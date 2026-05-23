@@ -30,6 +30,8 @@
 - `generate`：调用 NovelAI 并保存图片
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
+- `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
+- `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest`
 - `config`：查看配置解析结果
 
 默认输出会截断图片/base64 字段，避免调试输出过大。需要完整 JSON 时使用 `--full`。
@@ -48,6 +50,15 @@ uv run python -m tags_machine_core compose-nodes `
 ```
 
 这个示例会读取角色和动作节点的 `meta.yaml`，并根据 action v1 的 `character_scope: foot_detail` 生成 `PromptBundle.meta.composition`。
+
+旧项目对照验收示例：
+
+```powershell
+uv run python -m tags_machine_core inspect-image-params old.png --normalized
+uv run python -m tags_machine_core compare-render-params old.png core_render_request.json --show-normalized
+```
+
+`compare-render-params` 会完整比较 NovelAI 请求关键字段，包括 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 等。图片/base64 字段会用长度和 sha256 摘要比较，避免把大段 base64 打进终端。
 
 详细文档：
 

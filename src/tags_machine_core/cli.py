@@ -13,6 +13,12 @@ from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationService
+from tags_machine_core.verification import (
+    compare_render_parameters,
+    load_render_parameter_source,
+    normalize_render_parameters,
+    read_image_parameters,
+)
 
 
 def print_json(value, *, full: bool = False) -> None:
@@ -159,6 +165,30 @@ def cmd_config(args) -> int:
     return 0
 
 
+def cmd_inspect_image_params(args) -> int:
+    params = read_image_parameters(args.path)
+    if args.normalized:
+        params = normalize_render_parameters(params)
+    print_json(params, full=args.full)
+    return 0
+
+
+def cmd_compare_render_params(args) -> int:
+    left = load_render_parameter_source(args.left)
+    right = load_render_parameter_source(args.right)
+    diffs = compare_render_parameters(left, right)
+    result = {
+        "match": not diffs,
+        "diff_count": len(diffs),
+        "diffs": [diff.as_dict() for diff in diffs],
+    }
+    if args.show_normalized:
+        result["left_normalized"] = normalize_render_parameters(left)
+        result["right_normalized"] = normalize_render_parameters(right)
+    print_json(result, full=args.full)
+    return 0 if not diffs else 2
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
@@ -291,6 +321,33 @@ def build_parser() -> argparse.ArgumentParser:
     config = subparsers.add_parser("config", parents=[output_parent], help="Read an app config file")
     config.add_argument("path")
     config.set_defaults(func=cmd_config)
+
+    inspect_image_params = subparsers.add_parser(
+        "inspect-image-params",
+        parents=[output_parent],
+        help="Read PNG generation parameters without legacy runtime imports",
+    )
+    inspect_image_params.add_argument("path")
+    inspect_image_params.add_argument(
+        "--normalized",
+        action="store_true",
+        help="Print normalized NovelAI parameters for comparison",
+    )
+    inspect_image_params.set_defaults(func=cmd_inspect_image_params)
+
+    compare_render_params = subparsers.add_parser(
+        "compare-render-params",
+        parents=[output_parent],
+        help="Compare NovelAI request/render/png parameters after normalization",
+    )
+    compare_render_params.add_argument("left")
+    compare_render_params.add_argument("right")
+    compare_render_params.add_argument(
+        "--show-normalized",
+        action="store_true",
+        help="Include both normalized parameter trees in the output",
+    )
+    compare_render_params.set_defaults(func=cmd_compare_render_params)
 
     return parser
 

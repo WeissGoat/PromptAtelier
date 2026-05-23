@@ -368,6 +368,16 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 局部镜头样例需要额外检查 `PromptBundle.meta.composition`：例如 `foot_detail` 必须包含脚部相关 section，并抑制 `hair`、`eyes`、`upper_clothes` 等不应进入脚底特写的角色 section。
 - 新增 `run-prompt` / agent composer 入口时，必须能和旧 `run_action` 在同一基准样例上产出等价的 render plan；若 prompt 表达不完全相同，需要给出差异说明和可接受范围。
 
+旧项目对照的通过线：
+
+- 每次新增 composer、adapter 或节点解析规则时，都至少选一个旧 `tags_machine` 可跑通的样例做回归对照。
+- 对照流程分三步：旧项目生成基准请求/基准图，core 生成候选 `RenderRequest`/候选图，最后用归一化参数 diff 判断是否通过。
+- 第一优先级是参数等价：归一化后 `prompt`、`negative_prompt`、模型参数、随机种子、参考图数组和 V4 payload 必须一致或有明确白名单差异。
+- 第二优先级是节点裁剪等价：局部动作必须验证 character section 的纳入和抑制结果，不能只看最终字符串里有没有某几个词。
+- 第三优先级才是图片视觉：图片可以作为人工抽检材料，但不能替代参数 diff；如果参数不同，先修参数，如果参数相同但像素不同，记录原因。
+- 验收脚本不能依赖旧项目运行时代码。旧项目可以生成 oracle 文件，core 的测试只读取 oracle JSON、PNG 参数或素材文件。
+- 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
+
 中期验收：
 
 - 同一组输入在脚本 composer 下生成稳定 `PromptBundle`。
