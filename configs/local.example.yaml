@@ -16,3 +16,11 @@ novelai:
   access_token_env: "NAI_ACCESS_TOKEN"
   timeout: 120
   retry: 3
+
+comfyui:
+  base_url: "http://127.0.0.1:8188"
+  timeout: 120
+
+sd:
+  base_url: "http://127.0.0.1:7860"
+  timeout: 120

@@ -30,11 +30,23 @@ class NovelAIConfig(BaseModel):
     retry: int = 3
 
 
+class ComfyUIConfig(BaseModel):
+    base_url: str = "http://127.0.0.1:8188"
+    timeout: int = 120
+
+
+class SDConfig(BaseModel):
+    base_url: str = "http://127.0.0.1:7860"
+    timeout: int = 120
+
+
 class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)
+    comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
+    sd: SDConfig = Field(default_factory=SDConfig)
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

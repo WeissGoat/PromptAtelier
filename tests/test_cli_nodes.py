@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from tags_machine_core.cli import main
 from tags_machine_core.nodes import NodeReader
@@ -121,6 +123,30 @@ negative_prompt:
             encoding="utf-8",
         )
         return background
+
+    def _write_config(self, root: Path) -> Path:
+        legacy_root = root / "legacy"
+        design_root = legacy_root / "design"
+        output_dir = root / "outputs"
+        design_root.mkdir(parents=True)
+        config = root / "config.yaml"
+        config.write_text(
+            f"""
+legacy:
+  tags_machine_root: "{legacy_root.as_posix()}"
+  design_root: "{design_root.as_posix()}"
+runtime:
+  output_dir: "{output_dir.as_posix()}"
+comfyui:
+  base_url: "http://comfy.local"
+  timeout: 30
+sd:
+  base_url: "http://sd.local"
+  timeout: 45
+""".strip(),
+            encoding="utf-8",
+        )
+        return config
 
     def test_compose_nodes_command_filters_by_character_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -391,6 +417,115 @@ negative_prompt:
             self.assertEqual(data["params"]["clip_skip"], 2)
             self.assertEqual(data["params"]["vae"], "anime.vae.pt")
             self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+
+    def test_execute_render_request_queues_comfyui_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            request = root / "comfy_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "backend": "comfyui",
+                        "prompt": "akemi homura",
+                        "params": {
+                            "workflow_json": {
+                                "1": {"inputs": {"text": "akemi homura"}},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("tags_machine_core.cli.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.queue_prompt.return_value = SimpleNamespace(
+                    prompt_id="abc123",
+                    raw={"prompt_id": "abc123"},
+                )
+                client.build_payload.return_value = {
+                    "prompt": {"1": {"inputs": {"text": "akemi homura"}}},
+                    "client_id": "client-1",
+                }
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "execute-render-request",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--client-id",
+                            "client-1",
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            client_cls.assert_called_once_with(base_url="http://comfy.local", timeout=30)
+            client.queue_prompt.assert_called_once()
+            self.assertEqual(client.queue_prompt.call_args.kwargs["client_id"], "client-1")
+            self.assertEqual(data["backend"], "comfyui")
+            self.assertEqual(data["images"], [])
+            self.assertEqual(data["request_body"]["client_id"], "client-1")
+            self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
+
+    def test_execute_render_request_saves_sd_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            output_dir = root / "custom_outputs"
+            request = root / "sd_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "backend": "sd",
+                        "prompt": "akemi homura",
+                        "negative_prompt": "bad anatomy",
+                        "seed": 321,
+                        "size": {"width": 832, "height": 1216},
+                        "params": {"steps": 24},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("tags_machine_core.cli.SDClient") as client_cls:
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="sd_result.png", content=b"png-bytes")
+                ]
+                client.build_payload.return_value = {
+                    "prompt": "akemi homura",
+                    "negative_prompt": "bad anatomy",
+                    "seed": 321,
+                }
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "execute-render-request",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            client_cls.assert_called_once_with(base_url="http://sd.local", timeout=45)
+            client.generate_images.assert_called_once()
+            self.assertEqual(data["backend"], "sd")
+            self.assertEqual(data["request_body"]["seed"], 321)
+            self.assertEqual(len(data["images"]), 1)
+            saved_path = Path(data["images"][0]["path"])
+            self.assertEqual(saved_path.parent, output_dir)
+            self.assertEqual(saved_path.read_bytes(), b"png-bytes")
 
     def test_migrate_style_tags_command_writes_structured_node(self):
         with tempfile.TemporaryDirectory() as tmp:

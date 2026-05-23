@@ -267,27 +267,29 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 
 ### ComfyUI adapter
 
-当前已完成 dry-run 第一版：
+当前已完成 adapter 和基础 client 第一版：
 
 - 根据 `style_ref` 选择工作流模板。
 - 可从结构化 style node 的 `renderers.comfyui` 读取 workflow、checkpoint、LoRA、embedding、control、node_overrides 等后端配置。
 - `PromptBundle` 不关心具体 ComfyUI 节点编号。
 - adapter 产出统一 `RenderRequest` 执行计划，不负责联网。
 - CLI 可通过 `render-plan --backend comfyui` 或 `render-plan-nodes --backend comfyui` 生成 dry-run 请求。
+- `execute-render-request` 可读取已有 `RenderRequest`，调用 ComfyUI `/prompt` 排队，并在 `GenerationResult.png_info.comfyui` 里记录 `prompt_id` 和原始响应。
 
-真实 ComfyUI client、workflow JSON 展开和节点级 patch 仍放在下一步。
+后续仍需要补齐 workflow JSON 模板加载、队列状态轮询、图片下载和更完整的节点级 patch。
 
 ### SD adapter
 
-当前已完成 dry-run 第一版：
+当前已完成 adapter 和基础 WebUI client 第一版：
 
 - 根据配置选择 checkpoint、vae、sampler、scheduler。
 - 可从结构化 style node 的 `renderers.sd` 读取 checkpoint、VAE、LoRA、embedding、ControlNet、hires_fix 等后端配置。
 - 将完整 positive / negative prompt 合成到 SD 请求计划。
 - 保持和 NovelAI/ComfyUI 一致的 `RenderRequest` 外壳。
 - CLI 可通过 `render-plan --backend sd` 或 `render-plan-nodes --backend sd` 生成 dry-run 请求。
+- `execute-render-request` 可读取已有 `RenderRequest`，调用 WebUI / Forge `/sdapi/v1/txt2img`，解码返回图片并写入 `GenerationResult.images`。
 
-真实 SD client 和具体 WebUI/Forge/Comfy 兼容请求体仍放在下一步。
+后续仍需要补齐更多 WebUI / Forge 差异字段、img2img、ControlNet 参数校准和图片内嵌参数读取。
 
 ## 当前 CLI
 
@@ -297,6 +299,7 @@ uv run python -m tags_machine_core inspect-style --config configs\local.example.
 uv run python -m tags_machine_core migrate-style-tags F:\my_project\new\tags_machine\design\画风\20260412_2 --output migrated\nodes\styles\20260412_2\node.yaml
 uv run python -m tags_machine_core render-plan --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 uv run python -m tags_machine_core render-plan-nodes --backend comfyui --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123
+uv run python -m tags_machine_core execute-render-request core_render_request.json --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core generate --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
@@ -306,6 +309,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网，支持 `novelai`、`comfyui`、`sd`。
 - `generate` 当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
+- `execute-render-request` 读取已有 `RenderRequest` 后联网执行：NovelAI / SD 会保存图片，ComfyUI 当前会排队 prompt 并返回 `prompt_id`。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算旧项目对照验收记录。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
@@ -323,6 +327,8 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `defaults.style_ref`
 - `novelai.base_url`
 - `novelai.access_token_env`
+- `comfyui.base_url`
+- `sd.base_url`
 
 真实 token 不写入配置文件，只从环境变量读取。
 
@@ -390,12 +396,21 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 固定一组最小回归样例，至少覆盖：普通半身/全身动作、脚部局部特写、手部局部特写、角色服装复杂样例、带 `reference_image_multiple` 的画风样例。
 - 每个样例使用同一组输入：character/action/style 引用、seed、尺寸、模型、sampler、steps、scale、negative prompt、参考图/vibe 参数。
 - 旧项目用现有 `run_action` 或等价脚本生成基准图；core 用新链路生成对照图。两边生成参数需要从图片内嵌参数和请求体中读取，而不是只看 CLI 输出。
+- 模块通信格式也必须参照旧项目验证：`PromptBundle` 要能解释旧 `run_action` 最终 prompt 的来源，`RenderRequest` 要能还原旧请求体的关键字段，`GenerationResult` 要能归档旧图和新图的内嵌参数差异。
 - 参数对比要覆盖完整 NovelAI 请求关键字段，包括 `prompt`、`negative_prompt`、`model`、`width`、`height`、`scale`、`sampler`、`steps`、`seed`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等。
 - 对 base64 图片字段不做文本展开对比，但要比较数组长度、是否为空、图片 hash 或文件 hash、strength/information_extracted 等配套字段是否一一对应。
 - 对旧项目和新 adapter 的字段命名差异允许做归一化，例如 `ddim` 到 `ddim_v3`、默认参数补齐、布尔默认值补齐；归一化规则必须写入测试或对照脚本，不能靠人工记忆。
 - 如果两边图片像素不一致，优先检查请求体差异；若请求体完全一致但像素仍不同，需要记录后端非确定性、模型版本或 NovelAI 服务端策略变化，不把它当成 prompt composer 的失败。
 - 局部镜头样例需要额外检查 `PromptBundle.meta.composition`：例如 `foot_detail` 必须包含脚部相关 section，并抑制 `hair`、`eyes`、`upper_clothes` 等不应进入脚底特写的角色 section。
 - 新增 `run-prompt` / agent composer 入口时，必须能和旧 `run_action` 在同一基准样例上产出等价的 render plan；若 prompt 表达不完全相同，需要给出差异说明和可接受范围。
+
+模块通信格式的通过线：
+
+- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。
+- `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；对 ComfyUI / SD，至少要能从同一 `PromptBundle` 生成完整 dry-run plan，并记录和 NovelAI 字段的映射关系。
+- `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；图片像素只作为人工视觉抽检，不替代参数 diff。
+- 缓存验收：agent composer 命中缓存时，重新输出的 `PromptBundle` 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本和显式输入参数，避免旧素材更新后误用旧结果。
+- 回放验收：任意一条验收记录都应该能在不运行旧项目代码的情况下重算 core 侧 diff；旧项目只负责提前产出 oracle 文件或基准图片。
 
 旧项目对照的通过线：
 

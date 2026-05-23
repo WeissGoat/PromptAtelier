@@ -8,11 +8,11 @@ from uuid import uuid4
 
 import yaml
 
-from tags_machine_core.clients import NovelAIClient
+from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
 from tags_machine_core.composers import load_agent_result
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
-from tags_machine_core.contracts import GeneratedImage, GenerationResult
+from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 from tags_machine_core.renderers import NovelAIStyleRepository
@@ -156,21 +156,12 @@ def cmd_generate(args) -> int:
     )
     images = client.generate_images(request)
     output_dir = Path(args.output_dir or config.runtime.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    batch_id = uuid4().hex[:8]
-    generated_images: list[GeneratedImage] = []
-    for index, image in enumerate(images, start=1):
-        suffix = Path(image.filename).suffix or f".{config.defaults.image_format}"
-        filename = f"{batch_id}_{request.seed or 0}_{index:02d}{suffix}"
-        path = output_dir / filename
-        path.write_bytes(image.content)
-        generated_images.append(
-            GeneratedImage(
-                path=path,
-                filename=filename,
-                meta={"source_filename": image.filename, "index": index},
-            )
-        )
+    generated_images = _save_generated_images(
+        images,
+        output_dir=output_dir,
+        request=request,
+        default_format=config.defaults.image_format,
+    )
     result = GenerationResult(
         backend="novelai",
         images=generated_images,
@@ -178,6 +169,74 @@ def cmd_generate(args) -> int:
         png_info={},
         cache_hit=False,
     )
+    print_json(result, full=args.full)
+    return 0
+
+
+def cmd_execute_render_request(args) -> int:
+    config = load_config(Path(args.config))
+    request = _load_render_request(args.request)
+    output_dir = Path(args.output_dir or config.runtime.output_dir)
+
+    if request.backend == "novelai":
+        access_token = os.environ.get(config.novelai.access_token_env)
+        if not access_token:
+            raise RuntimeError(
+                f"Missing NovelAI token environment variable: {config.novelai.access_token_env}"
+            )
+        client = NovelAIClient(
+            access_token=access_token,
+            base_url=config.novelai.base_url,
+            timeout=config.novelai.timeout,
+            retry=config.novelai.retry,
+        )
+        images = _save_generated_images(
+            client.generate_images(request),
+            output_dir=output_dir,
+            request=request,
+            default_format=config.defaults.image_format,
+        )
+        result = GenerationResult(
+            backend="novelai",
+            images=images,
+            request_body=client.build_payload(request),
+            png_info={},
+            cache_hit=False,
+        )
+    elif request.backend == "comfyui":
+        client = ComfyUIClient(
+            base_url=config.comfyui.base_url,
+            timeout=config.comfyui.timeout,
+        )
+        queued = client.queue_prompt(request, client_id=args.client_id)
+        result = GenerationResult(
+            backend="comfyui",
+            images=[],
+            request_body=client.build_payload(request, client_id=args.client_id),
+            png_info={"comfyui": {"prompt_id": queued.prompt_id, "raw": queued.raw}},
+            cache_hit=False,
+        )
+    elif request.backend == "sd":
+        client = SDClient(
+            base_url=config.sd.base_url,
+            timeout=config.sd.timeout,
+        )
+        images = _save_generated_images(
+            client.generate_images(request),
+            output_dir=output_dir,
+            request=request,
+            default_format=config.defaults.image_format,
+        )
+        result = GenerationResult(
+            backend="sd",
+            images=images,
+            request_body=client.build_payload(request),
+            png_info={},
+            cache_hit=False,
+        )
+    else:
+        raise ValueError(f"Unsupported backend: {request.backend}")
+
     print_json(result, full=args.full)
     return 0
 
@@ -272,6 +331,13 @@ def _load_json_arg(value: str | None) -> dict:
     return data
 
 
+def _load_render_request(path: str | Path) -> RenderRequest:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected RenderRequest JSON object: {path}")
+    return RenderRequest.model_validate(data)
+
+
 def _build_bundle(service: GenerationService, args, *, style_ref: str | None = None):
     return service.compose_full_prompt(
         prompt=args.prompt,
@@ -338,6 +404,31 @@ def _write_structured_output(data: dict, path: Path, *, output_format: str | Non
         )
         return
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _save_generated_images(
+    images,
+    *,
+    output_dir: Path,
+    request: RenderRequest,
+    default_format: str,
+) -> list[GeneratedImage]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    batch_id = uuid4().hex[:8]
+    generated_images: list[GeneratedImage] = []
+    for index, image in enumerate(images, start=1):
+        suffix = Path(image.filename).suffix or f".{default_format}"
+        filename = f"{batch_id}_{request.seed or 0}_{index:02d}{suffix}"
+        path = output_dir / filename
+        path.write_bytes(image.content)
+        generated_images.append(
+            GeneratedImage(
+                path=path,
+                filename=filename,
+                meta={"source_filename": image.filename, "index": index},
+            )
+        )
+    return generated_images
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -432,6 +523,20 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--config", required=True, help="Load runtime and NovelAI config")
     generate.add_argument("--output-dir", help="Override output directory")
     generate.set_defaults(func=cmd_generate)
+
+    execute_render_request = subparsers.add_parser(
+        "execute-render-request",
+        parents=[output_parent],
+        help="Execute a serialized RenderRequest with its backend client",
+    )
+    execute_render_request.add_argument("request", help="Path to RenderRequest JSON")
+    execute_render_request.add_argument("--config", required=True, help="Load backend config")
+    execute_render_request.add_argument("--output-dir", help="Override output directory")
+    execute_render_request.add_argument(
+        "--client-id",
+        help="Optional ComfyUI client_id when queueing a prompt",
+    )
+    execute_render_request.set_defaults(func=cmd_execute_render_request)
 
     inspect_node = subparsers.add_parser(
         "inspect-node",

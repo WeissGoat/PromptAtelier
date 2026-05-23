@@ -16,7 +16,7 @@
 完整主体提示词 + style_ref
 -> PromptBundle
 -> RenderRequest
--> NovelAI generate-image
+-> NovelAI / SD 保存图片，或 ComfyUI queue prompt
 ```
 
 默认不 import 旧项目里的运行时代码。
@@ -30,6 +30,7 @@
 - `render-plan`：生成 NovelAI / ComfyUI / SD `RenderRequest`，不联网
 - `render-plan-nodes`：从结构化节点生成多后端 `RenderRequest`，不联网
 - `generate`：调用 NovelAI 并保存图片
+- `execute-render-request`：读取已有 `RenderRequest` 并调用对应后端 client
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
 - `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
@@ -45,6 +46,11 @@ NovelAI 默认使用：
 
 - 环境变量：`NAI_ACCESS_TOKEN`
 - 接口：`https://image.novelai.net/ai/generate-image`
+
+ComfyUI / SD 默认本地地址：
+
+- ComfyUI：`http://127.0.0.1:8188`
+- Stable Diffusion WebUI / Forge：`http://127.0.0.1:7860`
 
 结构化节点示例：
 
@@ -89,7 +95,15 @@ uv run python -m tags_machine_core render-plan `
   --params-json "{\"checkpoint\":\"anime_sd.safetensors\"}"
 ```
 
-ComfyUI / SD 目前只生成 dry-run `RenderRequest`，用于 UI、队列、diff 和后续执行器接入；真实联网执行仍只在 `generate` 的 NovelAI 路径里。
+`render-plan` / `render-plan-nodes` 只生成 `RenderRequest`，用于 UI、队列、diff 和验收。已有 `RenderRequest` 可以交给执行入口：
+
+```powershell
+uv run python -m tags_machine_core execute-render-request core_render_request.json `
+  --config configs\local.example.yaml `
+  --output-dir outputs
+```
+
+`generate` 是 NovelAI 的快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片。`execute-render-request` 支持 NovelAI、ComfyUI、SD：NovelAI / SD 会保存返回图片，ComfyUI 当前会把 workflow 排入 `/prompt` 队列并返回 `prompt_id`。
 
 旧画风节点迁移示例：
 
