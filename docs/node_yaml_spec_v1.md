@@ -102,7 +102,7 @@ prompt:
   positive: ...
 ```
 
-原因是 character 的内容还需要根据 action、shot、style 策略筛选，不是最终可直接喂模型的完整提示词。
+原因是 character 的内容还需要根据 action 的 `character_scope`、composer 策略和 style 上下文筛选，不是最终可直接喂模型的完整提示词。
 
 ## Character 当前状态
 
@@ -192,8 +192,19 @@ prompt:
 meta:
   character_ref: homura
   action_ref: foot_closeup
-  shot:
-    body_scope: foot_detail
+  composition:
+    character_scope: foot_detail
+    included_character_sections:
+      - character
+      - copyright
+      - feet
+      - footwear
+    suppressed_character_sections:
+      - hair
+      - eyes
+      - upper_clothes
 ```
 
 `PromptBundle.prompt` 才是最终完整提示词。节点 YAML 只是输入素材。
+
+这里不使用 `meta.shot.body_scope`，因为 v1 的动作节点已经直接声明 `character_scope`。`PromptBundle.meta.composition` 记录的是 composer 本次实际采用的裁剪结果，用来调试、缓存和回放，而不是再发明一套镜头字段。

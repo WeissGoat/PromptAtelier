@@ -123,7 +123,7 @@ character_id: akemi_homura
 
 正向提示词素材，按语义 section 分组。
 
-这里叫 `tags`，不是 `prompt`，原因是：这些内容还不是最终提示词，而是等待 composer 根据 action、shot、style 等上下文选择的素材库。
+这里叫 `tags`，不是 `prompt`，原因是：这些内容还不是最终提示词，而是等待 composer 根据 action 的 `character_scope`、style 等上下文选择的素材库。
 
 最终完整提示词由 `PromptBundle.prompt.positive` 表示。
 
@@ -290,4 +290,4 @@ character v1 暂时冻结以下决策：
 - 不把通用 section 过滤规则写进 character。
 - composer 负责把 character tags 渲染成最终 prompt。
 
-后续讨论重点应转向 action YAML：它需要提供足够清晰的 shot 语义，让 composer 能稳定选择 character section。
+后续讨论重点应转向 style / background YAML，以及继续用旧项目回归样例校准 `character_scope` 策略。

@@ -20,16 +20,10 @@ class PromptText(BaseModel):
     negative: str = ""
 
 
-class ShotMeta(BaseModel):
-    framing: str | None = None
-    body_scope: str | None = None
-    camera: str | None = None
-
-
-class PromptConstraints(BaseModel):
-    required_parts: list[str] = Field(default_factory=list)
-    forbidden_parts: list[str] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
+class PromptCompositionMeta(BaseModel):
+    character_scope: str | None = None
+    included_character_sections: list[str] = Field(default_factory=list)
+    suppressed_character_sections: list[str] = Field(default_factory=list)
 
 
 class PromptMeta(BaseModel):
@@ -39,8 +33,7 @@ class PromptMeta(BaseModel):
     background_ref: str | None = None
     composer_type: ComposerName = "script"
     composer_version: str = "v1"
-    shot: ShotMeta = Field(default_factory=ShotMeta)
-    constraints: PromptConstraints = Field(default_factory=PromptConstraints)
+    composition: PromptCompositionMeta = Field(default_factory=PromptCompositionMeta)
     source_nodes: list[str] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
 

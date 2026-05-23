@@ -1,0 +1,30 @@
+schema: tags-machine.character/v1
+kind: character
+id: homura
+character_id: akemi_homura
+variant: school_uniform
+name: Akemi Homura
+description: 结构化角色节点示例。角色节点只提供素材事实，局部镜头过滤由 composer 统一处理。
+
+tags:
+  character:
+    - akemi homura
+  copyright:
+    - puella magi madoka magica
+  hair:
+    - long black hair
+  eyes:
+    - purple eyes
+  upper_clothes:
+    - school uniform
+  feet:
+    - bare soles
+
+negative_prompt:
+  - extra toes
+
+agent:
+  summary: Homura 角色示例。脚底特写时由 composer 过滤眼睛、头发和上半身服装。
+  labels:
+    - character
+    - foot-aware

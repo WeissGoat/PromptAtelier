@@ -1,0 +1,23 @@
+schema: tags-machine.action/v1
+kind: action
+id: foot_closeup
+name: Foot close-up
+description: 脚底特写动作节点示例，会把 character_scope 设为 foot_detail。
+
+tags:
+  action:
+    - foot focus
+    - soles toward viewer
+    - toes spread
+
+negative_prompt:
+  - face focus
+  - full body
+
+character_scope: foot_detail
+
+agent:
+  summary: 脚底极近景动作，要求角色节点只保留身份和脚部相关词。
+  labels:
+    - action
+    - foot_detail

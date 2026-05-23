@@ -193,6 +193,7 @@ def _build_bundle_from_nodes(
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         style_ref=style_ref if style_ref is not None else args.style_ref,
+        character_scope=args.character_scope,
         body_scope=args.body_scope,
     )
 
@@ -301,7 +302,8 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--extra-prompt", help="Additional positive prompt text")
     parser.add_argument("--negative")
     parser.add_argument("--style-ref")
-    parser.add_argument("--body-scope", help="Override body_scope for scoped prompt fragments")
+    parser.add_argument("--character-scope", help="Override character_scope for node composition")
+    parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
 
 
 def main(argv: list[str] | None = None) -> int:

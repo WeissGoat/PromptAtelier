@@ -39,6 +39,7 @@ class GenerationService:
         extra_prompt: str = "",
         negative: str = "",
         style_ref: str | None = None,
+        character_scope: str | None = None,
         body_scope: str | None = None,
     ) -> PromptBundle:
         return self.composer.compose_nodes(
@@ -48,6 +49,7 @@ class GenerationService:
             extra_prompt=extra_prompt,
             negative=negative,
             style_ref=style_ref,
+            character_scope=character_scope,
             body_scope=body_scope,
         )
 

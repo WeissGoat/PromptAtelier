@@ -41,7 +41,7 @@ flowchart LR
   F --> G["GenerationResult<br/>图片路径 + 请求体 + 元信息"]
 ```
 
-核心原则：`PromptBundle` 是提示词生成层和生图层之间的分界线。它可以描述角色、动作、镜头、约束和缓存信息，但不直接携带某个后端专属的工作流细节。
+核心原则：`PromptBundle` 是提示词生成层和生图层之间的分界线。它保存完整提示词、输入节点引用、composer 的关键选择结果和缓存信息，但不直接携带某个后端专属的工作流细节。
 
 ## 模块通信格式
 
@@ -151,11 +151,16 @@ UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参
 - `meta.character_ref`：人物节点引用。
 - `meta.action_ref`：动作节点引用。
 - `meta.style_ref`：画风节点引用。
-- `meta.shot`：composer 输出的归一化镜头信息，例如 body_scope；action v1 输入侧先用更直接的 `character_scope`。
-- `meta.constraints`：必须保留和必须避免的语义约束。
+- `meta.composition.character_scope`：composer 实际采用的角色素材裁剪视角。通常来自 action 的 `character_scope`，也可能被显式参数或 agent 结果覆盖。
+- `meta.composition.included_character_sections`：本次拼接纳入的 character section，便于调试和回放。
+- `meta.composition.suppressed_character_sections`：本次拼接跳过的 character section，便于解释为什么没有带入头发、眼睛、上衣等素材。
 - `cache.cache_key`：用于 agent 拼接结果复用。
 
 这一层不应该决定 NovelAI 的 `v4_prompt`、ComfyUI workflow、LoRA 权重等后端细节。
+
+`meta.shot` 不作为 v1 正式字段。原因是当前 action v1 已经用 `character_scope` 表达了“这个动作应该怎样裁剪角色素材”，如果再把同一信息复制成 `shot.body_scope`，会制造两套语义。未来只有在确实需要表达镜头语言，例如焦段、机位、构图，并且有明确消费方时，再单独引入 shot。
+
+`meta.constraints` 也不作为 v1 正式字段。必须保留/必须避免这类约束目前没有稳定消费方，容易变成没人用的冗余字段。短期需要调试时可以放进 `meta.extra`，等脚本 composer、agent composer 或 UI 明确需要后再提升为正式契约。
 
 ### RenderRequest
 
@@ -349,6 +354,19 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `render-plan` 输出包含完整 NovelAI V4/V4.5 字段。
 - 默认 CLI 输出不会展开长 base64。
 - core 不 import 旧项目运行时代码。
+
+旧项目对照验收：
+
+- 旧 `tags_machine` 作为行为 oracle，但不是运行时依赖；core 只读取素材文件和对照产物，不 import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。
+- 固定一组最小回归样例，至少覆盖：普通半身/全身动作、脚部局部特写、手部局部特写、角色服装复杂样例、带 `reference_image_multiple` 的画风样例。
+- 每个样例使用同一组输入：character/action/style 引用、seed、尺寸、模型、sampler、steps、scale、negative prompt、参考图/vibe 参数。
+- 旧项目用现有 `run_action` 或等价脚本生成基准图；core 用新链路生成对照图。两边生成参数需要从图片内嵌参数和请求体中读取，而不是只看 CLI 输出。
+- 参数对比要覆盖完整 NovelAI 请求关键字段，包括 `prompt`、`negative_prompt`、`model`、`width`、`height`、`scale`、`sampler`、`steps`、`seed`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等。
+- 对 base64 图片字段不做文本展开对比，但要比较数组长度、是否为空、图片 hash 或文件 hash、strength/information_extracted 等配套字段是否一一对应。
+- 对旧项目和新 adapter 的字段命名差异允许做归一化，例如 `ddim` 到 `ddim_v3`、默认参数补齐、布尔默认值补齐；归一化规则必须写入测试或对照脚本，不能靠人工记忆。
+- 如果两边图片像素不一致，优先检查请求体差异；若请求体完全一致但像素仍不同，需要记录后端非确定性、模型版本或 NovelAI 服务端策略变化，不把它当成 prompt composer 的失败。
+- 局部镜头样例需要额外检查 `PromptBundle.meta.composition`：例如 `foot_detail` 必须包含脚部相关 section，并抑制 `hair`、`eyes`、`upper_clothes` 等不应进入脚底特写的角色 section。
+- 新增 `run-prompt` / agent composer 入口时，必须能和旧 `run_action` 在同一基准样例上产出等价的 render plan；若 prompt 表达不完全相同，需要给出差异说明和可接受范围。
 
 中期验收：
 

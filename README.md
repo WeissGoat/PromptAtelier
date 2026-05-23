@@ -47,7 +47,7 @@ uv run python -m tags_machine_core compose-nodes `
   --action examples\nodes\actions\foot_closeup
 ```
 
-这个示例是当前代码里的结构化拼接 smoke test。最新文档规范里，action v1 会使用 `character_scope: foot_detail` 表示角色素材裁剪视角，后续实现会向这个字段收敛。
+这个示例会读取角色和动作节点的 `meta.yaml`，并根据 action v1 的 `character_scope: foot_detail` 生成 `PromptBundle.meta.composition`。
 
 详细文档：
 

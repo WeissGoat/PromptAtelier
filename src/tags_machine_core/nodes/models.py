@@ -99,8 +99,12 @@ class NodeDocument(BaseModel):
     kind: NodeKind = "unknown"
     id: str
     name: str | None = None
+    character_id: str | None = None
+    variant: str | None = None
+    character_scope: str | None = None
     path: Path | None = None
     tags: dict[str, list[str]] = Field(default_factory=dict)
+    negative_prompt: list[str] = Field(default_factory=list)
     description: str | None = None
     shot: NodeShot = Field(default_factory=NodeShot)
     prompt: NodePrompt = Field(default_factory=NodePrompt)
@@ -109,6 +113,17 @@ class NodeDocument(BaseModel):
     renderers: dict[str, Any] = Field(default_factory=dict)
     agent: dict[str, Any] = Field(default_factory=dict)
     legacy: LegacyNodeMeta = Field(default_factory=LegacyNodeMeta)
+
+    @field_validator("negative_prompt", mode="before")
+    @classmethod
+    def normalize_negative_prompt(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()] if str(value).strip() else []
 
     def all_tags(self) -> list[str]:
         items: list[str] = []
