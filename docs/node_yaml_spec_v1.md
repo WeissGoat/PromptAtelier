@@ -3,7 +3,7 @@
 本文档只定义节点体系的总体边界。具体节点格式会拆成独立规范：
 
 - [Character YAML 规范](character_yaml_spec_v1.md)
-- Action YAML 规范：待讨论
+- [Action YAML 规范](action_yaml_spec_v1.md)
 - Artist / Style YAML 规范：待讨论
 - Background YAML 规范：待讨论
 
@@ -15,7 +15,7 @@
 
 ```text
 character：描述角色素材事实
-action：描述动作和镜头事实
+action：描述动作素材和 character_scope
 artist/style：描述画风素材和后端相关素材
 composer：根据统一策略组合素材
 adapter：根据后端生成 RenderRequest
@@ -26,7 +26,7 @@ adapter：根据后端生成 RenderRequest
 ```text
 character.tags.hair = black_hair
 character.tags.eyes = purple_eyes
-action.shot.body_scope = foot_detail
+action.character_scope = foot_detail
 composer policy = foot_detail 默认不取 hair / eyes / upper_clothes
 ```
 
@@ -48,7 +48,7 @@ node.yaml     # 通用结构化节点，后续用于 action/style/background 等
 2. `meta.yaml`
 3. `tags.txt`
 
-注意：`meta.yaml` 不表示“不重要”，只是说明它是轻量事实库格式。当前 character v1 就推荐使用 `meta.yaml`。
+注意：`meta.yaml` 不表示“不重要”，只是说明它是轻量事实库格式。当前 character v1 和 action v1 都推荐使用 `meta.yaml`。
 
 ## 通用设计原则
 
@@ -89,6 +89,8 @@ composer 会根据 action 和策略决定最终取哪些 section。
 
 当前 character v1 保留这个字段名，因为它已经落地，并且对 agent 和生图链路都直观。
 
+action v1 也使用 `negative_prompt` 表示动作级负向素材。
+
 ### `prompt`
 
 `prompt` 保留给最终产物或特殊 raw prompt 节点。
@@ -117,21 +119,21 @@ character v1 已确认：
 
 详细结构见 [Character YAML 规范](character_yaml_spec_v1.md)。
 
-## Action 待讨论重点
+## Action 当前状态
 
-action 节点不应该关心某个角色有哪些 section，但它需要提供足够清晰的镜头事实，让 composer 能选择 section。
+action v1 已确认：
 
-下一步需要确认：
+- 使用 `meta.yaml`
+- 使用 `schema: tags-machine.action/v1`
+- 使用 `tags.action` 存正向动作素材
+- 使用 `negative_prompt` 存动作级负向素材
+- 使用 `character_scope` 表示角色素材裁剪视角
+- 不写角色 section include/suppress 规则
+- 不提前拆 `pose` / `camera` / `focus`
 
-- action 用 `node.yaml` 还是 `meta.yaml`
-- `shot.body_scope` 的枚举
-- `shot.focus` 是否允许多值
-- `visible_parts` 如何表达
-- action 自己的正向素材仍叫 `tags` 还是叫 `prompt_material`
-- action 的负向素材是否也叫 `negative_prompt`
-- 是否需要 `intensity`、`contact`、`camera`、`composition` 等结构字段
+action 节点不应该关心某个角色有哪些 section。它只声明这个动作应使用哪种 `character_scope`。
 
-目前倾向：
+示例：
 
 ```yaml
 schema: tags-machine.action/v1
@@ -139,25 +141,20 @@ kind: action
 id: foot_closeup
 
 tags:
-  base:
+  action:
     - foot_focus
     - soles
     - toes
-  pose:
     - soles_toward_viewer
-  camera:
-    - close-up
 
-shot:
-  body_scope: foot_detail
-  focus:
-    - feet
-  visible_parts:
-    - feet
-    - legs
+negative_prompt:
+  - extra_toes
+  - bad_feet
+
+character_scope: foot_detail
 ```
 
-这只是讨论草案，不作为冻结规范。
+详细结构见 [Action YAML 规范](action_yaml_spec_v1.md)。
 
 ## YAML 引号规则
 

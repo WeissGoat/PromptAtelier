@@ -43,6 +43,103 @@ flowchart LR
 
 核心原则：`PromptBundle` 是提示词生成层和生图层之间的分界线。它可以描述角色、动作、镜头、约束和缓存信息，但不直接携带某个后端专属的工作流细节。
 
+## 模块通信格式
+
+模块之间的主通信方式是运行时对象，不是文件。
+
+文件只用于这些场景：
+
+- 输入素材库：`meta.yaml`、`node.yaml`、`tags.txt`
+- 缓存：把 `PromptBundle` 序列化成 JSON
+- 队列：未来批量任务可以把请求序列化落盘
+- 调试：保存 render plan、request body、结果日志
+- 跨进程：CLI、前端、worker 之间需要恢复任务状态时使用 JSON
+
+核心链路如下：
+
+```text
+YAML / tags.txt
+-> NodeDocument
+-> PromptBundle
+-> RenderRequest
+-> GenerationResult
+```
+
+### 输入层通信
+
+输入层从文件读取节点：
+
+- character：`meta.yaml`
+- action：`meta.yaml`
+- style / artist：暂时兼容 `tags.txt`，后续再定 YAML
+- background：后续再定 YAML
+
+读取后在运行时统一变成 `NodeDocument` 或更具体的 node DTO。composer 不直接操作文件路径里的文本，而是操作已经解析过的对象。
+
+### Composer 输出
+
+composer 输出 `PromptBundle`。
+
+在同一个进程内，它就是普通内存对象：
+
+```text
+GenerationService.compose(...)
+-> PromptBundle
+```
+
+需要缓存或跨进程时，才把它序列化成 JSON：
+
+```text
+cache/prompt/{cache_key}.json
+```
+
+所以 `PromptBundle` 不是“必须用文件通信”，而是一个稳定数据契约。文件只是它的持久化形式。
+
+### Adapter 输出
+
+adapter 接收 `PromptBundle`，输出 `RenderRequest`。
+
+```text
+NovelAIAdapter.build_request(prompt_bundle)
+-> RenderRequest
+```
+
+`RenderRequest` 已经包含后端可执行参数，但还不负责网络请求。它也可以序列化成 JSON，用于：
+
+- dry-run
+- diff
+- debug
+- worker 队列
+- 复现某次生成
+
+### Client 输出
+
+client 接收 `RenderRequest`，调用真实后端，输出 `GenerationResult`。
+
+```text
+NovelAIClient.generate(render_request)
+-> GenerationResult
+```
+
+`GenerationResult` 记录图片路径、请求体摘要、图片参数、缓存命中等信息。它同样可以序列化成 JSON，方便 UI 和批量任务读取。
+
+### 前端/服务通信
+
+未来如果做前端 UI，推荐的 API 边界是 JSON：
+
+```text
+POST /compose
+Node refs -> PromptBundle JSON
+
+POST /render-plan
+PromptBundle JSON -> RenderRequest JSON
+
+POST /generate
+RenderRequest JSON -> GenerationResult JSON
+```
+
+UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参数。
+
 ## 数据契约
 
 ### PromptBundle
@@ -54,7 +151,7 @@ flowchart LR
 - `meta.character_ref`：人物节点引用。
 - `meta.action_ref`：动作节点引用。
 - `meta.style_ref`：画风节点引用。
-- `meta.shot`：镜头信息，例如 framing、body_scope、camera。
+- `meta.shot`：composer 输出的归一化镜头信息，例如 body_scope；action v1 输入侧先用更直接的 `character_scope`。
 - `meta.constraints`：必须保留和必须避免的语义约束。
 - `cache.cache_key`：用于 agent 拼接结果复用。
 
@@ -101,8 +198,8 @@ flowchart LR
 
 - 人物节点只拆出角色素材事实，例如身份、头发、眼睛、服装、道具、身体局部等 section。
 - 人物节点不写通用过滤规则，不写 `include_scopes` / `exclude_scopes`。
-- 动作节点声明动作和镜头事实，比如 foot close-up、upper body、full body。
-- composer 根据 action 的 shot 语义统一选择 character section。
+- 动作节点声明动作素材和 `character_scope`，例如 foot_detail、upper_body、full_body。
+- composer 根据 action 的 `character_scope` 统一选择 character section。
 - 画风节点要区分语义风格词、后端参数、参考图、负向词。
 - 每个节点都应可被 agent 直接读取，并且能被脚本稳定解析。
 
@@ -113,7 +210,7 @@ flowchart LR
 脚本 composer 负责确定性拼接，适合批量跑图和回归测试：
 
 - 输入节点结构化字段。
-- 根据动作节点的 `body_scope` 选择角色 section。
+- 根据动作节点的 `character_scope` 选择角色 section。
 - 通用过滤策略放在 composer，不重复写进每个 character YAML。
 - 输出稳定的 `PromptBundle`。
 

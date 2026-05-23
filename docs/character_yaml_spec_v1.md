@@ -243,25 +243,19 @@ foot_detail:
 
 角色节点不知道自己会被用于什么镜头。
 
-动作节点负责声明镜头事实，例如：
+动作节点负责声明角色素材裁剪视角，例如：
 
 ```yaml
-shot:
-  body_scope: foot_detail
-  focus:
-    - feet
-  visible_parts:
-    - feet
-    - legs
+character_scope: foot_detail
 ```
 
-composer 根据 action 的 `shot.body_scope` 选择 character section。
+composer 根据 action 的 `character_scope` 选择 character section。
 
 所以组合链路是：
 
 ```text
 character tags section
-+ action shot semantics
++ action character_scope
 + composer policy
 -> PromptBundle.prompt.positive
 ```

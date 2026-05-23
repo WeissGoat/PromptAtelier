@@ -47,10 +47,11 @@ uv run python -m tags_machine_core compose-nodes `
   --action examples\nodes\actions\foot_closeup
 ```
 
-这个示例会使用动作节点里的 `body_scope: foot_detail` 过滤角色节点，保留身份和脚部相关词，跳过眼睛、头发和服装等不适合脚底特写的字段。
+这个示例是当前代码里的结构化拼接 smoke test。最新文档规范里，action v1 会使用 `character_scope: foot_detail` 表示角色素材裁剪视角，后续实现会向这个字段收敛。
 
 详细文档：
 
 - [整体设计与开发方案](docs/development_plan_v1.md)
 - [Node YAML 规范](docs/node_yaml_spec_v1.md)
 - [Character YAML 规范](docs/character_yaml_spec_v1.md)
+- [Action YAML 规范](docs/action_yaml_spec_v1.md)
