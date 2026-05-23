@@ -34,6 +34,8 @@
 - `inspect-style`：读取旧画风节点
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
 - `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest`
+- `create-acceptance-record`：生成旧项目对照验收记录
+- `verify-acceptance-record`：重算验收记录并检查未批准差异
 - `config`：查看配置解析结果
 
 默认输出会截断图片/base64 字段，避免调试输出过大。需要完整 JSON 时使用 `--full`。
@@ -93,9 +95,18 @@ ComfyUI / SD 目前只生成 dry-run `RenderRequest`，用于 UI、队列、diff
 ```powershell
 uv run python -m tags_machine_core inspect-image-params old.png --normalized
 uv run python -m tags_machine_core compare-render-params old.png core_render_request.json --show-normalized
+uv run python -m tags_machine_core create-acceptance-record `
+  --case-id foot_detail_homura_001 `
+  --legacy-source old.png `
+  --core-source core_render_request.json `
+  --prompt-bundle core_prompt_bundle.json `
+  --output acceptance\foot_detail_homura_001.yaml
+uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
 ```
 
 `compare-render-params` 会完整比较 NovelAI 请求关键字段，包括 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 等。图片/base64 字段会用长度和 sha256 摘要比较，避免把大段 base64 打进终端。
+
+`create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异和 `PromptBundle.meta.composition` 归档成 JSON/YAML。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异时返回非 0。
 
 详细文档：
 

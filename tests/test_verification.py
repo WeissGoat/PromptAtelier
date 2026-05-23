@@ -9,9 +9,11 @@ from pathlib import Path
 
 from tags_machine_core.cli import main
 from tags_machine_core.verification import (
+    build_acceptance_record,
     compare_render_parameters,
     normalize_render_parameters,
     read_image_parameters,
+    verify_acceptance_record,
 )
 
 
@@ -198,6 +200,193 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(data["model"], "nai-diffusion-4-5-full")
             self.assertIn("reference_image_multiple", data["parameters"])
             self.assertIn("sha256", data["parameters"]["reference_image_multiple"][0])
+
+    def test_build_acceptance_record_with_prompt_bundle_composition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            bundle = root / "bundle.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            bundle.write_text(
+                json.dumps(
+                    {
+                        "meta": {
+                            "composition": {
+                                "character_scope": "foot_detail",
+                                "included_character_sections": ["character", "feet"],
+                                "suppressed_character_sections": ["eyes", "upper_clothes"],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="foot_detail_homura_001",
+                legacy_source=legacy,
+                core_source=core,
+                prompt_bundle=bundle,
+                notes=["sample acceptance"],
+            )
+
+            self.assertEqual(record["result"], "pass")
+            self.assertTrue(record["diff"]["normalized_equal"])
+            self.assertEqual(record["diff"]["unapproved_diff_count"], 0)
+            self.assertEqual(record["composition"]["character_scope"], "foot_detail")
+            self.assertEqual(record["notes"], ["sample acceptance"])
+
+    def test_build_acceptance_record_fails_on_unapproved_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            legacy.write_text(json.dumps({"parameters": _sample_parameters()}), encoding="utf-8")
+            changed = _sample_parameters()
+            changed["steps"] = 30
+            core.write_text(json.dumps({"parameters": changed}), encoding="utf-8")
+
+            record = build_acceptance_record(
+                case_id="changed_steps",
+                legacy_source=legacy,
+                core_source=core,
+            )
+
+            self.assertEqual(record["result"], "fail")
+            self.assertFalse(record["diff"]["normalized_equal"])
+            self.assertEqual(record["diff"]["unapproved_diff_count"], 1)
+            self.assertEqual(record["diff"]["unapproved_diffs"][0]["path"], "$.parameters.steps")
+
+    def test_build_acceptance_record_allows_whitelisted_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            legacy.write_text(json.dumps({"parameters": _sample_parameters()}), encoding="utf-8")
+            changed = _sample_parameters()
+            changed["sampler"] = "ddim_v3"
+            core.write_text(json.dumps({"parameters": changed}), encoding="utf-8")
+
+            record = build_acceptance_record(
+                case_id="sampler_alias",
+                legacy_source=legacy,
+                core_source=core,
+                whitelist=[{"path": "$.parameters.sampler", "reason": "sampler alias"}],
+            )
+
+            self.assertEqual(record["result"], "pass")
+            self.assertFalse(record["diff"]["normalized_equal"])
+            self.assertEqual(record["diff"]["approved_diff_count"], 1)
+            self.assertEqual(record["diff"]["unapproved_diff_count"], 0)
+
+    def test_verify_acceptance_record_recomputes_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="roundtrip",
+                legacy_source=legacy,
+                core_source=core,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            result = verify_acceptance_record(record_path)
+
+            self.assertTrue(result["match"])
+            self.assertEqual(result["result"], "pass")
+
+    def test_cli_create_and_verify_acceptance_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.yaml"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                create_exit = main(
+                    [
+                        "create-acceptance-record",
+                        "--case-id",
+                        "cli_roundtrip",
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                        "--output",
+                        str(record_path),
+                    ]
+                )
+            created = json.loads(stdout.getvalue())
+
+            verify_stdout = io.StringIO()
+            with redirect_stdout(verify_stdout):
+                verify_exit = main(["verify-acceptance-record", str(record_path)])
+            verified = json.loads(verify_stdout.getvalue())
+
+            self.assertEqual(create_exit, 0)
+            self.assertEqual(verify_exit, 0)
+            self.assertEqual(created["result"], "pass")
+            self.assertTrue(verified["match"])
+            self.assertTrue(record_path.exists())
+
+    def test_cli_create_acceptance_record_returns_nonzero_for_unapproved_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            legacy.write_text(json.dumps({"parameters": _sample_parameters()}), encoding="utf-8")
+            changed = _sample_parameters()
+            changed["scale"] = 6.0
+            core.write_text(json.dumps({"parameters": changed}), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "create-acceptance-record",
+                        "--case-id",
+                        "scale_changed",
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(data["result"], "fail")
+            self.assertEqual(data["diff"]["unapproved_diffs"][0]["path"], "$.parameters.scale")
 
 
 if __name__ == "__main__":

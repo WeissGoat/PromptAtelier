@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import yaml
+
 from tags_machine_core.clients import NovelAIClient
 from tags_machine_core.composers import load_agent_result
 from tags_machine_core.composers.cache import PromptCache
@@ -16,10 +18,13 @@ from tags_machine_core.nodes import NodeReader
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import (
+    build_acceptance_record,
     compare_render_parameters,
     load_render_parameter_source,
     normalize_render_parameters,
+    parse_whitelist_args,
     read_image_parameters,
+    verify_acceptance_record,
 )
 
 
@@ -220,6 +225,29 @@ def cmd_compare_render_params(args) -> int:
     return 0 if not diffs else 2
 
 
+def cmd_create_acceptance_record(args) -> int:
+    record = build_acceptance_record(
+        case_id=args.case_id,
+        legacy_source=args.legacy_source,
+        core_source=args.core_source,
+        legacy_image=args.legacy_image,
+        core_image=args.core_image,
+        prompt_bundle=args.prompt_bundle,
+        whitelist=parse_whitelist_args(args.whitelist),
+        notes=args.note or [],
+    )
+    if args.output:
+        _write_structured_output(record, Path(args.output), output_format=args.format)
+    print_json(record, full=args.full)
+    return 0 if record["result"] == "pass" else 2
+
+
+def cmd_verify_acceptance_record(args) -> int:
+    result = verify_acceptance_record(args.record)
+    print_json(result, full=args.full)
+    return 0 if result["match"] else 2
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
@@ -281,6 +309,20 @@ def _load_render_style(args):
 
 def _render_action(backend: str) -> str:
     return "generate" if backend == "novelai" else "render-plan"
+
+
+def _write_structured_output(data: dict, path: Path, *, output_format: str | None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    format_name = output_format
+    if format_name == "auto":
+        format_name = "yaml" if path.suffix.lower() in {".yaml", ".yml"} else "json"
+    if format_name == "yaml":
+        path.write_text(
+            yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        return
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -423,6 +465,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include both normalized parameter trees in the output",
     )
     compare_render_params.set_defaults(func=cmd_compare_render_params)
+
+    create_acceptance_record = subparsers.add_parser(
+        "create-acceptance-record",
+        parents=[output_parent],
+        help="Create an archived legacy-vs-core acceptance record",
+    )
+    create_acceptance_record.add_argument("--case-id", required=True)
+    create_acceptance_record.add_argument("--legacy-source", required=True)
+    create_acceptance_record.add_argument("--core-source", required=True)
+    create_acceptance_record.add_argument("--legacy-image")
+    create_acceptance_record.add_argument("--core-image")
+    create_acceptance_record.add_argument("--prompt-bundle")
+    create_acceptance_record.add_argument(
+        "--whitelist",
+        action="append",
+        help="Approved diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    create_acceptance_record.add_argument(
+        "--note",
+        action="append",
+        help="Human note stored in the acceptance record; can be repeated",
+    )
+    create_acceptance_record.add_argument("--output", help="Write the record to JSON/YAML")
+    create_acceptance_record.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    create_acceptance_record.set_defaults(func=cmd_create_acceptance_record)
+
+    verify_acceptance = subparsers.add_parser(
+        "verify-acceptance-record",
+        parents=[output_parent],
+        help="Recompute an archived acceptance record and fail on unapproved diffs",
+    )
+    verify_acceptance.add_argument("record")
+    verify_acceptance.set_defaults(func=cmd_verify_acceptance_record)
 
     return parser
 
