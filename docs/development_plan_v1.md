@@ -223,12 +223,28 @@ UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参
 
 ### Agent composer
 
-Agent composer 负责语义理解和复杂组合：
+Agent composer 负责语义理解和复杂组合。当前 v1 采用“外部 agent + core 契约”的方式：core 不直接绑定某个 LLM SDK，而是生成稳定的 agent task JSON，接收 agent result JSON，再落成 `PromptBundle` 并写入缓存。
 
 - 根据节点内容打标。
 - 处理冲突，例如“脚底特写”和“全身服装展示”冲突。
 - 生成完整动作角色混合提示词。
-- 把结果和输入 hash 存入缓存，后续相同输入可以零 token 复用。
+- 把结果和输入节点内容 hash 存入缓存，后续相同输入可以零 token 复用。
+
+当前 CLI：
+
+```powershell
+uv run python -m tags_machine_core agent-task-nodes `
+  --character examples\nodes\characters\homura `
+  --action examples\nodes\actions\foot_closeup
+
+uv run python -m tags_machine_core compose-agent-nodes `
+  --character examples\nodes\characters\homura `
+  --action examples\nodes\actions\foot_closeup `
+  --agent-result agent_result.json `
+  --cache-dir cache\prompt
+```
+
+`agent-task-nodes` 输出给 agent 读取的任务，不联网。`compose-agent-nodes` 接收外部 agent 结果并生成 `PromptBundle`；如果 `--cache-dir` 已有相同输入的缓存，可以不传 `--agent-result`，直接复用缓存。
 
 Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 

@@ -7,6 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from tags_machine_core.clients import NovelAIClient
+from tags_machine_core.composers import load_agent_result
+from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GeneratedImage, GenerationResult
 from tags_machine_core.json_tools import sanitize_json_for_display
@@ -36,6 +38,44 @@ def cmd_compose(args) -> int:
 def cmd_compose_nodes(args) -> int:
     service = GenerationService()
     bundle = _build_bundle_from_nodes(service, args, style_ref=args.style_ref)
+    print_json(bundle, full=args.full)
+    return 0
+
+
+def cmd_agent_task_nodes(args) -> int:
+    service = GenerationService()
+    character, action, background = _read_node_inputs(args)
+    task = service.build_agent_composition_task(
+        character=character,
+        action=action,
+        background=background,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        style_ref=args.style_ref,
+        character_scope=args.character_scope or args.body_scope,
+        instructions=args.instruction or [],
+    )
+    print_json(task, full=args.full)
+    return 0
+
+
+def cmd_compose_agent_nodes(args) -> int:
+    service = GenerationService()
+    character, action, background = _read_node_inputs(args)
+    cache = PromptCache(args.cache_dir) if args.cache_dir else None
+    result = load_agent_result(args.agent_result) if args.agent_result else None
+    bundle = service.compose_nodes_with_agent(
+        character=character,
+        action=action,
+        background=background,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        style_ref=args.style_ref,
+        character_scope=args.character_scope or args.body_scope,
+        instructions=args.instruction or [],
+        result=result,
+        cache=cache,
+    )
     print_json(bundle, full=args.full)
     return 0
 
@@ -212,10 +252,7 @@ def _build_bundle_from_nodes(
     *,
     style_ref: str | None = None,
 ):
-    reader = NodeReader()
-    character = reader.read(args.character) if args.character else None
-    action = reader.read(args.action) if args.action else None
-    background = reader.read(args.background) if args.background else None
+    character, action, background = _read_node_inputs(args)
     return service.compose_nodes(
         character=character,
         action=action,
@@ -226,6 +263,14 @@ def _build_bundle_from_nodes(
         character_scope=args.character_scope,
         body_scope=args.body_scope,
     )
+
+
+def _read_node_inputs(args):
+    reader = NodeReader()
+    character = reader.read(args.character) if args.character else None
+    action = reader.read(args.action) if args.action else None
+    background = reader.read(args.background) if args.background else None
+    return character, action, background
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -251,6 +296,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_node_compose_arguments(compose_nodes)
     compose_nodes.set_defaults(func=cmd_compose_nodes)
+
+    agent_task_nodes = subparsers.add_parser(
+        "agent-task-nodes",
+        parents=[output_parent],
+        help="Build an agent-readable prompt composition task",
+    )
+    _add_node_compose_arguments(agent_task_nodes)
+    _add_agent_arguments(agent_task_nodes, result=False)
+    agent_task_nodes.set_defaults(func=cmd_agent_task_nodes)
+
+    compose_agent_nodes = subparsers.add_parser(
+        "compose-agent-nodes",
+        parents=[output_parent],
+        help="Build a PromptBundle from an agent composition result",
+    )
+    _add_node_compose_arguments(compose_agent_nodes)
+    _add_agent_arguments(compose_agent_nodes, result=True)
+    compose_agent_nodes.set_defaults(func=cmd_compose_agent_nodes)
 
     render_plan = subparsers.add_parser(
         "render-plan",
@@ -361,6 +424,17 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--style-ref")
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
+
+
+def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> None:
+    parser.add_argument(
+        "--instruction",
+        action="append",
+        help="Instruction passed through to the external agent; can be repeated",
+    )
+    if result:
+        parser.add_argument("--agent-result", help="Path to agent result JSON")
+        parser.add_argument("--cache-dir", help="PromptBundle cache directory")
 
 
 def main(argv: list[str] | None = None) -> int:

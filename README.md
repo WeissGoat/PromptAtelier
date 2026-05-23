@@ -25,6 +25,8 @@
 
 - `compose`：生成 `PromptBundle`
 - `compose-nodes`：从结构化角色/动作/背景节点生成 `PromptBundle`
+- `agent-task-nodes`：生成给外部 agent 读取的组合任务 JSON
+- `compose-agent-nodes`：把外部 agent 结果落成 `PromptBundle`，支持缓存复用
 - `render-plan`：生成 NovelAI `RenderRequest`，不联网
 - `render-plan-nodes`：从结构化节点生成 NovelAI `RenderRequest`，不联网
 - `generate`：调用 NovelAI 并保存图片
@@ -50,6 +52,23 @@ uv run python -m tags_machine_core compose-nodes `
 ```
 
 这个示例会读取角色和动作节点的 `meta.yaml`，并根据 action v1 的 `character_scope: foot_detail` 生成 `PromptBundle.meta.composition`。
+
+Agent composer 示例：
+
+```powershell
+uv run python -m tags_machine_core agent-task-nodes `
+  --character examples\nodes\characters\homura `
+  --action examples\nodes\actions\foot_closeup `
+  --instruction "组合角色和动作，局部特写不要带入无关角色细节"
+
+uv run python -m tags_machine_core compose-agent-nodes `
+  --character examples\nodes\characters\homura `
+  --action examples\nodes\actions\foot_closeup `
+  --agent-result agent_result.json `
+  --cache-dir cache\prompt
+```
+
+`agent-task-nodes` 不调用模型，只输出稳定任务 JSON。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
 
 旧项目对照验收示例：
 

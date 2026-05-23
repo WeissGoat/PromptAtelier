@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from tags_machine_core.composers import ScriptComposer
+from tags_machine_core.composers import (
+    AgentComposer,
+    AgentCompositionResult,
+    AgentCompositionTask,
+    ScriptComposer,
+)
+from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import PromptBundle, RenderRequest
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.renderers import NovelAIRenderAdapter
@@ -13,9 +19,11 @@ class GenerationService:
     def __init__(
         self,
         composer: ScriptComposer | None = None,
+        agent_composer: AgentComposer | None = None,
         novelai_adapter: NovelAIRenderAdapter | None = None,
     ):
         self.composer = composer or ScriptComposer()
+        self.agent_composer = agent_composer or AgentComposer()
         self.novelai_adapter = novelai_adapter or NovelAIRenderAdapter()
 
     def compose_full_prompt(
@@ -51,6 +59,56 @@ class GenerationService:
             style_ref=style_ref,
             character_scope=character_scope,
             body_scope=body_scope,
+        )
+
+    def build_agent_composition_task(
+        self,
+        *,
+        character: NodeDocument | None = None,
+        action: NodeDocument | None = None,
+        background: NodeDocument | None = None,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        instructions: list[str] | None = None,
+    ) -> AgentCompositionTask:
+        return self.agent_composer.build_task(
+            character=character,
+            action=action,
+            background=background,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            character_scope=character_scope,
+            instructions=instructions,
+        )
+
+    def compose_nodes_with_agent(
+        self,
+        *,
+        character: NodeDocument | None = None,
+        action: NodeDocument | None = None,
+        background: NodeDocument | None = None,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        instructions: list[str] | None = None,
+        result: AgentCompositionResult | dict[str, Any] | None = None,
+        cache: PromptCache | None = None,
+    ) -> PromptBundle:
+        return self.agent_composer.compose_nodes(
+            character=character,
+            action=action,
+            background=background,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            character_scope=character_scope,
+            instructions=instructions,
+            result=result,
+            cache=cache,
         )
 
     def build_novelai_request(
