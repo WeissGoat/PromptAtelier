@@ -1,7 +1,9 @@
 import io
 import json
+import struct
 import tempfile
 import unittest
+import zlib
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +11,22 @@ from unittest.mock import patch
 
 from tags_machine_core.cli import main
 from tags_machine_core.nodes import NodeReader
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    crc = zlib.crc32(chunk_type)
+    crc = zlib.crc32(data, crc) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
+
+
+def _png_bytes_with_text(chunks: dict[str, str]) -> bytes:
+    png = bytearray(b"\x89PNG\r\n\x1a\n")
+    png.extend(_png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)))
+    for key, value in chunks.items():
+        png.extend(_png_chunk(b"tEXt", key.encode("latin-1") + b"\x00" + value.encode("utf-8")))
+    png.extend(_png_chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00\x00")))
+    png.extend(_png_chunk(b"IEND", b""))
+    return bytes(png)
 
 
 class CliNodesTest(unittest.TestCase):
@@ -526,6 +544,65 @@ sd:
             saved_path = Path(data["images"][0]["path"])
             self.assertEqual(saved_path.parent, output_dir)
             self.assertEqual(saved_path.read_bytes(), b"png-bytes")
+            self.assertIn("Not a PNG file", data["png_info"]["images"][0]["error"])
+
+    def test_execute_render_request_reads_saved_png_info(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            output_dir = root / "outputs"
+            request = root / "sd_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "backend": "sd",
+                        "prompt": "akemi homura",
+                        "seed": 654,
+                        "params": {"steps": 24},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            image_bytes = _png_bytes_with_text(
+                {
+                    "Comment": json.dumps(
+                        {
+                            "prompt": "akemi homura",
+                            "negative_prompt": "bad anatomy",
+                            "seed": 654,
+                        }
+                    ),
+                    "Source": "Stable Diffusion WebUI",
+                }
+            )
+
+            with patch("tags_machine_core.cli.SDClient") as client_cls:
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="sd_result.png", content=image_bytes)
+                ]
+                client.build_payload.return_value = {"prompt": "akemi homura", "seed": 654}
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "execute-render-request",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            png_info = data["png_info"]["images"][0]
+            self.assertEqual(png_info["parameters"]["prompt"], "akemi homura")
+            self.assertEqual(png_info["parameters"]["seed"], 654)
+            self.assertEqual(png_info["png_text"]["Source"], "Stable Diffusion WebUI")
+            self.assertEqual(Path(png_info["path"]).parent, output_dir)
 
     def test_migrate_style_tags_command_writes_structured_node(self):
         with tempfile.TemporaryDirectory() as tmp:

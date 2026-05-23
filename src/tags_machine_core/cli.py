@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import yaml
@@ -166,7 +167,7 @@ def cmd_generate(args) -> int:
         backend="novelai",
         images=generated_images,
         request_body=client.build_payload(request),
-        png_info={},
+        png_info=_collect_png_info(generated_images),
         cache_hit=False,
     )
     print_json(result, full=args.full)
@@ -200,7 +201,7 @@ def cmd_execute_render_request(args) -> int:
             backend="novelai",
             images=images,
             request_body=client.build_payload(request),
-            png_info={},
+            png_info=_collect_png_info(images),
             cache_hit=False,
         )
     elif request.backend == "comfyui":
@@ -231,7 +232,7 @@ def cmd_execute_render_request(args) -> int:
             backend="sd",
             images=images,
             request_body=client.build_payload(request),
-            png_info={},
+            png_info=_collect_png_info(images),
             cache_hit=False,
         )
     else:
@@ -429,6 +430,21 @@ def _save_generated_images(
             )
         )
     return generated_images
+
+
+def _collect_png_info(images: list[GeneratedImage]) -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    for image in images:
+        record: dict[str, Any] = {
+            "filename": image.filename,
+            "path": str(image.path),
+        }
+        try:
+            record.update(read_image_parameters(image.path))
+        except Exception as exc:  # 图片可能不是 PNG，或者后端没有写入文本参数。
+            record["error"] = str(exc)
+        records.append(record)
+    return {"images": records}
 
 
 def build_parser() -> argparse.ArgumentParser:

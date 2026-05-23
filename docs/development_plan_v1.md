@@ -180,7 +180,7 @@ UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参
 
 - `images`：本地图片路径、文件名和图片级 meta。
 - `request_body`：发送给后端的请求体，默认展示时会截断图片 base64。
-- `png_info`：后续用于保存和读取图片内嵌参数。
+- `png_info`：生成后自动尝试读取保存图片里的 PNG 文本参数；如果图片不是 PNG 或没有可读参数，会保留读取错误，方便验收记录判断。
 - `cache_hit`：是否命中缓存。
 
 ## 节点格式策略
@@ -289,7 +289,7 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 - CLI 可通过 `render-plan --backend sd` 或 `render-plan-nodes --backend sd` 生成 dry-run 请求。
 - `execute-render-request` 可读取已有 `RenderRequest`，调用 WebUI / Forge `/sdapi/v1/txt2img`，解码返回图片并写入 `GenerationResult.images`。
 
-后续仍需要补齐更多 WebUI / Forge 差异字段、img2img、ControlNet 参数校准和图片内嵌参数读取。
+后续仍需要补齐更多 WebUI / Forge 差异字段、img2img 和 ControlNet 参数校准。
 
 ## 当前 CLI
 
