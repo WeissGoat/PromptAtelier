@@ -14,7 +14,7 @@ from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GeneratedImage, GenerationResult
 from tags_machine_core.json_tools import sanitize_json_for_display
-from tags_machine_core.nodes import NodeReader
+from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import (
@@ -246,6 +246,21 @@ def cmd_verify_acceptance_record(args) -> int:
     result = verify_acceptance_record(args.record)
     print_json(result, full=args.full)
     return 0 if result["match"] else 2
+
+
+def cmd_migrate_style_tags(args) -> int:
+    node = migrate_legacy_style_tags(
+        args.source,
+        node_id=args.id,
+        name=args.name,
+    )
+    if args.output:
+        output_path = Path(args.output)
+        if output_path.exists() and not args.overwrite:
+            raise FileExistsError(f"Output already exists, pass --overwrite to replace: {output_path}")
+        _write_structured_output(node, output_path, output_format=args.format)
+    print_json(node, full=args.full)
+    return 0
 
 
 def _load_json_arg(value: str | None) -> dict:
@@ -503,6 +518,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_acceptance.add_argument("record")
     verify_acceptance.set_defaults(func=cmd_verify_acceptance_record)
+
+    migrate_style_tags = subparsers.add_parser(
+        "migrate-style-tags",
+        parents=[output_parent],
+        help="Convert a legacy style tags.txt into a structured style node",
+    )
+    migrate_style_tags.add_argument("source", help="Legacy style directory or tags.txt path")
+    migrate_style_tags.add_argument("--id", help="Override generated style node id")
+    migrate_style_tags.add_argument("--name", help="Override generated style node name")
+    migrate_style_tags.add_argument("--output", help="Write node.yaml to this path")
+    migrate_style_tags.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    migrate_style_tags.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace --output if it already exists",
+    )
+    migrate_style_tags.set_defaults(func=cmd_migrate_style_tags)
 
     return parser
 

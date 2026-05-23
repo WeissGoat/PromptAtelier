@@ -294,6 +294,7 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 ```powershell
 uv run python -m tags_machine_core compose --prompt "akemi homura, foot focus"
 uv run python -m tags_machine_core inspect-style --config configs\local.example.yaml --style-ref 20260412_2
+uv run python -m tags_machine_core migrate-style-tags F:\my_project\new\tags_machine\design\画风\20260412_2 --output migrated\nodes\styles\20260412_2\node.yaml
 uv run python -m tags_machine_core render-plan --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 uv run python -m tags_machine_core render-plan-nodes --backend comfyui --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
@@ -305,6 +306,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网，支持 `novelai`、`comfyui`、`sd`。
 - `generate` 当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
+- `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算旧项目对照验收记录。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
@@ -350,7 +352,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 确认角色 `meta.yaml` 轻量事实库格式。
 - 设计并落地 action / style / background 的结构化规范。
 - 给动作、画风节点补结构化字段。
-- 编写 `tags.txt -> node.yaml` 辅助迁移脚本。
+- 编写 `tags.txt -> node.yaml` 辅助迁移脚本。当前已支持旧画风 `tags.txt` 到 style `node.yaml` 的迁移，后续再扩展更多节点类型。
 
 第三阶段：composer 拆分
 

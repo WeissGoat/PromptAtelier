@@ -32,6 +32,7 @@
 - `generate`：调用 NovelAI 并保存图片
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
+- `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
 - `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest`
 - `create-acceptance-record`：生成旧项目对照验收记录
@@ -89,6 +90,16 @@ uv run python -m tags_machine_core render-plan `
 ```
 
 ComfyUI / SD 目前只生成 dry-run `RenderRequest`，用于 UI、队列、diff 和后续执行器接入；真实联网执行仍只在 `generate` 的 NovelAI 路径里。
+
+旧画风节点迁移示例：
+
+```powershell
+uv run python -m tags_machine_core migrate-style-tags `
+  F:\my_project\new\tags_machine\design\画风\sample_style `
+  --output migrated\nodes\styles\sample_style\node.yaml
+```
+
+`migrate-style-tags` 默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。
 
 旧项目对照验收示例：
 

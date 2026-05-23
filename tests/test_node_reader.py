@@ -2,7 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tags_machine_core.nodes import NodeReader
+import yaml
+
+from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 
 
 class NodeReaderTest(unittest.TestCase):
@@ -103,6 +105,70 @@ negative_prompt:
             self.assertEqual(node.tags["background"], ["simple room"])
             self.assertEqual(node.tags["lighting"], ["soft window light"])
             self.assertEqual(node.negative_prompt, ["crowded background"])
+
+    def test_migrate_legacy_style_tags_txt_to_style_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            style_dir = Path(tmp) / "old_style"
+            style_dir.mkdir()
+            (style_dir / "tags.txt").write_text(
+                """
+style prefix,
+style suffix, best quality
+=
+origin_uc, lowres, bad anatomy
+after_uc, extra fingers
+gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multiple": ["abc"], "reference_strength_multiple": [0.2]}
+not_quality_prompts
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_style_tags(style_dir, node_id="migrated_style")
+
+            self.assertEqual(node["schema"], "tags-machine.style/v1")
+            self.assertEqual(node["kind"], "style")
+            self.assertEqual(node["id"], "migrated_style")
+            self.assertEqual(node["tags"]["style"], ["style prefix", "style suffix, best quality"])
+            novelai = node["renderers"]["novelai"]
+            self.assertFalse(novelai["include_common_tags"])
+            self.assertEqual(novelai["prompt_prefix"], ["style prefix"])
+            self.assertEqual(novelai["prompt_suffix"], ["style suffix, best quality"])
+            self.assertEqual(novelai["negative_prompt"], ["lowres, bad anatomy"])
+            self.assertEqual(novelai["after_negative_prompt"], ["extra fingers"])
+            self.assertEqual(novelai["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(novelai["params"]["reference_strength_multiple"], [0.2])
+            self.assertEqual(novelai["flags"], ["not_quality_prompts"])
+
+    def test_read_migrated_style_node_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            style_dir = Path(tmp) / "old_style"
+            style_dir.mkdir()
+            (style_dir / "tags.txt").write_text(
+                """
+style prefix,
+=
+origin_uc, lowres
+gen_json, {"sampler": "k_euler"}
+""".strip(),
+                encoding="utf-8",
+            )
+            output = style_dir / "node.yaml"
+            output.write_text(
+                yaml.safe_dump(
+                    migrate_legacy_style_tags(style_dir),
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            node = NodeReader().read(style_dir)
+
+            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.id, "old_style")
+            self.assertEqual(node.tags["style"], ["style prefix"])
+            self.assertEqual(node.renderers["novelai"]["negative_prompt"], ["lowres"])
+            self.assertEqual(node.renderers["novelai"]["params"]["sampler"], "k_euler")
 
     def test_read_scoped_prompt_fragments(self):
         with tempfile.TemporaryDirectory() as tmp:

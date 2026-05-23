@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from tags_machine_core.cli import main
+from tags_machine_core.nodes import NodeReader
 
 
 class CliNodesTest(unittest.TestCase):
@@ -390,6 +391,51 @@ negative_prompt:
             self.assertEqual(data["params"]["clip_skip"], 2)
             self.assertEqual(data["params"]["vae"], "anime.vae.pt")
             self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+
+    def test_migrate_style_tags_command_writes_structured_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            style_dir = root / "legacy_style"
+            style_dir.mkdir()
+            (style_dir / "tags.txt").write_text(
+                """
+style prefix,
+style suffix, best quality
+=
+origin_uc, lowres, bad anatomy
+after_uc, extra fingers
+gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multiple": ["abc"], "reference_strength_multiple": [0.2]}
+""".strip(),
+                encoding="utf-8",
+            )
+            output = style_dir / "node.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "migrate-style-tags",
+                        str(style_dir),
+                        "--id",
+                        "migrated_style",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            node = NodeReader().read(output)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["id"], "migrated_style")
+            self.assertTrue(output.exists())
+            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.id, "migrated_style")
+            self.assertEqual(node.tags["style"], ["style prefix", "style suffix, best quality"])
+            self.assertFalse(node.renderers["novelai"]["include_common_tags"])
+            self.assertEqual(node.renderers["novelai"]["negative_prompt"], ["lowres, bad anatomy"])
+            self.assertEqual(node.renderers["novelai"]["after_negative_prompt"], ["extra fingers"])
+            self.assertEqual(node.renderers["novelai"]["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(node.renderers["novelai"]["params"]["reference_strength_multiple"], [0.2])
 
 
 if __name__ == "__main__":
