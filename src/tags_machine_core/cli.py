@@ -23,6 +23,9 @@ from tags_machine_core.verification import (
 )
 
 
+RENDER_BACKENDS = ("novelai", "comfyui", "sd")
+
+
 def print_json(value, *, full: bool = False) -> None:
     data = sanitize_json_for_display(value, full=full)
     print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -82,23 +85,17 @@ def cmd_compose_agent_nodes(args) -> int:
 
 def cmd_render_plan(args) -> int:
     service = GenerationService()
-    if args.backend != "novelai":
-        raise ValueError(f"Unsupported backend in first scaffold: {args.backend}")
-    style = None
-    style_ref = args.style_ref
-    if args.config:
-        config = load_config(Path(args.config))
-        style_ref = args.style_ref or config.defaults.style_ref
-        if style_ref:
-            style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    style_ref, style = _load_render_style(args)
     bundle = _build_bundle(service, args, style_ref=style_ref)
-    request = service.build_novelai_request(
+    request = service.build_render_request(
         bundle,
+        backend=args.backend,
         seed=args.seed,
         style=style,
         width=args.width,
         height=args.height,
         model=args.model,
+        action=_render_action(args.backend),
         params=_load_json_arg(args.params_json),
     )
     print_json(request, full=args.full)
@@ -107,23 +104,17 @@ def cmd_render_plan(args) -> int:
 
 def cmd_render_plan_nodes(args) -> int:
     service = GenerationService()
-    if args.backend != "novelai":
-        raise ValueError(f"Unsupported backend in first scaffold: {args.backend}")
-    style = None
-    style_ref = args.style_ref
-    if args.config:
-        config = load_config(Path(args.config))
-        style_ref = args.style_ref or config.defaults.style_ref
-        if style_ref:
-            style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    style_ref, style = _load_render_style(args)
     bundle = _build_bundle_from_nodes(service, args, style_ref=style_ref)
-    request = service.build_novelai_request(
+    request = service.build_render_request(
         bundle,
+        backend=args.backend,
         seed=args.seed,
         style=style,
         width=args.width,
         height=args.height,
         model=args.model,
+        action=_render_action(args.backend),
         params=_load_json_arg(args.params_json),
     )
     print_json(request, full=args.full)
@@ -273,6 +264,25 @@ def _read_node_inputs(args):
     return character, action, background
 
 
+def _load_render_style(args):
+    if args.style_node:
+        node = NodeReader().read(args.style_node)
+        return args.style_ref or node.id, node
+
+    style_ref = args.style_ref
+    if args.config:
+        config = load_config(Path(args.config))
+        if args.backend == "novelai":
+            style_ref = style_ref or config.defaults.style_ref
+            if style_ref:
+                return style_ref, NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    return style_ref, None
+
+
+def _render_action(backend: str) -> str:
+    return "generate" if backend == "novelai" else "render-plan"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tags Machine Core CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -323,11 +333,12 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan.add_argument("--prompt", required=True)
     render_plan.add_argument("--negative")
     render_plan.add_argument("--style-ref")
-    render_plan.add_argument("--backend", default="novelai", choices=["novelai"])
+    render_plan.add_argument("--style-node", help="Path to a structured style node")
+    render_plan.add_argument("--backend", default="novelai", choices=RENDER_BACKENDS)
     render_plan.add_argument("--seed", type=int)
     render_plan.add_argument("--width", type=int, default=1024)
     render_plan.add_argument("--height", type=int, default=1024)
-    render_plan.add_argument("--model", default="nai-diffusion-4-5-full")
+    render_plan.add_argument("--model")
     render_plan.add_argument("--params-json", help="Extra renderer params as a JSON object")
     render_plan.add_argument("--config", help="Load style nodes through this config file")
     render_plan.set_defaults(func=cmd_render_plan)
@@ -338,11 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build a RenderRequest from structured nodes",
     )
     _add_node_compose_arguments(render_plan_nodes)
-    render_plan_nodes.add_argument("--backend", default="novelai", choices=["novelai"])
+    render_plan_nodes.add_argument("--style-node", help="Path to a structured style node")
+    render_plan_nodes.add_argument("--backend", default="novelai", choices=RENDER_BACKENDS)
     render_plan_nodes.add_argument("--seed", type=int)
     render_plan_nodes.add_argument("--width", type=int, default=1024)
     render_plan_nodes.add_argument("--height", type=int, default=1024)
-    render_plan_nodes.add_argument("--model", default="nai-diffusion-4-5-full")
+    render_plan_nodes.add_argument("--model")
     render_plan_nodes.add_argument("--params-json", help="Extra renderer params as a JSON object")
     render_plan_nodes.add_argument("--config", help="Load style nodes through this config file")
     render_plan_nodes.set_defaults(func=cmd_render_plan_nodes)

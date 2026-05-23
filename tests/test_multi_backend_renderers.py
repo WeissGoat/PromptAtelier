@@ -1,0 +1,106 @@
+import unittest
+
+from tags_machine_core.composers import ScriptComposer
+from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.renderers import ComfyUIRenderAdapter, SDRenderAdapter
+from tags_machine_core.services import GenerationService
+
+
+def _bundle():
+    return ScriptComposer().compose_full_prompt(
+        prompt="akemi homura, foot focus",
+        negative="extra toes",
+        style_ref="cross_backend_style",
+    )
+
+
+def _style_node() -> NodeDocument:
+    return NodeDocument.model_validate(
+        {
+            "schema": "tags-machine-core.node/v1",
+            "kind": "artist",
+            "id": "cross_backend_style",
+            "renderers": {
+                "comfyui": {
+                    "workflow": "portrait_workflow",
+                    "checkpoint": "anime_comfy.safetensors",
+                    "loras": [{"name": "lineart", "weight": 0.65}],
+                    "params": {"steps": 32, "cfg": 6.5},
+                },
+                "sd": {
+                    "checkpoint": "anime_sd.safetensors",
+                    "vae": "anime.vae.pt",
+                    "loras": [{"name": "feet_detail", "weight": 0.8}],
+                    "params": {"steps": 24, "cfg_scale": 7.5},
+                },
+            },
+        }
+    )
+
+
+class MultiBackendRendererTest(unittest.TestCase):
+    def test_comfyui_adapter_builds_dry_run_render_request(self):
+        request = ComfyUIRenderAdapter().build_request(
+            _bundle(),
+            seed=123,
+            width=832,
+            height=1216,
+            style=_style_node(),
+            params={"scheduler": "karras"},
+        )
+
+        self.assertEqual(request.backend, "comfyui")
+        self.assertEqual(request.model, "anime_comfy.safetensors")
+        self.assertEqual(request.seed, 123)
+        self.assertEqual(request.params["workflow"], "portrait_workflow")
+        self.assertEqual(request.params["steps"], 32)
+        self.assertEqual(request.params["cfg"], 6.5)
+        self.assertEqual(request.params["scheduler"], "karras")
+        self.assertEqual(request.params["loras"], [{"name": "lineart", "weight": 0.65}])
+        self.assertEqual(request.params["positive_prompt"], "akemi homura, foot focus")
+        self.assertEqual(request.params["negative_prompt"], "extra toes")
+        self.assertEqual(request.meta["backend"], "comfyui")
+
+    def test_sd_adapter_builds_dry_run_render_request(self):
+        request = SDRenderAdapter().build_request(
+            _bundle(),
+            seed=456,
+            width=768,
+            height=1024,
+            style=_style_node(),
+            params={"sampler": "DPM++ 2M", "clip_skip": 2},
+        )
+
+        self.assertEqual(request.backend, "sd")
+        self.assertEqual(request.model, "anime_sd.safetensors")
+        self.assertEqual(request.seed, 456)
+        self.assertEqual(request.params["checkpoint"], "anime_sd.safetensors")
+        self.assertEqual(request.params["steps"], 24)
+        self.assertEqual(request.params["cfg_scale"], 7.5)
+        self.assertEqual(request.params["sampler"], "DPM++ 2M")
+        self.assertEqual(request.params["clip_skip"], 2)
+        self.assertEqual(request.params["vae"], "anime.vae.pt")
+        self.assertEqual(request.params["loras"], [{"name": "feet_detail", "weight": 0.8}])
+        self.assertEqual(request.meta["backend"], "sd")
+
+    def test_generation_service_dispatches_backend_adapters(self):
+        service = GenerationService()
+        comfy = service.build_render_request(
+            _bundle(),
+            backend="comfyui",
+            seed=1,
+            style=_style_node(),
+        )
+        sd = service.build_render_request(
+            _bundle(),
+            backend="sd",
+            seed=2,
+            style=_style_node(),
+        )
+
+        self.assertEqual(comfy.backend, "comfyui")
+        self.assertEqual(sd.backend, "sd")
+
+
+if __name__ == "__main__":
+    unittest.main()

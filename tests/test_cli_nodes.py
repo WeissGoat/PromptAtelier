@@ -47,6 +47,38 @@ character_scope: foot_detail
         )
         return character, action
 
+    def _write_style_node(self, root: Path) -> Path:
+        style = root / "style"
+        style.mkdir()
+        (style / "meta.yaml").write_text(
+            """
+schema: tags-machine-core.node/v1
+kind: artist
+id: cross_backend_style
+renderers:
+  comfyui:
+    workflow: portrait_workflow
+    checkpoint: anime_comfy.safetensors
+    loras:
+      - name: lineart
+        weight: 0.65
+    params:
+      steps: 32
+      cfg: 6.5
+  sd:
+    checkpoint: anime_sd.safetensors
+    vae: anime.vae.pt
+    loras:
+      - name: feet_detail
+        weight: 0.8
+    params:
+      steps: 24
+      cfg_scale: 7.5
+""".strip(),
+            encoding="utf-8",
+        )
+        return style
+
     def test_compose_nodes_command_filters_by_character_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -165,6 +197,89 @@ character_scope: foot_detail
             self.assertTrue(second_data["cache"]["cache_hit"])
             self.assertEqual(second_data["prompt"]["positive"], "akemi homura, bare soles, foot focus")
             self.assertEqual(second_data["meta"]["composer_type"], "agent")
+
+    def test_render_plan_nodes_supports_comfyui_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            style = self._write_style_node(root)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "comfyui",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "123",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--params-json",
+                        '{"scheduler": "karras"}',
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(data["backend"], "comfyui")
+            self.assertEqual(data["model"], "anime_comfy.safetensors")
+            self.assertEqual(data["seed"], 123)
+            self.assertEqual(data["size"], {"width": 832, "height": 1216})
+            self.assertEqual(data["params"]["workflow"], "portrait_workflow")
+            self.assertEqual(data["params"]["steps"], 32)
+            self.assertEqual(data["params"]["cfg"], 6.5)
+            self.assertEqual(data["params"]["scheduler"], "karras")
+            self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+
+    def test_render_plan_nodes_supports_sd_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            style = self._write_style_node(root)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "sd",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "456",
+                        "--model",
+                        "override_sd.safetensors",
+                        "--params-json",
+                        '{"sampler": "DPM++ 2M", "clip_skip": 2}',
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(data["backend"], "sd")
+            self.assertEqual(data["model"], "override_sd.safetensors")
+            self.assertEqual(data["seed"], 456)
+            self.assertEqual(data["params"]["checkpoint"], "override_sd.safetensors")
+            self.assertEqual(data["params"]["steps"], 24)
+            self.assertEqual(data["params"]["cfg_scale"], 7.5)
+            self.assertEqual(data["params"]["sampler"], "DPM++ 2M")
+            self.assertEqual(data["params"]["clip_skip"], 2)
+            self.assertEqual(data["params"]["vae"], "anime.vae.pt")
+            self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
 
 
 if __name__ == "__main__":

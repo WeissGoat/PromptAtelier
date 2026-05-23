@@ -27,8 +27,8 @@
 - `compose-nodes`：从结构化角色/动作/背景节点生成 `PromptBundle`
 - `agent-task-nodes`：生成给外部 agent 读取的组合任务 JSON
 - `compose-agent-nodes`：把外部 agent 结果落成 `PromptBundle`，支持缓存复用
-- `render-plan`：生成 NovelAI `RenderRequest`，不联网
-- `render-plan-nodes`：从结构化节点生成 NovelAI `RenderRequest`，不联网
+- `render-plan`：生成 NovelAI / ComfyUI / SD `RenderRequest`，不联网
+- `render-plan-nodes`：从结构化节点生成多后端 `RenderRequest`，不联网
 - `generate`：调用 NovelAI 并保存图片
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
@@ -69,6 +69,24 @@ uv run python -m tags_machine_core compose-agent-nodes `
 ```
 
 `agent-task-nodes` 不调用模型，只输出稳定任务 JSON。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
+
+多后端 render plan 示例：
+
+```powershell
+uv run python -m tags_machine_core render-plan-nodes `
+  --backend comfyui `
+  --character examples\nodes\characters\homura `
+  --action examples\nodes\actions\foot_closeup `
+  --style-node examples\nodes\styles\anime_comfy `
+  --seed 123
+
+uv run python -m tags_machine_core render-plan `
+  --backend sd `
+  --prompt "akemi homura, foot focus" `
+  --params-json "{\"checkpoint\":\"anime_sd.safetensors\"}"
+```
+
+ComfyUI / SD 目前只生成 dry-run `RenderRequest`，用于 UI、队列、diff 和后续执行器接入；真实联网执行仍只在 `generate` 的 NovelAI 路径里。
 
 旧项目对照验收示例：
 

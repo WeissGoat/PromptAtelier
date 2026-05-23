@@ -267,20 +267,27 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 
 ### ComfyUI adapter
 
-下一阶段设计：
+当前已完成 dry-run 第一版：
 
 - 根据 `style_ref` 选择工作流模板。
-- 根据人物和画风节点注入 LoRA、embedding、control 参数。
+- 可从结构化 style node 的 `renderers.comfyui` 读取 workflow、checkpoint、LoRA、embedding、control、node_overrides 等后端配置。
 - `PromptBundle` 不关心具体 ComfyUI 节点编号。
-- adapter 产出完整 workflow JSON 或执行计划。
+- adapter 产出统一 `RenderRequest` 执行计划，不负责联网。
+- CLI 可通过 `render-plan --backend comfyui` 或 `render-plan-nodes --backend comfyui` 生成 dry-run 请求。
+
+真实 ComfyUI client、workflow JSON 展开和节点级 patch 仍放在下一步。
 
 ### SD adapter
 
-下一阶段设计：
+当前已完成 dry-run 第一版：
 
 - 根据配置选择 checkpoint、vae、sampler、scheduler。
-- 将结构化 LoRA 和 negative prompt 合成到 SD 请求体。
+- 可从结构化 style node 的 `renderers.sd` 读取 checkpoint、VAE、LoRA、embedding、ControlNet、hires_fix 等后端配置。
+- 将完整 positive / negative prompt 合成到 SD 请求计划。
 - 保持和 NovelAI/ComfyUI 一致的 `RenderRequest` 外壳。
+- CLI 可通过 `render-plan --backend sd` 或 `render-plan-nodes --backend sd` 生成 dry-run 请求。
+
+真实 SD client 和具体 WebUI/Forge/Comfy 兼容请求体仍放在下一步。
 
 ## 当前 CLI
 
@@ -288,13 +295,14 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 uv run python -m tags_machine_core compose --prompt "akemi homura, foot focus"
 uv run python -m tags_machine_core inspect-style --config configs\local.example.yaml --style-ref 20260412_2
 uv run python -m tags_machine_core render-plan --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
+uv run python -m tags_machine_core render-plan-nodes --backend comfyui --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123
 uv run python -m tags_machine_core generate --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 ```
 
 说明：
 
-- `render-plan` 只生成请求计划，不联网。
-- `generate` 会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
+- `render-plan` / `render-plan-nodes` 只生成请求计划，不联网，支持 `novelai`、`comfyui`、`sd`。
+- `generate` 当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
 

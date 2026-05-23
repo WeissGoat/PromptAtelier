@@ -11,7 +11,7 @@ from tags_machine_core.composers import (
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import PromptBundle, RenderRequest
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.renderers import NovelAIRenderAdapter
+from tags_machine_core.renderers import ComfyUIRenderAdapter, NovelAIRenderAdapter, SDRenderAdapter
 from tags_machine_core.renderers.novelai_style import NovelAIStyle
 
 
@@ -21,10 +21,14 @@ class GenerationService:
         composer: ScriptComposer | None = None,
         agent_composer: AgentComposer | None = None,
         novelai_adapter: NovelAIRenderAdapter | None = None,
+        comfyui_adapter: ComfyUIRenderAdapter | None = None,
+        sd_adapter: SDRenderAdapter | None = None,
     ):
         self.composer = composer or ScriptComposer()
         self.agent_composer = agent_composer or AgentComposer()
         self.novelai_adapter = novelai_adapter or NovelAIRenderAdapter()
+        self.comfyui_adapter = comfyui_adapter or ComfyUIRenderAdapter()
+        self.sd_adapter = sd_adapter or SDRenderAdapter()
 
     def compose_full_prompt(
         self,
@@ -132,3 +136,51 @@ class GenerationService:
             params=params,
             style=style,
         )
+
+    def build_render_request(
+        self,
+        bundle: PromptBundle,
+        *,
+        backend: str = "novelai",
+        seed: int | None = None,
+        style: NovelAIStyle | NodeDocument | dict[str, Any] | None = None,
+        width: int = 1024,
+        height: int = 1024,
+        model: str | None = None,
+        action: str = "render-plan",
+        params: dict[str, Any] | None = None,
+    ) -> RenderRequest:
+        if backend == "novelai":
+            return self.novelai_adapter.build_request(
+                bundle,
+                seed=seed,
+                width=width,
+                height=height,
+                model=model or "nai-diffusion-4-5-full",
+                action=action,
+                params=params,
+                style=style if isinstance(style, NovelAIStyle) else None,
+            )
+        if backend == "comfyui":
+            return self.comfyui_adapter.build_request(
+                bundle,
+                seed=seed,
+                width=width,
+                height=height,
+                model=model,
+                action=action,
+                params=params,
+                style=style,
+            )
+        if backend == "sd":
+            return self.sd_adapter.build_request(
+                bundle,
+                seed=seed,
+                width=width,
+                height=height,
+                model=model,
+                action=action,
+                params=params,
+                style=style,
+            )
+        raise ValueError(f"Unsupported backend: {backend}")
