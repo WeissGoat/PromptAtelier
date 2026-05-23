@@ -99,8 +99,10 @@ flowchart LR
 
 新 YAML 的方向：
 
-- 人物节点要拆出身份、外观、服装、可局部禁用字段。
-- 动作节点要声明镜头范围，比如 foot close-up、upper body、full body。
+- 人物节点只拆出角色素材事实，例如身份、头发、眼睛、服装、道具、身体局部等 section。
+- 人物节点不写通用过滤规则，不写 `include_scopes` / `exclude_scopes`。
+- 动作节点声明动作和镜头事实，比如 foot close-up、upper body、full body。
+- composer 根据 action 的 shot 语义统一选择 character section。
 - 画风节点要区分语义风格词、后端参数、参考图、负向词。
 - 每个节点都应可被 agent 直接读取，并且能被脚本稳定解析。
 
@@ -111,11 +113,11 @@ flowchart LR
 脚本 composer 负责确定性拼接，适合批量跑图和回归测试：
 
 - 输入节点结构化字段。
-- 根据镜头范围过滤角色字段。
-- 根据动作节点的 `body_scope` 决定是否加入衣服、头发、眼睛等细节。
+- 根据动作节点的 `body_scope` 选择角色 section。
+- 通用过滤策略放在 composer，不重复写进每个 character YAML。
 - 输出稳定的 `PromptBundle`。
 
-例子：脚底特写镜头中，角色节点的眼睛、发型、上身服装应该降权、移除或进入 `meta.constraints.notes`，而不是直接进入正向提示词。
+例子：脚底特写镜头中，composer 可以默认取 `character`、`copyright`、`body`、`feet`、`legwear`、`footwear`，并跳过 `eyes`、`hair`、`upper_clothes` 等 section。这个策略不写进角色节点。
 
 ### Agent composer
 
@@ -216,8 +218,9 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 第二阶段：结构化节点
 
-- 设计并落地 `node.yaml` 规范。
-- 给角色、动作、画风节点补结构化字段。
+- 确认角色 `meta.yaml` 轻量事实库格式。
+- 设计并落地 action / style / background 的结构化规范。
+- 给动作、画风节点补结构化字段。
 - 编写 `tags.txt -> node.yaml` 辅助迁移脚本。
 
 第三阶段：composer 拆分
@@ -254,7 +257,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - 同一组输入在脚本 composer 下生成稳定 `PromptBundle`。
 - Agent composer 的输出可缓存并复用。
-- 局部镜头能正确过滤角色节点里的不相关字段。
+- 局部镜头能通过 composer 策略正确选择角色 section。
 - NovelAI、ComfyUI、SD 各自后端差异不会污染提示词生成层。
 
 ## 版本管理策略

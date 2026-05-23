@@ -1,260 +1,202 @@
-# Node YAML 规范 v1
+# Node YAML 规范总览 v1
 
-`node.yaml` 是新提示词库的结构化格式。它的目标不是把所有提示词技巧都拆成复杂对象，而是让脚本和 agent 都能稳定理解：这个节点是什么、哪些词什么时候该用、哪些词在特定镜头下应该禁用。
+本文档只定义节点体系的总体边界。具体节点格式会拆成独立规范：
 
-## 设计原则
+- [Character YAML 规范](character_yaml_spec_v1.md)
+- Action YAML 规范：待讨论
+- Artist / Style YAML 规范：待讨论
+- Background YAML 规范：待讨论
 
-- 保留提示词原文，不破坏 NovelAI / SD 常用的 `(){}[]`、`1.2::tag::` 等权重写法。
-- 用结构化字段描述语义边界，例如角色身份、身体部位、镜头范围、后端参数。
-- 角色、动作、画风、背景都使用同一个外壳，降低 agent 读取成本。
-- 后端强相关内容放到 `renderers`，不污染通用提示词层。
-- `tags.txt` 在迁移期继续可用，`node.yaml` 优先级更高。
+## 当前结论
 
-## 顶层结构
+节点 YAML 不应该把所有规则都写进每个节点。
 
-```yaml
-schema: tags-machine-core.node/v1
-kind: character
-id: akemi_homura
-name: Akemi Homura
-description: 魔法少女小圆角色节点
+更清晰的职责边界是：
 
-tags:
-  identity:
-    - akemi homura
-  traits:
-    - calm
-
-shot:
-  framing: close-up
-  body_scope: foot_detail
-  camera: low angle
-
-prompt:
-  positive:
-    - text: akemi homura
-      role: identity
-      include_scopes: ["*"]
-    - text: purple eyes
-      role: eyes
-      include_scopes: [face_detail, upper_body, full_body]
-      exclude_scopes: [foot_detail]
-    - text: black hair
-      role: hair
-      include_scopes: [face_detail, upper_body, full_body]
-      exclude_scopes: [foot_detail]
-    - text: bare soles
-      role: feet
-      include_scopes: [foot_detail, lower_body, full_body]
-  negative:
-    - text: extra toes
-      role: anatomy
-
-constraints:
-  required_parts:
-    - akemi homura
-  forbidden_parts:
-    - purple eyes
-  notes:
-    - foot_detail 镜头下不要强行描述脸部和发型。
-
-renderers:
-  novelai:
-    params:
-      sampler: k_euler_ancestral
-
-agent:
-  summary: 脚底特写时只保留身份与足部相关外观。
-  labels:
-    - character
-    - foot-aware
+```text
+character：描述角色素材事实
+action：描述动作和镜头事实
+artist/style：描述画风素材和后端相关素材
+composer：根据统一策略组合素材
+adapter：根据后端生成 RenderRequest
 ```
 
-## 字段说明
+例如：
 
-### `schema`
+```text
+character.tags.hair = black_hair
+character.tags.eyes = purple_eyes
+action.shot.body_scope = foot_detail
+composer policy = foot_detail 默认不取 hair / eyes / upper_clothes
+```
 
-固定为 `tags-machine-core.node/v1`。旧草稿里的 `tags-machine.node/v1` 也会被 reader 兼容读取。
+这里的过滤逻辑属于 composer，不属于 character YAML。
 
-### `kind`
+## 文件约定
 
-节点类型：
+迁移期允许同一个节点目录同时存在：
 
-- `character`
-- `action`
-- `artist`
-- `background`
-- `vibe`
-- `story`
-- `unknown`
+```text
+tags.txt      # 旧格式，继续兼容
+meta.yaml     # 轻量结构化元数据，角色节点当前使用
+node.yaml     # 通用结构化节点，后续用于 action/style/background 等
+```
+
+读取优先级建议：
+
+1. `node.yaml`
+2. `meta.yaml`
+3. `tags.txt`
+
+注意：`meta.yaml` 不表示“不重要”，只是说明它是轻量事实库格式。当前 character v1 就推荐使用 `meta.yaml`。
+
+## 通用设计原则
+
+- YAML 只存素材事实和必要元数据。
+- 通用组合规则放在 composer 策略层。
+- 后端强相关处理放在 adapter 层。
+- `tags.txt` 在迁移期继续可用。
+- 已经落地的 `design/角色/.../meta.yaml` 视为 character v1 的事实来源。
+- agent 可以读取 YAML，但 agent 不应该把临时推理规则写回每个角色节点。
+
+## 字段命名原则
 
 ### `tags`
 
-给人和 agent 快速浏览的标签组。它可以继续接收旧 `tags.txt` 的简单文本，但不建议把所有正式提示词都只塞在这里。
+`tags` 表示可用于正向提示词的素材分组。
 
-### `shot`
+它不是最终 prompt，而是 prompt material。
 
-镜头语义：
+例如 character 中：
 
-- `framing`：构图，例如 `close-up`、`medium shot`、`full body`。
-- `body_scope`：画面主体范围，例如 `foot_detail`、`face_detail`、`upper_body`、`lower_body`、`full_body`。
-- `camera`：机位，例如 `low angle`、`overhead view`。
+```yaml
+tags:
+  character:
+    - akemi_homura
+  hair:
+    - black_hair
+  eyes:
+    - purple_eyes
+```
 
-`body_scope` 是脚本过滤角色字段的核心。
+composer 会根据 action 和策略决定最终取哪些 section。
 
-### `prompt.positive[]`
+### `negative_prompt`
 
-正向提示词片段。每一项可以是字符串，也可以是对象。
+`negative_prompt` 表示节点自带的负向提示词素材。
 
-字符串简写：
+它也不是最终完整 negative prompt，而是会被 composer 合并进 `PromptBundle.prompt.negative`。
+
+当前 character v1 保留这个字段名，因为它已经落地，并且对 agent 和生图链路都直观。
+
+### `prompt`
+
+`prompt` 保留给最终产物或特殊 raw prompt 节点。
+
+character v1 不推荐使用：
 
 ```yaml
 prompt:
-  positive:
-    - akemi homura
-    - bare soles
+  positive: ...
 ```
 
-对象写法：
+原因是 character 的内容还需要根据 action、shot、style 策略筛选，不是最终可直接喂模型的完整提示词。
+
+## Character 当前状态
+
+character v1 已确认：
+
+- 使用 `meta.yaml`
+- 使用 `schema: tags-machine.character/v1`
+- 使用 `tags` 存正向素材分组
+- 使用 `negative_prompt` 存角色级负向素材
+- 不写 `rules`
+- 不写 `profiles`
+- 不写 `include_scopes` / `exclude_scopes`
+- 不写通用镜头过滤规则
+
+详细结构见 [Character YAML 规范](character_yaml_spec_v1.md)。
+
+## Action 待讨论重点
+
+action 节点不应该关心某个角色有哪些 section，但它需要提供足够清晰的镜头事实，让 composer 能选择 section。
+
+下一步需要确认：
+
+- action 用 `node.yaml` 还是 `meta.yaml`
+- `shot.body_scope` 的枚举
+- `shot.focus` 是否允许多值
+- `visible_parts` 如何表达
+- action 自己的正向素材仍叫 `tags` 还是叫 `prompt_material`
+- action 的负向素材是否也叫 `negative_prompt`
+- 是否需要 `intensity`、`contact`、`camera`、`composition` 等结构字段
+
+目前倾向：
 
 ```yaml
-prompt:
-  positive:
-    - text: purple eyes
-      role: eyes
-      include_scopes: [face_detail, upper_body, full_body]
-      exclude_scopes: [foot_detail]
-```
-
-字段：
-
-- `text`：真实提示词文本，可以包含 `(){}[]` 和模型权重语法。
-- `role`：语义角色，例如 `identity`、`hair`、`eyes`、`feet`、`clothing`、`pose`。
-- `weight`：可选数值，仅做 meta，不强制改写 `text`。
-- `include_scopes`：在哪些 `body_scope` 下启用。包含 `"*"` 表示总是可用。
-- `exclude_scopes`：在哪些 `body_scope` 下禁用。
-- `notes`：给 agent 或人工维护者的说明。
-
-判定规则：
-
-1. 如果 `exclude_scopes` 包含当前 `body_scope`，禁用。
-2. 如果 `include_scopes` 为空，默认启用。
-3. 如果 `include_scopes` 包含 `"*"`，启用。
-4. 否则只有当前 `body_scope` 在 `include_scopes` 中时启用。
-
-### `prompt.negative[]`
-
-负向提示词片段，结构和 positive 一样。通常可以少写 scope，除非某些负向词只适用于特定镜头。
-
-### `constraints`
-
-给 composer 和 agent 的硬约束：
-
-- `required_parts`：最终提示词里必须保留的语义。
-- `forbidden_parts`：最终提示词里应该避免出现的语义。
-- `notes`：非硬性说明。
-
-### `renderers`
-
-后端强相关配置。提示词生成层只传递引用，不直接理解这些字段。
-
-NovelAI 示例：
-
-```yaml
-renderers:
-  novelai:
-    prompt_prefix:
-      - year 2024
-      - best quality
-    negative_prompt: lowres, bad anatomy
-    params:
-      model: nai-diffusion-4-5-full
-      sampler: k_euler_ancestral
-      noise_schedule: karras
-      steps: 28
-      reference_strength_multiple: [0.2]
-```
-
-ComfyUI 示例：
-
-```yaml
-renderers:
-  comfyui:
-    workflow_ref: anime_portrait_v1
-    loras:
-      - name: homura_character
-        strength_model: 0.8
-        strength_clip: 0.8
-```
-
-### `agent`
-
-给 agent 读取的摘要和标签：
-
-```yaml
-agent:
-  summary: 角色是 Homura，脚部特写时不强调眼睛和发型。
-  labels:
-    - character
-    - foot-aware
-  warnings:
-    - 不要在 foot_detail 镜头中加入 full body clothing dump。
-```
-
-## 角色节点建议
-
-角色节点不要只写“一整套角色外观 dump”。建议拆成：
-
-- `identity`：角色名、作品名、核心识别词。
-- `face`：眼睛、表情、脸部特征。
-- `hair`：发型、发色。
-- `clothing`：服装。
-- `body`：体型、身体特征。
-- `feet` / `hands`：局部特写可用的部位特征。
-
-脚底特写中通常保留：
-
-- 角色身份。
-- 动作需要的足部或腿部词。
-- 和画面主体相关的材质、姿势、接触关系。
-
-脚底特写中通常过滤：
-
-- 眼睛。
-- 头发细节。
-- 上半身衣服 dump。
-- 全身构图词。
-
-## 动作节点建议
-
-动作节点应声明自己的镜头范围：
-
-```yaml
+schema: tags-machine.action/v1
 kind: action
 id: foot_closeup
+
+tags:
+  base:
+    - foot_focus
+    - soles
+    - toes
+  pose:
+    - soles_toward_viewer
+  camera:
+    - close-up
+
 shot:
-  framing: extreme close-up
   body_scope: foot_detail
-  camera: low angle
-prompt:
-  positive:
-    - text: foot focus
-      role: composition
-    - text: soles toward viewer
-      role: pose
-    - text: toes spread
-      role: pose
-  negative:
-    - text: face focus
-      role: composition
+  focus:
+    - feet
+  visible_parts:
+    - feet
+    - legs
 ```
 
-这样角色节点就能知道哪些字段该保留，哪些字段该跳过。
+这只是讨论草案，不作为冻结规范。
 
-## 迁移策略
+## YAML 引号规则
 
-1. 先保留旧 `tags.txt`。
-2. 给高频角色和动作节点补 `node.yaml`。
-3. 脚本 composer 优先读 `node.yaml`，没有时退回 `tags.txt`。
-4. agent 可以读取 `agent.summary` 和 `constraints` 做更细的冲突处理。
-5. 后续写迁移脚本，把旧 `tags.txt` 初步拆成 `prompt.positive` 和 `tags.legacy`。
+提示词中经常出现 `{}`、`[]`、`:`、`#`、`,` 等字符。建议这些字符串统一加引号。
+
+推荐：
+
+```yaml
+tags:
+  style:
+    - "{best_quality}"
+    - "[[artist:kedama_milk]]"
+    - "dark_orb_(madoka_magica)"
+```
+
+避免：
+
+```yaml
+tags:
+  style:
+    - {best_quality}
+    - [artist:kedama_milk]
+```
+
+原因是 YAML 可能把 `{}` 当 map，把 `[]` 当 list，把 `:` 当 key 分隔。
+
+## PromptBundle 边界
+
+所有节点最终都应由 composer 组合成统一的 `PromptBundle`：
+
+```yaml
+prompt:
+  positive: "akemi_homura, bare_feet, foot_focus"
+  negative: "extra_toes"
+meta:
+  character_ref: homura
+  action_ref: foot_closeup
+  shot:
+    body_scope: foot_detail
+```
+
+`PromptBundle.prompt` 才是最终完整提示词。节点 YAML 只是输入素材。
