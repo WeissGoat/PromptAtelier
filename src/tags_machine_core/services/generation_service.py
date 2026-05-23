@@ -119,7 +119,7 @@ class GenerationService:
         self,
         bundle: PromptBundle,
         seed: int | None = None,
-        style: NovelAIStyle | None = None,
+        style: NovelAIStyle | NodeDocument | dict[str, Any] | None = None,
         width: int = 1024,
         height: int = 1024,
         model: str = "nai-diffusion-4-5-full",
@@ -159,7 +159,7 @@ class GenerationService:
                 model=model or "nai-diffusion-4-5-full",
                 action=action,
                 params=params,
-                style=style if isinstance(style, NovelAIStyle) else None,
+                style=style,
             )
         if backend == "comfyui":
             return self.comfyui_adapter.build_request(

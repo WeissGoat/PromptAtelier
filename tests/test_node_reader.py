@@ -42,6 +42,68 @@ renderers:
             self.assertEqual(node.tags["semantic"], ["watercolor"])
             self.assertIn("novelai", node.renderers)
 
+    def test_read_style_node_v1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            node_dir = Path(tmp) / "anime_comfy"
+            node_dir.mkdir()
+            (node_dir / "node.yaml").write_text(
+                """
+schema: tags-machine.style/v1
+kind: style
+id: anime_comfy
+tags:
+  style:
+    - anime style
+  quality:
+    - "{best quality}"
+negative_prompt:
+  - lowres
+renderers:
+  novelai:
+    prompt_prefix:
+      - "{best quality}"
+    params:
+      sampler: k_euler_ancestral
+  comfyui:
+    workflow: portrait_workflow
+  sd:
+    checkpoint: anime_sd.safetensors
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = NodeReader().read(node_dir)
+            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.tags["style"], ["anime style"])
+            self.assertEqual(node.negative_prompt, ["lowres"])
+            self.assertEqual(node.renderers["comfyui"]["workflow"], "portrait_workflow")
+
+    def test_read_background_node_v1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            node_dir = Path(tmp) / "simple_room"
+            node_dir.mkdir()
+            (node_dir / "meta.yaml").write_text(
+                """
+schema: tags-machine.background/v1
+kind: background
+id: simple_room
+tags:
+  background:
+    - simple room
+  lighting:
+    - soft window light
+negative_prompt:
+  - crowded background
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = NodeReader().read(node_dir)
+            self.assertEqual(node.kind, "background")
+            self.assertEqual(node.tags["background"], ["simple room"])
+            self.assertEqual(node.tags["lighting"], ["soft window light"])
+            self.assertEqual(node.negative_prompt, ["crowded background"])
+
     def test_read_scoped_prompt_fragments(self):
         with tempfile.TemporaryDirectory() as tmp:
             node_dir = Path(tmp) / "character_node"

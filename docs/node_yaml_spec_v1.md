@@ -4,8 +4,8 @@
 
 - [Character YAML 规范](character_yaml_spec_v1.md)
 - [Action YAML 规范](action_yaml_spec_v1.md)
-- Artist / Style YAML 规范：待讨论
-- Background YAML 规范：待讨论
+- [Style YAML 规范](style_yaml_spec_v1.md)
+- [Background YAML 规范](background_yaml_spec_v1.md)
 
 ## 当前结论
 
@@ -155,6 +155,34 @@ character_scope: foot_detail
 ```
 
 详细结构见 [Action YAML 规范](action_yaml_spec_v1.md)。
+
+## Style 当前状态
+
+style v1 已确认：
+
+- 新结构化画风节点推荐使用 `node.yaml`
+- 使用 `schema: tags-machine.style/v1`
+- 使用 `kind: style`
+- 使用 `tags` 存通用画风素材
+- 使用 `negative_prompt` 存通用画风负向素材
+- 使用 `renderers.novelai` / `renderers.comfyui` / `renderers.sd` 存后端专属配置
+- 不写角色、动作、局部镜头裁剪规则
+
+详细结构见 [Style YAML 规范](style_yaml_spec_v1.md)。
+
+## Background 当前状态
+
+background v1 已确认：
+
+- 使用 `meta.yaml`
+- 使用 `schema: tags-machine.background/v1`
+- 使用 `kind: background`
+- 使用 `tags` 存背景素材
+- 使用 `negative_prompt` 存背景级负向素材
+- 不写后端配置
+- 不写角色 section include/suppress 规则
+
+详细结构见 [Background YAML 规范](background_yaml_spec_v1.md)。
 
 ## YAML 引号规则
 

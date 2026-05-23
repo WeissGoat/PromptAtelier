@@ -4,7 +4,15 @@ import copy
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
+from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.renderers.common import (
+    renderer_style_payload,
+    renderer_style_prompt_parts,
+)
 from tags_machine_core.renderers.novelai_style import NovelAIStyle
+
+
+NovelAIStyleInput = NovelAIStyle | NodeDocument | dict[str, Any] | None
 
 
 def _join_prompt_parts(*parts: str | list[str] | None) -> str:
@@ -35,13 +43,15 @@ class NovelAIRenderAdapter:
         model: str = "nai-diffusion-4-5-full",
         action: str = "generate",
         params: dict[str, Any] | None = None,
-        style: NovelAIStyle | None = None,
+        style: NovelAIStyleInput = None,
     ) -> RenderRequest:
-        style_params = copy.deepcopy(style.params) if style else {}
-        model = style_params.pop("model", model)
+        style_payload = self._style_payload(style)
+        style_params = self._style_params(style, style_payload)
+        model = style_params.pop("model", style_payload.get("model", model))
         final_params = self._build_parameters(
             bundle=bundle,
             style=style,
+            style_payload=style_payload,
             seed=seed,
             width=width,
             height=height,
@@ -58,7 +68,7 @@ class NovelAIRenderAdapter:
             seed=seed,
             size=RenderSize(width=width, height=height),
             params=final_params,
-            style_payload=style.style_payload() if style else {},
+            style_payload=style_payload,
             meta={
                 "action": action,
                 "style_ref": bundle.meta.style_ref,
@@ -71,21 +81,23 @@ class NovelAIRenderAdapter:
     def _build_parameters(
         self,
         bundle: PromptBundle,
-        style: NovelAIStyle | None,
+        style: NovelAIStyleInput,
+        style_payload: dict[str, Any],
         seed: int | None,
         width: int,
         height: int,
         params: dict[str, Any],
     ) -> dict[str, Any]:
+        style_prompt = self._style_prompt_parts(style, style_payload)
         positive = _join_prompt_parts(
-            style.prompt_prefix if style else None,
+            style_prompt["prompt_prefix"],
             bundle.prompt.positive,
-            style.prompt_suffix if style else None,
+            style_prompt["prompt_suffix"],
         )
         negative = _join_prompt_parts(
             bundle.prompt.negative,
-            style.negative_prompt if style else None,
-            style.after_negative_prompt if style else None,
+            style_prompt["negative_prompt"],
+            style_prompt["after_negative_prompt"],
         )
 
         sampler = params.get("sampler", "k_euler")
@@ -141,6 +153,45 @@ class NovelAIRenderAdapter:
             final_params["prefer_brownian"] = True
 
         return final_params
+
+    def _style_payload(self, style: NovelAIStyleInput) -> dict[str, Any]:
+        if style is None:
+            return {}
+        if isinstance(style, NovelAIStyle):
+            return style.style_payload()
+        return renderer_style_payload(style, self.backend)
+
+    def _style_params(
+        self,
+        style: NovelAIStyleInput,
+        style_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if isinstance(style, NovelAIStyle):
+            return copy.deepcopy(style.params)
+        return copy.deepcopy(style_payload.get("params", {}) or {})
+
+    def _style_prompt_parts(
+        self,
+        style: NovelAIStyleInput,
+        style_payload: dict[str, Any],
+    ) -> dict[str, list[str]]:
+        if style is None:
+            return {
+                "prompt_prefix": [],
+                "prompt_suffix": [],
+                "negative_prompt": [],
+                "after_negative_prompt": [],
+            }
+        if isinstance(style, NovelAIStyle):
+            return {
+                "prompt_prefix": style.prompt_prefix,
+                "prompt_suffix": style.prompt_suffix,
+                "negative_prompt": [style.negative_prompt] if style.negative_prompt else [],
+                "after_negative_prompt": (
+                    [style.after_negative_prompt] if style.after_negative_prompt else []
+                ),
+            }
+        return renderer_style_prompt_parts(style, self.backend)
 
     def _preserve_supported_extras(self, params: dict[str, Any]) -> dict[str, Any]:
         # 这里只保留 adapter 没有显式标准化处理的扩展字段。

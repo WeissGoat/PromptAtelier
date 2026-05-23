@@ -50,12 +50,34 @@ character_scope: foot_detail
     def _write_style_node(self, root: Path) -> Path:
         style = root / "style"
         style.mkdir()
-        (style / "meta.yaml").write_text(
+        (style / "node.yaml").write_text(
             """
-schema: tags-machine-core.node/v1
-kind: artist
+schema: tags-machine.style/v1
+kind: style
 id: cross_backend_style
+tags:
+  style:
+    - anime style
+  quality:
+    - "{best quality}"
+negative_prompt:
+  - lowres
 renderers:
+  novelai:
+    prompt_prefix:
+      - style prefix
+    prompt_suffix:
+      - style suffix
+    negative_prompt:
+      - bad anatomy
+    params:
+      sampler: k_euler_ancestral
+      noise_schedule: karras
+      steps: 30
+      reference_image_multiple:
+        - abc
+      reference_strength_multiple:
+        - 0.25
   comfyui:
     workflow: portrait_workflow
     checkpoint: anime_comfy.safetensors
@@ -78,6 +100,26 @@ renderers:
             encoding="utf-8",
         )
         return style
+
+    def _write_background_node(self, root: Path) -> Path:
+        background = root / "background"
+        background.mkdir()
+        (background / "meta.yaml").write_text(
+            """
+schema: tags-machine.background/v1
+kind: background
+id: simple_room
+tags:
+  background:
+    - simple room
+  lighting:
+    - soft window light
+negative_prompt:
+  - crowded background
+""".strip(),
+            encoding="utf-8",
+        )
+        return background
 
     def test_compose_nodes_command_filters_by_character_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +153,33 @@ renderers:
             self.assertNotIn("purple eyes", data["prompt"]["positive"])
             self.assertNotIn("school uniform", data["prompt"]["positive"])
             self.assertIn("extra toes", data["prompt"]["negative"])
+
+    def test_compose_nodes_command_merges_background_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            background = self._write_background_node(root)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "compose-nodes",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--background",
+                        str(background),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(data["meta"]["background_ref"], "simple_room")
+            self.assertIn("simple room", data["prompt"]["positive"])
+            self.assertIn("soft window light", data["prompt"]["positive"])
+            self.assertIn("crowded background", data["prompt"]["negative"])
 
     def test_agent_task_and_compose_agent_nodes_reuse_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,6 +307,47 @@ renderers:
             self.assertEqual(data["params"]["steps"], 32)
             self.assertEqual(data["params"]["cfg"], 6.5)
             self.assertEqual(data["params"]["scheduler"], "karras")
+            self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+
+    def test_render_plan_nodes_supports_novelai_structured_style_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            style = self._write_style_node(root)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "novelai",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "789",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(data["backend"], "novelai")
+            self.assertEqual(data["seed"], 789)
+            self.assertEqual(data["params"]["steps"], 30)
+            self.assertEqual(data["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(data["params"]["reference_strength_multiple"], [0.25])
+            self.assertIn("style prefix", data["prompt"])
+            self.assertIn("akemi homura", data["prompt"])
+            self.assertIn("anime style", data["prompt"])
+            self.assertIn("{best quality}", data["prompt"])
+            self.assertIn("style suffix", data["prompt"])
+            self.assertIn("extra toes", data["negative_prompt"])
+            self.assertIn("lowres", data["negative_prompt"])
+            self.assertIn("bad anatomy", data["negative_prompt"])
             self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
 
     def test_render_plan_nodes_supports_sd_backend(self):

@@ -6,7 +6,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-NodeKind = Literal["character", "action", "artist", "background", "vibe", "story", "unknown"]
+NodeKind = Literal[
+    "character",
+    "action",
+    "artist",
+    "style",
+    "background",
+    "vibe",
+    "story",
+    "unknown",
+]
 
 
 class LegacyNodeMeta(BaseModel):

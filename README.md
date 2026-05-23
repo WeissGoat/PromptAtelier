@@ -103,3 +103,5 @@ uv run python -m tags_machine_core compare-render-params old.png core_render_req
 - [Node YAML 规范](docs/node_yaml_spec_v1.md)
 - [Character YAML 规范](docs/character_yaml_spec_v1.md)
 - [Action YAML 规范](docs/action_yaml_spec_v1.md)
+- [Style YAML 规范](docs/style_yaml_spec_v1.md)
+- [Background YAML 规范](docs/background_yaml_spec_v1.md)

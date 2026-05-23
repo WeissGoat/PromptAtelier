@@ -71,8 +71,8 @@ YAML / tags.txt
 
 - character：`meta.yaml`
 - action：`meta.yaml`
-- style / artist：暂时兼容 `tags.txt`，后续再定 YAML
-- background：后续再定 YAML
+- style / artist：旧节点兼容 `tags.txt`，新节点使用 `node.yaml`
+- background：`meta.yaml`
 
 读取后在运行时统一变成 `NodeDocument` 或更具体的 node DTO。composer 不直接操作文件路径里的文本，而是操作已经解析过的对象。
 
@@ -401,6 +401,48 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 第三优先级才是图片视觉：图片可以作为人工抽检材料，但不能替代参数 diff；如果参数不同，先修参数，如果参数相同但像素不同，记录原因。
 - 验收脚本不能依赖旧项目运行时代码。旧项目可以生成 oracle 文件，core 的测试只读取 oracle JSON、PNG 参数或素材文件。
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
+
+旧项目基准验收矩阵：
+
+| 层级 | 参照对象 | 必须一致的内容 | 允许差异 |
+| --- | --- | --- | --- |
+| 节点读取 | 旧 `design` / `character` / `action` 素材目录 | 同一个节点引用能解析到同一批核心 tags、negative tags、参考图配置 | 新 YAML 的字段名、分组名可以不同，但要能映射回旧素材含义 |
+| 提示词生成 | 旧 `formula` / `run_action` 的最终 prompt 结果 | 正向 prompt、负向 prompt、质量词、默认负向词、角色/动作组合顺序 | agent composer 可以改写自然语言连接方式，但不能丢失旧项目关键 tag；差异必须写入对照记录 |
+| 局部镜头裁剪 | 旧项目实际生成的局部动作样例 | `foot_detail`、`hand_detail` 等 scope 下应保留的角色部位 tags 与应过滤的 hair/eyes/upper_clothes 等 section | 如果旧项目本身存在割裂组合，新 core 可以修正，但要在验收记录里标记为“有意修复” |
+| 生图参数 | 旧项目请求体和 PNG 内嵌参数 | seed、尺寸、模型、sampler、steps、scale、cfg_rescale、noise_schedule、V4 prompt、参考图数组、vibe 参数 | 字段命名和默认值补齐可以归一化；归一化规则必须进脚本 |
+| 生成结果 | 旧项目基准图 | 参数一致时，新图应作为人工视觉抽检材料，确认主体、动作、镜头和画风没有明显偏离 | NovelAI 服务端非确定性、模型版本变动、相同参数下像素不一致，需要记录原因，不直接判 composer 失败 |
+
+最小回归样例集：
+
+- `default_action`：普通角色 + 普通动作，验证旧 `run_action` 的默认质量词、negative prompt、生成参数没有丢。
+- `foot_detail`：脚部局部镜头，验证角色 section 裁剪，重点检查 hair / eyes / upper_clothes 不进入最终角色组合。
+- `hand_detail`：手部局部镜头，验证与脚部类似但不复用错误的 feet tags。
+- `complex_character`：服装、发型、眼睛、饰品较多的角色，验证默认 scope 下角色信息完整。
+- `reference_style`：带 `reference_image_multiple` / vibe / style 参考图的画风样例，验证 base64 图片摘要、数组长度和 strength / information_extracted 一一对应。
+
+每个回归样例都应产出一份可归档的验收记录：
+
+```yaml
+case_id: foot_detail_homura_001
+legacy:
+  image_path: F:/.../old.png
+  params_path: F:/.../old_params.json
+core:
+  image_path: F:/.../core.png
+  render_request_path: F:/.../core_render_request.json
+diff:
+  normalized_equal: true
+  whitelist:
+    - field: sampler
+      legacy: ddim
+      core: ddim_v3
+      reason: adapter normalized sampler alias
+composition:
+  character_scope: foot_detail
+  included_character_sections: [character, copyright, body, feet, legwear, footwear]
+  suppressed_character_sections: [hair, eyes, head_accessories, upper_clothes]
+result: pass
+```
 
 中期验收：
 

@@ -1,0 +1,77 @@
+schema: tags-machine.style/v1
+kind: style
+id: anime_comfy
+name: Anime Comfy
+description: 结构化画风节点示例。通用画风词保存在 tags，后端差异保存在 renderers。
+
+tags:
+  style:
+    - "anime style"
+    - "clean lineart"
+  quality:
+    - "{best quality}"
+  lighting:
+    - "soft lighting"
+
+negative_prompt:
+  - "lowres"
+  - "bad anatomy"
+
+renderers:
+  novelai:
+    prompt_prefix:
+      - "{best quality}"
+    prompt_suffix:
+      - "detailed anime illustration"
+    negative_prompt:
+      - "worst quality"
+    after_negative_prompt:
+      - "extra fingers"
+    params:
+      model: nai-diffusion-4-5-full
+      sampler: k_euler_ancestral
+      noise_schedule: karras
+      steps: 28
+      scale: 5.0
+      reference_image_multiple: []
+      reference_strength_multiple: []
+      reference_information_extracted_multiple: []
+
+  comfyui:
+    workflow: portrait_workflow
+    checkpoint: anime_comfy.safetensors
+    loras:
+      - name: lineart
+        weight: 0.65
+    embeddings: []
+    control:
+      enabled: false
+    node_overrides: {}
+    params:
+      steps: 32
+      cfg: 6.5
+      sampler: euler
+      scheduler: karras
+
+  sd:
+    checkpoint: anime_sd.safetensors
+    vae: anime.vae.pt
+    loras:
+      - name: feet_detail
+        weight: 0.8
+    embeddings: []
+    controlnet: []
+    hires_fix:
+      enabled: false
+    params:
+      steps: 24
+      cfg_scale: 7.5
+      sampler: "DPM++ 2M"
+      scheduler: karras
+
+agent:
+  summary: 通用二次元画风示例，后端配置只给 adapter 使用。
+  labels:
+    - style
+    - anime
+    - multi_backend

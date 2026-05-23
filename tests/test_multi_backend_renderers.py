@@ -2,7 +2,7 @@ import unittest
 
 from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.renderers import ComfyUIRenderAdapter, SDRenderAdapter
+from tags_machine_core.renderers import ComfyUIRenderAdapter, NovelAIRenderAdapter, SDRenderAdapter
 from tags_machine_core.services import GenerationService
 
 
@@ -18,9 +18,26 @@ def _style_node() -> NodeDocument:
     return NodeDocument.model_validate(
         {
             "schema": "tags-machine-core.node/v1",
-            "kind": "artist",
+            "kind": "style",
             "id": "cross_backend_style",
+            "tags": {
+                "style": ["anime style"],
+                "quality": ["{best quality}"],
+            },
+            "negative_prompt": ["lowres"],
             "renderers": {
+                "novelai": {
+                    "prompt_prefix": ["style prefix"],
+                    "prompt_suffix": ["style suffix"],
+                    "negative_prompt": ["bad anatomy"],
+                    "params": {
+                        "sampler": "k_euler_ancestral",
+                        "noise_schedule": "karras",
+                        "steps": 30,
+                        "reference_image_multiple": ["abc"],
+                        "reference_strength_multiple": [0.25],
+                    },
+                },
                 "comfyui": {
                     "workflow": "portrait_workflow",
                     "checkpoint": "anime_comfy.safetensors",
@@ -39,6 +56,26 @@ def _style_node() -> NodeDocument:
 
 
 class MultiBackendRendererTest(unittest.TestCase):
+    def test_novelai_adapter_accepts_structured_style_node(self):
+        request = NovelAIRenderAdapter().build_request(
+            _bundle(),
+            seed=321,
+            style=_style_node(),
+        )
+
+        self.assertEqual(request.backend, "novelai")
+        self.assertEqual(request.params["steps"], 30)
+        self.assertEqual(request.params["reference_image_multiple"], ["abc"])
+        self.assertEqual(request.params["reference_strength_multiple"], [0.25])
+        self.assertIn("style prefix", request.prompt)
+        self.assertIn("akemi homura, foot focus", request.prompt)
+        self.assertIn("anime style", request.prompt)
+        self.assertIn("{best quality}", request.prompt)
+        self.assertIn("style suffix", request.prompt)
+        self.assertIn("extra toes", request.negative_prompt)
+        self.assertIn("lowres", request.negative_prompt)
+        self.assertIn("bad anatomy", request.negative_prompt)
+
     def test_comfyui_adapter_builds_dry_run_render_request(self):
         request = ComfyUIRenderAdapter().build_request(
             _bundle(),
@@ -100,6 +137,18 @@ class MultiBackendRendererTest(unittest.TestCase):
 
         self.assertEqual(comfy.backend, "comfyui")
         self.assertEqual(sd.backend, "sd")
+
+    def test_generation_service_dispatches_structured_style_to_novelai(self):
+        request = GenerationService().build_render_request(
+            _bundle(),
+            backend="novelai",
+            seed=3,
+            style=_style_node(),
+        )
+
+        self.assertEqual(request.backend, "novelai")
+        self.assertIn("style prefix", request.prompt)
+        self.assertIn("anime style", request.prompt)
 
 
 if __name__ == "__main__":

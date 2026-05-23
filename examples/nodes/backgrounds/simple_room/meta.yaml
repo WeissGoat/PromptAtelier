@@ -1,0 +1,24 @@
+schema: tags-machine.background/v1
+kind: background
+id: simple_room
+name: Simple Room
+description: 简单室内背景示例。背景节点只提供场景素材，不携带角色裁剪或后端规则。
+
+tags:
+  background:
+    - "simple room"
+    - "wooden floor"
+  lighting:
+    - "soft window light"
+  mood:
+    - "quiet atmosphere"
+
+negative_prompt:
+  - "crowded background"
+  - "messy room"
+
+agent:
+  summary: 简单室内背景，不包含角色和镜头规则。
+  labels:
+    - background
+    - indoor
