@@ -1,0 +1,23 @@
+[project]
+name = "tags-machine-core"
+version = "0.1.0"
+description = "Clean prompt composition and render planning core for Tags Machine."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "requests>=2.31",
+]
+
+[project.scripts]
+tm-core = "tags_machine_core.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100

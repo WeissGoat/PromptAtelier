@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+from uuid import uuid4
+
+from tags_machine_core.clients import NovelAIClient
+from tags_machine_core.config import load_config
+from tags_machine_core.contracts import GeneratedImage, GenerationResult
+from tags_machine_core.json_tools import sanitize_json_for_display
+from tags_machine_core.nodes import NodeReader
+from tags_machine_core.renderers import NovelAIStyleRepository
+from tags_machine_core.services import GenerationService
+
+
+def print_json(value, *, full: bool = False) -> None:
+    data = sanitize_json_for_display(value, full=full)
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def cmd_compose(args) -> int:
+    service = GenerationService()
+    bundle = _build_bundle(service, args)
+    print_json(bundle, full=args.full)
+    return 0
+
+
+def cmd_render_plan(args) -> int:
+    service = GenerationService()
+    if args.backend != "novelai":
+        raise ValueError(f"Unsupported backend in first scaffold: {args.backend}")
+    style = None
+    style_ref = args.style_ref
+    if args.config:
+        config = load_config(Path(args.config))
+        style_ref = args.style_ref or config.defaults.style_ref
+        if style_ref:
+            style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    bundle = _build_bundle(service, args, style_ref=style_ref)
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=_load_json_arg(args.params_json),
+    )
+    print_json(request, full=args.full)
+    return 0
+
+
+def cmd_generate(args) -> int:
+    config = load_config(Path(args.config))
+    service = GenerationService()
+    style = None
+    style_ref = args.style_ref or config.defaults.style_ref
+    if style_ref:
+        style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    bundle = _build_bundle(service, args, style_ref=style_ref)
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=_load_json_arg(args.params_json),
+    )
+    access_token = os.environ.get(config.novelai.access_token_env)
+    if not access_token:
+        raise RuntimeError(
+            f"Missing NovelAI token environment variable: {config.novelai.access_token_env}"
+        )
+    client = NovelAIClient(
+        access_token=access_token,
+        base_url=config.novelai.base_url,
+        timeout=config.novelai.timeout,
+        retry=config.novelai.retry,
+    )
+    images = client.generate_images(request)
+    output_dir = Path(args.output_dir or config.runtime.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    batch_id = uuid4().hex[:8]
+    generated_images: list[GeneratedImage] = []
+    for index, image in enumerate(images, start=1):
+        suffix = Path(image.filename).suffix or f".{config.defaults.image_format}"
+        filename = f"{batch_id}_{request.seed or 0}_{index:02d}{suffix}"
+        path = output_dir / filename
+        path.write_bytes(image.content)
+        generated_images.append(
+            GeneratedImage(
+                path=path,
+                filename=filename,
+                meta={"source_filename": image.filename, "index": index},
+            )
+        )
+    result = GenerationResult(
+        backend="novelai",
+        images=generated_images,
+        request_body=client.build_payload(request),
+        png_info={},
+        cache_hit=False,
+    )
+    print_json(result, full=args.full)
+    return 0
+
+
+def cmd_inspect_style(args) -> int:
+    config = load_config(Path(args.config))
+    style = NovelAIStyleRepository(config.legacy.design_root).load(args.style_ref)
+    print_json(style, full=args.full)
+    return 0
+
+
+def cmd_inspect_node(args) -> int:
+    node = NodeReader().read(args.path)
+    print_json(node, full=args.full)
+    return 0
+
+
+def cmd_config(args) -> int:
+    config = load_config(Path(args.path))
+    print_json(config, full=args.full)
+    return 0
+
+
+def _load_json_arg(value: str | None) -> dict:
+    if not value:
+        return {}
+    data = json.loads(value)
+    if not isinstance(data, dict):
+        raise ValueError("--params-json must be a JSON object")
+    return data
+
+
+def _build_bundle(service: GenerationService, args, *, style_ref: str | None = None):
+    return service.compose_full_prompt(
+        prompt=args.prompt,
+        negative=args.negative or "",
+        style_ref=style_ref if style_ref is not None else args.style_ref,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Tags Machine Core CLI")
+    subparsers = parser.add_subparsers(dest="command")
+    output_parent = argparse.ArgumentParser(add_help=False)
+    output_parent.add_argument(
+        "--full",
+        action="store_true",
+        help="Print full JSON without truncating long image/base64 fields",
+    )
+
+    compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
+    compose.add_argument("--prompt", required=True)
+    compose.add_argument("--negative")
+    compose.add_argument("--style-ref")
+    compose.set_defaults(func=cmd_compose)
+
+    render_plan = subparsers.add_parser(
+        "render-plan",
+        parents=[output_parent],
+        help="Build a RenderRequest",
+    )
+    render_plan.add_argument("--prompt", required=True)
+    render_plan.add_argument("--negative")
+    render_plan.add_argument("--style-ref")
+    render_plan.add_argument("--backend", default="novelai", choices=["novelai"])
+    render_plan.add_argument("--seed", type=int)
+    render_plan.add_argument("--width", type=int, default=1024)
+    render_plan.add_argument("--height", type=int, default=1024)
+    render_plan.add_argument("--model", default="nai-diffusion-4-5-full")
+    render_plan.add_argument("--params-json", help="Extra renderer params as a JSON object")
+    render_plan.add_argument("--config", help="Load style nodes through this config file")
+    render_plan.set_defaults(func=cmd_render_plan)
+
+    generate = subparsers.add_parser(
+        "generate",
+        parents=[output_parent],
+        help="Generate image(s) with NovelAI",
+    )
+    generate.add_argument("--prompt", required=True)
+    generate.add_argument("--negative")
+    generate.add_argument("--style-ref")
+    generate.add_argument("--seed", type=int)
+    generate.add_argument("--width", type=int, default=1024)
+    generate.add_argument("--height", type=int, default=1024)
+    generate.add_argument("--model", default="nai-diffusion-4-5-full")
+    generate.add_argument("--params-json", help="Extra renderer params as a JSON object")
+    generate.add_argument("--config", required=True, help="Load runtime and NovelAI config")
+    generate.add_argument("--output-dir", help="Override output directory")
+    generate.set_defaults(func=cmd_generate)
+
+    inspect_node = subparsers.add_parser(
+        "inspect-node",
+        parents=[output_parent],
+        help="Read a node file/directory",
+    )
+    inspect_node.add_argument("path")
+    inspect_node.set_defaults(func=cmd_inspect_node)
+
+    inspect_style = subparsers.add_parser(
+        "inspect-style",
+        parents=[output_parent],
+        help="Read a NovelAI style node",
+    )
+    inspect_style.add_argument("--config", required=True)
+    inspect_style.add_argument("--style-ref", required=True)
+    inspect_style.set_defaults(func=cmd_inspect_style)
+
+    config = subparsers.add_parser("config", parents=[output_parent], help="Read an app config file")
+    config.add_argument("path")
+    config.set_defaults(func=cmd_config)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 1
+    return args.func(args)

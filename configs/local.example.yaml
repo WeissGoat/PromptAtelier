@@ -1,0 +1,18 @@
+legacy:
+  tags_machine_root: "F:/my_project/new/tags_machine"
+  design_root: "F:/my_project/new/tags_machine/design"
+
+runtime:
+  cache_dir: "cache"
+  output_dir: "outputs"
+
+defaults:
+  backend: "novelai"
+  style_ref: "20260412_2"
+  image_format: "png"
+
+novelai:
+  base_url: "https://image.novelai.net"
+  access_token_env: "NAI_ACCESS_TOKEN"
+  timeout: 120
+  retry: 3
