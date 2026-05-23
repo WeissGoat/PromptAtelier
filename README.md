@@ -24,7 +24,9 @@
 ## CLI
 
 - `compose`：生成 `PromptBundle`
+- `compose-nodes`：从结构化角色/动作/背景节点生成 `PromptBundle`
 - `render-plan`：生成 NovelAI `RenderRequest`，不联网
+- `render-plan-nodes`：从结构化节点生成 NovelAI `RenderRequest`，不联网
 - `generate`：调用 NovelAI 并保存图片
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
@@ -37,4 +39,17 @@ NovelAI 默认使用：
 - 环境变量：`NAI_ACCESS_TOKEN`
 - 接口：`https://image.novelai.net/ai/generate-image`
 
-详细设计见 [docs/development_plan_v1.md](docs/development_plan_v1.md)。
+结构化节点示例：
+
+```powershell
+uv run python -m tags_machine_core compose-nodes `
+  --character examples\nodes\characters\homura `
+  --action examples\nodes\actions\foot_closeup
+```
+
+这个示例会使用动作节点里的 `body_scope: foot_detail` 过滤角色节点，保留身份和脚部相关词，跳过眼睛、头发和服装等不适合脚底特写的字段。
+
+详细文档：
+
+- [整体设计与开发方案](docs/development_plan_v1.md)
+- [Node YAML 规范](docs/node_yaml_spec_v1.md)

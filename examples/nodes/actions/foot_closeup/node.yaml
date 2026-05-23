@@ -1,0 +1,37 @@
+schema: tags-machine-core.node/v1
+kind: action
+id: foot_closeup
+name: Foot close-up
+description: 脚底特写动作节点示例，会把 body_scope 设为 foot_detail。
+
+shot:
+  framing: extreme close-up
+  body_scope: foot_detail
+  camera: low angle
+
+prompt:
+  positive:
+    - text: foot focus
+      role: composition
+    - text: soles toward viewer
+      role: pose
+    - text: toes spread
+      role: pose
+  negative:
+    - text: face focus
+      role: composition
+    - text: full body
+      role: composition
+
+constraints:
+  forbidden_parts:
+    - face focus
+    - full body clothing dump
+  notes:
+    - 这个动作节点用于测试角色字段按 body_scope 过滤。
+
+agent:
+  summary: 脚底极近景动作，要求角色节点只保留身份和脚部相关词。
+  labels:
+    - action
+    - foot_detail

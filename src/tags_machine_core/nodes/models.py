@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 NodeKind = Literal["character", "action", "artist", "background", "vibe", "story", "unknown"]
@@ -15,6 +15,83 @@ class LegacyNodeMeta(BaseModel):
     raw_sections: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class PromptFragment(BaseModel):
+    text: str
+    role: str | None = None
+    weight: float | None = None
+    include_scopes: list[str] = Field(default_factory=list)
+    exclude_scopes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator("include_scopes", "exclude_scopes", "notes", mode="before")
+    @classmethod
+    def normalize_string_list(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()] if str(value).strip() else []
+
+    def applies_to(self, body_scope: str | None) -> bool:
+        if body_scope and body_scope in self.exclude_scopes:
+            return False
+        if not self.include_scopes or "*" in self.include_scopes:
+            return True
+        if not body_scope:
+            return False
+        return body_scope in self.include_scopes
+
+
+class NodePrompt(BaseModel):
+    positive: list[PromptFragment] = Field(default_factory=list)
+    negative: list[PromptFragment] = Field(default_factory=list)
+
+    @field_validator("positive", "negative", mode="before")
+    @classmethod
+    def normalize_fragments(cls, value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [{"text": value}]
+        if isinstance(value, list):
+            items: list[Any] = []
+            for item in value:
+                if isinstance(item, str):
+                    if item.strip():
+                        items.append({"text": item.strip()})
+                elif isinstance(item, dict):
+                    items.append(item)
+            return items
+        if isinstance(value, dict):
+            return [value]
+        return [{"text": str(value)}] if str(value).strip() else []
+
+
+class NodeShot(BaseModel):
+    framing: str | None = None
+    body_scope: str | None = None
+    camera: str | None = None
+
+
+class NodeConstraints(BaseModel):
+    required_parts: list[str] = Field(default_factory=list)
+    forbidden_parts: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator("required_parts", "forbidden_parts", "notes", mode="before")
+    @classmethod
+    def normalize_string_list(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()] if str(value).strip() else []
+
+
 class NodeDocument(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -24,6 +101,10 @@ class NodeDocument(BaseModel):
     name: str | None = None
     path: Path | None = None
     tags: dict[str, list[str]] = Field(default_factory=dict)
+    description: str | None = None
+    shot: NodeShot = Field(default_factory=NodeShot)
+    prompt: NodePrompt = Field(default_factory=NodePrompt)
+    constraints: NodeConstraints = Field(default_factory=NodeConstraints)
     generation: dict[str, Any] = Field(default_factory=dict)
     renderers: dict[str, Any] = Field(default_factory=dict)
     agent: dict[str, Any] = Field(default_factory=dict)
@@ -34,3 +115,20 @@ class NodeDocument(BaseModel):
         for values in self.tags.values():
             items.extend(values)
         return items
+
+    def positive_texts(self, body_scope: str | None = None) -> list[str]:
+        return [
+            fragment.text
+            for fragment in self.prompt.positive
+            if fragment.applies_to(body_scope)
+        ]
+
+    def negative_texts(self, body_scope: str | None = None) -> list[str]:
+        return [
+            fragment.text
+            for fragment in self.prompt.negative
+            if fragment.applies_to(body_scope)
+        ]
+
+    def source_ref(self) -> str:
+        return str(self.path) if self.path else self.id

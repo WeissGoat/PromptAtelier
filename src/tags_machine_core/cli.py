@@ -27,6 +27,13 @@ def cmd_compose(args) -> int:
     return 0
 
 
+def cmd_compose_nodes(args) -> int:
+    service = GenerationService()
+    bundle = _build_bundle_from_nodes(service, args, style_ref=args.style_ref)
+    print_json(bundle, full=args.full)
+    return 0
+
+
 def cmd_render_plan(args) -> int:
     service = GenerationService()
     if args.backend != "novelai":
@@ -39,6 +46,31 @@ def cmd_render_plan(args) -> int:
         if style_ref:
             style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
     bundle = _build_bundle(service, args, style_ref=style_ref)
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=_load_json_arg(args.params_json),
+    )
+    print_json(request, full=args.full)
+    return 0
+
+
+def cmd_render_plan_nodes(args) -> int:
+    service = GenerationService()
+    if args.backend != "novelai":
+        raise ValueError(f"Unsupported backend in first scaffold: {args.backend}")
+    style = None
+    style_ref = args.style_ref
+    if args.config:
+        config = load_config(Path(args.config))
+        style_ref = args.style_ref or config.defaults.style_ref
+        if style_ref:
+            style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    bundle = _build_bundle_from_nodes(service, args, style_ref=style_ref)
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
@@ -144,6 +176,27 @@ def _build_bundle(service: GenerationService, args, *, style_ref: str | None = N
     )
 
 
+def _build_bundle_from_nodes(
+    service: GenerationService,
+    args,
+    *,
+    style_ref: str | None = None,
+):
+    reader = NodeReader()
+    character = reader.read(args.character) if args.character else None
+    action = reader.read(args.action) if args.action else None
+    background = reader.read(args.background) if args.background else None
+    return service.compose_nodes(
+        character=character,
+        action=action,
+        background=background,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        style_ref=style_ref if style_ref is not None else args.style_ref,
+        body_scope=args.body_scope,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tags Machine Core CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -159,6 +212,14 @@ def build_parser() -> argparse.ArgumentParser:
     compose.add_argument("--negative")
     compose.add_argument("--style-ref")
     compose.set_defaults(func=cmd_compose)
+
+    compose_nodes = subparsers.add_parser(
+        "compose-nodes",
+        parents=[output_parent],
+        help="Build a PromptBundle from structured nodes",
+    )
+    _add_node_compose_arguments(compose_nodes)
+    compose_nodes.set_defaults(func=cmd_compose_nodes)
 
     render_plan = subparsers.add_parser(
         "render-plan",
@@ -176,6 +237,21 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan.add_argument("--params-json", help="Extra renderer params as a JSON object")
     render_plan.add_argument("--config", help="Load style nodes through this config file")
     render_plan.set_defaults(func=cmd_render_plan)
+
+    render_plan_nodes = subparsers.add_parser(
+        "render-plan-nodes",
+        parents=[output_parent],
+        help="Build a RenderRequest from structured nodes",
+    )
+    _add_node_compose_arguments(render_plan_nodes)
+    render_plan_nodes.add_argument("--backend", default="novelai", choices=["novelai"])
+    render_plan_nodes.add_argument("--seed", type=int)
+    render_plan_nodes.add_argument("--width", type=int, default=1024)
+    render_plan_nodes.add_argument("--height", type=int, default=1024)
+    render_plan_nodes.add_argument("--model", default="nai-diffusion-4-5-full")
+    render_plan_nodes.add_argument("--params-json", help="Extra renderer params as a JSON object")
+    render_plan_nodes.add_argument("--config", help="Load style nodes through this config file")
+    render_plan_nodes.set_defaults(func=cmd_render_plan_nodes)
 
     generate = subparsers.add_parser(
         "generate",
@@ -216,6 +292,16 @@ def build_parser() -> argparse.ArgumentParser:
     config.set_defaults(func=cmd_config)
 
     return parser
+
+
+def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--character", help="Path to a character node")
+    parser.add_argument("--action", help="Path to an action node")
+    parser.add_argument("--background", help="Path to a background node")
+    parser.add_argument("--extra-prompt", help="Additional positive prompt text")
+    parser.add_argument("--negative")
+    parser.add_argument("--style-ref")
+    parser.add_argument("--body-scope", help="Override body_scope for scoped prompt fragments")
 
 
 def main(argv: list[str] | None = None) -> int:

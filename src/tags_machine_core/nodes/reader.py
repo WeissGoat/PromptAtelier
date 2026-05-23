@@ -51,6 +51,9 @@ class NodeReader:
             data["tags"] = {
                 str(key): self._as_string_list(value) for key, value in tags.items()
             }
+        prompt = data.get("prompt")
+        if isinstance(prompt, (str, list)):
+            data["prompt"] = {"positive": prompt}
         return data
 
     def _read_tags_txt(self, path: Path, node_dir: Path | None = None) -> NodeDocument:
@@ -66,6 +69,7 @@ class NodeReader:
             name=node_dir.name,
             path=node_dir,
             tags={"legacy": lines},
+            prompt={"positive": lines},
             legacy=LegacyNodeMeta(source_file=str(path), raw_lines=lines),
         )
 

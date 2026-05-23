@@ -4,6 +4,7 @@ from typing import Any
 
 from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.contracts import PromptBundle, RenderRequest
+from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.renderers import NovelAIRenderAdapter
 from tags_machine_core.renderers.novelai_style import NovelAIStyle
 
@@ -27,6 +28,27 @@ class GenerationService:
             prompt=prompt,
             negative=negative,
             style_ref=style_ref,
+        )
+
+    def compose_nodes(
+        self,
+        *,
+        character: NodeDocument | None = None,
+        action: NodeDocument | None = None,
+        background: NodeDocument | None = None,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        body_scope: str | None = None,
+    ) -> PromptBundle:
+        return self.composer.compose_nodes(
+            character=character,
+            action=action,
+            background=background,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            body_scope=body_scope,
         )
 
     def build_novelai_request(
