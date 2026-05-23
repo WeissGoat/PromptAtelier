@@ -14,6 +14,7 @@ from tags_machine_core.verification import (
     normalize_render_parameters,
     read_image_parameters,
     verify_acceptance_record,
+    verify_acceptance_suite,
 )
 
 
@@ -321,6 +322,106 @@ class VerificationTest(unittest.TestCase):
             self.assertTrue(result["match"])
             self.assertEqual(result["result"], "pass")
 
+    def test_verify_acceptance_record_resolves_relative_paths_from_record_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record_dir = root / "acceptance"
+            record_dir.mkdir()
+            legacy = record_dir / "legacy.json"
+            core = record_dir / "core.json"
+            record_path = record_dir / "relative_record.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.acceptance-record/v1",
+                        "case_id": "relative_paths",
+                        "legacy": {"source_path": "legacy.json"},
+                        "core": {"source_path": "core.json"},
+                        "diff": {"whitelist": []},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = verify_acceptance_record(record_path)
+
+            self.assertTrue(result["match"])
+            self.assertEqual(result["case_id"], "relative_paths")
+
+    def test_verify_acceptance_suite_accepts_manifest_and_required_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = {"parameters": _sample_parameters()}
+            for case_id in ("default_action_001", "foot_detail_001"):
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                record_path = root / f"{case_id}.json"
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+            manifest = root / "suite.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.acceptance-suite/v1",
+                        "required_cases": ["default_action", "foot_detail"],
+                        "records": [
+                            "default_action_001.json",
+                            {"path": "foot_detail_001.json"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = verify_acceptance_suite(manifest)
+
+            self.assertTrue(result["match"])
+            self.assertEqual(result["record_count"], 2)
+            self.assertEqual(result["missing_required_cases"], [])
+
+    def test_verify_acceptance_suite_reports_missing_minimum_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "default_action_001_legacy.json"
+            core = root / "default_action_001_core.json"
+            record_path = root / "default_action_001.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="default_action_001",
+                legacy_source=legacy,
+                core_source=core,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            result = verify_acceptance_suite(root, require_minimum_set=True)
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["result"], "fail")
+            self.assertIn("foot_detail", result["missing_required_cases"])
+            self.assertIn("reference_style", result["missing_required_cases"])
+
+    def test_verify_acceptance_suite_fails_when_no_records_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            result = verify_acceptance_suite(root)
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["result"], "fail")
+            self.assertEqual(result["record_count"], 0)
+            self.assertEqual(result["errors"], ["No acceptance records found"])
+
     def test_cli_create_and_verify_acceptance_record(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -387,6 +488,40 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertEqual(data["result"], "fail")
             self.assertEqual(data["diff"]["unapproved_diffs"][0]["path"], "$.parameters.scale")
+
+    def test_cli_verify_acceptance_suite_returns_nonzero_for_missing_case(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "default_action_001_legacy.json"
+            core = root / "default_action_001_core.json"
+            record_path = root / "default_action_001.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="default_action_001",
+                legacy_source=legacy,
+                core_source=core,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "verify-acceptance-suite",
+                        str(root),
+                        "--required-case",
+                        "default_action",
+                        "--required-case",
+                        "foot_detail",
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(data["match"])
+            self.assertEqual(data["missing_required_cases"], ["foot_detail"])
 
 
 if __name__ == "__main__":

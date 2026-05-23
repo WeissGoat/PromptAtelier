@@ -26,6 +26,7 @@ from tags_machine_core.verification import (
     parse_whitelist_args,
     read_image_parameters,
     verify_acceptance_record,
+    verify_acceptance_suite,
 )
 
 
@@ -304,6 +305,16 @@ def cmd_create_acceptance_record(args) -> int:
 
 def cmd_verify_acceptance_record(args) -> int:
     result = verify_acceptance_record(args.record)
+    print_json(result, full=args.full)
+    return 0 if result["match"] else 2
+
+
+def cmd_verify_acceptance_suite(args) -> int:
+    result = verify_acceptance_suite(
+        args.path,
+        required_cases=args.required_case,
+        require_minimum_set=args.require_minimum_set,
+    )
     print_json(result, full=args.full)
     return 0 if result["match"] else 2
 
@@ -639,6 +650,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_acceptance.add_argument("record")
     verify_acceptance.set_defaults(func=cmd_verify_acceptance_record)
+
+    verify_acceptance_suite_parser = subparsers.add_parser(
+        "verify-acceptance-suite",
+        parents=[output_parent],
+        help="Verify a directory or manifest of acceptance records",
+    )
+    verify_acceptance_suite_parser.add_argument(
+        "path",
+        help="Acceptance record, suite manifest, or directory containing records",
+    )
+    verify_acceptance_suite_parser.add_argument(
+        "--required-case",
+        action="append",
+        help="Required case id or prefix; can be repeated",
+    )
+    verify_acceptance_suite_parser.add_argument(
+        "--require-minimum-set",
+        action="store_true",
+        help="Require the documented minimum legacy regression cases",
+    )
+    verify_acceptance_suite_parser.set_defaults(func=cmd_verify_acceptance_suite)
 
     migrate_style_tags = subparsers.add_parser(
         "migrate-style-tags",

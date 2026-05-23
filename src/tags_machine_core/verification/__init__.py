@@ -3,6 +3,7 @@ from .acceptance import (
     load_acceptance_record,
     parse_whitelist_args,
     verify_acceptance_record,
+    verify_acceptance_suite,
 )
 from .image_params import read_png_text_chunks, read_image_parameters
 from .render_params import (
@@ -23,4 +24,5 @@ __all__ = [
     "read_image_parameters",
     "read_png_text_chunks",
     "verify_acceptance_record",
+    "verify_acceptance_suite",
 ]

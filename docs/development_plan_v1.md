@@ -302,6 +302,7 @@ uv run python -m tags_machine_core render-plan-nodes --backend comfyui --charact
 uv run python -m tags_machine_core execute-render-request core_render_request.json --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
+uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set
 uv run python -m tags_machine_core generate --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 ```
 
@@ -311,7 +312,8 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `generate` 当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
 - `execute-render-request` 读取已有 `RenderRequest` 后联网执行：NovelAI / SD 会保存图片，ComfyUI 当前会排队 prompt 并返回 `prompt_id`。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
-- `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算旧项目对照验收记录。
+- `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录。
+- `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
 
@@ -421,6 +423,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 第三优先级才是图片视觉：图片可以作为人工抽检材料，但不能替代参数 diff；如果参数不同，先修参数，如果参数相同但像素不同，记录原因。
 - 验收脚本不能依赖旧项目运行时代码。旧项目可以生成 oracle 文件，core 的测试只读取 oracle JSON、PNG 参数或素材文件。
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
+- 回归样例集需要能用 `verify-acceptance-suite` 一次性回放；空目录、未批准差异、缺少必需样例都必须返回非 0。
 
 旧项目基准验收矩阵：
 
@@ -460,6 +463,26 @@ composition:
   included_character_sections: [character, copyright, body, feet, legwear, footwear]
   suppressed_character_sections: [hair, eyes, head_accessories, upper_clothes]
 result: pass
+```
+
+验收记录可以通过目录或 manifest 批量回放：
+
+```yaml
+schema: tags-machine-core.acceptance-suite/v1
+required_cases:
+  - default_action
+  - foot_detail
+  - hand_detail
+  - complex_character
+  - reference_style
+records:
+  - default_action_001.yaml
+  - foot_detail_homura_001.yaml
+```
+
+```powershell
+uv run python -m tags_machine_core verify-acceptance-suite acceptance\suite.yaml
+uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set
 ```
 
 中期验收：
