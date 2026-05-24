@@ -39,6 +39,34 @@ class ProjectBoundaryTest(unittest.TestCase):
             "core/tests must only read legacy artifacts as data, not import legacy runtime modules",
         )
 
+    def test_cli_keeps_novelai_client_behind_execution_module(self):
+        cli_path = PROJECT_ROOT / "src" / "tags_machine_core" / "cli.py"
+        tree = ast.parse(cli_path.read_text(encoding="utf-8"), filename=str(cli_path))
+        violations: list[str] = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module in {
+                    "tags_machine_core.clients",
+                    "tags_machine_core.clients.novelai",
+                }:
+                    for alias in node.names:
+                        if alias.name == "NovelAIClient":
+                            violations.append(
+                                f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: {module}.{alias.name}"
+                            )
+            elif isinstance(node, ast.Name) and node.id == "NovelAIClient":
+                violations.append(
+                    f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: direct NovelAIClient reference"
+                )
+
+        self.assertEqual(
+            violations,
+            [],
+            "CLI must use tags_machine_core.execution for NovelAI execution",
+        )
+
 
 def _iter_python_sources():
     for root in PYTHON_SOURCE_ROOTS:
