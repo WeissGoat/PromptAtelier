@@ -240,7 +240,7 @@ uv run python -m tags_machine_core verify-acceptance-suite examples\acceptance\s
 - `default_action`：检查 NovelAI 核心参数、默认 negative、V4/V4.5 payload 没有丢。
 - `foot_detail` / `hand_detail`：检查 `PromptBundle.meta.composition` 的 scope、纳入 section、抑制 section 是否符合局部镜头规则，并确认最终 prompt 没有残留被抑制 section 的典型词。
 - `complex_character`：检查默认角色组合没有误过滤 `hair`、`eyes`、`upper_clothes`。
-- `reference_style`：检查 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 非空且长度一致。
+- `reference_style`：检查 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 非空且长度一致，并检查 `director_reference_images` 非空。
 
 `examples/nodes` 也有测试门禁：character/action/background 使用 `meta.yaml`，style 使用 `node.yaml`；action 必须显式声明 `character_scope`；v1 样例里不能重新引入 `shot`、`constraints`、`rules`、`include_scopes` / `exclude_scopes` 等字段。
 

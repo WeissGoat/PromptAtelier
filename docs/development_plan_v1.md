@@ -382,7 +382,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `archive-acceptance-case` 会把旧项目 oracle 和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
 - `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；它不运行旧项目代码，也不联网生图。
 - `archive-novelai-acceptance-prompt` 会从完整 prompt 生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；适合验证 agent prompt、人工完整 prompt 或旧 `run-prompt` 输出和旧 `run_action` 基准是否等价。
-- `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全，并输出 `case_checks` 验证关键样例语义：默认动作必须保留 NovelAI 核心默认参数和 V4 payload，局部镜头必须验证 character section 裁剪且最终 prompt 不能残留被抑制 section 的典型词，复杂角色必须验证默认 scope 不误过滤 hair / eyes / upper_clothes，参考图画风必须验证 reference 数组语义。
+- `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全，并输出 `case_checks` 验证关键样例语义：默认动作必须保留 NovelAI 核心默认参数和 V4 payload，局部镜头必须验证 character section 裁剪且最终 prompt 不能残留被抑制 section 的典型词，复杂角色必须验证默认 scope 不误过滤 hair / eyes / upper_clothes，参考图画风必须验证 reference 数组和 director reference 图语义。
 - `examples/acceptance/` 是仓库内置的静态 dry-run 最小资料包，用于固定验收记录格式、参数归一化、PNG 参数读取、`GenerationResult` 图片证据和五类 minimum case 语义检查；它不等价于真实旧项目 oracle 验收。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
@@ -513,7 +513,7 @@ v1 冻结验收补充：
   - `default_action` 必须验证 `prompt`、`negative_prompt`、`seed`、`width`、`height`、`sampler`、`steps`、`scale`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt` 等 NovelAI 核心参数仍在。
   - `foot_detail` / `hand_detail` 必须验证 `PromptBundle.meta.composition` 的 scope、included sections 和 suppressed sections，并检查最终 prompt 没有残留被 suppressed sections 代表的典型角色片段。
   - `complex_character` 必须验证默认 scope 下 `hair`、`eyes`、`upper_clothes` 纳入角色组合，且没有被误放入 suppressed sections。
-  - `reference_style` 必须验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 数组非空且长度一致。
+  - `reference_style` 必须验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 数组非空且长度一致，并验证 `director_reference_images` 非空。
 
 变更门禁：
 

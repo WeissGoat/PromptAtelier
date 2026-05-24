@@ -925,6 +925,78 @@ class VerificationTest(unittest.TestCase):
                 reference_check["messages"][0],
             )
 
+    def test_verify_acceptance_suite_fails_reference_style_missing_director_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_record(
+                case_id: str,
+                *,
+                composition: dict | None = None,
+                parameters: dict | None = None,
+            ) -> None:
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                bundle = root / f"{case_id}_bundle.json"
+                record_path = root / f"{case_id}.json"
+                payload = {"parameters": parameters or _minimum_case_parameters(case_id)}
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                prompt_bundle = None
+                if composition is not None:
+                    bundle.write_text(
+                        json.dumps({"meta": {"composition": composition}}),
+                        encoding="utf-8",
+                    )
+                    prompt_bundle = bundle
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                    prompt_bundle=prompt_bundle,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            write_record("default_action_001")
+            write_record(
+                "foot_detail_001",
+                composition={
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes"],
+                },
+            )
+            write_record(
+                "hand_detail_001",
+                composition={
+                    "character_scope": "hand_detail",
+                    "included_character_sections": ["character", "hands"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes", "feet"],
+                },
+            )
+            write_record(
+                "complex_character_001",
+                composition={
+                    "character_scope": "default",
+                    "included_character_sections": ["character", "hair", "eyes", "upper_clothes"],
+                    "suppressed_character_sections": [],
+                },
+            )
+            missing_director_params = _sample_parameters(reference="first-reference")
+            missing_director_params["director_reference_images"] = []
+            write_record("reference_style_001", parameters=missing_director_params)
+
+            result = verify_acceptance_suite(root, require_minimum_set=True)
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["missing_required_cases"], [])
+            self.assertEqual(result["case_check_fail_count"], 1)
+            reference_check = [
+                check for check in result["case_checks"] if check["required_case"] == "reference_style"
+            ][0]
+            self.assertEqual(reference_check["result"], "fail")
+            self.assertIn("missing director_reference_images", reference_check["messages"][0])
+
     def test_verify_acceptance_suite_fails_default_action_missing_core_params(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

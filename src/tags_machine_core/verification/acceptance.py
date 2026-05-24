@@ -1006,6 +1006,7 @@ def _reference_style_case_errors(record: dict[str, Any]) -> list[str]:
     references = params.get("reference_image_multiple") or []
     strengths = params.get("reference_strength_multiple") or []
     information = params.get("reference_information_extracted_multiple") or []
+    director_references = params.get("director_reference_images") or []
     errors: list[str] = []
     if not isinstance(references, list) or not references:
         errors.append("missing reference_image_multiple")
@@ -1013,6 +1014,8 @@ def _reference_style_case_errors(record: dict[str, Any]) -> list[str]:
         errors.append("reference_strength_multiple length mismatch")
     if not isinstance(information, list) or len(information) != len(references):
         errors.append("reference_information_extracted_multiple length mismatch")
+    if not isinstance(director_references, list) or not director_references:
+        errors.append("missing director_reference_images")
     return errors
 
 
