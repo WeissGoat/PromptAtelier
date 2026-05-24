@@ -547,6 +547,129 @@ renderers:
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
 
+    def test_archive_novelai_acceptance_nodes_matches_cli_prompt_and_render_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            style = self._write_style_node(root)
+
+            compose_stdout = io.StringIO()
+            with redirect_stdout(compose_stdout):
+                compose_exit = main(
+                    [
+                        "compose-nodes",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-ref",
+                        "cross_backend_style",
+                        "--extra-prompt",
+                        "dynamic low angle",
+                        "--negative",
+                        "messy crop",
+                    ]
+                )
+            prompt_bundle = json.loads(compose_stdout.getvalue())
+
+            render_stdout = io.StringIO()
+            with redirect_stdout(render_stdout):
+                render_exit = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "novelai",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--extra-prompt",
+                        "dynamic low angle",
+                        "--negative",
+                        "messy crop",
+                        "--seed",
+                        "1357",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--params-json",
+                        '{"scale": 6.0, "cfg_rescale": 0.15}',
+                    ]
+                )
+            render_request = json.loads(render_stdout.getvalue())
+
+            legacy = root / "legacy_request.json"
+            legacy.write_text(
+                json.dumps(
+                    {
+                        "input": render_request["prompt"],
+                        "model": render_request["model"],
+                        "action": "generate",
+                        "parameters": render_request["params"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            archive_stdout = io.StringIO()
+            with redirect_stdout(archive_stdout):
+                archive_exit = main(
+                    [
+                        "archive-novelai-acceptance-nodes",
+                        "--case-id",
+                        "foot_detail_homura_parity_001",
+                        "--output-dir",
+                        str(root / "acceptance"),
+                        "--legacy-source",
+                        str(legacy),
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--extra-prompt",
+                        "dynamic low angle",
+                        "--negative",
+                        "messy crop",
+                        "--seed",
+                        "1357",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--params-json",
+                        '{"scale": 6.0, "cfg_rescale": 0.15}',
+                        "--required-case",
+                        "foot_detail",
+                    ]
+                )
+            archive = json.loads(archive_stdout.getvalue())
+
+            case_dir = Path(archive["case_dir"])
+            archived_bundle = json.loads(
+                (case_dir / "core" / "prompt_bundle.json").read_text(encoding="utf-8")
+            )
+            archived_request = json.loads(
+                (case_dir / "core" / "render_request.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(compose_exit, 0)
+            self.assertEqual(render_exit, 0)
+            self.assertEqual(archive_exit, 0)
+            self.assertEqual(archive["result"], "pass")
+            self.assertEqual(
+                _without_runtime_fields(archived_bundle),
+                _without_runtime_fields(prompt_bundle),
+            )
+            self.assertEqual(archived_request, render_request)
+            self.assertTrue(archive["record"]["diff"]["normalized_equal"])
+            self.assertEqual(archived_request["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(archived_request["params"]["cfg_rescale"], 0.15)
+
     def test_render_plan_nodes_supports_sd_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1023,6 +1146,18 @@ gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multipl
             self.assertEqual(node.renderers["novelai"]["after_negative_prompt"], ["extra fingers"])
             self.assertEqual(node.renderers["novelai"]["params"]["reference_image_multiple"], ["abc"])
             self.assertEqual(node.renderers["novelai"]["params"]["reference_strength_multiple"], [0.2])
+
+
+def _without_runtime_fields(value):
+    if isinstance(value, dict):
+        return {
+            key: _without_runtime_fields(item)
+            for key, item in value.items()
+            if key != "created_at"
+        }
+    if isinstance(value, list):
+        return [_without_runtime_fields(item) for item in value]
+    return value
 
 
 if __name__ == "__main__":
