@@ -275,9 +275,10 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 - `PromptBundle` 不关心具体 ComfyUI 节点编号。
 - adapter 产出统一 `RenderRequest` 执行计划，不负责联网。
 - CLI 可通过 `render-plan --backend comfyui` 或 `render-plan-nodes --backend comfyui` 生成 dry-run 请求。
-- `execute-render-request` 可读取已有 `RenderRequest`，调用 ComfyUI `/prompt` 排队，并在 `GenerationResult.png_info.comfyui` 里记录 `prompt_id` 和原始响应。
+- `execute-render-request` 可读取已有 `RenderRequest`，调用 ComfyUI `/prompt` 排队，轮询 `/history/{prompt_id}`，通过 `/view` 下载输出图片，并写入 `GenerationResult.images`。
+- `GenerationResult.png_info.comfyui` 会记录 `prompt_id`、排队响应和 history；如果使用 `--comfyui-no-wait`，则只排队并返回 `prompt_id`。
 
-后续仍需要补齐队列状态轮询、图片下载和更完整的节点级 patch。
+后续仍需要补齐更完整的节点级 patch、失败状态归因和更细的 ComfyUI workflow 校准。
 
 ### SD adapter
 
@@ -311,7 +312,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网，支持 `novelai`、`comfyui`、`sd`。
 - `generate` 当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
-- `execute-render-request` 读取已有 `RenderRequest` 后联网执行：NovelAI / SD 会保存图片，ComfyUI 当前会排队 prompt 并返回 `prompt_id`。
+- `execute-render-request` 读取已有 `RenderRequest` 后联网执行：NovelAI / SD 会保存图片；ComfyUI 默认会排队、轮询 history、下载图片并保存，使用 `--comfyui-no-wait` 时只返回 `prompt_id`。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录。
 - `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全。

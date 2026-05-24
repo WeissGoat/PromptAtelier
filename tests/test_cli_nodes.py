@@ -545,6 +545,7 @@ renderers:
                             str(config),
                             "--client-id",
                             "client-1",
+                            "--comfyui-no-wait",
                         ]
                     )
 
@@ -553,10 +554,118 @@ renderers:
             client_cls.assert_called_once_with(base_url="http://comfy.local", timeout=30)
             client.queue_prompt.assert_called_once()
             self.assertEqual(client.queue_prompt.call_args.kwargs["client_id"], "client-1")
+            client.generate_images.assert_not_called()
             self.assertEqual(data["backend"], "comfyui")
             self.assertEqual(data["images"], [])
             self.assertEqual(data["request_body"]["client_id"], "client-1")
             self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
+
+    def test_execute_render_request_saves_comfyui_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            output_dir = root / "comfy_outputs"
+            request = root / "comfy_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "backend": "comfyui",
+                        "prompt": "akemi homura",
+                        "seed": 222,
+                        "params": {
+                            "workflow_json": {
+                                "1": {"inputs": {"text": "akemi homura"}},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            image_bytes = _png_bytes_with_text(
+                {
+                    "Comment": json.dumps(
+                        {
+                            "prompt": "akemi homura",
+                            "seed": 222,
+                        }
+                    ),
+                    "Source": "ComfyUI",
+                }
+            )
+            history = {
+                "abc123": {
+                    "outputs": {
+                        "7": {
+                            "images": [
+                                {
+                                    "filename": "ComfyUI_00001_.png",
+                                    "subfolder": "",
+                                    "type": "output",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+
+            with patch("tags_machine_core.cli.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.generate_images.return_value = SimpleNamespace(
+                    prompt_id="abc123",
+                    queue_raw={"prompt_id": "abc123"},
+                    history=history,
+                    images=[
+                        SimpleNamespace(
+                            filename="ComfyUI_00001_.png",
+                            content=image_bytes,
+                            image_type="output",
+                            node_id="7",
+                        )
+                    ],
+                )
+                client.build_payload.return_value = {
+                    "prompt": {"1": {"inputs": {"text": "akemi homura"}}},
+                    "client_id": "client-1",
+                }
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "execute-render-request",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                            "--client-id",
+                            "client-1",
+                            "--comfyui-poll-interval",
+                            "0",
+                            "--comfyui-max-wait-seconds",
+                            "1",
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            client.generate_images.assert_called_once()
+            self.assertEqual(client.generate_images.call_args.kwargs["client_id"], "client-1")
+            self.assertEqual(client.generate_images.call_args.kwargs["poll_interval"], 0)
+            self.assertEqual(client.generate_images.call_args.kwargs["max_wait_seconds"], 1)
+            self.assertEqual(data["backend"], "comfyui")
+            self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
+            self.assertEqual(data["png_info"]["comfyui"]["history"], history)
+            self.assertEqual(len(data["images"]), 1)
+            saved_path = Path(data["images"][0]["path"])
+            self.assertEqual(saved_path.parent, output_dir)
+            self.assertEqual(saved_path.read_bytes(), image_bytes)
+            self.assertEqual(data["images"][0]["meta"]["node_id"], "7")
+            self.assertEqual(data["images"][0]["meta"]["image_type"], "output")
+            png_info = data["png_info"]["images"][0]
+            self.assertEqual(png_info["parameters"]["prompt"], "akemi homura")
+            self.assertEqual(png_info["parameters"]["seed"], 222)
+            self.assertEqual(png_info["png_text"]["Source"], "ComfyUI")
 
     def test_execute_render_request_saves_sd_images(self):
         with tempfile.TemporaryDirectory() as tmp:

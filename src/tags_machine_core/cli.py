@@ -210,12 +210,35 @@ def cmd_execute_render_request(args) -> int:
             base_url=config.comfyui.base_url,
             timeout=config.comfyui.timeout,
         )
-        queued = client.queue_prompt(request, client_id=args.client_id)
+        if args.comfyui_no_wait:
+            queued = client.queue_prompt(request, client_id=args.client_id)
+            images = []
+            comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
+        else:
+            generated = client.generate_images(
+                request,
+                client_id=args.client_id,
+                poll_interval=args.comfyui_poll_interval,
+                max_wait_seconds=args.comfyui_max_wait_seconds,
+            )
+            images = _save_generated_images(
+                generated.images,
+                output_dir=output_dir,
+                request=request,
+                default_format=config.defaults.image_format,
+            )
+            comfyui_meta = {
+                "prompt_id": generated.prompt_id,
+                "queue_raw": generated.queue_raw,
+                "history": generated.history,
+            }
+        png_info = _collect_png_info(images)
+        png_info["comfyui"] = comfyui_meta
         result = GenerationResult(
             backend="comfyui",
-            images=[],
+            images=images,
             request_body=client.build_payload(request, client_id=args.client_id),
-            png_info={"comfyui": {"prompt_id": queued.prompt_id, "raw": queued.raw}},
+            png_info=png_info,
             cache_hit=False,
         )
     elif request.backend == "sd":
@@ -433,11 +456,16 @@ def _save_generated_images(
         filename = f"{batch_id}_{request.seed or 0}_{index:02d}{suffix}"
         path = output_dir / filename
         path.write_bytes(image.content)
+        meta = {"source_filename": image.filename, "index": index}
+        for attr in ("subfolder", "image_type", "node_id"):
+            value = getattr(image, attr, None)
+            if value:
+                meta[attr] = value
         generated_images.append(
             GeneratedImage(
                 path=path,
                 filename=filename,
-                meta={"source_filename": image.filename, "index": index},
+                meta=meta,
             )
         )
     return generated_images
@@ -562,6 +590,22 @@ def build_parser() -> argparse.ArgumentParser:
     execute_render_request.add_argument(
         "--client-id",
         help="Optional ComfyUI client_id when queueing a prompt",
+    )
+    execute_render_request.add_argument(
+        "--comfyui-no-wait",
+        action="store_true",
+        help="Only queue a ComfyUI prompt and return prompt_id without polling history",
+    )
+    execute_render_request.add_argument(
+        "--comfyui-poll-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between ComfyUI history polls",
+    )
+    execute_render_request.add_argument(
+        "--comfyui-max-wait-seconds",
+        type=float,
+        help="Maximum seconds to wait for ComfyUI output; defaults to comfyui.timeout",
     )
     execute_render_request.set_defaults(func=cmd_execute_render_request)
 

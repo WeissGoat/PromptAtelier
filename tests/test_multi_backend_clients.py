@@ -13,10 +13,17 @@ from tags_machine_core.contracts import RenderRequest
 
 
 class FakeJsonResponse:
-    def __init__(self, status_code: int, data=None, text: str = "OK"):
+    def __init__(
+        self,
+        status_code: int,
+        data=None,
+        text: str = "OK",
+        content: bytes = b"",
+    ):
         self.status_code = status_code
         self._data = data
         self.text = text
+        self.content = content
 
     def json(self):
         return self._data
@@ -34,6 +41,24 @@ class FakePostSession:
     def post(self, url, json, timeout):
         self.calls.append({"url": url, "json": json, "timeout": timeout})
         return self.response
+
+
+class FakeComfySession:
+    def __init__(self, post_response: FakeJsonResponse, get_responses: list[FakeJsonResponse]):
+        self.post_response = post_response
+        self.get_responses = list(get_responses)
+        self.post_calls = []
+        self.get_calls = []
+
+    def post(self, url, json, timeout):
+        self.post_calls.append({"url": url, "json": json, "timeout": timeout})
+        return self.post_response
+
+    def get(self, url, timeout):
+        self.get_calls.append({"url": url, "timeout": timeout})
+        if not self.get_responses:
+            raise AssertionError(f"Unexpected GET call: {url}")
+        return self.get_responses.pop(0)
 
 
 class MultiBackendClientTest(unittest.TestCase):
@@ -108,6 +133,79 @@ class MultiBackendClientTest(unittest.TestCase):
         self.assertIn("bad request", ctx.exception.response_text)
         image = ctx.exception.sanitized_payload["prompt"]["1"]["inputs"]["image"]
         self.assertLess(len(image), 200)
+
+    def test_comfyui_client_polls_history_and_downloads_images(self):
+        history = {
+            "abc123": {
+                "outputs": {
+                    "7": {
+                        "images": [
+                            {
+                                "filename": "ComfyUI_00001_.png",
+                                "subfolder": "",
+                                "type": "output",
+                            }
+                        ]
+                    }
+                },
+                "status": {"completed": True},
+            }
+        }
+        session = FakeComfySession(
+            FakeJsonResponse(200, data={"prompt_id": "abc123"}),
+            [
+                FakeJsonResponse(200, data={}),
+                FakeJsonResponse(200, data=history),
+                FakeJsonResponse(200, content=b"png-bytes"),
+            ],
+        )
+        client = ComfyUIClient(base_url="http://comfy.local", timeout=30, http_client=session)
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="akemi homura",
+            params={"workflow_json": {"1": {"inputs": {"text": "akemi homura"}}}},
+        )
+
+        result = client.generate_images(
+            request,
+            client_id="client-1",
+            poll_interval=0,
+            max_wait_seconds=1,
+        )
+
+        self.assertEqual(result.prompt_id, "abc123")
+        self.assertEqual(result.history, history)
+        self.assertEqual(len(result.images), 1)
+        self.assertEqual(result.images[0].filename, "ComfyUI_00001_.png")
+        self.assertEqual(result.images[0].content, b"png-bytes")
+        self.assertEqual(result.images[0].node_id, "7")
+        self.assertEqual(session.post_calls[0]["url"], "http://comfy.local/prompt")
+        self.assertEqual(
+            session.get_calls[0]["url"],
+            "http://comfy.local/history/abc123",
+        )
+        self.assertEqual(
+            session.get_calls[2]["url"],
+            "http://comfy.local/view?filename=ComfyUI_00001_.png&subfolder=&type=output",
+        )
+
+    def test_comfyui_client_returns_terminal_history_without_images(self):
+        history = {"abc123": {"outputs": {}, "status": {"completed": True}}}
+        session = FakeComfySession(
+            FakeJsonResponse(200, data={"prompt_id": "abc123"}),
+            [FakeJsonResponse(200, data=history)],
+        )
+        client = ComfyUIClient(http_client=session)
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="akemi homura",
+            params={"workflow_json": {}},
+        )
+
+        result = client.generate_images(request, poll_interval=0, max_wait_seconds=1)
+
+        self.assertEqual(result.history, history)
+        self.assertEqual(result.images, [])
 
     def test_sd_client_builds_txt2img_payload_and_decodes_images(self):
         image_bytes = b"png-bytes"
