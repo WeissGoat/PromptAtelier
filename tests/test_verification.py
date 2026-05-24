@@ -1,8 +1,11 @@
 import io
 import hashlib
 import json
+import os
 import shutil
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import zlib
@@ -539,6 +542,7 @@ class VerificationTest(unittest.TestCase):
 
             self.assertTrue(result["match"])
             self.assertEqual(result["result"], "pass")
+            self.assertEqual(result["oracle_kind"], "legacy_oracle")
             self.assertEqual(result["diff"]["intentional_diff_count"], 1)
             self.assertEqual(result["diff"]["unapproved_diff_count"], 0)
             self.assertEqual(
@@ -550,6 +554,31 @@ class VerificationTest(unittest.TestCase):
                     }
                 ],
             )
+
+    def test_build_acceptance_record_marks_fixture_oracle_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="fixture_roundtrip",
+                legacy_source=legacy,
+                core_source=core,
+                oracle_kind="fixture",
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            result = verify_acceptance_record(record_path)
+
+            self.assertEqual(record["oracle_kind"], "fixture")
+            self.assertEqual(result["oracle_kind"], "fixture")
+            self.assertTrue(result["match"])
+            self.assertEqual(result["diff"]["intentional_diff_count"], 0)
+            self.assertEqual(result["diff"]["unapproved_diff_count"], 0)
 
     def test_verify_acceptance_record_recomputes_diff(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -637,6 +666,33 @@ class VerificationTest(unittest.TestCase):
             self.assertTrue(result["match"])
             self.assertEqual(result["record_count"], 2)
             self.assertEqual(result["missing_required_cases"], [])
+            self.assertEqual(result["oracle_kind_counts"], {"legacy_oracle": 2})
+
+    def test_verify_acceptance_suite_can_require_legacy_oracle_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "fixture_legacy.json"
+            core = root / "fixture_core.json"
+            record_path = root / "fixture_record.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="fixture_record",
+                legacy_source=legacy,
+                core_source=core,
+                oracle_kind="fixture",
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            fixture_only = verify_acceptance_suite(root)
+            required = verify_acceptance_suite(root, require_legacy_oracle=True)
+
+            self.assertTrue(fixture_only["match"])
+            self.assertEqual(fixture_only["oracle_kind_counts"], {"fixture": 1})
+            self.assertFalse(required["match"])
+            self.assertEqual(required["result"], "fail")
+            self.assertIn("No legacy_oracle acceptance records found", required["errors"])
 
     def test_verify_acceptance_suite_reports_missing_minimum_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -741,6 +797,7 @@ class VerificationTest(unittest.TestCase):
         self.assertEqual(result["record_count"], 5)
         self.assertEqual(result["case_check_fail_count"], 0)
         self.assertEqual(result["missing_required_cases"], [])
+        self.assertEqual(result["oracle_kind_counts"], {"fixture": 5})
         self.assertEqual(
             {check["required_case"] for check in result["case_checks"]},
             {
@@ -752,12 +809,21 @@ class VerificationTest(unittest.TestCase):
             },
         )
         for record in result["records"]:
+            self.assertEqual(record["oracle_kind"], "fixture")
             self.assertTrue(record["diff"]["normalized_equal"])
             self.assertEqual(record["generation_result_evidence"]["result"], "pass")
             self.assertEqual(record["prompt_bundle_contract_evidence"]["result"], "pass")
             self.assertEqual(record["generation_result_evidence"]["image_count"], 1)
             self.assertTrue(record["image_evidence"]["legacy"]["exists"])
             self.assertTrue(record["image_evidence"]["core"]["exists"])
+
+        legacy_required = verify_acceptance_suite(
+            PROJECT_ROOT / "examples" / "acceptance" / "suite.yaml",
+            require_minimum_set=True,
+            require_legacy_oracle=True,
+        )
+        self.assertFalse(legacy_required["match"])
+        self.assertIn("No legacy_oracle acceptance records found", legacy_required["errors"])
 
     def test_verify_acceptance_suite_fails_bad_minimum_case_semantics(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1640,8 +1706,101 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(create_exit, 0)
             self.assertEqual(verify_exit, 0)
             self.assertEqual(created["result"], "pass")
+            self.assertEqual(created["oracle_kind"], "legacy_oracle")
             self.assertTrue(verified["match"])
+            self.assertEqual(verified["oracle_kind"], "legacy_oracle")
             self.assertTrue(record_path.exists())
+
+    def test_cli_acceptance_record_fixture_kind_requires_legacy_oracle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.yaml"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                create_exit = main(
+                    [
+                        "create-acceptance-record",
+                        "--case-id",
+                        "fixture_cli",
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                        "--oracle-kind",
+                        "fixture",
+                        "--output",
+                        str(record_path),
+                    ]
+                )
+            created = json.loads(stdout.getvalue())
+
+            suite_stdout = io.StringIO()
+            with redirect_stdout(suite_stdout):
+                suite_exit = main(
+                    [
+                        "verify-acceptance-suite",
+                        str(root),
+                        "--require-legacy-oracle",
+                    ]
+                )
+            suite = json.loads(suite_stdout.getvalue())
+
+            self.assertEqual(create_exit, 0)
+            self.assertEqual(created["oracle_kind"], "fixture")
+            self.assertEqual(suite_exit, 2)
+            self.assertFalse(suite["match"])
+            self.assertEqual(suite["oracle_kind_counts"], {"fixture": 1})
+            self.assertIn("No legacy_oracle acceptance records found", suite["errors"])
+
+    def test_module_cli_exits_nonzero_when_suite_requires_legacy_oracle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="fixture_module_cli",
+                legacy_source=legacy,
+                core_source=core,
+                oracle_kind="fixture",
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            env = {
+                **os.environ,
+                "PYTHONPATH": str(PROJECT_ROOT / "src")
+                + os.pathsep
+                + os.environ.get("PYTHONPATH", ""),
+            }
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "tags_machine_core",
+                    "verify-acceptance-suite",
+                    str(root),
+                    "--require-legacy-oracle",
+                ],
+                cwd=PROJECT_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            data = json.loads(result.stdout)
+            self.assertFalse(data["match"])
+            self.assertIn("No legacy_oracle acceptance records found", data["errors"])
 
     def test_cli_create_acceptance_record_accepts_generation_result(self):
         with tempfile.TemporaryDirectory() as tmp:

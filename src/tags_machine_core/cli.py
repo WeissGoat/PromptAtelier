@@ -255,6 +255,7 @@ def cmd_create_acceptance_record(args) -> int:
         whitelist=parse_whitelist_args(args.whitelist),
         intentional_differences=parse_intentional_difference_args(args.intentional_difference),
         notes=args.note or [],
+        oracle_kind=args.oracle_kind,
     )
     if args.output:
         _write_structured_output(record, Path(args.output), output_format=args.format)
@@ -280,6 +281,7 @@ def cmd_archive_acceptance_case(args) -> int:
         update_manifest=not args.no_manifest,
         overwrite=args.overwrite,
         record_format=args.format,
+        oracle_kind=args.oracle_kind,
     )
     print_json(archive, full=args.full)
     return 0 if archive["result"] == "pass" else 2
@@ -331,6 +333,7 @@ def cmd_archive_novelai_acceptance_nodes(args) -> int:
         update_manifest=not args.no_manifest,
         overwrite=args.overwrite,
         record_format=args.format,
+        oracle_kind=args.oracle_kind,
     )
     print_json(archive, full=args.full)
     return 0 if archive["result"] == "pass" else 2
@@ -372,6 +375,7 @@ def cmd_archive_novelai_acceptance_prompt(args) -> int:
         update_manifest=not args.no_manifest,
         overwrite=args.overwrite,
         record_format=args.format,
+        oracle_kind=args.oracle_kind,
     )
     print_json(archive, full=args.full)
     return 0 if archive["result"] == "pass" else 2
@@ -388,6 +392,7 @@ def cmd_verify_acceptance_suite(args) -> int:
         args.path,
         required_cases=args.required_case,
         require_minimum_set=args.require_minimum_set,
+        require_legacy_oracle=args.require_legacy_oracle,
     )
     print_json(result, full=args.full)
     return 0 if result["match"] else 2
@@ -920,6 +925,12 @@ def build_parser() -> argparse.ArgumentParser:
     create_acceptance_record.add_argument("--prompt-bundle")
     create_acceptance_record.add_argument("--generation-result")
     create_acceptance_record.add_argument(
+        "--oracle-kind",
+        default="legacy_oracle",
+        choices=("legacy_oracle", "fixture"),
+        help="Acceptance source kind; use fixture only for synthetic/static mechanism tests",
+    )
+    create_acceptance_record.add_argument(
         "--whitelist",
         action="append",
         help="Approved diff path with optional reason, for example $.parameters.sampler=alias",
@@ -959,6 +970,12 @@ def build_parser() -> argparse.ArgumentParser:
     archive_acceptance.add_argument("--core-image")
     archive_acceptance.add_argument("--prompt-bundle")
     archive_acceptance.add_argument("--generation-result")
+    archive_acceptance.add_argument(
+        "--oracle-kind",
+        default="legacy_oracle",
+        choices=("legacy_oracle", "fixture"),
+        help="Acceptance source kind; use fixture only for synthetic/static mechanism tests",
+    )
     archive_acceptance.add_argument(
         "--whitelist",
         action="append",
@@ -1016,6 +1033,12 @@ def build_parser() -> argparse.ArgumentParser:
     archive_novelai_acceptance_nodes.add_argument("--legacy-image")
     archive_novelai_acceptance_nodes.add_argument("--core-image")
     archive_novelai_acceptance_nodes.add_argument("--generation-result")
+    archive_novelai_acceptance_nodes.add_argument(
+        "--oracle-kind",
+        default="legacy_oracle",
+        choices=("legacy_oracle", "fixture"),
+        help="Acceptance source kind; use fixture only for synthetic/static mechanism tests",
+    )
     archive_novelai_acceptance_nodes.add_argument("--style-node", help="Path to a structured style node")
     archive_novelai_acceptance_nodes.add_argument("--config", help="Load legacy style refs through this config")
     archive_novelai_acceptance_nodes.add_argument("--seed", type=int)
@@ -1086,6 +1109,12 @@ def build_parser() -> argparse.ArgumentParser:
     archive_novelai_acceptance_prompt.add_argument("--legacy-image")
     archive_novelai_acceptance_prompt.add_argument("--core-image")
     archive_novelai_acceptance_prompt.add_argument("--generation-result")
+    archive_novelai_acceptance_prompt.add_argument(
+        "--oracle-kind",
+        default="legacy_oracle",
+        choices=("legacy_oracle", "fixture"),
+        help="Acceptance source kind; use fixture only for synthetic/static mechanism tests",
+    )
     archive_novelai_acceptance_prompt.add_argument(
         "--config",
         help="Load legacy style refs through this config",
@@ -1161,6 +1190,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-minimum-set",
         action="store_true",
         help="Require the documented minimum legacy regression cases",
+    )
+    verify_acceptance_suite_parser.add_argument(
+        "--require-legacy-oracle",
+        action="store_true",
+        help="Fail unless the suite contains at least one real legacy_oracle record",
     )
     verify_acceptance_suite_parser.set_defaults(func=cmd_verify_acceptance_suite)
 

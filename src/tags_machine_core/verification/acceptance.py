@@ -22,6 +22,8 @@ ACCEPTANCE_SCHEMA = "tags-machine-core.acceptance-record/v1"
 ACCEPTANCE_ARCHIVE_SCHEMA = "tags-machine-core.acceptance-archive/v1"
 ACCEPTANCE_SUITE_MANIFEST_SCHEMA = "tags-machine-core.acceptance-suite/v1"
 ACCEPTANCE_SUITE_SCHEMA = "tags-machine-core.acceptance-suite-verification/v1"
+ACCEPTANCE_ORACLE_KINDS = ("legacy_oracle", "fixture")
+DEFAULT_ACCEPTANCE_ORACLE_KIND = "legacy_oracle"
 MINIMUM_ACCEPTANCE_CASES = (
     "default_action",
     "foot_detail",
@@ -109,9 +111,11 @@ def build_acceptance_record(
     whitelist: list[dict[str, str]] | None = None,
     intentional_differences: list[dict[str, str]] | None = None,
     notes: list[str] | None = None,
+    oracle_kind: str = DEFAULT_ACCEPTANCE_ORACLE_KIND,
 ) -> dict[str, Any]:
     legacy_source_path = Path(legacy_source)
     core_source_path = Path(core_source)
+    oracle_kind = _normalize_oracle_kind(oracle_kind)
     legacy_image_path = _effective_image_path(legacy_source_path, legacy_image)
     core_image_path = _effective_image_path(core_source_path, core_image)
     generation_result_path = Path(generation_result) if generation_result else None
@@ -131,6 +135,7 @@ def build_acceptance_record(
         "schema": ACCEPTANCE_SCHEMA,
         "case_id": case_id,
         "created_at": utc_now_iso(),
+        "oracle_kind": oracle_kind,
         "legacy": _legacy_record_paths(
             source=legacy_source_path,
             image=legacy_image_path,
@@ -205,6 +210,7 @@ def archive_acceptance_case(
     update_manifest: bool = True,
     overwrite: bool = False,
     record_format: str = "yaml",
+    oracle_kind: str = DEFAULT_ACCEPTANCE_ORACLE_KIND,
 ) -> dict[str, Any]:
     """归档一条旧项目 oracle 对照样例，生成可回放的 record 和 suite manifest。"""
 
@@ -271,6 +277,7 @@ def archive_acceptance_case(
         whitelist=whitelist,
         intentional_differences=intentional_differences,
         notes=notes,
+        oracle_kind=oracle_kind,
     )
     record["archive"] = {
         "schema": ACCEPTANCE_ARCHIVE_SCHEMA,
@@ -345,11 +352,13 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
         whitelist=(record.get("diff") or {}).get("whitelist") or [],
         intentional_differences=_record_intentional_differences(record),
         notes=record.get("notes") or [],
+        oracle_kind=_record_oracle_kind(record),
     )
     return {
         "schema": "tags-machine-core.acceptance-verification/v1",
         "record_path": str(path),
         "case_id": rebuilt["case_id"],
+        "oracle_kind": rebuilt["oracle_kind"],
         "match": rebuilt["result"] == "pass",
         "result": rebuilt["result"],
         "diff": rebuilt["diff"],
@@ -367,6 +376,7 @@ def verify_acceptance_suite(
     *,
     required_cases: list[str] | None = None,
     require_minimum_set: bool = False,
+    require_legacy_oracle: bool = False,
 ) -> dict[str, Any]:
     path = Path(path)
     record_paths, manifest_required_cases = _suite_record_paths(path)
@@ -388,6 +398,7 @@ def verify_acceptance_suite(
                     "schema": "tags-machine-core.acceptance-verification/v1",
                     "record_path": str(record_path),
                     "case_id": record_path.stem,
+                    "oracle_kind": "unknown",
                     "match": False,
                     "result": "error",
                     "error": str(exc),
@@ -405,9 +416,12 @@ def verify_acceptance_suite(
     case_checks = _minimum_case_checks(results) if require_minimum_set else []
     case_check_fail_count = sum(1 for item in case_checks if item.get("result") != "pass")
     fail_count = sum(1 for item in results if not item.get("match"))
+    oracle_kind_counts = _oracle_kind_counts(results)
     errors: list[str] = []
     if not results:
         errors.append("No acceptance records found")
+    if require_legacy_oracle and not oracle_kind_counts.get("legacy_oracle"):
+        errors.append("No legacy_oracle acceptance records found")
     match = not errors and fail_count == 0 and not missing_required_cases and case_check_fail_count == 0
     return {
         "schema": ACCEPTANCE_SUITE_SCHEMA,
@@ -416,6 +430,7 @@ def verify_acceptance_suite(
         "pass_count": len(results) - fail_count,
         "fail_count": fail_count,
         "case_check_fail_count": case_check_fail_count,
+        "oracle_kind_counts": oracle_kind_counts,
         "required_cases": required,
         "missing_required_cases": missing_required_cases,
         "case_checks": case_checks,
@@ -462,6 +477,27 @@ def _record_intentional_differences(record: dict[str, Any]) -> list[dict[str, st
     if value is None:
         value = (record.get("diff") or {}).get("intentional_differences")
     return _normalize_path_reason_entries(value if isinstance(value, list) else [])
+
+
+def _record_oracle_kind(record: dict[str, Any]) -> str:
+    return _normalize_oracle_kind(record.get("oracle_kind") or DEFAULT_ACCEPTANCE_ORACLE_KIND)
+
+
+def _normalize_oracle_kind(value: str | None) -> str:
+    text = str(value or DEFAULT_ACCEPTANCE_ORACLE_KIND).strip()
+    if text not in ACCEPTANCE_ORACLE_KINDS:
+        raise ValueError(
+            f"Unsupported acceptance oracle_kind: {value!r}; expected one of {ACCEPTANCE_ORACLE_KINDS}"
+        )
+    return text
+
+
+def _oracle_kind_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        kind = str(record.get("oracle_kind") or "unknown")
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
 
 
 def _legacy_record_paths(*, source: Path, image: Path | None) -> dict[str, str]:

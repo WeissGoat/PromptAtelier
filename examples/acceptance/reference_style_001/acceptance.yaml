@@ -1,5 +1,6 @@
 schema: tags-machine-core.acceptance-record/v1
 case_id: reference_style_001
+oracle_kind: fixture
 legacy:
   source_path: legacy/source.json
   image_path: legacy/image.png
