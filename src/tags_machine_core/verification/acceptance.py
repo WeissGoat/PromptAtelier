@@ -588,6 +588,29 @@ def _append_generation_result_evidence_messages(messages: list[str], evidence: A
         messages.append("GenerationResult evidence failed")
     if not evidence.get("image_count"):
         messages.append("GenerationResult has no archived images")
+    _append_generation_result_png_info_messages(messages, evidence)
+
+
+def _append_generation_result_png_info_messages(
+    messages: list[str],
+    evidence: dict[str, Any],
+) -> None:
+    png_info = evidence.get("png_info")
+    png_images = png_info.get("images") if isinstance(png_info, dict) else None
+    if not isinstance(png_images, list):
+        messages.append("GenerationResult missing png_info image evidence")
+        return
+    if evidence.get("image_count") and not png_images:
+        messages.append("GenerationResult has no png_info image evidence")
+        return
+    for index, item in enumerate(png_images):
+        if not isinstance(item, dict):
+            messages.append(f"GenerationResult png_info image[{index}] evidence invalid")
+            continue
+        if not item.get("has_parameters") and not item.get("has_error"):
+            messages.append(
+                f"GenerationResult png_info image[{index}] missing parameters or error"
+            )
 
 
 def _append_prompt_bundle_evidence_messages(messages: list[str], evidence: Any) -> None:
