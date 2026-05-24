@@ -418,11 +418,11 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `uv run python -m unittest discover -s tests` 通过。
 - `render-plan` 输出包含完整 NovelAI V4/V4.5 字段。
 - 默认 CLI 输出不会展开长 base64。
-- core 不 import 旧项目运行时代码。
+- `tests/test_project_boundaries.py` 会解析 `src/tags_machine_core` 和 `tests` 的 Python import，确保 core/test 不 import 旧项目运行时代码。
 
 旧项目对照验收：
 
-- 旧 `tags_machine` 作为行为 oracle，但不是运行时依赖；core 只读取素材文件和对照产物，不 import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。
+- 旧 `tags_machine` 作为行为 oracle，但不是运行时依赖；core 只读取素材文件和对照产物，不 import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。这个边界由 `test_project_boundaries.py` 持续验证。
 - 固定一组最小回归样例，至少覆盖：普通半身/全身动作、脚部局部特写、手部局部特写、角色服装复杂样例、带 `reference_image_multiple` 的画风样例。
 - 每个样例使用同一组输入：character/action/style 引用、seed、尺寸、模型、sampler、steps、scale、negative prompt、参考图/vibe 参数。
 - 旧项目用现有 `run_action` 或等价脚本生成基准图；core 用新链路生成对照图。两边生成参数需要从图片内嵌参数和请求体中读取，而不是只看 CLI 输出。
