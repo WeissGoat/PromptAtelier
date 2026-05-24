@@ -10,6 +10,7 @@ from unittest.mock import patch
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.cli import main
 from tags_machine_core.services import GenerationJsonApi
+from tags_machine_core.verification import build_acceptance_record
 
 
 def _write_sample_nodes(root: Path) -> tuple[Path, Path, Path]:
@@ -278,6 +279,119 @@ class JsonApiTest(unittest.TestCase):
             )
 
         self.assertIn("generation_executor", str(raised.exception))
+
+    def test_json_api_roundtrip_from_node_refs_to_acceptance_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            generated_image = root / "generated.png"
+            executor_calls = []
+
+            def executor(render_request: RenderRequest, request_data):
+                executor_calls.append((render_request, request_data))
+                generated_image.write_bytes(b"mock-image")
+                return GenerationResult(
+                    backend=render_request.backend,
+                    images=[
+                        {
+                            "path": generated_image,
+                            "filename": generated_image.name,
+                            "meta": {"source": "mock-json-api"},
+                        }
+                    ],
+                    request_body={
+                        "input": render_request.prompt,
+                        "model": render_request.model,
+                        "action": render_request.meta.get("action"),
+                        "parameters": render_request.params,
+                    },
+                    png_info={"images": []},
+                )
+
+            api = GenerationJsonApi(generation_executor=executor)
+            planned = api.compose_render_plan(
+                {
+                    "compose": {
+                        "nodes": {
+                            "character": str(character),
+                            "action": str(action),
+                        },
+                        "style": str(style),
+                    },
+                    "render": {
+                        "backend": "novelai",
+                        "style": str(style),
+                        "seed": 123,
+                        "width": 832,
+                        "height": 1216,
+                        "params": {
+                            "n_samples": 2,
+                            "reference_image_multiple": ["base64-reference"],
+                            "reference_strength_multiple": [0.2],
+                            "reference_information_extracted_multiple": [1.0],
+                        },
+                    },
+                }
+            )
+            generation = api.generate(
+                {
+                    "render_request": planned["render_request"],
+                    "queue": {"job_id": "json-api-e2e"},
+                }
+            )
+
+            bundle_path = root / "prompt_bundle.json"
+            render_request_path = root / "render_request.json"
+            generation_path = root / "generation_result.json"
+            legacy_source_path = root / "legacy_oracle.json"
+            bundle_path.write_text(
+                json.dumps(planned["prompt_bundle"], ensure_ascii=False),
+                encoding="utf-8",
+            )
+            render_request_path.write_text(
+                json.dumps(planned["render_request"], ensure_ascii=False),
+                encoding="utf-8",
+            )
+            generation_path.write_text(
+                json.dumps(generation, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            legacy_source_path.write_text(
+                json.dumps(
+                    {
+                        "input": planned["render_request"]["prompt"],
+                        "model": planned["render_request"]["model"],
+                        "action": planned["render_request"]["meta"]["action"],
+                        "parameters": planned["render_request"]["params"],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="foot_detail_json_api_001",
+                legacy_source=legacy_source_path,
+                core_source=render_request_path,
+                prompt_bundle=bundle_path,
+                generation_result=generation_path,
+            )
+
+            self.assertEqual(executor_calls[0][0].prompt, planned["render_request"]["prompt"])
+            self.assertEqual(executor_calls[0][1]["queue"]["job_id"], "json-api-e2e")
+            self.assertEqual(generation["schema"], "tags-machine-core.generation-result/v1")
+            self.assertEqual(generation["request_body"]["parameters"]["n_samples"], 2)
+            self.assertEqual(record["result"], "pass")
+            self.assertTrue(record["diff"]["normalized_equal"])
+            self.assertEqual(record["generation_result_evidence"]["result"], "pass")
+            self.assertEqual(record["composition"]["character_scope"], "foot_detail")
+            self.assertIn("feet", record["composition"]["included_character_sections"])
+            self.assertIn("eyes", record["composition"]["suppressed_character_sections"])
+            self.assertIn("upper_clothes", record["composition"]["suppressed_character_sections"])
+            self.assertIn(
+                "reference_image_multiple",
+                record["normalized"]["core"]["parameters"],
+            )
 
     def test_cli_api_generate_executes_novelai_request(self):
         with tempfile.TemporaryDirectory() as tmp:
