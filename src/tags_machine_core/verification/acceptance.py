@@ -624,9 +624,28 @@ def _append_generation_result_evidence_messages(messages: list[str], evidence: A
         return
     if evidence.get("result") != "pass":
         messages.append("GenerationResult evidence failed")
+        _append_string_messages(messages, evidence.get("errors"))
+        _append_generation_result_request_diff_messages(messages, evidence)
     if not evidence.get("image_count"):
         messages.append("GenerationResult has no archived images")
     _append_generation_result_png_info_messages(messages, evidence)
+
+
+def _append_generation_result_request_diff_messages(
+    messages: list[str],
+    evidence: dict[str, Any],
+) -> None:
+    request_body = evidence.get("request_body")
+    diff = request_body.get("diff") if isinstance(request_body, dict) else None
+    diffs = diff.get("diffs") if isinstance(diff, dict) else None
+    if not isinstance(diffs, list):
+        return
+    for item in diffs:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if path:
+            messages.append(f"GenerationResult request_body diff at {path}")
 
 
 def _append_generation_result_png_info_messages(
@@ -657,6 +676,22 @@ def _append_prompt_bundle_evidence_messages(messages: list[str], evidence: Any) 
         return
     if evidence.get("result") != "pass":
         messages.append("PromptBundle contract evidence failed")
+        for error in _string_items(evidence.get("contract_errors")):
+            messages.append(f"PromptBundle contract error: {error}")
+        for field in _string_items(evidence.get("forbidden_meta_fields")):
+            messages.append(f"PromptBundle forbidden meta field: $.meta.{field}")
+        for field in _string_items(evidence.get("forbidden_backend_fields")):
+            messages.append(f"PromptBundle forbidden backend field: {field}")
+
+
+def _append_string_messages(messages: list[str], value: Any) -> None:
+    messages.extend(_string_items(value))
+
+
+def _string_items(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
 
 
 def _legacy_record_paths(*, source: Path, image: Path | None) -> dict[str, str]:
