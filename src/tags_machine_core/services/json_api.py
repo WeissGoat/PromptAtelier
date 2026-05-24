@@ -11,6 +11,11 @@ from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.services.generation_service import GenerationService
+from tags_machine_core.services.json_api_models import (
+    AgentComposeResolution,
+    ComposeRenderPlanResolution,
+    ComposeRenderPlanResult,
+)
 
 GenerationExecutor = Callable[[RenderRequest, Mapping[str, Any]], GenerationResult | Mapping[str, Any]]
 
@@ -105,16 +110,18 @@ class GenerationJsonApi:
         try:
             bundle = self.compose_agent(data)
         except AgentCompositionRequired as exc:
-            return {
-                "schema": "tags-machine-core.agent-compose-resolution/v1",
-                "status": "requires_agent",
-                "agent_task": to_jsonable(exc.task),
-            }
-        return {
-            "schema": "tags-machine-core.agent-compose-resolution/v1",
-            "status": "ready",
-            "prompt_bundle": bundle,
-        }
+            return _response_model_to_jsonable(
+                AgentComposeResolution(
+                    status="requires_agent",
+                    agent_task=exc.task,
+                )
+            )
+        return _response_model_to_jsonable(
+            AgentComposeResolution(
+                status="ready",
+                prompt_bundle=PromptBundle.model_validate(bundle),
+            )
+        )
 
     def render_plan(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "render-plan request")
@@ -152,27 +159,29 @@ class GenerationJsonApi:
                 render_request["style_node"] = compose_request["style_node"]
         bundle = self.compose(compose_request)
         render_request["prompt_bundle"] = bundle
-        return {
-            "schema": "tags-machine-core.compose-render-plan-result/v1",
-            "prompt_bundle": bundle,
-            "render_request": self.render_plan(render_request),
-        }
+        result = ComposeRenderPlanResult(
+            prompt_bundle=PromptBundle.model_validate(bundle),
+            render_request=RenderRequest.model_validate(self.render_plan(render_request)),
+        )
+        return _response_model_to_jsonable(result)
 
     def resolve_compose_render_plan(self, request: Mapping[str, Any]) -> dict[str, Any]:
         try:
             result = self.compose_render_plan(request)
         except AgentCompositionRequired as exc:
-            return {
-                "schema": "tags-machine-core.compose-render-plan-resolution/v1",
-                "status": "requires_agent",
-                "agent_task": to_jsonable(exc.task),
-            }
-        return {
-            "schema": "tags-machine-core.compose-render-plan-resolution/v1",
-            "status": "ready",
-            "prompt_bundle": result["prompt_bundle"],
-            "render_request": result["render_request"],
-        }
+            return _response_model_to_jsonable(
+                ComposeRenderPlanResolution(
+                    status="requires_agent",
+                    agent_task=exc.task,
+                )
+            )
+        return _response_model_to_jsonable(
+            ComposeRenderPlanResolution(
+                status="ready",
+                prompt_bundle=PromptBundle.model_validate(result["prompt_bundle"]),
+                render_request=RenderRequest.model_validate(result["render_request"]),
+            )
+        )
 
     def generate(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "generate request")
@@ -218,6 +227,14 @@ def _mapping(value: Any, label: str) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value
     raise ValueError(f"Expected mapping for {label}")
+
+
+def _response_model_to_jsonable(value: Any) -> dict[str, Any]:
+    data = to_jsonable(value)
+    if not isinstance(data, dict):
+        raise ValueError("JSON API response model must serialize to an object")
+    # 状态响应保持旧契约：未使用的顶层分支直接省略，而不是输出 null。
+    return {key: item for key, item in data.items() if item is not None}
 
 
 def _optional_mapping(value: Any) -> Mapping[str, Any] | None:

@@ -1,8 +1,14 @@
 import unittest
+from pydantic import ValidationError
 
 from tags_machine_core.contracts import PromptBundle
 from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.renderers import NovelAIRenderAdapter
+from tags_machine_core.services.json_api_models import (
+    AgentComposeResolution,
+    ComposeRenderPlanResolution,
+    ComposeRenderPlanResult,
+)
 
 
 class ContractsTest(unittest.TestCase):
@@ -48,6 +54,23 @@ class ContractsTest(unittest.TestCase):
         self.assertEqual(meta["composition"]["character_scope"], "foot_detail")
         self.assertNotIn("shot", meta)
         self.assertNotIn("constraints", meta)
+
+    def test_json_api_response_models_validate_status_payloads(self):
+        bundle = ScriptComposer().compose_full_prompt(prompt="akemi homura")
+        request = NovelAIRenderAdapter().build_request(bundle, seed=123)
+        result = ComposeRenderPlanResult(prompt_bundle=bundle, render_request=request)
+        ready = ComposeRenderPlanResolution(
+            status="ready",
+            prompt_bundle=bundle,
+            render_request=request,
+        )
+
+        self.assertEqual(result.schema_id, "tags-machine-core.compose-render-plan-result/v1")
+        self.assertEqual(ready.status, "ready")
+        with self.assertRaises(ValidationError):
+            AgentComposeResolution(status="ready")
+        with self.assertRaises(ValidationError):
+            ComposeRenderPlanResolution(status="requires_agent")
 
 
 if __name__ == "__main__":
