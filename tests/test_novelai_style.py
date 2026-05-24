@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from tags_machine_core.composers import ScriptComposer
+from tags_machine_core.nodes import migrate_legacy_style_tags
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.renderers import NovelAIRenderAdapter, NovelAIStyleRepository
 
@@ -123,6 +124,68 @@ gen_json, {"sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 
                 request.negative_prompt,
             )
             self.assertTrue(request.params["prefer_brownian"])
+
+    def test_migrated_legacy_style_node_matches_tags_txt_novelai_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            style_dir = design_root / "\u753b\u98ce" / "sample_style"
+            style_dir.mkdir(parents=True)
+            (style_dir / "tags.txt").write_text(
+                """
+style prefix,
+style suffix, best quality
+=
+origin_uc, lowres, bad anatomy
+after_uc, extra fingers
+gen_json, {"model": "nai-diffusion-4-5-full", "sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 28, "scale": 5.0, "reference_image_multiple": ["abc"], "reference_strength_multiple": [0.2], "reference_information_extracted_multiple": [0.8]}
+not_quality_prompts
+""".strip(),
+                encoding="utf-8",
+            )
+
+            legacy_style = NovelAIStyleRepository(design_root).load("sample_style")
+            migrated_node = NodeDocument.model_validate(
+                migrate_legacy_style_tags(style_dir, node_id="sample_style")
+            )
+            bundle = ScriptComposer().compose_full_prompt(
+                prompt="akemi homura, foot focus",
+                negative="bad feet",
+                style_ref="sample_style",
+            )
+
+            legacy_request = NovelAIRenderAdapter().build_request(
+                bundle,
+                seed=123,
+                style=legacy_style,
+            )
+            migrated_request = NovelAIRenderAdapter().build_request(
+                bundle,
+                seed=123,
+                style=migrated_node,
+            )
+
+            self.assertEqual(migrated_node.renderers["novelai"]["include_common_tags"], False)
+            self.assertEqual(migrated_request.prompt, legacy_request.prompt)
+            self.assertEqual(migrated_request.negative_prompt, legacy_request.negative_prompt)
+            self.assertEqual(migrated_request.model, legacy_request.model)
+            for key in (
+                "prompt",
+                "negative_prompt",
+                "sampler",
+                "noise_schedule",
+                "steps",
+                "scale",
+                "seed",
+                "extra_noise_seed",
+                "reference_image_multiple",
+                "reference_strength_multiple",
+                "reference_information_extracted_multiple",
+                "v4_prompt",
+                "v4_negative_prompt",
+                "prefer_brownian",
+                "deliberate_euler_ancestral_bug",
+            ):
+                self.assertEqual(migrated_request.params.get(key), legacy_request.params.get(key))
 
     def test_structured_style_node_builds_novelai_request(self):
         style = NodeDocument.model_validate(
