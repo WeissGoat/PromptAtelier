@@ -34,7 +34,7 @@
 - `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
 - `api-compose` / `api-render-plan` / `api-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
-- `execute-render-request`：读取已有 `RenderRequest` 并调用对应后端 client
+- `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
 - `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
@@ -59,6 +59,8 @@ NovelAI 默认使用：
 
 - ComfyUI：`http://127.0.0.1:8188`
 - Stable Diffusion WebUI / Forge：`http://127.0.0.1:7860`
+
+预研后端真实执行需要在 `execute-render-request` 中显式传 `--allow-experimental-backend`；默认执行路径只承诺 NovelAI。
 
 结构化节点示例：
 
@@ -103,7 +105,7 @@ uv run python -m tags_machine_core render-plan `
   --params-json "{\"sampler\":\"k_euler_ancestral\"}"
 ```
 
-`render-plan` / `render-plan-nodes` 只生成 `RenderRequest`，用于 UI、队列、diff 和验收。已有 `RenderRequest` 可以交给执行入口：
+`render-plan` / `render-plan-nodes` 只生成 `RenderRequest`，用于 UI、队列、diff 和验收。已有 NovelAI `RenderRequest` 可以交给执行入口：
 
 ```powershell
 uv run python -m tags_machine_core execute-render-request core_render_request.json `
@@ -181,7 +183,7 @@ uv run python -m tags_machine_core api-generate api_generate.json `
 
 `api-generate` 对应未来 `POST /generate` 的本地文件入口，输入 `RenderRequest` JSON，输出 `GenerationResult` JSON；v1 正式执行范围只包含 NovelAI。
 
-`generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 当前验收只要求 NovelAI 链路稳定；ComfyUI / SD WebUI / Forge 入口属于预研代码，不作为本阶段接入承诺。
+`generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 默认只执行 NovelAI；ComfyUI / SD WebUI / Forge 真实执行需要 `--allow-experimental-backend`，属于预研代码，不作为本阶段接入承诺。
 
 旧画风节点迁移示例：
 
