@@ -825,15 +825,26 @@ def _generation_result_png_info_image_summaries(
             continue
         raw_path = item.get("path")
         path = _resolve_generation_result_image_path(raw_path, base_dir)
+        item_parameters = item.get("parameters")
+        item_error = item.get("error")
         summary: dict[str, Any] = {
             "path": raw_path,
-            "has_parameters": bool(item.get("parameters")),
-            "has_error": bool(item.get("error")),
+            "has_parameters": bool(item_parameters),
+            "has_error": bool(item_error),
         }
-        item_parameters = item.get("parameters")
         if item_parameters is not None and not isinstance(item_parameters, dict):
             errors.append(
                 f"GenerationResult png_info image[{index}] parameters must be an object"
+            )
+        if item_parameters is not None and item_error is not None:
+            errors.append(
+                f"GenerationResult png_info image[{index}] has both parameters and error"
+            )
+        if item_error is not None and (
+            not isinstance(item_error, str) or not item_error.strip()
+        ):
+            errors.append(
+                f"GenerationResult png_info image[{index}] error must be a non-empty string"
             )
         if path is None:
             errors.append(f"GenerationResult png_info image[{index}] missing path")
@@ -855,6 +866,13 @@ def _generation_result_png_info_image_summaries(
                     index=index,
                     path=path,
                     parameters=item_parameters,
+                )
+            if isinstance(item_error, str) and item_error.strip():
+                _append_generation_result_png_error_evidence(
+                    summary,
+                    errors,
+                    index=index,
+                    path=path,
                 )
         summaries.append(summary)
     return summaries, errors
@@ -894,6 +912,26 @@ def _append_generation_result_png_parameter_evidence(
         errors.append(
             f"GenerationResult png_info image[{index}] parameters differ from image PNG"
         )
+
+
+def _append_generation_result_png_error_evidence(
+    summary: dict[str, Any],
+    errors: list[str],
+    *,
+    index: int,
+    path: Path,
+) -> None:
+    if not path.exists() or not path.is_file():
+        return
+    try:
+        read_image_parameters(path)
+    except Exception as exc:
+        summary["error_check"] = {"result": "pass", "actual_error": str(exc)}
+        return
+    summary["error_check"] = {"result": "fail"}
+    errors.append(
+        f"GenerationResult png_info image[{index}] error contradicts readable PNG"
+    )
 
 
 def _same_path(left: Path, right: Path) -> bool:
