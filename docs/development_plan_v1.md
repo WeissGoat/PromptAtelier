@@ -437,6 +437,21 @@ v1 冻结验收补充：
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
 - 回归样例集需要能用 `verify-acceptance-suite` 一次性回放；空目录、未批准差异、缺少必需样例都必须返回非 0。
 
+变更门禁：
+
+- 新增或修改 composer 时，至少选择一个旧 `run_action` 样例对照最终 positive / negative prompt、质量词、默认 negative、角色/动作拼接顺序和 `meta.composition`。局部镜头必须额外验证 section 纳入/抑制结果。
+- 新增或修改 NovelAI adapter 时，必须和旧项目请求体做归一化 diff；参考图相关字段必须覆盖数组长度、图片摘要、strength、information_extracted，不能只比较 prompt 字符串。
+- 新增 ComfyUI / SD adapter 能力时，至少要证明同一个 `PromptBundle` 能生成完整 dry-run plan，并说明它和旧 NovelAI 请求字段的映射关系；真实出图能力再用图片证据补充验收。
+- 新增节点 YAML 字段时，必须能映射回旧素材或说明消费方；如果只是给未来使用，先放在 `extra`，不得进入 v1 必填契约。
+- 新增 service / API / 前端通信格式时，必须用旧项目样例完成一次 JSON 往返：node refs -> `PromptBundle` -> `RenderRequest` -> `GenerationResult` / acceptance record。往返后关键字段不得丢失。
+
+旧项目 oracle 资料包：
+
+- 每个样例至少归档旧项目最终请求体、旧图、旧图 PNG 参数、新 `PromptBundle`、新 `RenderRequest`、新图或 dry-run 结果、验收记录。
+- oracle 资料包可以由旧项目脚本提前生成，但 core 的回放、测试和验收只能读取这些静态产物。
+- 若旧项目自身输出存在已知问题，例如局部镜头混入头发、眼睛、上衣等不相关 tags，core 可以修复；修复差异必须进入 `intentional_differences`，并标明对应 composer 规则。
+- 未归档 oracle 的新能力只能算开发完成，不能算旧项目对照验收完成。
+
 旧项目基准验收矩阵：
 
 | 层级 | 参照对象 | 必须一致的内容 | 允许差异 |
