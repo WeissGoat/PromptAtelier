@@ -426,6 +426,131 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(api_result["render_request"]["params"]["n_samples"], 2)
             self.assertEqual(api_result["render_request"]["params"]["cfg_rescale"], 0.15)
 
+    def test_agent_json_api_builds_task_and_reuses_cached_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            request = {
+                "nodes": {
+                    "character": str(character),
+                    "action": str(action),
+                },
+                "style": str(style),
+                "extra_prompt": "soles toward viewer",
+                "negative": "face focus",
+                "character_scope": "foot_detail",
+                "agent": {
+                    "instructions": ["局部特写只保留脚部相关角色细节"],
+                    "result": {
+                        "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
+                        "negative": "extra toes, face focus",
+                        "character_scope": "foot_detail",
+                        "included_character_sections": ["character", "feet"],
+                        "suppressed_character_sections": ["eyes", "upper_clothes"],
+                        "notes": ["agent 已按 foot_detail 合并"],
+                    },
+                },
+                "cache": {
+                    "cache_dir": str(cache_dir),
+                },
+            }
+            api = GenerationJsonApi()
+
+            task = api.agent_task(request)
+            first = api.compose_agent(request)
+            second_request = dict(request)
+            second_request["agent"] = {
+                "instructions": ["局部特写只保留脚部相关角色细节"],
+            }
+            second = api.compose_agent(second_request)
+
+            self.assertEqual(task["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertTrue(task["cache_key"].startswith("sha256:"))
+            self.assertEqual(task["nodes"]["character"]["id"], "homura")
+            self.assertEqual(task["nodes"]["action"]["node"]["character_scope"], "foot_detail")
+            self.assertEqual(task["instructions"], ["局部特写只保留脚部相关角色细节"])
+            self.assertEqual(first["meta"]["composer_type"], "agent")
+            self.assertEqual(first["meta"]["style_ref"], "api_style")
+            self.assertEqual(first["prompt"]["positive"], "akemi homura, bare soles, foot focus, soles toward viewer")
+            self.assertEqual(first["meta"]["composition"]["suppressed_character_sections"], ["eyes", "upper_clothes"])
+            self.assertFalse(first["cache"]["cache_hit"])
+            self.assertTrue(second["cache"]["cache_hit"])
+            self.assertEqual(
+                _without_runtime_fields(first),
+                _without_runtime_fields({**second, "cache": {**second["cache"], "cache_hit": False}}),
+            )
+
+    def test_cli_api_agent_entries_read_json_request_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            request_path = root / "agent_request.json"
+            task_output = root / "agent_task.json"
+            bundle_output = root / "agent_bundle.json"
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": {
+                            "character": str(character),
+                            "action": str(action),
+                        },
+                        "style": str(style),
+                        "character_scope": "foot_detail",
+                        "agent": {
+                            "instructions": ["避免把眼睛和上衣放进脚部特写"],
+                            "result": {
+                                "positive": "akemi homura, bare soles, foot focus",
+                                "negative": "extra toes, face focus",
+                                "character_scope": "foot_detail",
+                                "included_character_sections": ["character", "feet"],
+                                "suppressed_character_sections": ["eyes", "upper_clothes"],
+                            },
+                        },
+                        "cache": {
+                            "cache_dir": str(cache_dir),
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            task_stdout = io.StringIO()
+            with redirect_stdout(task_stdout):
+                task_exit = main(
+                    [
+                        "api-agent-task",
+                        str(request_path),
+                        "--output",
+                        str(task_output),
+                    ]
+                )
+            bundle_stdout = io.StringIO()
+            with redirect_stdout(bundle_stdout):
+                bundle_exit = main(
+                    [
+                        "api-compose-agent",
+                        str(request_path),
+                        "--output",
+                        str(bundle_output),
+                    ]
+                )
+
+            task_printed = json.loads(task_stdout.getvalue())
+            task_written = json.loads(task_output.read_text(encoding="utf-8"))
+            bundle_printed = json.loads(bundle_stdout.getvalue())
+            bundle_written = json.loads(bundle_output.read_text(encoding="utf-8"))
+
+            self.assertEqual(task_exit, 0)
+            self.assertEqual(bundle_exit, 0)
+            self.assertEqual(task_printed["cache_key"], task_written["cache_key"])
+            self.assertEqual(bundle_printed["prompt"]["positive"], "akemi homura, bare soles, foot focus")
+            self.assertEqual(bundle_written["meta"]["composer_type"], "agent")
+            self.assertEqual(bundle_written["meta"]["composition"]["character_scope"], "foot_detail")
+            self.assertTrue(any(cache_dir.glob("*.json")))
+
     def test_generate_json_api_uses_injected_executor(self):
         calls = []
 

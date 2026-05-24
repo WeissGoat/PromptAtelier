@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
 
+from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.nodes import NodeReader
@@ -29,6 +30,9 @@ class GenerationJsonApi:
 
     def compose(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "compose request")
+        if _is_agent_compose_request(data):
+            return self.compose_agent(data)
+
         style_node = self._load_optional_node(data.get("style") or data.get("style_node"))
         style_ref = _optional_string(data.get("style_ref")) or (style_node.id if style_node else None)
 
@@ -57,6 +61,41 @@ class GenerationJsonApi:
             style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope")),
             body_scope=_optional_string(data.get("body_scope")),
+        )
+        return to_jsonable(bundle)
+
+    def agent_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        data = _mapping(request, "agent-task request")
+        character, action, background, style_ref = self._load_agent_inputs(data)
+        task = self.service.build_agent_composition_task(
+            character=character,
+            action=action,
+            background=background,
+            extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
+            negative=str(data.get("negative") or ""),
+            style_ref=style_ref,
+            character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
+            instructions=_string_list(_agent_value(data, "instructions", "instruction")),
+        )
+        return to_jsonable(task)
+
+    def compose_agent(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        data = _mapping(request, "compose-agent request")
+        character, action, background, style_ref = self._load_agent_inputs(data)
+        result = _optional_mapping(_agent_value(data, "agent_result", "result"))
+        cache_dir = _optional_string(_agent_value(data, "cache_dir", "cache_root"))
+        cache = PromptCache(cache_dir) if cache_dir else None
+        bundle = self.service.compose_nodes_with_agent(
+            character=character,
+            action=action,
+            background=background,
+            extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
+            negative=str(data.get("negative") or ""),
+            style_ref=style_ref,
+            character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
+            instructions=_string_list(_agent_value(data, "instructions", "instruction")),
+            result=result,
+            cache=cache,
         )
         return to_jsonable(bundle)
 
@@ -126,6 +165,21 @@ class GenerationJsonApi:
             return NodeDocument.model_validate(value)
         raise ValueError(f"Expected node path or node mapping, got: {type(value).__name__}")
 
+    def _load_agent_inputs(
+        self,
+        data: Mapping[str, Any],
+    ) -> tuple[NodeDocument | None, NodeDocument | None, NodeDocument | None, str | None]:
+        nodes = _mapping(data.get("nodes") or {}, "agent request nodes")
+        character = self._load_optional_node(nodes.get("character") or data.get("character"))
+        action = self._load_optional_node(nodes.get("action") or data.get("action"))
+        background = self._load_optional_node(nodes.get("background") or data.get("background"))
+        if character is None and action is None and background is None:
+            raise ValueError("agent request must provide at least one node")
+
+        style_node = self._load_optional_node(data.get("style") or data.get("style_node"))
+        style_ref = _optional_string(data.get("style_ref")) or (style_node.id if style_node else None)
+        return character, action, background, style_ref
+
 
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
@@ -146,6 +200,16 @@ def _optional_string(value: Any) -> str | None:
     return text or None
 
 
+def _string_list(value: Any) -> list[str]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item).strip()]
+    raise ValueError(f"Expected string or list of strings, got: {type(value).__name__}")
+
+
 def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -158,3 +222,26 @@ def _int_or_default(value: Any, default: int) -> int:
 
 def _default_render_action(backend: str) -> str:
     return "generate" if backend == "novelai" else "render-plan"
+
+
+def _is_agent_compose_request(data: Mapping[str, Any]) -> bool:
+    composer = _optional_string(data.get("composer") or data.get("composer_type"))
+    if composer == "agent":
+        return True
+    return "agent_result" in data or "agent" in data
+
+
+def _agent_value(data: Mapping[str, Any], *keys: str) -> Any:
+    agent = data.get("agent")
+    agent_data = agent if isinstance(agent, Mapping) else {}
+    for key in keys:
+        if key in data:
+            return data[key]
+        if key in agent_data:
+            return agent_data[key]
+    cache = data.get("cache")
+    cache_data = cache if isinstance(cache, Mapping) else {}
+    for key in keys:
+        if key in cache_data:
+            return cache_data[key]
+    return None

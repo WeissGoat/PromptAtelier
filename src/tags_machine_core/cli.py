@@ -414,6 +414,22 @@ def cmd_api_compose(args) -> int:
     return 0
 
 
+def cmd_api_agent_task(args) -> int:
+    result = GenerationJsonApi().agent_task(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
+def cmd_api_compose_agent(args) -> int:
+    result = GenerationJsonApi().compose_agent(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_api_render_plan(args) -> int:
     result = GenerationJsonApi().render_plan(_load_json_mapping_file(args.request))
     if args.output:
@@ -710,6 +726,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_request_arguments(api_compose)
     api_compose.set_defaults(func=cmd_api_compose)
+
+    api_agent_task = subparsers.add_parser(
+        "api-agent-task",
+        parents=[output_parent],
+        help="Build an agent-readable composition task from a JSON API request file",
+    )
+    _add_api_request_arguments(api_agent_task)
+    api_agent_task.set_defaults(func=cmd_api_agent_task)
+
+    api_compose_agent = subparsers.add_parser(
+        "api-compose-agent",
+        parents=[output_parent],
+        help="Build a PromptBundle from an agent JSON API request file",
+    )
+    _add_api_request_arguments(api_compose_agent)
+    api_compose_agent.set_defaults(func=cmd_api_compose_agent)
 
     api_render_plan = subparsers.add_parser(
         "api-render-plan",

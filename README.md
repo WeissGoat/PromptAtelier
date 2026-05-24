@@ -35,7 +35,7 @@
 - `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
-- `api-compose` / `api-render-plan` / `api-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
+- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-render-plan` / `api-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关
 - `inspect-node`：读取节点文件或目录
@@ -91,6 +91,42 @@ uv run python -m tags_machine_core compose-agent-nodes `
 ```
 
 `agent-task-nodes` 不调用模型，只输出稳定任务 JSON。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
+
+等价的 JSON API 文件入口适合前端和 worker 使用：
+
+```json
+{
+  "nodes": {
+    "character": "examples/nodes/characters/homura",
+    "action": "examples/nodes/actions/foot_closeup"
+  },
+  "style": "examples/nodes/styles/anime_comfy",
+  "character_scope": "foot_detail",
+  "agent": {
+    "instructions": ["组合角色和动作，局部特写不要带入无关角色细节"],
+    "result": {
+      "positive": "akemi homura, bare soles, foot focus",
+      "negative": "extra toes, face focus",
+      "character_scope": "foot_detail",
+      "included_character_sections": ["character", "feet"],
+      "suppressed_character_sections": ["eyes", "upper_clothes"]
+    }
+  },
+  "cache": {
+    "cache_dir": "cache/prompt"
+  }
+}
+```
+
+```powershell
+uv run python -m tags_machine_core api-agent-task agent_request.json `
+  --output agent_task.json
+
+uv run python -m tags_machine_core api-compose-agent agent_request.json `
+  --output prompt_bundle.json
+```
+
+`api-agent-task` 和 `api-compose-agent` 也不调用模型。前者只生成 agent 可读任务；后者把外部 agent 结果落成 `PromptBundle` 并支持同输入缓存复用。
 
 NovelAI render plan 示例：
 
@@ -161,7 +197,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json `
   --output api_response.json
 ```
 
-`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。已有 `RenderRequest` 可以通过本地 JSON API 执行：
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。`api-compose` 也可以通过 `"composer": "agent"` 或 `agent.result` 走 agent composer 路径，效果等价于 `api-compose-agent`。已有 `RenderRequest` 可以通过本地 JSON API 执行：
 
 ```json
 {

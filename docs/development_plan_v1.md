@@ -142,6 +142,9 @@ ComfyUI / SD 的真实执行函数也放在 execution 层，便于后续接入�
 POST /compose
 Node refs -> PromptBundle JSON
 
+POST /agent-task
+Node refs -> AgentCompositionTask JSON
+
 POST /render-plan
 PromptBundle JSON -> RenderRequest JSON
 
@@ -153,10 +156,14 @@ RenderRequest JSON -> GenerationResult JSON
 
 ```powershell
 uv run python -m tags_machine_core api-compose api_compose.json
+uv run python -m tags_machine_core api-agent-task agent_request.json --output agent_task.json
+uv run python -m tags_machine_core api-compose-agent agent_request.json --output prompt_bundle.json
 uv run python -m tags_machine_core api-render-plan api_render_plan.json
 uv run python -m tags_machine_core api-compose-render-plan api_request.json --output api_response.json
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 ```
+
+`GenerationJsonApi.agent_task()` 和 `GenerationJsonApi.compose_agent()` 是 agent 拼接的本地 JSON 边界。前者只生成稳定任务 JSON，不调用模型；后者接收外部 agent result，落成 `PromptBundle` 并写入缓存。`api-compose` 在请求里带 `"composer": "agent"`、`agent.result` 或 `agent` 对象时，也会走同一条 agent composer 路径。
 
 `GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_render_request()`，并关闭实验后端，只支持 NovelAI，符合 v1 正式范围。
 
@@ -268,6 +275,16 @@ uv run python -m tags_machine_core compose-agent-nodes `
 
 `agent-task-nodes` 输出给 agent 读取的任务，不联网。`compose-agent-nodes` 接收外部 agent 结果并生成 `PromptBundle`；如果 `--cache-dir` 已有相同输入的缓存，可以不传 `--agent-result`，直接复用缓存。
 
+面向前端和 worker 的等价文件入口是 `api-agent-task` 与 `api-compose-agent`。它们读取同一类 JSON 请求，支持把 `agent.instructions`、`agent.result` 和 `cache.cache_dir` 放在请求体里，便于队列记录完整上下文：
+
+```powershell
+uv run python -m tags_machine_core api-agent-task agent_request.json `
+  --output agent_task.json
+
+uv run python -m tags_machine_core api-compose-agent agent_request.json `
+  --output prompt_bundle.json
+```
+
 Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 
 ## 生图适配层
@@ -341,7 +358,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网；当前正式验收只要求 NovelAI 链路稳定。
 - `run-prompt` 面向完整角色+动作混合 prompt。它不读取 character/action 节点，也不做 `character_scope` 裁剪，只把完整 prompt 落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--dry-run` 输出 `PromptBundle + RenderRequest`，去掉 `--dry-run` 后需要 `NAI_ACCESS_TOKEN` 并真实生图；`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
-- `api-compose` / `api-render-plan` / `api-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约。
+- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-render-plan` / `api-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、`PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
