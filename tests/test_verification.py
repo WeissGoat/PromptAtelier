@@ -577,6 +577,121 @@ class VerificationTest(unittest.TestCase):
             self.assertIn("foot_detail", result["missing_required_cases"])
             self.assertIn("reference_style", result["missing_required_cases"])
 
+    def test_verify_acceptance_suite_checks_minimum_case_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_record(case_id: str, composition: dict | None = None) -> None:
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                bundle = root / f"{case_id}_bundle.json"
+                record_path = root / f"{case_id}.json"
+                payload = {"parameters": _sample_parameters()}
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                prompt_bundle = None
+                if composition is not None:
+                    bundle.write_text(
+                        json.dumps({"meta": {"composition": composition}}),
+                        encoding="utf-8",
+                    )
+                    prompt_bundle = bundle
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                    prompt_bundle=prompt_bundle,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            write_record("default_action_001")
+            write_record(
+                "foot_detail_001",
+                {
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes"],
+                },
+            )
+            write_record(
+                "hand_detail_001",
+                {
+                    "character_scope": "hand_detail",
+                    "included_character_sections": ["character", "hands"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes", "feet"],
+                },
+            )
+            write_record("complex_character_001")
+            write_record("reference_style_001")
+
+            result = verify_acceptance_suite(root, require_minimum_set=True)
+
+            self.assertTrue(result["match"])
+            self.assertEqual(result["case_check_fail_count"], 0)
+            self.assertEqual(result["missing_required_cases"], [])
+            self.assertEqual(
+                {check["required_case"] for check in result["case_checks"]},
+                {"foot_detail", "hand_detail", "reference_style"},
+            )
+
+    def test_verify_acceptance_suite_fails_bad_minimum_case_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_record(case_id: str, composition: dict | None = None) -> None:
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                bundle = root / f"{case_id}_bundle.json"
+                record_path = root / f"{case_id}.json"
+                payload = {"parameters": _sample_parameters()}
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                prompt_bundle = None
+                if composition is not None:
+                    bundle.write_text(
+                        json.dumps({"meta": {"composition": composition}}),
+                        encoding="utf-8",
+                    )
+                    prompt_bundle = bundle
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                    prompt_bundle=prompt_bundle,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            write_record("default_action_001")
+            write_record(
+                "foot_detail_001",
+                {
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["eyes"],
+                },
+            )
+            write_record(
+                "hand_detail_001",
+                {
+                    "character_scope": "hand_detail",
+                    "included_character_sections": ["character", "hands"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes", "feet"],
+                },
+            )
+            write_record("complex_character_001")
+            write_record("reference_style_001")
+
+            result = verify_acceptance_suite(root, require_minimum_set=True)
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["missing_required_cases"], [])
+            self.assertEqual(result["case_check_fail_count"], 1)
+            foot_check = [
+                check for check in result["case_checks"] if check["required_case"] == "foot_detail"
+            ][0]
+            self.assertEqual(foot_check["result"], "fail")
+            self.assertIn("upper_clothes", foot_check["messages"][0])
+
     def test_verify_acceptance_suite_fails_when_no_records_found(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

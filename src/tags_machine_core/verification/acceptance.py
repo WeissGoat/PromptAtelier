@@ -28,6 +28,18 @@ MINIMUM_ACCEPTANCE_CASES = (
     "complex_character",
     "reference_style",
 )
+MINIMUM_SCOPE_CASES = {
+    "foot_detail": {
+        "character_scope": "foot_detail",
+        "included_any": ("feet",),
+        "suppressed_all": ("hair", "eyes", "upper_clothes"),
+    },
+    "hand_detail": {
+        "character_scope": "hand_detail",
+        "included_any": ("hands", "hand"),
+        "suppressed_all": ("hair", "eyes", "upper_clothes", "feet"),
+    },
+}
 ACCEPTANCE_RECORD_EXTENSIONS = {".json", ".yaml", ".yml"}
 ACCEPTANCE_PATH_FIELDS = {
     "source_path",
@@ -277,6 +289,7 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
         "diff": rebuilt["diff"],
         "intentional_differences": rebuilt["intentional_differences"],
         "composition": rebuilt["composition"],
+        "normalized": rebuilt["normalized"],
         "image_evidence": rebuilt["image_evidence"],
     }
 
@@ -321,19 +334,23 @@ def verify_acceptance_suite(
         for required_case in required
         if not _case_requirement_satisfied(required_case, case_ids)
     ]
+    case_checks = _minimum_case_checks(results) if require_minimum_set else []
+    case_check_fail_count = sum(1 for item in case_checks if item.get("result") != "pass")
     fail_count = sum(1 for item in results if not item.get("match"))
     errors: list[str] = []
     if not results:
         errors.append("No acceptance records found")
-    match = not errors and fail_count == 0 and not missing_required_cases
+    match = not errors and fail_count == 0 and not missing_required_cases and case_check_fail_count == 0
     return {
         "schema": ACCEPTANCE_SUITE_SCHEMA,
         "suite_path": str(path),
         "record_count": len(results),
         "pass_count": len(results) - fail_count,
         "fail_count": fail_count,
+        "case_check_fail_count": case_check_fail_count,
         "required_cases": required,
         "missing_required_cases": missing_required_cases,
+        "case_checks": case_checks,
         "errors": errors,
         "match": match,
         "result": "pass" if match else "fail",
@@ -551,6 +568,119 @@ def _unique_strings(values) -> list[str]:
 def _case_requirement_satisfied(required_case: str, case_ids: list[str]) -> bool:
     prefix = f"{required_case}_"
     return any(case_id == required_case or case_id.startswith(prefix) for case_id in case_ids)
+
+
+def _minimum_case_checks(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    for required_case in MINIMUM_ACCEPTANCE_CASES:
+        records = _records_for_required_case(required_case, results)
+        if not records:
+            continue
+        if required_case in MINIMUM_SCOPE_CASES:
+            checks.append(_scope_case_check(required_case, records))
+        elif required_case == "reference_style":
+            checks.append(_reference_style_case_check(records))
+    return checks
+
+
+def _records_for_required_case(
+    required_case: str,
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in results
+        if _case_requirement_satisfied(required_case, [str(record.get("case_id") or "")])
+    ]
+
+
+def _scope_case_check(required_case: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+    rule = MINIMUM_SCOPE_CASES[required_case]
+    failures: list[str] = []
+    for record in records:
+        errors = _scope_case_errors(record, rule)
+        if not errors:
+            return {
+                "required_case": required_case,
+                "case_ids": [str(item.get("case_id")) for item in records],
+                "matched_case_id": str(record.get("case_id")),
+                "result": "pass",
+                "messages": [],
+            }
+        failures.append(f"{record.get('case_id')}: {'; '.join(errors)}")
+    return {
+        "required_case": required_case,
+        "case_ids": [str(item.get("case_id")) for item in records],
+        "matched_case_id": None,
+        "result": "fail",
+        "messages": failures,
+    }
+
+
+def _scope_case_errors(record: dict[str, Any], rule: dict[str, Any]) -> list[str]:
+    composition = record.get("composition") if isinstance(record.get("composition"), dict) else {}
+    included = set(_normalized_string_list(composition.get("included_character_sections")))
+    suppressed = set(_normalized_string_list(composition.get("suppressed_character_sections")))
+    expected_scope = str(rule["character_scope"])
+    errors: list[str] = []
+    if composition.get("character_scope") != expected_scope:
+        errors.append(f"expected character_scope={expected_scope}")
+    included_any = set(rule["included_any"])
+    if included.isdisjoint(included_any):
+        errors.append(f"expected one included section from {sorted(included_any)}")
+    missing_suppressed = sorted(set(rule["suppressed_all"]) - suppressed)
+    if missing_suppressed:
+        errors.append(f"missing suppressed sections {missing_suppressed}")
+    return errors
+
+
+def _reference_style_case_check(records: list[dict[str, Any]]) -> dict[str, Any]:
+    failures: list[str] = []
+    for record in records:
+        errors = _reference_style_case_errors(record)
+        if not errors:
+            return {
+                "required_case": "reference_style",
+                "case_ids": [str(item.get("case_id")) for item in records],
+                "matched_case_id": str(record.get("case_id")),
+                "result": "pass",
+                "messages": [],
+            }
+        failures.append(f"{record.get('case_id')}: {'; '.join(errors)}")
+    return {
+        "required_case": "reference_style",
+        "case_ids": [str(item.get("case_id")) for item in records],
+        "matched_case_id": None,
+        "result": "fail",
+        "messages": failures,
+    }
+
+
+def _reference_style_case_errors(record: dict[str, Any]) -> list[str]:
+    params = (
+        ((record.get("normalized") or {}).get("core") or {}).get("parameters")
+        if isinstance(record.get("normalized"), dict)
+        else {}
+    )
+    if not isinstance(params, dict):
+        return ["missing normalized core parameters"]
+    references = params.get("reference_image_multiple") or []
+    strengths = params.get("reference_strength_multiple") or []
+    information = params.get("reference_information_extracted_multiple") or []
+    errors: list[str] = []
+    if not isinstance(references, list) or not references:
+        errors.append("missing reference_image_multiple")
+    if not isinstance(strengths, list) or len(strengths) != len(references):
+        errors.append("reference_strength_multiple length mismatch")
+    if not isinstance(information, list) or len(information) != len(references):
+        errors.append("reference_information_extracted_multiple length mismatch")
+    return errors
+
+
+def _normalized_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _validate_case_id(case_id: str) -> str:

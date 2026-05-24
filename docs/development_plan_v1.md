@@ -330,7 +330,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - `archive-acceptance-case` 会把旧项目 oracle 和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
 - `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；它不运行旧项目代码，也不联网生图。
-- `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全。
+- `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全，并输出 `case_checks` 验证关键样例语义。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
 
@@ -455,6 +455,7 @@ v1 冻结验收补充：
 - 验收脚本不能依赖旧项目运行时代码。旧项目可以生成 oracle 文件，core 的测试只读取 oracle JSON、PNG 参数或素材文件。
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
 - 回归样例集需要能用 `verify-acceptance-suite` 一次性回放；空目录、未批准差异、缺少必需样例都必须返回非 0。
+- 使用 `--require-minimum-set` 时，suite 不只检查 case id：`foot_detail` / `hand_detail` 必须验证 `PromptBundle.meta.composition` 的 scope、included sections 和 suppressed sections；`reference_style` 必须验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 数组非空且长度一致。
 
 变更门禁：
 
