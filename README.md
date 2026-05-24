@@ -31,6 +31,7 @@
 - `compose-agent-nodes`：把外部 agent 结果落成 `PromptBundle`，支持缓存复用
 - `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
+- `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
 - `api-compose` / `api-render-plan` / `api-compose-render-plan`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并调用对应后端 client
@@ -42,6 +43,7 @@
 - `create-acceptance-record`：生成旧项目对照验收记录
 - `archive-acceptance-case`：把旧项目 oracle 和 core 产物复制成可回放资料包
 - `archive-novelai-acceptance-nodes`：从结构化节点生成 NovelAI core 产物并归档旧项目对照资料包
+- `archive-novelai-acceptance-prompt`：从完整 prompt 生成 NovelAI core 产物并归档旧项目对照资料包
 - `verify-acceptance-record`：重算验收记录并检查未批准差异
 - `verify-acceptance-suite`：批量重算验收记录，并检查必需样例是否齐全
 - `config`：查看配置解析结果
@@ -109,6 +111,27 @@ uv run python -m tags_machine_core execute-render-request core_render_request.js
   --output-dir outputs
 ```
 
+完整 prompt 入口示例：
+
+```powershell
+uv run python -m tags_machine_core run-prompt `
+  --dry-run `
+  --prompt "akemi homura, bare soles, foot focus" `
+  --style-node examples\nodes\styles\anime_comfy `
+  --seed 123 `
+  --nt 3
+
+uv run python -m tags_machine_core run-prompt `
+  --prompt-file agent_prompt.txt `
+  --style-ref 20260412_2 `
+  --config configs\local.example.yaml `
+  --output-dir outputs `
+  --seed 123 `
+  --nt 3
+```
+
+`run-prompt` 用于“agent 或人工已经给出完整角色+动作混合 prompt”的场景。它不会再按 `character_scope` 裁剪角色节点，只把输入落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
+
 JSON API 边界示例：
 
 ```json
@@ -135,7 +158,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json `
 
 `api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。
 
-`generate` 是 NovelAI 的快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片。`execute-render-request` 当前验收只要求 NovelAI 链路稳定；ComfyUI / SD WebUI / Forge 入口属于预研代码，不作为本阶段接入承诺。
+`generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 当前验收只要求 NovelAI 链路稳定；ComfyUI / SD WebUI / Forge 入口属于预研代码，不作为本阶段接入承诺。
 
 旧画风节点迁移示例：
 
@@ -176,12 +199,22 @@ uv run python -m tags_machine_core archive-novelai-acceptance-nodes `
   --seed 123 `
   --required-case foot_detail `
   --overwrite
+uv run python -m tags_machine_core archive-novelai-acceptance-prompt `
+  --case-id default_action_prompt_001 `
+  --output-dir acceptance `
+  --legacy-source old_request.json `
+  --prompt-file agent_prompt.txt `
+  --style-node examples\nodes\styles\anime_comfy `
+  --seed 123 `
+  --nt 3 `
+  --required-case default_action `
+  --overwrite
 uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set
 ```
 
 `compare-render-params` 会完整比较 NovelAI 请求关键字段，包括 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 等。图片/base64 字段会用长度和 sha256 摘要比较，避免把大段 base64 打进终端。
 
-`create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异、`PromptBundle.meta.composition` 和可选 `GenerationResult` 归档成 JSON/YAML；如果提供 `--generation-result`，会验证其中的 `request_body` 与 core `RenderRequest` 归一化后一致。`archive-acceptance-case` 会进一步把这些证据复制到独立样例目录，并更新 suite manifest，方便后续不运行旧项目也能回放。`archive-novelai-acceptance-nodes` 会先从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再复用同一套归档逻辑，适合批量补旧项目 oracle 样例。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异时返回非 0。`verify-acceptance-suite` 可以验证单个 record、record 目录或 manifest；`--require-minimum-set` 会要求 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例都存在，并输出 `case_checks` 检查局部镜头 composition 和 reference/vibe 数组是否真的覆盖到。
+`create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异、`PromptBundle.meta.composition` 和可选 `GenerationResult` 归档成 JSON/YAML；如果提供 `--generation-result`，会验证其中的 `request_body` 与 core `RenderRequest` 归一化后一致。`archive-acceptance-case` 会进一步把这些证据复制到独立样例目录，并更新 suite manifest，方便后续不运行旧项目也能回放。`archive-novelai-acceptance-nodes` 会先从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再复用同一套归档逻辑，适合批量补结构化节点 oracle 样例。`archive-novelai-acceptance-prompt` 面向完整 prompt / agent prompt 样例，只叠加 NovelAI 画风后归档，用来验证它和旧 `run_action` 或旧 `run-prompt` oracle 的 render plan 等价。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异时返回非 0。`verify-acceptance-suite` 可以验证单个 record、record 目录或 manifest；`--require-minimum-set` 会要求 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例都存在，并输出 `case_checks` 检查局部镜头 composition 和 reference/vibe 数组是否真的覆盖到。
 
 详细文档：
 

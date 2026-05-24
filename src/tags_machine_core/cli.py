@@ -130,6 +130,29 @@ def cmd_render_plan_nodes(args) -> int:
     return 0
 
 
+def cmd_run_prompt(args) -> int:
+    service = GenerationService()
+    bundle, request = _build_novelai_prompt_artifacts(service, args)
+    result: dict[str, Any] = {
+        "schema": "tags-machine-core.run-prompt-result/v1",
+        "dry_run": args.dry_run,
+        "prompt_bundle": bundle,
+        "render_request": request,
+    }
+    if not args.dry_run:
+        if not args.config:
+            raise ValueError("run-prompt without --dry-run requires --config")
+        config = load_config(Path(args.config))
+        result["generation_result"] = _execute_novelai_generation(
+            config,
+            request,
+            output_dir=args.output_dir,
+            image_format=args.format,
+        )
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_generate(args) -> int:
     config = load_config(Path(args.config))
     service = GenerationService()
@@ -147,31 +170,11 @@ def cmd_generate(args) -> int:
         model=args.model,
         params=_load_json_arg(args.params_json),
     )
-    access_token = os.environ.get(config.novelai.access_token_env)
-    if not access_token:
-        raise RuntimeError(
-            f"Missing NovelAI token environment variable: {config.novelai.access_token_env}"
-        )
-    client = NovelAIClient(
-        access_token=access_token,
-        base_url=config.novelai.base_url,
-        timeout=config.novelai.timeout,
-        retry=config.novelai.retry,
-    )
-    images = client.generate_images(request)
-    output_dir = Path(args.output_dir or config.runtime.output_dir)
-    generated_images = _save_generated_images(
-        images,
-        output_dir=output_dir,
-        request=request,
-        default_format=config.defaults.image_format,
-    )
-    result = GenerationResult(
-        backend="novelai",
-        images=generated_images,
-        request_body=client.build_payload(request),
-        png_info=_collect_png_info(generated_images),
-        cache_hit=False,
+    result = _execute_novelai_generation(
+        config,
+        request,
+        output_dir=args.output_dir,
+        image_format=config.defaults.image_format,
     )
     print_json(result, full=args.full)
     return 0
@@ -404,6 +407,47 @@ def cmd_archive_novelai_acceptance_nodes(args) -> int:
     return 0 if archive["result"] == "pass" else 2
 
 
+def cmd_archive_novelai_acceptance_prompt(args) -> int:
+    service = GenerationService()
+    bundle, request = _build_novelai_prompt_artifacts(service, args)
+
+    case_dir = _acceptance_case_dir(args.output_dir, args.case_id)
+    core_dir = case_dir / "core"
+    prompt_bundle_path = core_dir / "prompt_bundle.json"
+    render_request_path = core_dir / "render_request.json"
+    _write_generated_core_artifact(
+        bundle.model_dump(by_alias=True, mode="json"),
+        prompt_bundle_path,
+        overwrite=args.overwrite,
+    )
+    _write_generated_core_artifact(
+        request.model_dump(by_alias=True, mode="json"),
+        render_request_path,
+        overwrite=args.overwrite,
+    )
+
+    archive = archive_acceptance_case(
+        case_id=args.case_id,
+        output_dir=args.output_dir,
+        legacy_source=args.legacy_source,
+        core_source=render_request_path,
+        legacy_image=args.legacy_image,
+        core_image=args.core_image,
+        prompt_bundle=prompt_bundle_path,
+        generation_result=args.generation_result,
+        whitelist=parse_whitelist_args(args.whitelist),
+        intentional_differences=parse_intentional_difference_args(args.intentional_difference),
+        notes=args.note or [],
+        manifest=args.manifest,
+        required_cases=args.required_case or [],
+        update_manifest=not args.no_manifest,
+        overwrite=args.overwrite,
+        record_format=args.format,
+    )
+    print_json(archive, full=args.full)
+    return 0 if archive["result"] == "pass" else 2
+
+
 def cmd_verify_acceptance_record(args) -> int:
     result = verify_acceptance_record(args.record)
     print_json(result, full=args.full)
@@ -482,6 +526,12 @@ def _load_render_request(path: str | Path) -> RenderRequest:
     return RenderRequest.model_validate(data)
 
 
+def _read_prompt_value(args) -> str:
+    if getattr(args, "prompt_file", None):
+        return Path(args.prompt_file).read_text(encoding="utf-8").strip()
+    return str(args.prompt or "").strip()
+
+
 def _build_bundle(service: GenerationService, args, *, style_ref: str | None = None):
     return service.compose_full_prompt(
         prompt=args.prompt,
@@ -507,6 +557,27 @@ def _build_bundle_from_nodes(
         character_scope=args.character_scope,
         body_scope=args.body_scope,
     )
+
+
+def _build_novelai_prompt_artifacts(service: GenerationService, args):
+    style_ref, style = _load_novelai_style_for_prompt(args)
+    bundle = service.compose_full_prompt(
+        prompt=_read_prompt_value(args),
+        negative=args.negative or "",
+        style_ref=style_ref,
+    )
+    params = _load_json_arg(args.params_json)
+    params["n_samples"] = args.nt
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=params,
+    )
+    return bundle, request
 
 
 def _read_node_inputs(args):
@@ -539,6 +610,20 @@ def _load_novelai_style_for_nodes(args):
 
     style_ref = args.style_ref
     if args.config:
+        config = load_config(Path(args.config))
+        style_ref = style_ref or config.defaults.style_ref
+        if style_ref:
+            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    return style_ref, None
+
+
+def _load_novelai_style_for_prompt(args):
+    if args.style_node:
+        node = NodeReader().read(args.style_node)
+        return args.style_ref or args.artist or node.id, node
+
+    style_ref = args.style_ref or args.artist
+    if getattr(args, "config", None):
         config = load_config(Path(args.config))
         style_ref = style_ref or config.defaults.style_ref
         if style_ref:
@@ -606,6 +691,39 @@ def _save_generated_images(
             )
         )
     return generated_images
+
+
+def _execute_novelai_generation(
+    config,
+    request: RenderRequest,
+    *,
+    output_dir: str | Path | None,
+    image_format: str,
+) -> GenerationResult:
+    access_token = os.environ.get(config.novelai.access_token_env)
+    if not access_token:
+        raise RuntimeError(
+            f"Missing NovelAI token environment variable: {config.novelai.access_token_env}"
+        )
+    client = NovelAIClient(
+        access_token=access_token,
+        base_url=config.novelai.base_url,
+        timeout=config.novelai.timeout,
+        retry=config.novelai.retry,
+    )
+    images = _save_generated_images(
+        client.generate_images(request),
+        output_dir=Path(output_dir or config.runtime.output_dir),
+        request=request,
+        default_format=image_format,
+    )
+    return GenerationResult(
+        backend="novelai",
+        images=images,
+        request_body=client.build_payload(request),
+        png_info=_collect_png_info(images),
+        cache_hit=False,
+    )
 
 
 def _collect_png_info(images: list[GeneratedImage]) -> dict[str, Any]:
@@ -698,6 +816,20 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan_nodes.add_argument("--params-json", help="Extra renderer params as a JSON object")
     render_plan_nodes.add_argument("--config", help="Load style nodes through this config file")
     render_plan_nodes.set_defaults(func=cmd_render_plan_nodes)
+
+    run_prompt = subparsers.add_parser(
+        "run-prompt",
+        parents=[output_parent],
+        help="Run or plan a full character+action prompt with NovelAI style only",
+    )
+    _add_prompt_run_arguments(run_prompt, output_options=True)
+    run_prompt.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only print PromptBundle and RenderRequest; do not call NovelAI",
+    )
+    run_prompt.add_argument("--config", help="Load runtime config and legacy style refs")
+    run_prompt.set_defaults(func=cmd_run_prompt)
 
     api_compose = subparsers.add_parser(
         "api-compose",
@@ -985,6 +1117,67 @@ def build_parser() -> argparse.ArgumentParser:
     )
     archive_novelai_acceptance_nodes.set_defaults(func=cmd_archive_novelai_acceptance_nodes)
 
+    archive_novelai_acceptance_prompt = subparsers.add_parser(
+        "archive-novelai-acceptance-prompt",
+        parents=[output_parent],
+        help="Build NovelAI core artifacts from a full prompt and archive a legacy acceptance case",
+    )
+    _add_prompt_run_arguments(archive_novelai_acceptance_prompt, output_options=False)
+    archive_novelai_acceptance_prompt.add_argument("--case-id", required=True)
+    archive_novelai_acceptance_prompt.add_argument("--output-dir", required=True)
+    archive_novelai_acceptance_prompt.add_argument("--legacy-source", required=True)
+    archive_novelai_acceptance_prompt.add_argument("--legacy-image")
+    archive_novelai_acceptance_prompt.add_argument("--core-image")
+    archive_novelai_acceptance_prompt.add_argument("--generation-result")
+    archive_novelai_acceptance_prompt.add_argument(
+        "--config",
+        help="Load legacy style refs through this config",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--whitelist",
+        action="append",
+        help="Approved diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--intentional-difference",
+        action="append",
+        help=(
+            "Intentional core-vs-legacy diff path with optional reason, "
+            "for example $.parameters.prompt=agent prompt wording"
+        ),
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--note",
+        action="append",
+        help="Human note stored in the acceptance record; can be repeated",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--manifest",
+        help="Suite manifest to create or update; defaults to output-dir\\suite.yaml",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--required-case",
+        action="append",
+        help="Required suite case id/prefix to add to the manifest; can be repeated",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--no-manifest",
+        action="store_true",
+        help="Do not create or update a suite manifest",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing generated core artifacts and copied archive artifacts",
+    )
+    archive_novelai_acceptance_prompt.add_argument(
+        "--format",
+        default="yaml",
+        choices=("json", "yaml"),
+        help="Acceptance record format written inside the case directory",
+    )
+    archive_novelai_acceptance_prompt.set_defaults(func=cmd_archive_novelai_acceptance_prompt)
+
     verify_acceptance = subparsers.add_parser(
         "verify-acceptance-record",
         parents=[output_parent],
@@ -1048,6 +1241,34 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--style-ref")
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
+
+
+def _add_prompt_run_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    output_options: bool,
+) -> None:
+    prompt_group = parser.add_mutually_exclusive_group(required=True)
+    prompt_group.add_argument("--prompt", help="Full character + action prompt / tags string")
+    prompt_group.add_argument("--prompt-file", help="Read prompt from a UTF-8 text file")
+    parser.add_argument("--negative")
+    parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
+    parser.add_argument("--artist", help="Compatibility alias for --style-ref")
+    parser.add_argument("--style-ref")
+    parser.add_argument("--style-node", help="Path to a structured style node")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--width", type=int, default=1024)
+    parser.add_argument("--height", type=int, default=1024)
+    parser.add_argument("--model", default="nai-diffusion-4-5-full")
+    parser.add_argument("--params-json", help="Extra NovelAI renderer params as a JSON object")
+    if output_options:
+        parser.add_argument("--output-dir", help="Override output directory")
+        parser.add_argument(
+            "--format",
+            default="png",
+            choices=("png", "jpg", "webp"),
+            help="Output image format when NovelAI returns files without an extension",
+        )
 
 
 def _add_api_request_arguments(parser: argparse.ArgumentParser) -> None:

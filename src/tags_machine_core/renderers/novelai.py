@@ -114,7 +114,7 @@ class NovelAIRenderAdapter:
             "sampler": sampler,
             "steps": params.get("steps", 28),
             "seed": seed or params.get("seed") or 0,
-            "n_samples": 1,
+            "n_samples": params.get("n_samples", 1),
             "ucPreset": 3,
             "qualityToggle": False,
             "sm": params.get("sm", False) and sampler != "ddim_v3",
