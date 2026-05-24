@@ -647,6 +647,81 @@ class JsonApiTest(unittest.TestCase):
             )
             self.assertEqual(first_render, second_render)
 
+    def test_resolve_compose_render_plan_json_api_returns_task_or_ready_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            api = GenerationJsonApi()
+            request = {
+                "compose": {
+                    "nodes": {
+                        "character": str(character),
+                        "action": str(action),
+                    },
+                    "style": str(style),
+                    "extra_prompt": "soles toward viewer",
+                    "negative": "face focus",
+                    "character_scope": "foot_detail",
+                    "agent": {
+                        "instructions": ["局部特写只保留脚部相关角色细节"],
+                    },
+                    "cache": {
+                        "cache_dir": str(cache_dir),
+                    },
+                },
+                "render": {
+                    "backend": "novelai",
+                    "style": str(style),
+                    "seed": 2468,
+                    "width": 832,
+                    "height": 1216,
+                    "params": {
+                        "n_samples": 2,
+                        "scale": 6.0,
+                    },
+                },
+            }
+
+            missing = api.resolve_compose_render_plan(request)
+            with_result = {
+                **request,
+                "compose": {
+                    **request["compose"],
+                    "agent": {
+                        "instructions": ["局部特写只保留脚部相关角色细节"],
+                        "result": {
+                            "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
+                            "negative": "extra toes, face focus",
+                            "character_scope": "foot_detail",
+                            "included_character_sections": ["character", "feet"],
+                            "suppressed_character_sections": ["eyes", "upper_clothes"],
+                        },
+                    },
+                },
+            }
+            ready = api.resolve_compose_render_plan(with_result)
+            cached = api.resolve_compose_render_plan(request)
+
+            self.assertEqual(
+                missing["schema"],
+                "tags-machine-core.compose-render-plan-resolution/v1",
+            )
+            self.assertEqual(missing["status"], "requires_agent")
+            self.assertEqual(missing["agent_task"]["nodes"]["character"]["id"], "homura")
+            self.assertEqual(missing["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+            self.assertNotIn("render_request", missing)
+
+            self.assertEqual(ready["status"], "ready")
+            self.assertFalse(ready["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(ready["render_request"]["backend"], "novelai")
+            self.assertEqual(ready["render_request"]["seed"], 2468)
+            self.assertEqual(ready["render_request"]["params"]["n_samples"], 2)
+            self.assertEqual(ready["render_request"]["meta"]["composer_type"], "agent")
+            self.assertEqual(cached["status"], "ready")
+            self.assertTrue(cached["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(ready["render_request"], cached["render_request"])
+
     def test_cli_api_agent_entries_read_json_request_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -782,6 +857,126 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(written["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
             self.assertFalse(any(cache_dir.glob("*.json")))
 
+    def test_cli_api_resolve_compose_render_plan_returns_ready_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            request_path = root / "agent_plan_request.json"
+            output = root / "agent_plan_resolution.json"
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "compose": {
+                            "nodes": {
+                                "character": str(character),
+                                "action": str(action),
+                            },
+                            "style": str(style),
+                            "character_scope": "foot_detail",
+                            "agent": {
+                                "instructions": ["避免把眼睛和上衣放进脚部特写"],
+                                "result": {
+                                    "positive": "akemi homura, bare soles, foot focus",
+                                    "negative": "extra toes, face focus",
+                                    "character_scope": "foot_detail",
+                                    "included_character_sections": ["character", "feet"],
+                                    "suppressed_character_sections": ["eyes", "upper_clothes"],
+                                },
+                            },
+                            "cache": {
+                                "cache_dir": str(cache_dir),
+                            },
+                        },
+                        "render": {
+                            "backend": "novelai",
+                            "style": str(style),
+                            "seed": 123,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "api-resolve-compose-render-plan",
+                        str(request_path),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            printed = json.loads(stdout.getvalue())
+            written = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(printed["status"], "ready")
+            self.assertEqual(written["schema"], "tags-machine-core.compose-render-plan-resolution/v1")
+            self.assertEqual(written["prompt_bundle"]["meta"]["composer_type"], "agent")
+            self.assertEqual(written["render_request"]["backend"], "novelai")
+            self.assertEqual(written["render_request"]["seed"], 123)
+
+    def test_cli_api_resolve_compose_render_plan_returns_task_without_agent_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            request_path = root / "agent_plan_request.json"
+            output = root / "agent_plan_resolution.json"
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "compose": {
+                            "nodes": {
+                                "character": str(character),
+                                "action": str(action),
+                            },
+                            "style": str(style),
+                            "character_scope": "foot_detail",
+                            "agent": {
+                                "instructions": ["避免把眼睛和上衣放进脚部特写"],
+                            },
+                            "cache": {
+                                "cache_dir": str(cache_dir),
+                            },
+                        },
+                        "render": {
+                            "backend": "novelai",
+                            "style": str(style),
+                            "seed": 123,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "api-resolve-compose-render-plan",
+                        str(request_path),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            printed = json.loads(stdout.getvalue())
+            written = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(printed["status"], "requires_agent")
+            self.assertEqual(written["schema"], "tags-machine-core.compose-render-plan-resolution/v1")
+            self.assertEqual(written["agent_task"]["nodes"]["character"]["id"], "homura")
+            self.assertEqual(written["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+            self.assertNotIn("render_request", written)
+            self.assertFalse(any(cache_dir.glob("*.json")))
+
     def test_example_request_files_are_valid_json_api_inputs(self):
         api = GenerationJsonApi()
 
@@ -796,6 +991,12 @@ class JsonApiTest(unittest.TestCase):
                 _load_example_request("compose_render_plan_novelai.json")
             )
             agent_plan = api.compose_render_plan(
+                _load_example_request("agent_compose_render_plan_novelai.json")
+            )
+            missing_plan = api.resolve_compose_render_plan(
+                _load_example_request("agent_compose_render_plan_requires_agent.json")
+            )
+            ready_plan = api.resolve_compose_render_plan(
                 _load_example_request("agent_compose_render_plan_novelai.json")
             )
 
@@ -832,6 +1033,11 @@ class JsonApiTest(unittest.TestCase):
         self.assertEqual(agent_plan["render_request"]["backend"], "novelai")
         self.assertIn("low angle close-up", agent_plan["render_request"]["prompt"])
         self.assertIn("worst quality", agent_plan["render_request"]["negative_prompt"])
+        self.assertEqual(missing_plan["status"], "requires_agent")
+        self.assertEqual(missing_plan["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+        self.assertEqual(ready_plan["status"], "ready")
+        self.assertEqual(ready_plan["render_request"]["backend"], "novelai")
+        self.assertEqual(ready_plan["prompt_bundle"]["meta"]["composer_type"], "agent")
 
     def test_generate_json_api_uses_injected_executor(self):
         calls = []

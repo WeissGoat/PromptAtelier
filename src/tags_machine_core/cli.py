@@ -454,6 +454,16 @@ def cmd_api_compose_render_plan(args) -> int:
     return 0
 
 
+def cmd_api_resolve_compose_render_plan(args) -> int:
+    result = GenerationJsonApi().resolve_compose_render_plan(
+        _load_json_mapping_file(args.request)
+    )
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_api_generate(args) -> int:
     config = load_config(Path(args.config))
 
@@ -774,6 +784,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_request_arguments(api_compose_render_plan)
     api_compose_render_plan.set_defaults(func=cmd_api_compose_render_plan)
+
+    api_resolve_compose_render_plan = subparsers.add_parser(
+        "api-resolve-compose-render-plan",
+        parents=[output_parent],
+        help="Return a ready PromptBundle+RenderRequest or an AgentCompositionTask",
+    )
+    _add_api_request_arguments(api_resolve_compose_render_plan)
+    api_resolve_compose_render_plan.set_defaults(
+        func=cmd_api_resolve_compose_render_plan
+    )
 
     api_generate = subparsers.add_parser(
         "api-generate",

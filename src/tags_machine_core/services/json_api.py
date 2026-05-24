@@ -158,6 +158,22 @@ class GenerationJsonApi:
             "render_request": self.render_plan(render_request),
         }
 
+    def resolve_compose_render_plan(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            result = self.compose_render_plan(request)
+        except AgentCompositionRequired as exc:
+            return {
+                "schema": "tags-machine-core.compose-render-plan-resolution/v1",
+                "status": "requires_agent",
+                "agent_task": to_jsonable(exc.task),
+            }
+        return {
+            "schema": "tags-machine-core.compose-render-plan-resolution/v1",
+            "status": "ready",
+            "prompt_bundle": result["prompt_bundle"],
+            "render_request": result["render_request"],
+        }
+
     def generate(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "generate request")
         request_data = data.get("render_request") or data.get("request")
