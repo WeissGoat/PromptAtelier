@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from contextlib import contextmanager, redirect_stdout
@@ -1038,6 +1039,21 @@ class JsonApiTest(unittest.TestCase):
         self.assertEqual(ready_plan["status"], "ready")
         self.assertEqual(ready_plan["render_request"]["backend"], "novelai")
         self.assertEqual(ready_plan["prompt_bundle"]["meta"]["composer_type"], "agent")
+
+    def test_json_api_contract_documents_example_request_files(self):
+        doc_path = PROJECT_ROOT / "docs" / "json_api_contract_v1.md"
+        doc = doc_path.read_text(encoding="utf-8")
+        documented = sorted(
+            set(re.findall(r"examples/requests/[A-Za-z0-9_.-]+\.json", doc))
+        )
+        example_files = sorted(
+            f"examples/requests/{path.name}"
+            for path in (PROJECT_ROOT / "examples" / "requests").glob("*.json")
+        )
+
+        self.assertEqual(documented, example_files)
+        for relative_path in documented:
+            self.assertTrue((PROJECT_ROOT / relative_path).is_file())
 
     def test_generate_json_api_uses_injected_executor(self):
         calls = []

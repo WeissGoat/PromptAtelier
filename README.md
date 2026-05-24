@@ -300,6 +300,7 @@ uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-
 详细文档：
 
 - [整体设计与开发方案](docs/development_plan_v1.md)
+- [JSON API 契约](docs/json_api_contract_v1.md)
 - [Node YAML 规范](docs/node_yaml_spec_v1.md)
 - [Character YAML 规范](docs/character_yaml_spec_v1.md)
 - [Action YAML 规范](docs/action_yaml_spec_v1.md)
