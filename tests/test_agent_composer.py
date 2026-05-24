@@ -181,6 +181,25 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(second.meta.composition.character_scope, "foot_detail")
         self.assertEqual(second.meta.extra["agent"]["notes"], ["agent 合并了角色和动作"])
 
+    def test_prompt_cache_keeps_standard_sha256_filename_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PromptCache(Path(tmp) / "prompt")
+            path = cache._path_for("sha256:" + "a" * 64)
+
+        self.assertEqual(path.name, "sha256_" + "a" * 64 + ".json")
+
+    def test_prompt_cache_sanitizes_external_cache_keys_into_single_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PromptCache(Path(tmp) / "prompt")
+            path = cache._path_for("../agent/task:脚部特写?*")
+
+        self.assertEqual(path.parent.name, "prompt")
+        self.assertEqual(path.suffix, ".json")
+        self.assertNotIn("..", path.name)
+        self.assertNotIn("/", path.name)
+        self.assertNotIn("\\", path.name)
+        self.assertLessEqual(len(path.stem), 120)
+
     def test_compose_nodes_requires_result_on_cache_miss(self):
         with self.assertRaises(AgentCompositionRequired) as raised:
             AgentComposer().compose_nodes(
