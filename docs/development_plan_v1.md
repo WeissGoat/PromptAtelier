@@ -120,14 +120,17 @@ NovelAIAdapter.build_request(prompt_bundle)
 execution 层接收 `RenderRequest`，选择真实后端执行器，调用底层 client，保存图片并输出 `GenerationResult`。
 
 ```text
-execute_novelai_generation(config, render_request, output_dir, image_format)
+execute_render_request(config, render_request, ...)
+-> execute_novelai_generation(...)
 -> NovelAIClient.build_payload / generate_images
 -> save_generated_images
 -> collect_png_info
 -> GenerationResult
 ```
 
-当前正式执行入口是 `src/tags_machine_core/execution.py` 里的 `execute_novelai_generation()`。CLI、JSON API 和未来 worker 都通过这一层执行 NovelAI；`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
+当前正式执行边界在 `src/tags_machine_core/execution.py`。`execute-render-request` 通过 `execute_render_request()` 做后端分发，默认只允许 NovelAI；`api-generate` 和 `run-prompt` / `generate` 的真实出图路径复用 `execute_novelai_generation()`。`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
+
+ComfyUI / SD 的真实执行函数也放在 execution 层，便于后续接入时复用同一边界；但它们仍属于预研能力，必须通过显式实验开关触发，不进入 v1 正式验收范围。
 
 `GenerationResult` 记录图片路径、最终 request body、PNG 参数读取结果、缓存命中等信息。它同样可以序列化成 JSON，方便 UI、批量任务和验收资料包读取。
 

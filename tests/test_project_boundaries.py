@@ -39,10 +39,11 @@ class ProjectBoundaryTest(unittest.TestCase):
             "core/tests must only read legacy artifacts as data, not import legacy runtime modules",
         )
 
-    def test_cli_keeps_novelai_client_behind_execution_module(self):
+    def test_cli_keeps_backend_clients_behind_execution_module(self):
         cli_path = PROJECT_ROOT / "src" / "tags_machine_core" / "cli.py"
         tree = ast.parse(cli_path.read_text(encoding="utf-8"), filename=str(cli_path))
         violations: list[str] = []
+        disallowed_clients = {"NovelAIClient", "ComfyUIClient", "SDClient"}
 
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -50,21 +51,23 @@ class ProjectBoundaryTest(unittest.TestCase):
                 if module in {
                     "tags_machine_core.clients",
                     "tags_machine_core.clients.novelai",
+                    "tags_machine_core.clients.comfyui",
+                    "tags_machine_core.clients.sd",
                 }:
                     for alias in node.names:
-                        if alias.name == "NovelAIClient":
+                        if alias.name in disallowed_clients:
                             violations.append(
                                 f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: {module}.{alias.name}"
                             )
-            elif isinstance(node, ast.Name) and node.id == "NovelAIClient":
+            elif isinstance(node, ast.Name) and node.id in disallowed_clients:
                 violations.append(
-                    f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: direct NovelAIClient reference"
+                    f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: direct {node.id} reference"
                 )
 
         self.assertEqual(
             violations,
             [],
-            "CLI must use tags_machine_core.execution for NovelAI execution",
+            "CLI must use tags_machine_core.execution for backend execution",
         )
 
 

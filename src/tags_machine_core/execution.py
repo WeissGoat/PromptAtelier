@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from tags_machine_core.clients import NovelAIClient
+from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.verification import read_image_parameters
@@ -83,6 +83,126 @@ def execute_novelai_generation(
     )
     return GenerationResult(
         backend="novelai",
+        images=images,
+        request_body=client.build_payload(request),
+        png_info=collect_png_info(images),
+        cache_hit=False,
+    )
+
+
+def execute_render_request(
+    config: AppConfig,
+    request: RenderRequest,
+    *,
+    output_dir: str | Path | None,
+    image_format: str,
+    allow_experimental_backend: bool = False,
+    client_id: str | None = None,
+    comfyui_no_wait: bool = False,
+    comfyui_poll_interval: float = 1.0,
+    comfyui_max_wait_seconds: float | None = None,
+) -> GenerationResult:
+    if request.backend != "novelai" and not allow_experimental_backend:
+        raise ValueError(
+            "execute-render-request currently executes only NovelAI by default; "
+            "pass --allow-experimental-backend to run pre-v1 ComfyUI/SD clients"
+        )
+
+    if request.backend == "novelai":
+        return execute_novelai_generation(
+            config,
+            request,
+            output_dir=output_dir,
+            image_format=image_format,
+        )
+    if request.backend == "comfyui":
+        return execute_comfyui_generation(
+            config,
+            request,
+            output_dir=output_dir,
+            image_format=image_format,
+            client_id=client_id,
+            no_wait=comfyui_no_wait,
+            poll_interval=comfyui_poll_interval,
+            max_wait_seconds=comfyui_max_wait_seconds,
+        )
+    if request.backend == "sd":
+        return execute_sd_generation(
+            config,
+            request,
+            output_dir=output_dir,
+            image_format=image_format,
+        )
+    raise ValueError(f"Unsupported backend: {request.backend}")
+
+
+def execute_comfyui_generation(
+    config: AppConfig,
+    request: RenderRequest,
+    *,
+    output_dir: str | Path | None,
+    image_format: str,
+    client_id: str | None = None,
+    no_wait: bool = False,
+    poll_interval: float = 1.0,
+    max_wait_seconds: float | None = None,
+) -> GenerationResult:
+    client = ComfyUIClient(
+        base_url=config.comfyui.base_url,
+        timeout=config.comfyui.timeout,
+    )
+    if no_wait:
+        queued = client.queue_prompt(request, client_id=client_id)
+        images: list[GeneratedImage] = []
+        comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
+    else:
+        generated = client.generate_images(
+            request,
+            client_id=client_id,
+            poll_interval=poll_interval,
+            max_wait_seconds=max_wait_seconds,
+        )
+        images = save_generated_images(
+            generated.images,
+            output_dir=Path(output_dir or config.runtime.output_dir),
+            request=request,
+            default_format=image_format,
+        )
+        comfyui_meta = {
+            "prompt_id": generated.prompt_id,
+            "queue_raw": generated.queue_raw,
+            "history": generated.history,
+        }
+    png_info = collect_png_info(images)
+    png_info["comfyui"] = comfyui_meta
+    return GenerationResult(
+        backend="comfyui",
+        images=images,
+        request_body=client.build_payload(request, client_id=client_id),
+        png_info=png_info,
+        cache_hit=False,
+    )
+
+
+def execute_sd_generation(
+    config: AppConfig,
+    request: RenderRequest,
+    *,
+    output_dir: str | Path | None,
+    image_format: str,
+) -> GenerationResult:
+    client = SDClient(
+        base_url=config.sd.base_url,
+        timeout=config.sd.timeout,
+    )
+    images = save_generated_images(
+        client.generate_images(request),
+        output_dir=Path(output_dir or config.runtime.output_dir),
+        request=request,
+        default_format=image_format,
+    )
+    return GenerationResult(
+        backend="sd",
         images=images,
         request_body=client.build_payload(request),
         png_info=collect_png_info(images),

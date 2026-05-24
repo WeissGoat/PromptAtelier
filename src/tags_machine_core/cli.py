@@ -7,15 +7,13 @@ from typing import Any
 
 import yaml
 
-from tags_machine_core.clients import ComfyUIClient, SDClient
 from tags_machine_core.composers import load_agent_result
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import (
-    collect_png_info as _collect_png_info,
     execute_novelai_generation as _execute_novelai_generation,
-    save_generated_images as _save_generated_images,
+    execute_render_request as _execute_render_request,
 )
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
@@ -186,78 +184,17 @@ def cmd_generate(args) -> int:
 def cmd_execute_render_request(args) -> int:
     config = load_config(Path(args.config))
     request = _load_render_request(args.request)
-    output_dir = Path(args.output_dir or config.runtime.output_dir)
-
-    if request.backend != "novelai" and not args.allow_experimental_backend:
-        raise ValueError(
-            "execute-render-request currently executes only NovelAI by default; "
-            "pass --allow-experimental-backend to run pre-v1 ComfyUI/SD clients"
-        )
-
-    if request.backend == "novelai":
-        result = _execute_novelai_generation(
-            config,
-            request,
-            output_dir=output_dir,
-            image_format=config.defaults.image_format,
-        )
-    elif request.backend == "comfyui":
-        client = ComfyUIClient(
-            base_url=config.comfyui.base_url,
-            timeout=config.comfyui.timeout,
-        )
-        if args.comfyui_no_wait:
-            queued = client.queue_prompt(request, client_id=args.client_id)
-            images = []
-            comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
-        else:
-            generated = client.generate_images(
-                request,
-                client_id=args.client_id,
-                poll_interval=args.comfyui_poll_interval,
-                max_wait_seconds=args.comfyui_max_wait_seconds,
-            )
-            images = _save_generated_images(
-                generated.images,
-                output_dir=output_dir,
-                request=request,
-                default_format=config.defaults.image_format,
-            )
-            comfyui_meta = {
-                "prompt_id": generated.prompt_id,
-                "queue_raw": generated.queue_raw,
-                "history": generated.history,
-            }
-        png_info = _collect_png_info(images)
-        png_info["comfyui"] = comfyui_meta
-        result = GenerationResult(
-            backend="comfyui",
-            images=images,
-            request_body=client.build_payload(request, client_id=args.client_id),
-            png_info=png_info,
-            cache_hit=False,
-        )
-    elif request.backend == "sd":
-        client = SDClient(
-            base_url=config.sd.base_url,
-            timeout=config.sd.timeout,
-        )
-        images = _save_generated_images(
-            client.generate_images(request),
-            output_dir=output_dir,
-            request=request,
-            default_format=config.defaults.image_format,
-        )
-        result = GenerationResult(
-            backend="sd",
-            images=images,
-            request_body=client.build_payload(request),
-            png_info=_collect_png_info(images),
-            cache_hit=False,
-        )
-    else:
-        raise ValueError(f"Unsupported backend: {request.backend}")
-
+    result = _execute_render_request(
+        config,
+        request,
+        output_dir=args.output_dir,
+        image_format=config.defaults.image_format,
+        allow_experimental_backend=args.allow_experimental_backend,
+        client_id=args.client_id,
+        comfyui_no_wait=args.comfyui_no_wait,
+        comfyui_poll_interval=args.comfyui_poll_interval,
+        comfyui_max_wait_seconds=args.comfyui_max_wait_seconds,
+    )
     print_json(result, full=args.full)
     return 0
 

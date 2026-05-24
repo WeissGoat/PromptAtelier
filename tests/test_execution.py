@@ -11,7 +11,10 @@ from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, RenderRequest
 from tags_machine_core.execution import (
     collect_png_info,
+    execute_comfyui_generation,
     execute_novelai_generation,
+    execute_render_request,
+    execute_sd_generation,
     save_generated_images,
 )
 
@@ -47,6 +50,14 @@ def _app_config(root: Path) -> AppConfig:
                 "access_token_env": "NAI_ACCESS_TOKEN",
                 "timeout": 30,
                 "retry": 1,
+            },
+            "comfyui": {
+                "base_url": "http://comfy.local",
+                "timeout": 31,
+            },
+            "sd": {
+                "base_url": "http://sd.local",
+                "timeout": 32,
             },
         }
     )
@@ -190,6 +201,187 @@ class ExecutionTest(unittest.TestCase):
                 )
 
             self.assertIn("NAI_ACCESS_TOKEN", str(raised.exception))
+
+    def test_execute_render_request_rejects_experimental_backend_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _app_config(Path(tmp))
+            request = RenderRequest(
+                backend="comfyui",
+                prompt="akemi homura",
+                params={"workflow_json": {}},
+            )
+
+            with (
+                patch("tags_machine_core.execution.ComfyUIClient") as client_cls,
+                self.assertRaises(ValueError) as raised,
+            ):
+                execute_render_request(
+                    config,
+                    request,
+                    output_dir=None,
+                    image_format="png",
+                )
+
+            self.assertIn("only NovelAI by default", str(raised.exception))
+            client_cls.assert_not_called()
+
+    def test_execute_render_request_routes_novelai_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _app_config(Path(tmp))
+            request = RenderRequest(
+                backend="novelai",
+                prompt="akemi homura",
+            )
+
+            with patch("tags_machine_core.execution.execute_novelai_generation") as execute:
+                execute.return_value = SimpleNamespace(backend="novelai")
+                result = execute_render_request(
+                    config,
+                    request,
+                    output_dir="custom_outputs",
+                    image_format="webp",
+                )
+
+            self.assertEqual(result.backend, "novelai")
+            execute.assert_called_once_with(
+                config,
+                request,
+                output_dir="custom_outputs",
+                image_format="webp",
+            )
+
+    def test_execute_comfyui_generation_can_queue_without_waiting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _app_config(Path(tmp))
+            request = RenderRequest(
+                backend="comfyui",
+                prompt="akemi homura",
+                params={"workflow_json": {"1": {"inputs": {"text": "akemi homura"}}}},
+            )
+
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.queue_prompt.return_value = SimpleNamespace(
+                    prompt_id="abc123",
+                    raw={"prompt_id": "abc123"},
+                )
+                client.build_payload.return_value = {
+                    "prompt": {"1": {"inputs": {"text": "akemi homura"}}},
+                    "client_id": "client-1",
+                }
+
+                result = execute_comfyui_generation(
+                    config,
+                    request,
+                    output_dir=None,
+                    image_format="png",
+                    client_id="client-1",
+                    no_wait=True,
+                )
+
+            client_cls.assert_called_once_with(base_url="http://comfy.local", timeout=31)
+            client.queue_prompt.assert_called_once_with(request, client_id="client-1")
+            client.generate_images.assert_not_called()
+            client.build_payload.assert_called_once_with(request, client_id="client-1")
+            self.assertEqual(result.backend, "comfyui")
+            self.assertEqual(result.images, [])
+            self.assertEqual(result.request_body["client_id"], "client-1")
+            self.assertEqual(result.png_info["comfyui"]["prompt_id"], "abc123")
+
+    def test_execute_comfyui_generation_saves_images_and_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = root / "comfy_outputs"
+            config = _app_config(root)
+            request = RenderRequest(
+                backend="comfyui",
+                prompt="akemi homura",
+                seed=222,
+                params={"workflow_json": {"1": {"inputs": {"text": "akemi homura"}}}},
+            )
+            image_bytes = _png_bytes_with_text(
+                {
+                    "Comment": json.dumps({"prompt": "akemi homura", "seed": 222}),
+                    "Source": "ComfyUI",
+                }
+            )
+            history = {"abc123": {"outputs": {"7": {"images": []}}}}
+
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.generate_images.return_value = SimpleNamespace(
+                    prompt_id="abc123",
+                    queue_raw={"prompt_id": "abc123"},
+                    history=history,
+                    images=[
+                        SimpleNamespace(
+                            filename="ComfyUI_00001_.png",
+                            content=image_bytes,
+                            image_type="output",
+                            node_id="7",
+                        )
+                    ],
+                )
+                client.build_payload.return_value = {"prompt": {"1": {}}}
+
+                result = execute_comfyui_generation(
+                    config,
+                    request,
+                    output_dir=output_dir,
+                    image_format="png",
+                    client_id="client-1",
+                    poll_interval=0,
+                    max_wait_seconds=1,
+                )
+
+            client.generate_images.assert_called_once_with(
+                request,
+                client_id="client-1",
+                poll_interval=0,
+                max_wait_seconds=1,
+            )
+            self.assertEqual(result.backend, "comfyui")
+            self.assertEqual(result.png_info["comfyui"]["history"], history)
+            self.assertEqual(len(result.images), 1)
+            self.assertEqual(result.images[0].path.parent, output_dir)
+            self.assertEqual(result.images[0].path.read_bytes(), image_bytes)
+            self.assertEqual(result.images[0].meta["node_id"], "7")
+            self.assertEqual(result.png_info["images"][0]["parameters"]["seed"], 222)
+
+    def test_execute_sd_generation_saves_images_and_request_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = root / "sd_outputs"
+            config = _app_config(root)
+            request = RenderRequest(
+                backend="sd",
+                prompt="akemi homura",
+                seed=321,
+                params={"steps": 24},
+            )
+
+            with patch("tags_machine_core.execution.SDClient") as client_cls:
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="sd_result.png", content=b"png-bytes")
+                ]
+                client.build_payload.return_value = {"prompt": "akemi homura", "seed": 321}
+
+                result = execute_sd_generation(
+                    config,
+                    request,
+                    output_dir=output_dir,
+                    image_format="png",
+                )
+
+            client_cls.assert_called_once_with(base_url="http://sd.local", timeout=32)
+            client.generate_images.assert_called_once_with(request)
+            client.build_payload.assert_called_once_with(request)
+            self.assertEqual(result.backend, "sd")
+            self.assertEqual(result.request_body["seed"], 321)
+            self.assertEqual(result.images[0].path.parent, output_dir)
+            self.assertEqual(result.images[0].path.read_bytes(), b"png-bytes")
+            self.assertIn("Not a PNG file", result.png_info["images"][0]["error"])
 
 
 if __name__ == "__main__":

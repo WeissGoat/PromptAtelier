@@ -731,7 +731,7 @@ renderers:
                 encoding="utf-8",
             )
 
-            with patch("tags_machine_core.cli.ComfyUIClient") as client_cls:
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
                 client.queue_prompt.return_value = SimpleNamespace(
                     prompt_id="abc123",
@@ -785,7 +785,7 @@ renderers:
             )
 
             with (
-                patch("tags_machine_core.cli.ComfyUIClient") as client_cls,
+                patch("tags_machine_core.execution.ComfyUIClient") as client_cls,
                 self.assertRaises(ValueError) as raised,
             ):
                 main(
@@ -926,7 +926,7 @@ renderers:
                 }
             }
 
-            with patch("tags_machine_core.cli.ComfyUIClient") as client_cls:
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
                 client.generate_images.return_value = SimpleNamespace(
                     prompt_id="abc123",
@@ -1006,7 +1006,7 @@ renderers:
                 encoding="utf-8",
             )
 
-            with patch("tags_machine_core.cli.SDClient") as client_cls:
+            with patch("tags_machine_core.execution.SDClient") as client_cls:
                 client = client_cls.return_value
                 client.generate_images.return_value = [
                     SimpleNamespace(filename="sd_result.png", content=b"png-bytes")
@@ -1073,7 +1073,7 @@ renderers:
                 }
             )
 
-            with patch("tags_machine_core.cli.SDClient") as client_cls:
+            with patch("tags_machine_core.execution.SDClient") as client_cls:
                 client = client_cls.return_value
                 client.generate_images.return_value = [
                     SimpleNamespace(filename="sd_result.png", content=image_bytes)
