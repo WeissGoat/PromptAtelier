@@ -101,6 +101,10 @@ renderers:
         - abc
       reference_strength_multiple:
         - 0.25
+      reference_information_extracted_multiple:
+        - 0.6
+      director_reference_images:
+        - director-abc
   comfyui:
     workflow: portrait_workflow
     checkpoint: anime_comfy.safetensors
@@ -455,6 +459,8 @@ renderers:
             self.assertEqual(data["params"]["steps"], 30)
             self.assertEqual(data["params"]["reference_image_multiple"], ["abc"])
             self.assertEqual(data["params"]["reference_strength_multiple"], [0.25])
+            self.assertEqual(data["params"]["reference_information_extracted_multiple"], [0.6])
+            self.assertEqual(data["params"]["director_reference_images"], ["director-abc"])
             self.assertIn("style prefix", data["prompt"])
             self.assertIn("akemi homura", data["prompt"])
             self.assertIn("anime style", data["prompt"])
@@ -496,6 +502,27 @@ renderers:
                 ),
                 encoding="utf-8",
             )
+            generation_result = root / "generation_result.json"
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [],
+                        "request_body": {
+                            "input": request.prompt,
+                            "model": request.model,
+                            "action": "generate",
+                            "parameters": request.params,
+                        },
+                        "png_info": {"images": []},
+                        "cache_hit": False,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -520,6 +547,8 @@ renderers:
                         "832",
                         "--height",
                         "1216",
+                        "--generation-result",
+                        str(generation_result),
                         "--required-case",
                         "foot_detail",
                     ]
@@ -536,13 +565,49 @@ renderers:
             self.assertTrue((case_dir / "legacy" / "source.json").exists())
             generated_request = json.loads(render_request_path.read_text(encoding="utf-8"))
             generated_bundle = json.loads(prompt_bundle_path.read_text(encoding="utf-8"))
+            generated_result = json.loads(
+                (case_dir / "core" / "generation_result.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(generated_request["backend"], "novelai")
             self.assertEqual(generated_request["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(generated_request["params"]["reference_strength_multiple"], [0.25])
+            self.assertEqual(
+                generated_request["params"]["reference_information_extracted_multiple"],
+                [0.6],
+            )
+            self.assertEqual(
+                generated_request["params"]["director_reference_images"],
+                ["director-abc"],
+            )
             self.assertEqual(generated_bundle["meta"]["composition"]["character_scope"], "foot_detail")
             self.assertEqual(
                 archive["record"]["core"]["render_request_path"],
                 "core/render_request.json",
             )
+            self.assertEqual(
+                archive["record"]["core"]["generation_result_path"],
+                "core/generation_result.json",
+            )
+            self.assertEqual(
+                archive["record"]["generation_result_evidence"]["request_body"]["diff"][
+                    "diff_count"
+                ],
+                0,
+            )
+            raw_generation_params = generated_result["request_body"]["parameters"]
+            self.assertEqual(raw_generation_params["reference_image_multiple"], ["abc"])
+            self.assertEqual(raw_generation_params["reference_strength_multiple"], [0.25])
+            self.assertEqual(raw_generation_params["reference_information_extracted_multiple"], [0.6])
+            self.assertEqual(raw_generation_params["director_reference_images"], ["director-abc"])
+            generation_params = archive["record"]["generation_result_evidence"]["request_body"][
+                "normalized"
+            ]["parameters"]
+            self.assertEqual(generation_params["reference_image_multiple"][0]["type"], "string")
+            self.assertEqual(generation_params["reference_image_multiple"][0]["chars"], 3)
+            self.assertEqual(generation_params["reference_strength_multiple"], [0.25])
+            self.assertEqual(generation_params["reference_information_extracted_multiple"], [0.6])
+            self.assertEqual(generation_params["director_reference_images"][0]["type"], "string")
+            self.assertEqual(generation_params["director_reference_images"][0]["chars"], 12)
             suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
@@ -668,6 +733,7 @@ renderers:
             self.assertEqual(archived_request, render_request)
             self.assertTrue(archive["record"]["diff"]["normalized_equal"])
             self.assertEqual(archived_request["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(archived_request["params"]["director_reference_images"], ["director-abc"])
             self.assertEqual(archived_request["params"]["cfg_rescale"], 0.15)
 
     def test_render_plan_nodes_supports_sd_backend(self):
