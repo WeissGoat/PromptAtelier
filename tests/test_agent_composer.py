@@ -70,6 +70,75 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(left.cache_key, right.cache_key)
         self.assertNotEqual(left.nodes["character"].ref, right.nodes["character"].ref)
 
+    def test_task_cache_key_changes_for_content_version_and_explicit_inputs(self):
+        composer = AgentComposer()
+        base = composer.build_task(
+            character=_character(),
+            action=_action(),
+            character_scope="foot_detail",
+            instructions=["避免无关细节"],
+        )
+        changed_character = _character().model_copy(
+            update={
+                "tags": {
+                    "character": ["akemi homura"],
+                    "eyes": ["purple eyes"],
+                    "feet": ["bare feet"],
+                }
+            }
+        )
+        changed_content = composer.build_task(
+            character=changed_character,
+            action=_action(),
+            character_scope="foot_detail",
+            instructions=["避免无关细节"],
+        )
+        changed_scope = composer.build_task(
+            character=_character(),
+            action=_action(),
+            character_scope="upper_body",
+            instructions=["避免无关细节"],
+        )
+        changed_extra_prompt = composer.build_task(
+            character=_character(),
+            action=_action(),
+            extra_prompt="low angle",
+            character_scope="foot_detail",
+            instructions=["避免无关细节"],
+        )
+        changed_instruction = composer.build_task(
+            character=_character(),
+            action=_action(),
+            character_scope="foot_detail",
+            instructions=["保留角色辨识度"],
+        )
+        changed_version_composer = AgentComposer()
+        changed_version_composer.composer_version = "v2"
+        changed_version = changed_version_composer.build_task(
+            character=_character(),
+            action=_action(),
+            character_scope="foot_detail",
+            instructions=["避免无关细节"],
+        )
+
+        self.assertNotEqual(
+            base.nodes["character"].content_hash,
+            changed_content.nodes["character"].content_hash,
+        )
+        self.assertEqual(
+            len(
+                {
+                    base.cache_key,
+                    changed_content.cache_key,
+                    changed_scope.cache_key,
+                    changed_extra_prompt.cache_key,
+                    changed_instruction.cache_key,
+                    changed_version.cache_key,
+                }
+            ),
+            6,
+        )
+
     def test_compose_nodes_writes_and_reuses_cache(self):
         composer = AgentComposer()
         result = {
