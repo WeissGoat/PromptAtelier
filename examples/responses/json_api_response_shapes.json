@@ -63,6 +63,8 @@
           "$.meta.extra.agent.task_schema"
         ],
         "absent": [
+          "$.meta.shot",
+          "$.meta.constraints",
           "$.render_request",
           "$.agent_task"
         ]
@@ -99,6 +101,8 @@
           "$.render_request.style_payload"
         ],
         "absent": [
+          "$.prompt_bundle.meta.shot",
+          "$.prompt_bundle.meta.constraints",
           "$.status",
           "$.agent_task"
         ]
@@ -137,6 +141,8 @@
           "$.render_request.style_payload"
         ],
         "absent": [
+          "$.prompt_bundle.meta.shot",
+          "$.prompt_bundle.meta.constraints",
           "$.status",
           "$.agent_task"
         ]
@@ -165,6 +171,8 @@
           "$.render_request.params.v4_negative_prompt"
         ],
         "absent": [
+          "$.prompt_bundle.meta.shot",
+          "$.prompt_bundle.meta.constraints",
           "$.agent_task"
         ]
       }
