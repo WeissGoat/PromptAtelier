@@ -238,7 +238,7 @@ uv run python -m tags_machine_core verify-acceptance-suite examples\acceptance\s
 `--require-minimum-set` 不只是检查样例名字：
 
 - `default_action`：检查 NovelAI 核心参数、默认 negative、V4/V4.5 payload 没有丢。
-- `foot_detail` / `hand_detail`：检查 `PromptBundle.meta.composition` 的 scope、纳入 section、抑制 section 是否符合局部镜头规则。
+- `foot_detail` / `hand_detail`：检查 `PromptBundle.meta.composition` 的 scope、纳入 section、抑制 section 是否符合局部镜头规则，并确认最终 prompt 没有残留被抑制 section 的典型词。
 - `complex_character`：检查默认角色组合没有误过滤 `hair`、`eyes`、`upper_clothes`。
 - `reference_style`：检查 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 非空且长度一致。
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,18 @@ MINIMUM_DEFAULT_ACTION_REQUIRED_PARAMS = (
     "v4_negative_prompt",
 )
 MINIMUM_COMPLEX_CHARACTER_REQUIRED_INCLUDED = ("hair", "eyes", "upper_clothes")
+MINIMUM_SUPPRESSED_SECTION_PROMPT_TERMS = {
+    "hair": ("hair",),
+    "eyes": ("eyes",),
+    "upper_clothes": (
+        "school uniform",
+        "shirt",
+        "jacket",
+        "upper clothes",
+        "upper_clothes",
+    ),
+    "feet": ("feet", "foot", "bare soles", "soles", "toes"),
+}
 ACCEPTANCE_RECORD_EXTENSIONS = {".json", ".yaml", ".yml"}
 ACCEPTANCE_PATH_FIELDS = {
     "source_path",
@@ -874,6 +887,11 @@ def _scope_case_errors(record: dict[str, Any], rule: dict[str, Any]) -> list[str
     missing_suppressed = sorted(set(rule["suppressed_all"]) - suppressed)
     if missing_suppressed:
         errors.append(f"missing suppressed sections {missing_suppressed}")
+    forbidden_terms = _suppressed_prompt_terms(suppressed)
+    prompt = _normalized_core_prompt(record)
+    found_forbidden_terms = _terms_in_prompt(prompt, forbidden_terms)
+    if found_forbidden_terms:
+        errors.append(f"prompt contains suppressed section terms {found_forbidden_terms}")
     return errors
 
 
@@ -1007,6 +1025,39 @@ def _normalized_core_parameters(record: dict[str, Any]) -> dict[str, Any] | None
         return None
     params = core.get("parameters")
     return params if isinstance(params, dict) else None
+
+
+def _normalized_core_prompt(record: dict[str, Any]) -> str:
+    params = _normalized_core_parameters(record)
+    if isinstance(params, dict) and isinstance(params.get("prompt"), str):
+        return params["prompt"]
+
+    normalized = record.get("normalized")
+    if not isinstance(normalized, dict):
+        return ""
+    core = normalized.get("core")
+    if not isinstance(core, dict):
+        return ""
+    return str(core.get("input") or "")
+
+
+def _suppressed_prompt_terms(suppressed_sections: set[str]) -> list[str]:
+    terms: list[str] = []
+    for section in sorted(suppressed_sections):
+        terms.extend(MINIMUM_SUPPRESSED_SECTION_PROMPT_TERMS.get(section, ()))
+    return _unique_strings(terms)
+
+
+def _terms_in_prompt(prompt: str, terms: list[str]) -> list[str]:
+    normalized_prompt = prompt.lower()
+    return [
+        term
+        for term in terms
+        if re.search(
+            rf"(?<![a-z0-9_]){re.escape(term.lower())}(?![a-z0-9_])",
+            normalized_prompt,
+        )
+    ]
 
 
 def _normalized_string_list(value: Any) -> list[str]:

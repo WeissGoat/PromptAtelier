@@ -76,6 +76,18 @@ def _sample_parameters(reference: str = "base64-reference") -> dict:
     }
 
 
+def _minimum_case_parameters(case_id: str) -> dict:
+    params = _sample_parameters()
+    if case_id.startswith("hand_detail"):
+        prompt = "akemi homura, hand focus, reaching hand"
+        negative = "bad hands"
+        params["prompt"] = prompt
+        params["negative_prompt"] = negative
+        params["v4_prompt"]["caption"]["base_caption"] = prompt
+        params["v4_negative_prompt"]["caption"]["base_caption"] = negative
+    return params
+
+
 class VerificationTest(unittest.TestCase):
     def test_read_png_parameters_keeps_full_comment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -604,7 +616,7 @@ class VerificationTest(unittest.TestCase):
                 core = root / f"{case_id}_core.json"
                 bundle = root / f"{case_id}_bundle.json"
                 record_path = root / f"{case_id}.json"
-                payload = {"parameters": _sample_parameters()}
+                payload = {"parameters": _minimum_case_parameters(case_id)}
                 legacy.write_text(json.dumps(payload), encoding="utf-8")
                 core.write_text(json.dumps(payload), encoding="utf-8")
                 prompt_bundle = None
@@ -701,7 +713,7 @@ class VerificationTest(unittest.TestCase):
                 core = root / f"{case_id}_core.json"
                 bundle = root / f"{case_id}_bundle.json"
                 record_path = root / f"{case_id}.json"
-                payload = {"parameters": _sample_parameters()}
+                payload = {"parameters": _minimum_case_parameters(case_id)}
                 legacy.write_text(json.dumps(payload), encoding="utf-8")
                 core.write_text(json.dumps(payload), encoding="utf-8")
                 prompt_bundle = None
@@ -757,6 +769,82 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(foot_check["result"], "fail")
             self.assertIn("upper_clothes", foot_check["messages"][0])
 
+    def test_verify_acceptance_suite_fails_suppressed_prompt_terms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_record(
+                case_id: str,
+                *,
+                composition: dict | None = None,
+                parameters: dict | None = None,
+            ) -> None:
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                bundle = root / f"{case_id}_bundle.json"
+                record_path = root / f"{case_id}.json"
+                payload = {"parameters": parameters or _minimum_case_parameters(case_id)}
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                prompt_bundle = None
+                if composition is not None:
+                    bundle.write_text(
+                        json.dumps({"meta": {"composition": composition}}),
+                        encoding="utf-8",
+                    )
+                    prompt_bundle = bundle
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                    prompt_bundle=prompt_bundle,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            bad_foot_params = _minimum_case_parameters("foot_detail_001")
+            bad_foot_params["prompt"] = (
+                "akemi homura, bare soles, foot focus, purple eyes, school uniform"
+            )
+            bad_foot_params["v4_prompt"]["caption"]["base_caption"] = bad_foot_params["prompt"]
+            write_record("default_action_001")
+            write_record(
+                "foot_detail_001",
+                composition={
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes"],
+                },
+                parameters=bad_foot_params,
+            )
+            write_record(
+                "hand_detail_001",
+                composition={
+                    "character_scope": "hand_detail",
+                    "included_character_sections": ["character", "hands"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes", "feet"],
+                },
+            )
+            write_record(
+                "complex_character_001",
+                composition={
+                    "character_scope": "default",
+                    "included_character_sections": ["character", "hair", "eyes", "upper_clothes"],
+                    "suppressed_character_sections": [],
+                },
+            )
+            write_record("reference_style_001")
+
+            result = verify_acceptance_suite(root, require_minimum_set=True)
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["case_check_fail_count"], 1)
+            foot_check = [
+                check for check in result["case_checks"] if check["required_case"] == "foot_detail"
+            ][0]
+            self.assertEqual(foot_check["result"], "fail")
+            self.assertIn("prompt contains suppressed section terms", foot_check["messages"][0])
+            self.assertIn("school uniform", foot_check["messages"][0])
+
     def test_verify_acceptance_suite_fails_reference_style_array_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -771,7 +859,7 @@ class VerificationTest(unittest.TestCase):
                 core = root / f"{case_id}_core.json"
                 bundle = root / f"{case_id}_bundle.json"
                 record_path = root / f"{case_id}.json"
-                payload = {"parameters": parameters or _sample_parameters()}
+                payload = {"parameters": parameters or _minimum_case_parameters(case_id)}
                 legacy.write_text(json.dumps(payload), encoding="utf-8")
                 core.write_text(json.dumps(payload), encoding="utf-8")
                 prompt_bundle = None
@@ -851,7 +939,7 @@ class VerificationTest(unittest.TestCase):
                 core = root / f"{case_id}_core.json"
                 bundle = root / f"{case_id}_bundle.json"
                 record_path = root / f"{case_id}.json"
-                payload = {"parameters": parameters or _sample_parameters()}
+                payload = {"parameters": parameters or _minimum_case_parameters(case_id)}
                 legacy.write_text(json.dumps(payload), encoding="utf-8")
                 core.write_text(json.dumps(payload), encoding="utf-8")
                 prompt_bundle = None
@@ -927,7 +1015,7 @@ class VerificationTest(unittest.TestCase):
                 core = root / f"{case_id}_core.json"
                 bundle = root / f"{case_id}_bundle.json"
                 record_path = root / f"{case_id}.json"
-                payload = {"parameters": parameters or _sample_parameters()}
+                payload = {"parameters": parameters or _minimum_case_parameters(case_id)}
                 legacy.write_text(json.dumps(payload), encoding="utf-8")
                 core.write_text(json.dumps(payload), encoding="utf-8")
                 prompt_bundle = None
