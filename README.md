@@ -16,10 +16,12 @@
 完整主体提示词 + style_ref
 -> PromptBundle
 -> RenderRequest
--> NovelAI / SD 保存图片，或 ComfyUI queue prompt
+-> NovelAI 保存图片
 ```
 
 默认不 import 旧项目里的运行时代码。
+
+当前确定接入和验收主线只按 NovelAI 推进。ComfyUI / SD WebUI / Forge 相关代码只作为预研和未来扩展保留，等后续规范明确后再进入正式接入范围。
 
 ## CLI
 
@@ -27,8 +29,8 @@
 - `compose-nodes`：从结构化角色/动作/背景节点生成 `PromptBundle`
 - `agent-task-nodes`：生成给外部 agent 读取的组合任务 JSON
 - `compose-agent-nodes`：把外部 agent 结果落成 `PromptBundle`，支持缓存复用
-- `render-plan`：生成 NovelAI / ComfyUI / SD `RenderRequest`，不联网
-- `render-plan-nodes`：从结构化节点生成多后端 `RenderRequest`，不联网
+- `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
+- `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `api-compose` / `api-render-plan` / `api-compose-render-plan`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并调用对应后端 client
@@ -50,7 +52,7 @@ NovelAI 默认使用：
 - 环境变量：`NAI_ACCESS_TOKEN`
 - 接口：`https://image.novelai.net/ai/generate-image`
 
-ComfyUI / SD 默认本地地址：
+预研后端默认本地地址（当前不作为 v1 验收范围）：
 
 - ComfyUI：`http://127.0.0.1:8188`
 - Stable Diffusion WebUI / Forge：`http://127.0.0.1:7860`
@@ -82,20 +84,20 @@ uv run python -m tags_machine_core compose-agent-nodes `
 
 `agent-task-nodes` 不调用模型，只输出稳定任务 JSON。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
 
-多后端 render plan 示例：
+NovelAI render plan 示例：
 
 ```powershell
 uv run python -m tags_machine_core render-plan-nodes `
-  --backend comfyui `
+  --backend novelai `
   --character examples\nodes\characters\homura `
   --action examples\nodes\actions\foot_closeup `
   --style-node examples\nodes\styles\anime_comfy `
   --seed 123
 
 uv run python -m tags_machine_core render-plan `
-  --backend sd `
+  --backend novelai `
   --prompt "akemi homura, foot focus" `
-  --params-json "{\"checkpoint\":\"anime_sd.safetensors\"}"
+  --params-json "{\"sampler\":\"k_euler_ancestral\"}"
 ```
 
 `render-plan` / `render-plan-nodes` 只生成 `RenderRequest`，用于 UI、队列、diff 和验收。已有 `RenderRequest` 可以交给执行入口：
@@ -118,7 +120,7 @@ JSON API 边界示例：
     "style": "examples/nodes/styles/anime_comfy"
   },
   "render": {
-    "backend": "comfyui",
+    "backend": "novelai",
     "style": "examples/nodes/styles/anime_comfy",
     "seed": 123
   }
@@ -132,7 +134,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json `
 
 `api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。
 
-`generate` 是 NovelAI 的快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片。`execute-render-request` 支持 NovelAI、ComfyUI、SD：NovelAI / SD 会保存返回图片，ComfyUI 当前会把 workflow 排入 `/prompt` 队列并返回 `prompt_id`。
+`generate` 是 NovelAI 的快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片。`execute-render-request` 当前验收只要求 NovelAI 链路稳定；ComfyUI / SD WebUI / Forge 入口属于预研代码，不作为本阶段接入承诺。
 
 旧画风节点迁移示例：
 

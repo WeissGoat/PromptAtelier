@@ -7,7 +7,7 @@ style 节点描述画风素材和后端相关素材。它既要能被 agent 读�
 style 节点可以包含两类信息：
 
 - 通用画风素材：风格、质量词、构图倾向、通用负向词。
-- 后端适配素材：NovelAI 的 prompt 前后缀和 vibe 参数，ComfyUI 的 workflow / LoRA / 节点覆盖，SD 的 checkpoint / VAE / ControlNet 等。
+- 后端适配素材：当前正式接入 NovelAI 的 prompt 前后缀和 vibe 参数；ComfyUI / SD 字段只作为未来扩展预留。
 
 style 节点不应该包含角色、动作、局部镜头裁剪规则。
 
@@ -51,22 +51,7 @@ renderers:
       sampler: k_euler
       steps: 28
 
-  comfyui:
-    workflow: portrait_workflow
-    checkpoint: anime_comfy.safetensors
-    loras:
-      - name: lineart
-        weight: 0.65
-    params:
-      steps: 32
-      cfg: 6.5
-
-  sd:
-    checkpoint: anime_sd.safetensors
-    vae: anime.vae.pt
-    params:
-      steps: 24
-      cfg_scale: 7.5
+  # ComfyUI / SD 等后端字段等待后续规范确认。
 ```
 
 ## 字段说明
@@ -101,7 +86,7 @@ kind: style
 - `composition`：通用构图倾向。
 - `medium`：媒介或渲染类型，例如 watercolor、cel shading。
 
-这些 tags 不是最终 prompt。NovelAI adapter 可以把它们合入画风 prompt，ComfyUI/SD adapter 当前主要把它们保留在 `style_payload` 中，后续 UI 和执行器也可以读取。
+这些 tags 不是最终 prompt。NovelAI adapter 可以把它们合入画风 prompt；未来 ComfyUI / SD 接入时，也应该通过各自 adapter 消费，而不是写入 PromptBundle。
 
 ### `negative_prompt`
 
@@ -164,7 +149,9 @@ renderers:
     include_common_tags: false
 ```
 
-## ComfyUI 配置
+## ComfyUI 配置（预留）
+
+ComfyUI 暂不作为 v1 的正式接入和验收范围。下面字段只记录已有预研方向，后续需要根据新的 ComfyUI 规范再冻结：
 
 ```yaml
 renderers:
@@ -194,7 +181,9 @@ renderers:
 
 覆盖值可以使用 adapter 提供的占位符，例如 `{positive_prompt}`、`{negative_prompt}`、`{seed}`、`{width}`、`{height}`、`{steps}`、`{cfg}`、`{sampler}`、`{scheduler}`。当整个值正好是一个占位符时，adapter 会保留原始类型，例如 `{seed}` 仍然是整数；当占位符嵌在字符串中时，会按字符串替换，例如 `tmc_{seed}_{width}x{height}`。
 
-## SD 配置
+## SD 配置（待规范）
+
+SD WebUI / Forge 当前不接入。下面字段只作为历史预研参考，不能作为 v1 正式契约；后续需要等 SD 规范明确后再重新确认：
 
 ```yaml
 renderers:
@@ -216,7 +205,7 @@ renderers:
       scheduler: karras
 ```
 
-SD adapter 当前也只生成 dry-run `RenderRequest`。
+SD adapter 的正式字段契约、img2img、ControlNet、Forge 差异字段和验收样例都等待后续规范确认。
 
 ## 与 PromptBundle 的关系
 
