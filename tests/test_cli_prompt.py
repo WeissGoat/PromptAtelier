@@ -175,7 +175,7 @@ novelai:
 
             with (
                 patch.dict("os.environ", {"NAI_ACCESS_TOKEN": "token"}),
-                patch("tags_machine_core.cli.NovelAIClient") as client_cls,
+                patch("tags_machine_core.execution.NovelAIClient") as client_cls,
             ):
                 client = client_cls.return_value
                 client.generate_images.return_value = [
