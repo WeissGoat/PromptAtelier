@@ -23,6 +23,7 @@ from tags_machine_core.verification import (
     compare_render_parameters,
     load_render_parameter_source,
     normalize_render_parameters,
+    parse_intentional_difference_args,
     parse_whitelist_args,
     read_image_parameters,
     verify_acceptance_record,
@@ -318,6 +319,7 @@ def cmd_create_acceptance_record(args) -> int:
         core_image=args.core_image,
         prompt_bundle=args.prompt_bundle,
         whitelist=parse_whitelist_args(args.whitelist),
+        intentional_differences=parse_intentional_difference_args(args.intentional_difference),
         notes=args.note or [],
     )
     if args.output:
@@ -672,6 +674,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--whitelist",
         action="append",
         help="Approved diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    create_acceptance_record.add_argument(
+        "--intentional-difference",
+        action="append",
+        help=(
+            "Intentional core-vs-legacy diff path with optional reason, "
+            "for example $.parameters.prompt=foot_detail filters face tags"
+        ),
     )
     create_acceptance_record.add_argument(
         "--note",

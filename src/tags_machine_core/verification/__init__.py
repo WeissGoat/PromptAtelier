@@ -1,6 +1,7 @@
 from .acceptance import (
     build_acceptance_record,
     load_acceptance_record,
+    parse_intentional_difference_args,
     parse_whitelist_args,
     verify_acceptance_record,
     verify_acceptance_suite,
@@ -20,6 +21,7 @@ __all__ = [
     "load_acceptance_record",
     "load_render_parameter_source",
     "normalize_render_parameters",
+    "parse_intentional_difference_args",
     "parse_whitelist_args",
     "read_image_parameters",
     "read_png_text_chunks",

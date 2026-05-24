@@ -35,6 +35,7 @@ def build_acceptance_record(
     core_image: str | Path | None = None,
     prompt_bundle: str | Path | None = None,
     whitelist: list[dict[str, str]] | None = None,
+    intentional_differences: list[dict[str, str]] | None = None,
     notes: list[str] | None = None,
 ) -> dict[str, Any]:
     legacy_source_path = Path(legacy_source)
@@ -42,9 +43,14 @@ def build_acceptance_record(
     legacy_data = load_render_parameter_source(legacy_source_path)
     core_data = load_render_parameter_source(core_source_path)
     diffs = [diff.as_dict() for diff in compare_render_parameters(legacy_data, core_data)]
-    whitelist = whitelist or []
-    approved_paths = {entry["path"] for entry in whitelist if entry.get("path")}
+    whitelist = _normalize_path_reason_entries(whitelist)
+    intentional_differences = _normalize_path_reason_entries(intentional_differences)
+    whitelisted_paths = {entry["path"] for entry in whitelist}
+    intentional_paths = {entry["path"] for entry in intentional_differences}
+    approved_paths = whitelisted_paths | intentional_paths
     unapproved_diffs = [diff for diff in diffs if diff["path"] not in approved_paths]
+    whitelisted_diff_count = sum(1 for diff in diffs if diff["path"] in whitelisted_paths)
+    intentional_diff_count = sum(1 for diff in diffs if diff["path"] in intentional_paths)
 
     record = {
         "schema": ACCEPTANCE_SCHEMA,
@@ -63,11 +69,15 @@ def build_acceptance_record(
             "normalized_equal": not diffs,
             "diff_count": len(diffs),
             "approved_diff_count": len(diffs) - len(unapproved_diffs),
+            "whitelisted_diff_count": whitelisted_diff_count,
+            "intentional_diff_count": intentional_diff_count,
             "unapproved_diff_count": len(unapproved_diffs),
             "diffs": diffs,
             "unapproved_diffs": unapproved_diffs,
             "whitelist": whitelist,
+            "intentional_differences": intentional_differences,
         },
+        "intentional_differences": intentional_differences,
         "composition": _load_composition(
             core_data=core_data,
             prompt_bundle=Path(prompt_bundle) if prompt_bundle else None,
@@ -112,6 +122,7 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
             base_dir,
         ),
         whitelist=(record.get("diff") or {}).get("whitelist") or [],
+        intentional_differences=_record_intentional_differences(record),
         notes=record.get("notes") or [],
     )
     return {
@@ -121,6 +132,7 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
         "match": rebuilt["result"] == "pass",
         "result": rebuilt["result"],
         "diff": rebuilt["diff"],
+        "intentional_differences": rebuilt["intentional_differences"],
         "composition": rebuilt["composition"],
     }
 
@@ -186,6 +198,14 @@ def verify_acceptance_suite(
 
 
 def parse_whitelist_args(values: list[str] | None) -> list[dict[str, str]]:
+    return _parse_path_reason_args(values)
+
+
+def parse_intentional_difference_args(values: list[str] | None) -> list[dict[str, str]]:
+    return _parse_path_reason_args(values)
+
+
+def _parse_path_reason_args(values: list[str] | None) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for value in values or []:
         path, separator, reason = value.partition("=")
@@ -194,6 +214,25 @@ def parse_whitelist_args(values: list[str] | None) -> list[dict[str, str]]:
             continue
         entries.append({"path": path, "reason": reason.strip() if separator else ""})
     return entries
+
+
+def _normalize_path_reason_entries(values: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for value in values or []:
+        if not isinstance(value, dict):
+            continue
+        path = str(value.get("path") or "").strip()
+        if not path:
+            continue
+        entries.append({"path": path, "reason": str(value.get("reason") or "").strip()})
+    return entries
+
+
+def _record_intentional_differences(record: dict[str, Any]) -> list[dict[str, str]]:
+    value = record.get("intentional_differences")
+    if value is None:
+        value = (record.get("diff") or {}).get("intentional_differences")
+    return _normalize_path_reason_entries(value if isinstance(value, list) else [])
 
 
 def _legacy_record_paths(*, source: Path, image: Path | None) -> dict[str, str]:

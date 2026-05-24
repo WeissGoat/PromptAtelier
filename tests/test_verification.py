@@ -301,6 +301,83 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(record["diff"]["approved_diff_count"], 1)
             self.assertEqual(record["diff"]["unapproved_diff_count"], 0)
 
+    def test_build_acceptance_record_allows_intentional_difference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            legacy.write_text(json.dumps({"parameters": _sample_parameters()}), encoding="utf-8")
+            changed = _sample_parameters()
+            changed["scale"] = 6.0
+            core.write_text(json.dumps({"parameters": changed}), encoding="utf-8")
+
+            record = build_acceptance_record(
+                case_id="intentional_scale_change",
+                legacy_source=legacy,
+                core_source=core,
+                intentional_differences=[
+                    {
+                        "path": "$.parameters.scale",
+                        "reason": "core intentionally changes this sample",
+                    }
+                ],
+            )
+
+            self.assertEqual(record["result"], "pass")
+            self.assertFalse(record["diff"]["normalized_equal"])
+            self.assertEqual(record["diff"]["approved_diff_count"], 1)
+            self.assertEqual(record["diff"]["whitelisted_diff_count"], 0)
+            self.assertEqual(record["diff"]["intentional_diff_count"], 1)
+            self.assertEqual(record["diff"]["unapproved_diff_count"], 0)
+            self.assertEqual(
+                record["intentional_differences"],
+                [
+                    {
+                        "path": "$.parameters.scale",
+                        "reason": "core intentionally changes this sample",
+                    }
+                ],
+            )
+
+    def test_verify_acceptance_record_recomputes_intentional_differences(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.json"
+            legacy.write_text(json.dumps({"parameters": _sample_parameters()}), encoding="utf-8")
+            changed = _sample_parameters()
+            changed["steps"] = 30
+            core.write_text(json.dumps({"parameters": changed}), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="intentional_steps",
+                legacy_source=legacy,
+                core_source=core,
+                intentional_differences=[
+                    {
+                        "path": "$.parameters.steps",
+                        "reason": "documented core-side behavior change",
+                    }
+                ],
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            result = verify_acceptance_record(record_path)
+
+            self.assertTrue(result["match"])
+            self.assertEqual(result["result"], "pass")
+            self.assertEqual(result["diff"]["intentional_diff_count"], 1)
+            self.assertEqual(result["diff"]["unapproved_diff_count"], 0)
+            self.assertEqual(
+                result["intentional_differences"],
+                [
+                    {
+                        "path": "$.parameters.steps",
+                        "reason": "documented core-side behavior change",
+                    }
+                ],
+            )
+
     def test_verify_acceptance_record_recomputes_diff(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -459,6 +536,53 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(created["result"], "pass")
             self.assertTrue(verified["match"])
             self.assertTrue(record_path.exists())
+
+    def test_cli_create_acceptance_record_allows_intentional_difference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.yaml"
+            legacy.write_text(json.dumps({"parameters": _sample_parameters()}), encoding="utf-8")
+            changed = _sample_parameters()
+            changed["scale"] = 6.0
+            core.write_text(json.dumps({"parameters": changed}), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                create_exit = main(
+                    [
+                        "create-acceptance-record",
+                        "--case-id",
+                        "intentional_cli",
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                        "--intentional-difference",
+                        "$.parameters.scale=core intentionally changes scale",
+                        "--output",
+                        str(record_path),
+                    ]
+                )
+            created = json.loads(stdout.getvalue())
+
+            verify_stdout = io.StringIO()
+            with redirect_stdout(verify_stdout):
+                verify_exit = main(["verify-acceptance-record", str(record_path)])
+            verified = json.loads(verify_stdout.getvalue())
+
+            self.assertEqual(create_exit, 0)
+            self.assertEqual(verify_exit, 0)
+            self.assertEqual(created["result"], "pass")
+            self.assertEqual(created["diff"]["intentional_diff_count"], 1)
+            self.assertEqual(created["diff"]["unapproved_diff_count"], 0)
+            self.assertEqual(
+                created["intentional_differences"][0]["reason"],
+                "core intentionally changes scale",
+            )
+            self.assertTrue(verified["match"])
+            self.assertEqual(verified["diff"]["intentional_diff_count"], 1)
 
     def test_cli_create_acceptance_record_returns_nonzero_for_unapproved_diff(self):
         with tempfile.TemporaryDirectory() as tmp:

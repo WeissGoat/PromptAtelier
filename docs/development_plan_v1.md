@@ -315,6 +315,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `execute-render-request` 读取已有 `RenderRequest` 后联网执行：NovelAI / SD 会保存图片；ComfyUI 默认会排队、轮询 history、下载图片并保存，使用 `--comfyui-no-wait` 时只返回 `prompt_id`。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录。
+- `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
@@ -469,6 +470,9 @@ diff:
   whitelist:
     - path: $.parameters.sampler
       reason: adapter normalized sampler alias
+  intentional_differences:
+    - path: $.prompt.positive
+      reason: foot_detail 按统一 composer 规则过滤 hair / eyes / upper_clothes
 intentional_differences:
   - path: $.prompt.positive
     reason: foot_detail 按统一 composer 规则过滤 hair / eyes / upper_clothes
