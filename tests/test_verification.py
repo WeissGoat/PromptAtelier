@@ -407,6 +407,67 @@ class VerificationTest(unittest.TestCase):
                 ["shot", "constraints"],
             )
 
+    def test_verify_acceptance_record_fails_prompt_bundle_backend_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            bundle = root / "bundle.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            bundle.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.prompt-bundle/v1",
+                        "prompt": {
+                            "positive": "akemi homura, foot focus",
+                            "negative": "bad feet",
+                        },
+                        "meta": {
+                            "action_ref": "foot_closeup",
+                            "composition": {
+                                "character_scope": "foot_detail",
+                                "included_character_sections": ["character", "feet"],
+                                "suppressed_character_sections": ["eyes", "upper_clothes"],
+                            },
+                        },
+                        "backend": "novelai",
+                        "params": {
+                            "v4_prompt": {"caption": {"base_caption": "akemi homura"}},
+                            "reference_image_multiple": ["base64-ref"],
+                        },
+                        "style_payload": {"renderers": {"novelai": {}}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            record = build_acceptance_record(
+                case_id="prompt_bundle_backend_leak",
+                legacy_source=legacy,
+                core_source=core,
+                prompt_bundle=bundle,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            verified = verify_acceptance_record(record_path)
+
+            self.assertFalse(verified["match"])
+            self.assertEqual(verified["result"], "fail")
+            self.assertEqual(verified["prompt_bundle_contract_evidence"]["result"], "fail")
+            self.assertEqual(
+                verified["prompt_bundle_contract_evidence"]["forbidden_backend_fields"],
+                [
+                    "$.backend",
+                    "$.params",
+                    "$.params.v4_prompt",
+                    "$.params.reference_image_multiple",
+                    "$.style_payload",
+                    "$.style_payload.renderers",
+                ],
+            )
+
     def test_build_acceptance_record_records_image_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -80,6 +80,36 @@ MINIMUM_SUPPRESSED_SECTION_PROMPT_TERMS = {
     ),
     "feet": ("feet", "foot", "bare soles", "soles", "toes"),
 }
+PROMPT_BUNDLE_FORBIDDEN_META_FIELDS = ("shot", "constraints")
+PROMPT_BUNDLE_FORBIDDEN_BACKEND_FIELDS = {
+    "backend",
+    "cfg_rescale",
+    "checkpoint",
+    "director_reference_images",
+    "height",
+    "loras",
+    "model",
+    "negative_prompt",
+    "node_overrides",
+    "noise_schedule",
+    "params",
+    "reference_image_multiple",
+    "reference_information_extracted_multiple",
+    "reference_strength_multiple",
+    "renderers",
+    "sampler",
+    "scale",
+    "seed",
+    "size",
+    "steps",
+    "style_payload",
+    "v4_negative_prompt",
+    "v4_prompt",
+    "width",
+    "workflow",
+    "workflow_json",
+    "workflow_path",
+}
 ACCEPTANCE_RECORD_EXTENSIONS = {".json", ".yaml", ".yml"}
 ACCEPTANCE_PATH_FIELDS = {
     "source_path",
@@ -1081,16 +1111,38 @@ def _prompt_bundle_contract_evidence(prompt_bundle: Path | None) -> dict[str, An
         return None
     bundle_data = _load_json_mapping(prompt_bundle)
     meta = bundle_data.get("meta") if isinstance(bundle_data.get("meta"), dict) else {}
-    forbidden = [
+    forbidden_meta_fields = [
         key
-        for key in ("shot", "constraints")
+        for key in PROMPT_BUNDLE_FORBIDDEN_META_FIELDS
         if key in meta
     ]
+    forbidden_backend_fields = _prompt_bundle_forbidden_backend_field_paths(bundle_data)
     return {
         "path": str(prompt_bundle),
-        "forbidden_meta_fields": forbidden,
-        "result": "fail" if forbidden else "pass",
+        "forbidden_meta_fields": forbidden_meta_fields,
+        "forbidden_backend_fields": forbidden_backend_fields,
+        "result": "fail" if forbidden_meta_fields or forbidden_backend_fields else "pass",
     }
+
+
+def _prompt_bundle_forbidden_backend_field_paths(value: Any, prefix: str = "$") -> list[str]:
+    if isinstance(value, dict):
+        paths: list[str] = []
+        for key, item in value.items():
+            key_text = str(key)
+            key_path = f"{prefix}.{key_text}"
+            if key_text in PROMPT_BUNDLE_FORBIDDEN_BACKEND_FIELDS:
+                paths.append(key_path)
+            paths.extend(_prompt_bundle_forbidden_backend_field_paths(item, key_path))
+        return paths
+    if isinstance(value, list):
+        paths = []
+        for index, item in enumerate(value):
+            paths.extend(
+                _prompt_bundle_forbidden_backend_field_paths(item, f"{prefix}[{index}]")
+            )
+        return paths
+    return []
 
 
 def _load_json_mapping(path: Path) -> dict[str, Any]:

@@ -507,6 +507,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 v1 冻结验收补充：
 
 - `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来；验收资料包会用 `prompt_bundle_contract_evidence` 回放检查这一点。
+- `PromptBundle` 不得携带后端专属字段，例如 `backend`、`params`、`style_payload`、`v4_prompt`、`reference_image_multiple`、`workflow_json`、`checkpoint` 等。`prompt_bundle_contract_evidence` 会递归检查这类字段，防止 NovelAI / ComfyUI / SD 细节反向污染提示词生成层。
 - `meta.composition` 必须记录 composer 的实际选择，而不是重复 action 原始字段；验收时检查 `character_scope`、`included_character_sections`、`suppressed_character_sections` 是否和本次最终 prompt 一致。
 - 如果 core 为了修复旧项目割裂问题而有意过滤某些旧 prompt 片段，例如 `foot_detail` 过滤 `hair`、`eyes`、`upper_clothes`，这类差异不能简单算失败，但必须写进验收记录的 `intentional_differences`，并说明来自哪条统一 composer 规则。
 - 旧项目基准只负责提供 oracle：旧 `run_action` 的最终 prompt、请求体、PNG 内嵌参数和基准图。core 侧验收不得在测试或运行时 import 旧项目代码。
@@ -515,7 +516,7 @@ v1 冻结验收补充：
 
 模块通信格式的通过线：
 
-- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。
+- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。验收还会检查 `PromptBundle` 没有混入 `RenderRequest` 或后端 adapter 字段。
 - `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；ComfyUI / SD 暂不作为本阶段验收范围。
 - `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。若 `png_info.images` 条目包含 `parameters`，这些参数还必须和对应图片实际内嵌 PNG 参数归一化后一致；若条目包含 `error`，对应图片也必须确实不可读。真实旧项目 oracle 的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
 - 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本、显式输入参数和 agent 模型版本，避免旧素材更新或 agent 模型升级后误用旧结果。
