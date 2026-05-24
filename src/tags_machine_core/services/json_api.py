@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
 
+from tags_machine_core.composers import AgentCompositionRequired
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.json_tools import to_jsonable
@@ -98,6 +99,22 @@ class GenerationJsonApi:
             cache=cache,
         )
         return to_jsonable(bundle)
+
+    def resolve_agent(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        data = _mapping(request, "resolve-agent request")
+        try:
+            bundle = self.compose_agent(data)
+        except AgentCompositionRequired as exc:
+            return {
+                "schema": "tags-machine-core.agent-compose-resolution/v1",
+                "status": "requires_agent",
+                "agent_task": to_jsonable(exc.task),
+            }
+        return {
+            "schema": "tags-machine-core.agent-compose-resolution/v1",
+            "status": "ready",
+            "prompt_bundle": bundle,
+        }
 
     def render_plan(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "render-plan request")

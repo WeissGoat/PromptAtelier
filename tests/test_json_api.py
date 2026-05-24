@@ -481,6 +481,68 @@ class JsonApiTest(unittest.TestCase):
                 _without_runtime_fields({**second, "cache": {**second["cache"], "cache_hit": False}}),
             )
 
+    def test_resolve_agent_json_api_returns_task_on_cache_miss_then_cached_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            request = {
+                "nodes": {
+                    "character": str(character),
+                    "action": str(action),
+                },
+                "style": str(style),
+                "extra_prompt": "soles toward viewer",
+                "negative": "face focus",
+                "character_scope": "foot_detail",
+                "agent": {
+                    "instructions": ["局部特写只保留脚部相关角色细节"],
+                },
+                "cache": {
+                    "cache_dir": str(cache_dir),
+                },
+            }
+            api = GenerationJsonApi()
+
+            missing = api.resolve_agent(request)
+            with_result = {
+                **request,
+                "agent": {
+                    "instructions": ["局部特写只保留脚部相关角色细节"],
+                    "result": {
+                        "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
+                        "negative": "extra toes, face focus",
+                        "character_scope": "foot_detail",
+                        "included_character_sections": ["character", "feet"],
+                        "suppressed_character_sections": ["eyes", "upper_clothes"],
+                    },
+                },
+            }
+            created = api.resolve_agent(with_result)
+            cached = api.resolve_agent(request)
+
+            self.assertEqual(missing["schema"], "tags-machine-core.agent-compose-resolution/v1")
+            self.assertEqual(missing["status"], "requires_agent")
+            self.assertEqual(missing["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertEqual(missing["agent_task"]["nodes"]["action"]["node"]["character_scope"], "foot_detail")
+            self.assertEqual(created["status"], "ready")
+            self.assertFalse(created["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(cached["status"], "ready")
+            self.assertTrue(cached["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(
+                missing["agent_task"]["cache_key"],
+                created["prompt_bundle"]["cache"]["cache_key"],
+            )
+            self.assertEqual(
+                _without_runtime_fields(created["prompt_bundle"]),
+                _without_runtime_fields(
+                    {
+                        **cached["prompt_bundle"],
+                        "cache": {**cached["prompt_bundle"]["cache"], "cache_hit": False},
+                    }
+                ),
+            )
+
     def test_agent_compose_render_plan_json_api_builds_bundle_and_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -574,6 +636,7 @@ class JsonApiTest(unittest.TestCase):
             request_path = root / "agent_request.json"
             task_output = root / "agent_task.json"
             bundle_output = root / "agent_bundle.json"
+            resolve_output = root / "agent_resolution.json"
             request_path.write_text(
                 json.dumps(
                     {
@@ -622,19 +685,83 @@ class JsonApiTest(unittest.TestCase):
                         str(bundle_output),
                     ]
                 )
+            resolve_stdout = io.StringIO()
+            with redirect_stdout(resolve_stdout):
+                resolve_exit = main(
+                    [
+                        "api-resolve-agent",
+                        str(request_path),
+                        "--output",
+                        str(resolve_output),
+                    ]
+                )
 
             task_printed = json.loads(task_stdout.getvalue())
             task_written = json.loads(task_output.read_text(encoding="utf-8"))
             bundle_printed = json.loads(bundle_stdout.getvalue())
             bundle_written = json.loads(bundle_output.read_text(encoding="utf-8"))
+            resolve_printed = json.loads(resolve_stdout.getvalue())
+            resolve_written = json.loads(resolve_output.read_text(encoding="utf-8"))
 
             self.assertEqual(task_exit, 0)
             self.assertEqual(bundle_exit, 0)
+            self.assertEqual(resolve_exit, 0)
             self.assertEqual(task_printed["cache_key"], task_written["cache_key"])
             self.assertEqual(bundle_printed["prompt"]["positive"], "akemi homura, bare soles, foot focus")
             self.assertEqual(bundle_written["meta"]["composer_type"], "agent")
             self.assertEqual(bundle_written["meta"]["composition"]["character_scope"], "foot_detail")
+            self.assertEqual(resolve_printed["status"], "ready")
+            self.assertEqual(resolve_written["prompt_bundle"]["meta"]["composer_type"], "agent")
             self.assertTrue(any(cache_dir.glob("*.json")))
+
+    def test_cli_api_resolve_agent_returns_task_without_agent_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            request_path = root / "agent_request.json"
+            output = root / "agent_resolution.json"
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": {
+                            "character": str(character),
+                            "action": str(action),
+                        },
+                        "style": str(style),
+                        "character_scope": "foot_detail",
+                        "agent": {
+                            "instructions": ["避免把眼睛和上衣放进脚部特写"],
+                        },
+                        "cache": {
+                            "cache_dir": str(cache_dir),
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "api-resolve-agent",
+                        str(request_path),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            printed = json.loads(stdout.getvalue())
+            written = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(printed["status"], "requires_agent")
+            self.assertEqual(written["schema"], "tags-machine-core.agent-compose-resolution/v1")
+            self.assertEqual(written["agent_task"]["nodes"]["character"]["id"], "homura")
+            self.assertEqual(written["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+            self.assertFalse(any(cache_dir.glob("*.json")))
 
     def test_generate_json_api_uses_injected_executor(self):
         calls = []

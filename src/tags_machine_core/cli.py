@@ -430,6 +430,14 @@ def cmd_api_compose_agent(args) -> int:
     return 0
 
 
+def cmd_api_resolve_agent(args) -> int:
+    result = GenerationJsonApi().resolve_agent(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_api_render_plan(args) -> int:
     result = GenerationJsonApi().render_plan(_load_json_mapping_file(args.request))
     if args.output:
@@ -742,6 +750,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_request_arguments(api_compose_agent)
     api_compose_agent.set_defaults(func=cmd_api_compose_agent)
+
+    api_resolve_agent = subparsers.add_parser(
+        "api-resolve-agent",
+        parents=[output_parent],
+        help="Return a cached/ready PromptBundle or an AgentCompositionTask",
+    )
+    _add_api_request_arguments(api_resolve_agent)
+    api_resolve_agent.set_defaults(func=cmd_api_resolve_agent)
 
     api_render_plan = subparsers.add_parser(
         "api-render-plan",

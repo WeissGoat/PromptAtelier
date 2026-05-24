@@ -35,7 +35,7 @@
 - `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
-- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-render-plan` / `api-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
+- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关
 - `inspect-node`：读取节点文件或目录
@@ -124,9 +124,12 @@ uv run python -m tags_machine_core api-agent-task agent_request.json `
 
 uv run python -m tags_machine_core api-compose-agent agent_request.json `
   --output prompt_bundle.json
+
+uv run python -m tags_machine_core api-resolve-agent agent_request.json `
+  --output agent_resolution.json
 ```
 
-`api-agent-task` 和 `api-compose-agent` 也不调用模型。前者只生成 agent 可读任务；后者把外部 agent 结果落成 `PromptBundle` 并支持同输入缓存复用。
+`api-agent-task`、`api-compose-agent` 和 `api-resolve-agent` 也不调用模型。前者只生成 agent 可读任务；`api-compose-agent` 是严格落库入口，缓存缺失且没有 `agent.result` 时会失败；`api-resolve-agent` 是前端/worker 友好的分支入口，缓存命中或请求里带 `agent.result` 时返回 `status: "ready"` 和 `prompt_bundle`，否则返回 `status: "requires_agent"` 和 `agent_task`，调用方再把任务交给外部 agent。
 
 NovelAI render plan 示例：
 
