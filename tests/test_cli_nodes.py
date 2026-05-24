@@ -1497,6 +1497,69 @@ gen_json, {"reference_image_multiple": ["abc"], "reference_strength_multiple": [
             self.assertFalse((style_dir / "node.yaml").exists())
             self.assertFalse((output_root / "nodes" / "styles" / "anime_style" / "node.yaml").exists())
 
+    def test_apply_legacy_tags_migration_command_writes_ready_nodes_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character_root = root / "legacy_characters"
+            character_root.mkdir()
+            ready_character = character_root / "ready_character"
+            ready_character.mkdir()
+            (ready_character / "tags.txt").write_text(
+                """
+ready_character,ready_copyright
+blue_eyes,short_hair,jacket
+""".strip(),
+                encoding="utf-8",
+            )
+            review_character = character_root / "needs_review"
+            review_character.mkdir()
+            (review_character / "tags.txt").write_text(
+                """
+review_character,review_copyright
+signature_motif
+""".strip(),
+                encoding="utf-8",
+            )
+            output_root = root / "migrated"
+            report_path = root / "apply_report.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "apply-legacy-tags-migration",
+                        str(character_root),
+                        "--kind",
+                        "character",
+                        "--output-root",
+                        str(output_root),
+                        "--output",
+                        str(report_path),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["schema"], "tags-machine-core.legacy-tags-migration-apply/v1")
+            self.assertEqual(data["summary"]["written"], 1)
+            self.assertEqual(data["summary"]["skipped"], 1)
+            self.assertEqual(
+                data["summary"]["skip_reasons"],
+                {"migration_status:needs_review": 1},
+            )
+            ready_output = output_root / "nodes" / "characters" / "ready_character" / "meta.yaml"
+            review_output = output_root / "nodes" / "characters" / "needs_review" / "meta.yaml"
+            self.assertTrue(ready_output.exists())
+            self.assertFalse(review_output.exists())
+            migrated_node = NodeReader().read(ready_output)
+            self.assertEqual(migrated_node.kind, "character")
+            self.assertEqual(migrated_node.tags["character"], ["ready_character"])
+            self.assertEqual(migrated_node.tags["eyes"], ["blue_eyes"])
+            self.assertEqual(report["summary"], data["summary"])
+            self.assertFalse((ready_character / "meta.yaml").exists())
+            self.assertFalse((review_character / "meta.yaml").exists())
+
 
 def _without_runtime_fields(value):
     if isinstance(value, dict):

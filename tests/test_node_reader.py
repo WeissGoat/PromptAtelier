@@ -6,6 +6,7 @@ import yaml
 
 from tags_machine_core.nodes import (
     NodeReader,
+    apply_legacy_tags_migration,
     audit_legacy_tags,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
@@ -349,6 +350,60 @@ blue_eyes,short_hair,jacket
             self.assertFalse((ready_action / "meta.yaml").exists())
             self.assertFalse((nested_a / "meta.yaml").exists())
             self.assertFalse((nested_b / "meta.yaml").exists())
+
+    def test_apply_legacy_tags_migration_writes_only_ready_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "migrated"
+
+            ready_action = root / "ready_action"
+            ready_action.mkdir()
+            (ready_action / "tags.txt").write_text("foot focus, toes focus", encoding="utf-8")
+
+            review_action = root / "needs_review_action"
+            review_action.mkdir()
+            (review_action / "tags.txt").write_text(
+                "standing, looking at viewer, blue eyes",
+                encoding="utf-8",
+            )
+
+            existing_action = root / "existing_action"
+            existing_action.mkdir()
+            (existing_action / "tags.txt").write_text("hand focus, grabbing", encoding="utf-8")
+            existing_target = output_root / "nodes" / "actions" / "existing_action" / "meta.yaml"
+            existing_target.parent.mkdir(parents=True)
+            existing_target.write_text("already exists", encoding="utf-8")
+
+            result = apply_legacy_tags_migration(root, kind="action", output_root=output_root)
+
+            self.assertEqual(result["schema"], "tags-machine-core.legacy-tags-migration-apply/v1")
+            self.assertEqual(result["summary"]["written"], 1)
+            self.assertEqual(result["summary"]["skipped"], 2)
+            self.assertEqual(
+                result["summary"]["skip_reasons"],
+                {
+                    "migration_status:needs_review": 1,
+                    "migration_status:target_exists": 1,
+                },
+            )
+            items_by_source = {
+                Path(item["source_dir"]).relative_to(root).as_posix(): item
+                for item in result["items"]
+            }
+            self.assertEqual(items_by_source["ready_action"]["result"], "written")
+            self.assertEqual(items_by_source["needs_review_action"]["result"], "skipped")
+            self.assertEqual(items_by_source["existing_action"]["result"], "skipped")
+
+            ready_output = output_root / "nodes" / "actions" / "ready_action" / "meta.yaml"
+            self.assertTrue(ready_output.exists())
+            migrated_node = NodeReader().read(ready_output)
+            self.assertEqual(migrated_node.kind, "action")
+            self.assertEqual(migrated_node.tags["action"], ["foot focus", "toes focus"])
+            self.assertEqual(migrated_node.character_scope, "foot_detail")
+            self.assertEqual(existing_target.read_text(encoding="utf-8"), "already exists")
+            self.assertFalse((ready_action / "meta.yaml").exists())
+            self.assertFalse((review_action / "meta.yaml").exists())
+            self.assertFalse((existing_action / "meta.yaml").exists())
 
     def test_read_migrated_character_meta_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:

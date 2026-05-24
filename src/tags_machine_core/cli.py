@@ -15,6 +15,7 @@ from tags_machine_core.execution import execute_render_request as _execute_rende
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import (
     NodeReader,
+    apply_legacy_tags_migration,
     audit_legacy_tags,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
@@ -487,6 +488,18 @@ def cmd_plan_legacy_tags_migration(args) -> int:
     if args.output:
         _write_structured_output(plan, Path(args.output), output_format=args.format)
     print_json(plan, full=args.full)
+    return 0
+
+
+def cmd_apply_legacy_tags_migration(args) -> int:
+    result = apply_legacy_tags_migration(
+        args.source,
+        kind=args.kind,
+        output_root=args.output_root,
+    )
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
     return 0
 
 
@@ -1429,6 +1442,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output file format when --output is used",
     )
     plan_legacy_tags_migration_parser.set_defaults(func=cmd_plan_legacy_tags_migration)
+
+    apply_legacy_tags_migration_parser = subparsers.add_parser(
+        "apply-legacy-tags-migration",
+        parents=[output_parent],
+        help="Write ready legacy tags migration nodes without overwriting or writing old sources",
+    )
+    apply_legacy_tags_migration_parser.add_argument(
+        "source",
+        help="Legacy tags root, node directory, or tags.txt path",
+    )
+    apply_legacy_tags_migration_parser.add_argument(
+        "--kind",
+        required=True,
+        choices=("style", "character", "action", "background"),
+        help="Legacy node kind to migrate",
+    )
+    apply_legacy_tags_migration_parser.add_argument(
+        "--output-root",
+        required=True,
+        help="Root directory for migrated output, for example migrated",
+    )
+    apply_legacy_tags_migration_parser.add_argument(
+        "--output",
+        help="Write apply result report JSON/YAML",
+    )
+    apply_legacy_tags_migration_parser.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output report file format when --output is used",
+    )
+    apply_legacy_tags_migration_parser.set_defaults(func=cmd_apply_legacy_tags_migration)
 
     return parser
 

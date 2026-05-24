@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 NEGATIVE_EXTENSION_KEYS = {
     "origin_uc",
     "uc",
@@ -157,6 +159,61 @@ def plan_legacy_tags_migration(
         "output_root": str(output_root_path),
         "summary": _migration_plan_summary(items),
         "audit_summary": audit["summary"],
+        "items": items,
+    }
+
+
+def apply_legacy_tags_migration(
+    source: str | Path,
+    *,
+    kind: str,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """按迁移计划写出 ready 节点；不覆盖目标文件，也不写旧源目录。"""
+    plan = plan_legacy_tags_migration(source, kind=kind, output_root=output_root)
+    migrator = _legacy_migrator(kind)
+    items: list[dict[str, Any]] = []
+
+    for plan_item in plan["items"]:
+        target_file = Path(plan_item["target_file"])
+        item: dict[str, Any] = {
+            "source_file": plan_item["source_file"],
+            "source_dir": plan_item["source_dir"],
+            "target_file": str(target_file),
+            "migration_status": plan_item["migration_status"],
+        }
+        if plan_item["migration_status"] != "ready":
+            item["result"] = "skipped"
+            item["reason"] = f"migration_status:{plan_item['migration_status']}"
+            items.append(item)
+            continue
+        if target_file.exists():
+            item["result"] = "skipped"
+            item["reason"] = "target_exists"
+            items.append(item)
+            continue
+
+        try:
+            node = migrator(plan_item["source_file"])
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            target_file.write_text(
+                yaml.safe_dump(node, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # pragma: no cover - 具体文件错误由环境决定
+            item["result"] = "error"
+            item["error"] = str(exc)
+        else:
+            item["result"] = "written"
+        items.append(item)
+
+    return {
+        "schema": "tags-machine-core.legacy-tags-migration-apply/v1",
+        "kind": kind,
+        "source": str(Path(source)),
+        "output_root": str(Path(output_root)),
+        "plan_summary": plan["summary"],
+        "summary": _apply_migration_summary(items),
         "items": items,
     }
 
@@ -396,6 +453,18 @@ def _collect_legacy_tags_paths(source: Path) -> list[Path]:
     return sorted(path for path in source.rglob("tags.txt") if path.is_file())
 
 
+def _legacy_migrator(kind: str):
+    migrators = {
+        "style": migrate_legacy_style_tags,
+        "character": migrate_legacy_character_tags,
+        "action": migrate_legacy_action_tags,
+        "background": migrate_legacy_background_tags,
+    }
+    if kind not in migrators:
+        raise ValueError(f"Unsupported legacy tag kind: {kind}")
+    return migrators[kind]
+
+
 def _safe_migration_node_dir_name(node_id: str) -> str:
     value = "".join("_" if char in '<>:"/\\|?*' or ord(char) < 32 else char for char in node_id)
     value = value.strip().rstrip(".")
@@ -434,6 +503,25 @@ def _migration_plan_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         "errors": status_counts.get("error", 0),
         "status_counts": dict(sorted(status_counts.items())),
         "issue_counts": dict(sorted(issue_counts.items())),
+    }
+
+
+def _apply_migration_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    result_counts: dict[str, int] = {}
+    skip_reasons: dict[str, int] = {}
+    for item in items:
+        result = str(item.get("result") or "unknown")
+        result_counts[result] = result_counts.get(result, 0) + 1
+        if result == "skipped":
+            reason = str(item.get("reason") or "unknown")
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    return {
+        "total": len(items),
+        "written": result_counts.get("written", 0),
+        "skipped": result_counts.get("skipped", 0),
+        "errors": result_counts.get("error", 0),
+        "result_counts": dict(sorted(result_counts.items())),
+        "skip_reasons": dict(sorted(skip_reasons.items())),
     }
 
 
