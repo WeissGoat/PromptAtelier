@@ -367,6 +367,7 @@ uv run python -m tags_machine_core archive-novelai-acceptance-nodes --case-id fo
 uv run python -m tags_machine_core archive-novelai-acceptance-prompt --case-id default_action_prompt_001 --output-dir acceptance --legacy-source old_request.json --prompt-file agent_prompt.txt --style-node examples\nodes\styles\anime_comfy --seed 123 --nt 3 --required-case default_action --overwrite
 uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set
 uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set --require-legacy-oracle
+uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set --require-legacy-oracle --require-legacy-evidence
 uv run python -m tags_machine_core verify-acceptance-suite examples\acceptance\suite.yaml --require-minimum-set
 uv run python -m tags_machine_core generate --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 ```
@@ -386,7 +387,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；它不运行旧项目代码，也不联网生图。
 - `archive-novelai-acceptance-prompt` 会从完整 prompt 生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；适合验证 agent prompt、人工完整 prompt 或旧 `run-prompt` 输出和旧 `run_action` 基准是否等价。
 - `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全，并输出 `case_checks` 验证关键样例语义：默认动作必须保留 NovelAI 核心默认参数和 V4 payload，局部镜头必须验证 character section 裁剪且最终 prompt 不能残留被抑制 section 的典型词，复杂角色必须验证默认 scope 不误过滤 hair / eyes / upper_clothes，参考图画风必须验证 reference 数组和 director reference 图语义。
-- 验收记录使用 `oracle_kind` 区分来源：`legacy_oracle` 表示真实旧项目 oracle 产物，`fixture` 表示静态机制样例。`verify-acceptance-suite` 会输出 `oracle_kind_counts`；需要证明已经归档真实旧项目 oracle 时，必须加 `--require-legacy-oracle`。
+- 验收记录使用 `oracle_kind` 区分来源：`legacy_oracle` 表示真实旧项目 oracle 产物，`fixture` 表示静态机制样例。`verify-acceptance-suite` 会输出 `oracle_kind_counts`；需要证明已经归档真实旧项目 oracle 时，必须加 `--require-legacy-oracle`。需要进一步证明每条真实 oracle 都带有旧图、新图、`GenerationResult` 和 `PromptBundle` 合约证据时，再加 `--require-legacy-evidence`，输出会包含 `legacy_oracle_evidence_checks`。
 - `examples/acceptance/` 是仓库内置的静态 dry-run 最小资料包，记录均标记为 `oracle_kind: fixture`，用于固定验收记录格式、参数归一化、PNG 参数读取、`GenerationResult` 图片证据和五类 minimum case 语义检查；它不等价于真实旧项目 oracle 验收，也不能通过 `--require-legacy-oracle`。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。

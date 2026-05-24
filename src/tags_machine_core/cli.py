@@ -393,6 +393,7 @@ def cmd_verify_acceptance_suite(args) -> int:
         required_cases=args.required_case,
         require_minimum_set=args.require_minimum_set,
         require_legacy_oracle=args.require_legacy_oracle,
+        require_legacy_evidence=args.require_legacy_evidence,
     )
     print_json(result, full=args.full)
     return 0 if result["match"] else 2
@@ -1195,6 +1196,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-legacy-oracle",
         action="store_true",
         help="Fail unless the suite contains at least one real legacy_oracle record",
+    )
+    verify_acceptance_suite_parser.add_argument(
+        "--require-legacy-evidence",
+        action="store_true",
+        help=(
+            "Fail unless every legacy_oracle record has legacy/core image evidence, "
+            "GenerationResult evidence, and PromptBundle contract evidence"
+        ),
     )
     verify_acceptance_suite_parser.set_defaults(func=cmd_verify_acceptance_suite)
 

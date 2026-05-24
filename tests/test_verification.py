@@ -694,6 +694,40 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(required["result"], "fail")
             self.assertIn("No legacy_oracle acceptance records found", required["errors"])
 
+            fixture_evidence = verify_acceptance_suite(root, require_legacy_evidence=True)
+            self.assertTrue(fixture_evidence["match"])
+            self.assertEqual(fixture_evidence["legacy_oracle_evidence_checks"], [])
+
+    def test_verify_acceptance_suite_can_require_legacy_oracle_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            record = build_acceptance_record(
+                case_id="legacy_without_evidence",
+                legacy_source=legacy,
+                core_source=core,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            default = verify_acceptance_suite(root)
+            strict = verify_acceptance_suite(root, require_legacy_evidence=True)
+
+            self.assertTrue(default["match"])
+            self.assertFalse(strict["match"])
+            self.assertEqual(strict["legacy_oracle_evidence_fail_count"], 1)
+            self.assertIn("Legacy oracle evidence incomplete", strict["errors"])
+            evidence_check = strict["legacy_oracle_evidence_checks"][0]
+            self.assertEqual(evidence_check["case_id"], "legacy_without_evidence")
+            self.assertIn("missing legacy image evidence", evidence_check["messages"])
+            self.assertIn("missing core image evidence", evidence_check["messages"])
+            self.assertIn("missing GenerationResult evidence", evidence_check["messages"])
+            self.assertIn("missing PromptBundle contract evidence", evidence_check["messages"])
+
     def test_verify_acceptance_suite_reports_missing_minimum_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1482,6 +1516,16 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(record["composition"]["character_scope"], "foot_detail")
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
+            strict_suite = verify_acceptance_suite(
+                root / "acceptance" / "suite.yaml",
+                require_legacy_evidence=True,
+            )
+            self.assertTrue(strict_suite["match"])
+            self.assertEqual(strict_suite["legacy_oracle_evidence_fail_count"], 0)
+            self.assertEqual(
+                strict_suite["legacy_oracle_evidence_checks"][0]["result"],
+                "pass",
+            )
             shutil.rmtree(source_dir)
             replayed_suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
             self.assertTrue(replayed_suite["match"])
@@ -1757,6 +1801,48 @@ class VerificationTest(unittest.TestCase):
             self.assertFalse(suite["match"])
             self.assertEqual(suite["oracle_kind_counts"], {"fixture": 1})
             self.assertIn("No legacy_oracle acceptance records found", suite["errors"])
+
+    def test_cli_verify_acceptance_suite_can_require_legacy_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            record_path = root / "acceptance.yaml"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+
+            create_stdout = io.StringIO()
+            with redirect_stdout(create_stdout):
+                create_exit = main(
+                    [
+                        "create-acceptance-record",
+                        "--case-id",
+                        "legacy_without_images",
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                        "--output",
+                        str(record_path),
+                    ]
+                )
+
+            suite_stdout = io.StringIO()
+            with redirect_stdout(suite_stdout):
+                suite_exit = main(
+                    [
+                        "verify-acceptance-suite",
+                        str(root),
+                        "--require-legacy-evidence",
+                    ]
+                )
+            suite = json.loads(suite_stdout.getvalue())
+
+            self.assertEqual(create_exit, 0)
+            self.assertEqual(suite_exit, 2)
+            self.assertEqual(suite["legacy_oracle_evidence_fail_count"], 1)
+            self.assertIn("Legacy oracle evidence incomplete", suite["errors"])
 
     def test_module_cli_exits_nonzero_when_suite_requires_legacy_oracle(self):
         with tempfile.TemporaryDirectory() as tmp:

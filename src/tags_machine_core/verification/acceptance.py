@@ -377,6 +377,7 @@ def verify_acceptance_suite(
     required_cases: list[str] | None = None,
     require_minimum_set: bool = False,
     require_legacy_oracle: bool = False,
+    require_legacy_evidence: bool = False,
 ) -> dict[str, Any]:
     path = Path(path)
     record_paths, manifest_required_cases = _suite_record_paths(path)
@@ -415,6 +416,12 @@ def verify_acceptance_suite(
     ]
     case_checks = _minimum_case_checks(results) if require_minimum_set else []
     case_check_fail_count = sum(1 for item in case_checks if item.get("result") != "pass")
+    legacy_oracle_evidence_checks = (
+        _legacy_oracle_evidence_checks(results) if require_legacy_evidence else []
+    )
+    legacy_oracle_evidence_fail_count = sum(
+        1 for item in legacy_oracle_evidence_checks if item.get("result") != "pass"
+    )
     fail_count = sum(1 for item in results if not item.get("match"))
     oracle_kind_counts = _oracle_kind_counts(results)
     errors: list[str] = []
@@ -422,7 +429,15 @@ def verify_acceptance_suite(
         errors.append("No acceptance records found")
     if require_legacy_oracle and not oracle_kind_counts.get("legacy_oracle"):
         errors.append("No legacy_oracle acceptance records found")
-    match = not errors and fail_count == 0 and not missing_required_cases and case_check_fail_count == 0
+    if legacy_oracle_evidence_fail_count:
+        errors.append("Legacy oracle evidence incomplete")
+    match = (
+        not errors
+        and fail_count == 0
+        and not missing_required_cases
+        and case_check_fail_count == 0
+        and legacy_oracle_evidence_fail_count == 0
+    )
     return {
         "schema": ACCEPTANCE_SUITE_SCHEMA,
         "suite_path": str(path),
@@ -430,10 +445,12 @@ def verify_acceptance_suite(
         "pass_count": len(results) - fail_count,
         "fail_count": fail_count,
         "case_check_fail_count": case_check_fail_count,
+        "legacy_oracle_evidence_fail_count": legacy_oracle_evidence_fail_count,
         "oracle_kind_counts": oracle_kind_counts,
         "required_cases": required,
         "missing_required_cases": missing_required_cases,
         "case_checks": case_checks,
+        "legacy_oracle_evidence_checks": legacy_oracle_evidence_checks,
         "errors": errors,
         "match": match,
         "result": "pass" if match else "fail",
@@ -498,6 +515,81 @@ def _oracle_kind_counts(records: list[dict[str, Any]]) -> dict[str, int]:
         kind = str(record.get("oracle_kind") or "unknown")
         counts[kind] = counts.get(kind, 0) + 1
     return counts
+
+
+def _legacy_oracle_evidence_checks(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        _legacy_oracle_evidence_check(record)
+        for record in records
+        if record.get("oracle_kind") == "legacy_oracle"
+    ]
+
+
+def _legacy_oracle_evidence_check(record: dict[str, Any]) -> dict[str, Any]:
+    messages: list[str] = []
+    image_evidence = (
+        record.get("image_evidence")
+        if isinstance(record.get("image_evidence"), dict)
+        else {}
+    )
+    _append_image_evidence_messages(
+        messages,
+        image_evidence.get("legacy"),
+        label="legacy image",
+    )
+    _append_image_evidence_messages(
+        messages,
+        image_evidence.get("core"),
+        label="core image",
+    )
+    _append_generation_result_evidence_messages(
+        messages,
+        record.get("generation_result_evidence"),
+    )
+    _append_prompt_bundle_evidence_messages(
+        messages,
+        record.get("prompt_bundle_contract_evidence"),
+    )
+    return {
+        "case_id": str(record.get("case_id") or ""),
+        "record_path": str(record.get("record_path") or ""),
+        "result": "pass" if not messages else "fail",
+        "messages": messages,
+    }
+
+
+def _append_image_evidence_messages(
+    messages: list[str],
+    evidence: Any,
+    *,
+    label: str,
+) -> None:
+    if not isinstance(evidence, dict):
+        messages.append(f"missing {label} evidence")
+        return
+    if not evidence.get("exists"):
+        messages.append(f"{label} does not exist")
+        return
+    if not evidence.get("sha256"):
+        messages.append(f"{label} missing sha256")
+
+
+def _append_generation_result_evidence_messages(messages: list[str], evidence: Any) -> None:
+    if not isinstance(evidence, dict):
+        messages.append("missing GenerationResult evidence")
+        return
+    if evidence.get("result") != "pass":
+        messages.append("GenerationResult evidence failed")
+    if not evidence.get("image_count"):
+        messages.append("GenerationResult has no archived images")
+
+
+def _append_prompt_bundle_evidence_messages(messages: list[str], evidence: Any) -> None:
+    if not isinstance(evidence, dict):
+        messages.append("missing PromptBundle contract evidence")
+        return
+    if evidence.get("result") != "pass":
+        messages.append("PromptBundle contract evidence failed")
 
 
 def _legacy_record_paths(*, source: Path, image: Path | None) -> dict[str, str]:
