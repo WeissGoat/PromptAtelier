@@ -331,6 +331,14 @@ compose.prompt 已经包含完整角色 + 动作
 
 这些路径由测试门禁校验：文档引用必须存在，仓库内请求样例必须被文档引用，并且样例能从仓库根目录解析相对节点路径。
 
+## 响应形状样例
+
+仓库内还提供响应形状 golden：
+
+- `examples/responses/json_api_response_shapes.json`
+
+这个文件不是完整响应快照，而是前端/worker 需要依赖的字段形状、状态分支和关键常量。测试会读取该文件，实际调用 `GenerationJsonApi`，并校验每个样例的 `schema`、`status`、核心节点引用、NovelAI `RenderRequest` 字段、V4 payload 和缺失字段。
+
 ## CLI 对照
 
 本地文件入口和未来 HTTP 路由可以保持一一对应：

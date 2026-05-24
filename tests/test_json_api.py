@@ -1055,6 +1055,33 @@ class JsonApiTest(unittest.TestCase):
         for relative_path in documented:
             self.assertTrue((PROJECT_ROOT / relative_path).is_file())
 
+    def test_json_api_response_shape_examples_match_runtime_outputs(self):
+        api = GenerationJsonApi()
+        shape_path = PROJECT_ROOT / "examples" / "responses" / "json_api_response_shapes.json"
+        shapes = json.loads(shape_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            shapes["schema"],
+            "tags-machine-core.json-api-response-shapes/v1",
+        )
+
+        with _project_cwd():
+            for case in shapes["cases"]:
+                with self.subTest(case=case["id"]):
+                    request = json.loads(
+                        (PROJECT_ROOT / case["request"]).read_text(encoding="utf-8")
+                    )
+                    result = getattr(api, case["entry"])(request)
+                    expected = case["expect"]
+                    for path, value in expected.get("equals", {}).items():
+                        self.assertEqual(_json_path(result, path), value)
+                    for path, text in expected.get("contains", {}).items():
+                        self.assertIn(text, _json_path(result, path))
+                    for path in expected.get("required", []):
+                        self.assertTrue(_json_path_exists(result, path), path)
+                    for path in expected.get("absent", []):
+                        self.assertFalse(_json_path_exists(result, path), path)
+
     def test_generate_json_api_uses_injected_executor(self):
         calls = []
 
@@ -1378,6 +1405,42 @@ def _without_runtime_fields(value):
     if isinstance(value, list):
         return [_without_runtime_fields(item) for item in value]
     return value
+
+
+def _json_path(value, path: str):
+    exists, result = _try_json_path(value, path)
+    if not exists:
+        raise AssertionError(f"JSON path does not exist: {path}")
+    return result
+
+
+def _json_path_exists(value, path: str) -> bool:
+    exists, _ = _try_json_path(value, path)
+    return exists
+
+
+def _try_json_path(value, path: str):
+    if not path.startswith("$."):
+        raise ValueError(f"Unsupported JSON path: {path}")
+    current = value
+    for segment in path[2:].split("."):
+        name, indexes = _split_json_path_segment(segment)
+        if not isinstance(current, dict) or name not in current:
+            return False, None
+        current = current[name]
+        for index in indexes:
+            if not isinstance(current, list) or index >= len(current):
+                return False, None
+            current = current[index]
+    return True, current
+
+
+def _split_json_path_segment(segment: str) -> tuple[str, list[int]]:
+    match = re.fullmatch(r"([A-Za-z0-9_]+)((?:\[\d+\])*)", segment)
+    if not match:
+        raise ValueError(f"Unsupported JSON path segment: {segment}")
+    indexes = [int(item) for item in re.findall(r"\[(\d+)\]", match.group(2))]
+    return match.group(1), indexes
 
 
 if __name__ == "__main__":

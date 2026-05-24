@@ -1,0 +1,161 @@
+{
+  "schema": "tags-machine-core.json-api-response-shapes/v1",
+  "cases": [
+    {
+      "id": "resolve_agent_requires_agent",
+      "entry": "resolve_agent",
+      "request": "examples/requests/agent_resolution_requires_agent.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.agent-compose-resolution/v1",
+          "$.status": "requires_agent",
+          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
+          "$.agent_task.nodes.character.id": "homura",
+          "$.agent_task.nodes.action.id": "foot_closeup",
+          "$.agent_task.nodes.action.node.character_scope": "foot_detail",
+          "$.agent_task.style_ref": "anime_comfy",
+          "$.agent_task.character_scope": "foot_detail"
+        },
+        "contains": {
+          "$.agent_task.instructions[0]": "局部特写"
+        },
+        "required": [
+          "$.agent_task.cache_key",
+          "$.agent_task.nodes.character.content_hash",
+          "$.agent_task.nodes.action.content_hash"
+        ],
+        "absent": [
+          "$.prompt_bundle",
+          "$.render_request"
+        ]
+      }
+    },
+    {
+      "id": "compose_agent_ready_bundle",
+      "entry": "compose_agent",
+      "request": "examples/requests/agent_compose_with_result.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.prompt-bundle/v1",
+          "$.meta.composer_type": "agent",
+          "$.meta.character_ref": "homura",
+          "$.meta.action_ref": "foot_closeup",
+          "$.meta.style_ref": "anime_comfy",
+          "$.meta.composition.character_scope": "foot_detail",
+          "$.meta.composition.included_character_sections": [
+            "character",
+            "copyright",
+            "feet"
+          ],
+          "$.meta.composition.suppressed_character_sections": [
+            "hair",
+            "eyes",
+            "upper_clothes"
+          ],
+          "$.cache.cache_hit": false
+        },
+        "contains": {
+          "$.prompt.positive": "bare soles",
+          "$.prompt.negative": "extra toes"
+        },
+        "required": [
+          "$.cache.cache_key",
+          "$.meta.extra.agent.task_schema"
+        ],
+        "absent": [
+          "$.render_request",
+          "$.agent_task"
+        ]
+      }
+    },
+    {
+      "id": "compose_render_plan_novelai",
+      "entry": "compose_render_plan",
+      "request": "examples/requests/compose_render_plan_novelai.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.compose-render-plan-result/v1",
+          "$.prompt_bundle.meta.composer_type": "script",
+          "$.prompt_bundle.meta.composition.character_scope": "foot_detail",
+          "$.render_request.schema": "tags-machine-core.render-request/v1",
+          "$.render_request.backend": "novelai",
+          "$.render_request.seed": 123,
+          "$.render_request.size": {
+            "width": 832,
+            "height": 1216
+          },
+          "$.render_request.params.n_samples": 1,
+          "$.render_request.params.cfg_rescale": 0.15,
+          "$.render_request.params.reference_image_multiple": []
+        },
+        "contains": {
+          "$.render_request.prompt": "bare soles",
+          "$.render_request.negative_prompt": "worst quality"
+        },
+        "required": [
+          "$.prompt_bundle.prompt.positive",
+          "$.render_request.params.v4_prompt",
+          "$.render_request.params.v4_negative_prompt",
+          "$.render_request.style_payload"
+        ],
+        "absent": [
+          "$.status",
+          "$.agent_task"
+        ]
+      }
+    },
+    {
+      "id": "resolve_compose_render_plan_ready_agent",
+      "entry": "resolve_compose_render_plan",
+      "request": "examples/requests/agent_compose_render_plan_novelai.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.compose-render-plan-resolution/v1",
+          "$.status": "ready",
+          "$.prompt_bundle.meta.composer_type": "agent",
+          "$.render_request.backend": "novelai",
+          "$.render_request.seed": 123,
+          "$.render_request.meta.composer_type": "agent"
+        },
+        "contains": {
+          "$.render_request.prompt": "low angle close-up",
+          "$.render_request.negative_prompt": "worst quality"
+        },
+        "required": [
+          "$.prompt_bundle",
+          "$.render_request.params.v4_prompt",
+          "$.render_request.params.v4_negative_prompt"
+        ],
+        "absent": [
+          "$.agent_task"
+        ]
+      }
+    },
+    {
+      "id": "resolve_compose_render_plan_requires_agent",
+      "entry": "resolve_compose_render_plan",
+      "request": "examples/requests/agent_compose_render_plan_requires_agent.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.compose-render-plan-resolution/v1",
+          "$.status": "requires_agent",
+          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
+          "$.agent_task.nodes.character.id": "homura",
+          "$.agent_task.nodes.action.id": "foot_closeup",
+          "$.agent_task.style_ref": "anime_comfy"
+        },
+        "contains": {
+          "$.agent_task.instructions[0]": "局部特写"
+        },
+        "required": [
+          "$.agent_task.cache_key",
+          "$.agent_task.nodes.action.node.character_scope"
+        ],
+        "absent": [
+          "$.prompt_bundle",
+          "$.render_request"
+        ]
+      }
+    }
+  ]
+}
