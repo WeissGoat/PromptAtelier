@@ -263,25 +263,27 @@ Agent composer 负责语义理解和复杂组合。当前 v1 采用“外部 age
 - 根据节点内容打标。
 - 处理冲突，例如“脚底特写”和“全身服装展示”冲突。
 - 生成完整动作角色混合提示词。
-- 把结果和输入节点内容 hash 存入缓存，后续相同输入可以零 token 复用。
+- 把结果、输入节点内容 hash、显式输入参数和外部 agent 模型版本存入缓存，后续相同输入可以零 token 复用。
 
 当前 CLI：
 
 ```powershell
 uv run python -m tags_machine_core agent-task-nodes `
   --character examples\nodes\characters\homura `
-  --action examples\nodes\actions\foot_closeup
+  --action examples\nodes\actions\foot_closeup `
+  --agent-model agent-model-v1
 
 uv run python -m tags_machine_core compose-agent-nodes `
   --character examples\nodes\characters\homura `
   --action examples\nodes\actions\foot_closeup `
+  --agent-model agent-model-v1 `
   --agent-result agent_result.json `
   --cache-dir cache\prompt
 ```
 
-`agent-task-nodes` 输出给 agent 读取的任务，不联网。`compose-agent-nodes` 接收外部 agent 结果并生成 `PromptBundle`；如果 `--cache-dir` 已有相同输入的缓存，可以不传 `--agent-result`，直接复用缓存。
+`agent-task-nodes` 输出给 agent 读取的任务，不联网。`compose-agent-nodes` 接收外部 agent 结果并生成 `PromptBundle`；如果 `--cache-dir` 已有相同输入和相同 `--agent-model` 的缓存，可以不传 `--agent-result`，直接复用缓存。
 
-面向前端和 worker 的等价文件入口是 `api-agent-task`、`api-compose-agent` 与 `api-resolve-agent`。它们读取同一类 JSON 请求，支持把 `agent.instructions`、`agent.result` 和 `cache.cache_dir` 放在请求体里，便于队列记录完整上下文：
+面向前端和 worker 的等价文件入口是 `api-agent-task`、`api-compose-agent` 与 `api-resolve-agent`。它们读取同一类 JSON 请求，支持把 `agent.model`、`agent.instructions`、`agent.result` 和 `cache.cache_dir` 放在请求体里，便于队列记录完整上下文：
 
 ```powershell
 uv run python -m tags_machine_core api-agent-task examples\requests\agent_resolution_requires_agent.json `
@@ -495,7 +497,7 @@ v1 冻结验收补充：
 - `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。
 - `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；ComfyUI / SD 暂不作为本阶段验收范围。
 - `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256。图片像素只作为人工视觉抽检，不替代参数 diff。
-- 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本和显式输入参数，避免旧素材更新后误用旧结果。
+- 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本、显式输入参数和 agent 模型版本，避免旧素材更新或 agent 模型升级后误用旧结果。
 - 回放验收：任意一条验收记录都应该能在不运行旧项目代码的情况下重算 core 侧 diff；旧项目只负责提前产出 oracle 文件或基准图片。
 
 旧项目对照的通过线：

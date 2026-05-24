@@ -14,7 +14,8 @@
           "$.agent_task.nodes.action.id": "foot_closeup",
           "$.agent_task.nodes.action.node.character_scope": "foot_detail",
           "$.agent_task.style_ref": "anime_comfy",
-          "$.agent_task.character_scope": "foot_detail"
+          "$.agent_task.character_scope": "foot_detail",
+          "$.agent_task.agent_model": "agent-model-v1"
         },
         "contains": {
           "$.agent_task.instructions[0]": "局部特写"
@@ -52,6 +53,7 @@
             "eyes",
             "upper_clothes"
           ],
+          "$.meta.extra.agent.agent_model": "agent-model-v1",
           "$.cache.cache_hit": false
         },
         "contains": {
@@ -159,6 +161,7 @@
           "$.schema": "tags-machine-core.compose-render-plan-resolution/v1",
           "$.status": "ready",
           "$.prompt_bundle.meta.composer_type": "agent",
+          "$.prompt_bundle.meta.extra.agent.agent_model": "agent-model-v1",
           "$.render_request.backend": "novelai",
           "$.render_request.seed": 123,
           "$.render_request.meta.composer_type": "agent"
@@ -190,7 +193,8 @@
           "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
           "$.agent_task.nodes.character.id": "homura",
           "$.agent_task.nodes.action.id": "foot_closeup",
-          "$.agent_task.style_ref": "anime_comfy"
+          "$.agent_task.style_ref": "anime_comfy",
+          "$.agent_task.agent_model": "agent-model-v1"
         },
         "contains": {
           "$.agent_task.instructions[0]": "局部特写"

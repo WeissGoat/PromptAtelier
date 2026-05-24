@@ -51,6 +51,7 @@ class AgentCompositionTask(BaseModel):
     style_ref: str | None = None
     character_scope: str | None = None
     instructions: list[str] = Field(default_factory=list)
+    agent_model: str | None = None
     cache_key: str
 
 
@@ -108,6 +109,7 @@ class AgentComposer:
         style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
+        agent_model: str | None = None,
     ) -> AgentCompositionTask:
         nodes = {
             role: snapshot
@@ -129,6 +131,7 @@ class AgentComposer:
             "style_ref": style_ref,
             "character_scope": character_scope,
             "instructions": instructions or [],
+            "agent_model": _optional_text(agent_model),
         }
         cache_key = self._cache_key(self._task_cache_payload(payload))
         return AgentCompositionTask(cache_key=cache_key, **payload)
@@ -144,6 +147,7 @@ class AgentComposer:
         style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
+        agent_model: str | None = None,
         result: AgentCompositionResult | dict[str, Any] | None = None,
         cache: PromptCache | None = None,
     ) -> PromptBundle:
@@ -156,6 +160,7 @@ class AgentComposer:
             style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
+            agent_model=agent_model,
         )
         if cache:
             cached = cache.get(task.cache_key)
@@ -204,6 +209,7 @@ class AgentComposer:
                     "agent": {
                         "task_schema": task.schema_id,
                         "instructions": task.instructions,
+                        "agent_model": task.agent_model,
                         "notes": agent_result.notes,
                         "extra": agent_result.extra,
                     }
@@ -243,6 +249,13 @@ class AgentComposer:
                 "content_hash": snapshot.get("content_hash"),
             }
         return {**payload, "nodes": nodes}
+
+
+def _optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def load_agent_result(path: str | Path) -> AgentCompositionResult:

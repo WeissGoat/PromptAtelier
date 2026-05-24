@@ -76,6 +76,7 @@ class GenerationService:
         style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
+        agent_model: str | None = None,
     ) -> AgentCompositionTask:
         return self.agent_composer.build_task(
             character=character,
@@ -86,6 +87,7 @@ class GenerationService:
             style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
+            agent_model=agent_model,
         )
 
     def compose_nodes_with_agent(
@@ -99,6 +101,7 @@ class GenerationService:
         style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
+        agent_model: str | None = None,
         result: AgentCompositionResult | dict[str, Any] | None = None,
         cache: PromptCache | None = None,
     ) -> PromptBundle:
@@ -111,6 +114,7 @@ class GenerationService:
             style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
+            agent_model=agent_model,
             result=result,
             cache=cache,
         )

@@ -52,6 +52,7 @@ class AgentComposerTest(unittest.TestCase):
             style_ref="20260412_2",
             character_scope="foot_detail",
             instructions=["避免把眼睛和上衣放进脚部特写"],
+            agent_model="agent-model-v1",
         )
 
         self.assertEqual(task.schema_id, "tags-machine-core.agent-composition-task/v1")
@@ -59,6 +60,7 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(task.nodes["character"].id, "homura")
         self.assertEqual(task.nodes["action"].node["character_scope"], "foot_detail")
         self.assertEqual(task.instructions, ["避免把眼睛和上衣放进脚部特写"])
+        self.assertEqual(task.agent_model, "agent-model-v1")
 
     def test_task_cache_key_ignores_source_paths(self):
         composer = AgentComposer()
@@ -119,6 +121,13 @@ class AgentComposerTest(unittest.TestCase):
             character_scope="foot_detail",
             instructions=["保留角色辨识度"],
         )
+        changed_agent_model = composer.build_task(
+            character=_character(),
+            action=_action(),
+            character_scope="foot_detail",
+            instructions=["避免无关细节"],
+            agent_model="agent-model-v2",
+        )
         changed_version_composer = AgentComposer()
         changed_version_composer.composer_version = "v2"
         changed_version = changed_version_composer.build_task(
@@ -140,10 +149,11 @@ class AgentComposerTest(unittest.TestCase):
                     changed_scope.cache_key,
                     changed_extra_prompt.cache_key,
                     changed_instruction.cache_key,
+                    changed_agent_model.cache_key,
                     changed_version.cache_key,
                 }
             ),
-            6,
+            7,
         )
 
     def test_compose_nodes_writes_and_reuses_cache(self):
@@ -163,6 +173,7 @@ class AgentComposerTest(unittest.TestCase):
                 character=_character(),
                 action=_action(),
                 character_scope="foot_detail",
+                agent_model="agent-model-v1",
                 result=result,
                 cache=cache,
             )
@@ -170,6 +181,7 @@ class AgentComposerTest(unittest.TestCase):
                 character=_character(),
                 action=_action(),
                 character_scope="foot_detail",
+                agent_model="agent-model-v1",
                 cache=cache,
             )
 
@@ -179,7 +191,40 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(second.prompt.positive, "akemi homura, bare soles, foot focus")
         self.assertEqual(second.meta.composer_type, "agent")
         self.assertEqual(second.meta.composition.character_scope, "foot_detail")
+        self.assertEqual(second.meta.extra["agent"]["agent_model"], "agent-model-v1")
         self.assertEqual(second.meta.extra["agent"]["notes"], ["agent 合并了角色和动作"])
+
+    def test_compose_nodes_does_not_reuse_cache_for_different_agent_model(self):
+        composer = AgentComposer()
+        result = {
+            "positive": "akemi homura, bare soles, foot focus",
+            "negative": "extra toes, face focus",
+            "character_scope": "foot_detail",
+            "included_character_sections": ["character", "feet"],
+            "suppressed_character_sections": ["eyes", "upper_clothes"],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PromptCache(Path(tmp) / "prompt")
+            first = composer.compose_nodes(
+                character=_character(),
+                action=_action(),
+                character_scope="foot_detail",
+                agent_model="agent-model-v1",
+                result=result,
+                cache=cache,
+            )
+            with self.assertRaises(AgentCompositionRequired) as raised:
+                composer.compose_nodes(
+                    character=_character(),
+                    action=_action(),
+                    character_scope="foot_detail",
+                    agent_model="agent-model-v2",
+                    cache=cache,
+                )
+
+        self.assertNotEqual(first.cache.cache_key, raised.exception.task.cache_key)
+        self.assertEqual(raised.exception.task.agent_model, "agent-model-v2")
 
     def test_prompt_cache_keeps_standard_sha256_filename_compatible(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -82,6 +82,7 @@ class GenerationJsonApi:
             style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
             instructions=_string_list(_agent_value(data, "instructions", "instruction")),
+            agent_model=_agent_model_value(data),
         )
         return to_jsonable(task)
 
@@ -100,6 +101,7 @@ class GenerationJsonApi:
             style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
             instructions=_string_list(_agent_value(data, "instructions", "instruction")),
+            agent_model=_agent_model_value(data),
             result=result,
             cache=cache,
         )
@@ -295,3 +297,16 @@ def _agent_value(data: Mapping[str, Any], *keys: str) -> Any:
         if key in cache_data:
             return cache_data[key]
     return None
+
+
+def _agent_model_value(data: Mapping[str, Any]) -> str | None:
+    value = data.get("agent_model")
+    if value is not None:
+        return _optional_string(value)
+    agent = data.get("agent")
+    agent_data = agent if isinstance(agent, Mapping) else {}
+    return _optional_string(
+        agent_data.get("agent_model")
+        or agent_data.get("model")
+        or agent_data.get("model_version")
+    )

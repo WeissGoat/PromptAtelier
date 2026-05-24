@@ -35,6 +35,7 @@
 - `meta.composition.character_scope`：本次组合实际采用的角色素材裁剪视角。
 - `meta.composition.included_character_sections`：本次纳入的角色 section。
 - `meta.composition.suppressed_character_sections`：本次抑制的角色 section。
+- `meta.extra.agent.agent_model`：agent composer 输出时记录外部 agent 模型/版本，便于追溯缓存来源。
 - `cache.cache_key`：agent 缓存 key。
 - `cache.cache_hit`：本次是否命中缓存。
 
@@ -51,7 +52,10 @@
 - `style_ref`：画风引用。
 - `character_scope`：建议的裁剪视角，通常来自 action。
 - `instructions`：给外部 agent 的人工/系统指令。
+- `agent_model`：外部 agent 模型/版本标识，会进入 `cache_key`，避免模型升级后误用旧缓存。
 - `cache_key`：该任务的稳定缓存 key。
+
+请求里推荐使用 `agent.model` 传入模型/版本；同时兼容顶层 `agent_model`、`agent.agent_model` 和 `agent.model_version`。这些字段只用于 agent 任务和缓存追溯，不代表生图后端模型。
 
 外部 agent 返回的最小结果：
 
@@ -132,7 +136,7 @@
 
 ### api-agent-task
 
-输入：节点引用、agent 指令和可选缓存配置。
+输入：节点引用、agent 指令、可选 `agent.model` 和可选缓存配置。
 
 用途：只生成给外部 agent 读取的 `AgentCompositionTask`，不调用模型。
 
@@ -140,7 +144,7 @@
 
 ### api-compose-agent
 
-输入：节点引用、agent result 和可选缓存配置。
+输入：节点引用、agent result、可选 `agent.model` 和可选缓存配置。
 
 用途：把外部 agent result 严格落成 `PromptBundle`，并写入缓存。缓存命中时可以不传 `agent.result`。
 

@@ -8,6 +8,7 @@
   "negative": "face focus",
   "character_scope": "foot_detail",
   "agent": {
+    "model": "agent-model-v1",
     "instructions": [
       "组合角色和动作，局部特写不要带入头发、眼睛和上半身服装。"
     ],

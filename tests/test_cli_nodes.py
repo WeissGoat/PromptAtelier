@@ -264,6 +264,8 @@ sd:
                         "foot_detail",
                         "--instruction",
                         "组合角色和动作，避免带入脸部细节",
+                        "--agent-model",
+                        "agent-model-v1",
                     ]
                 )
             task_data = json.loads(task_stdout.getvalue())
@@ -281,6 +283,8 @@ sd:
                         "foot_detail",
                         "--instruction",
                         "组合角色和动作，避免带入脸部细节",
+                        "--agent-model",
+                        "agent-model-v1",
                         "--agent-result",
                         str(result),
                         "--cache-dir",
@@ -302,6 +306,8 @@ sd:
                         "foot_detail",
                         "--instruction",
                         "组合角色和动作，避免带入脸部细节",
+                        "--agent-model",
+                        "agent-model-v1",
                         "--cache-dir",
                         str(cache_dir),
                     ]
@@ -312,11 +318,13 @@ sd:
             self.assertEqual(first_exit_code, 0)
             self.assertEqual(second_exit_code, 0)
             self.assertEqual(task_data["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertEqual(task_data["agent_model"], "agent-model-v1")
             self.assertEqual(first_data["cache"]["cache_key"], task_data["cache_key"])
             self.assertFalse(first_data["cache"]["cache_hit"])
             self.assertTrue(second_data["cache"]["cache_hit"])
             self.assertEqual(second_data["prompt"]["positive"], "akemi homura, bare soles, foot focus")
             self.assertEqual(second_data["meta"]["composer_type"], "agent")
+            self.assertEqual(first_data["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
 
     def test_render_plan_nodes_supports_comfyui_backend(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -516,6 +516,7 @@ class JsonApiTest(unittest.TestCase):
                 "negative": "face focus",
                 "character_scope": "foot_detail",
                 "agent": {
+                    "model": "agent-model-v1",
                     "instructions": ["局部特写只保留脚部相关角色细节"],
                     "result": {
                         "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
@@ -536,6 +537,7 @@ class JsonApiTest(unittest.TestCase):
             first = api.compose_agent(request)
             second_request = dict(request)
             second_request["agent"] = {
+                "model": "agent-model-v1",
                 "instructions": ["局部特写只保留脚部相关角色细节"],
             }
             second = api.compose_agent(second_request)
@@ -545,8 +547,10 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(task["nodes"]["character"]["id"], "homura")
             self.assertEqual(task["nodes"]["action"]["node"]["character_scope"], "foot_detail")
             self.assertEqual(task["instructions"], ["局部特写只保留脚部相关角色细节"])
+            self.assertEqual(task["agent_model"], "agent-model-v1")
             self.assertEqual(first["meta"]["composer_type"], "agent")
             self.assertEqual(first["meta"]["style_ref"], "api_style")
+            self.assertEqual(first["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
             self.assertEqual(first["prompt"]["positive"], "akemi homura, bare soles, foot focus, soles toward viewer")
             self.assertEqual(first["meta"]["composition"]["suppressed_character_sections"], ["eyes", "upper_clothes"])
             self.assertFalse(first["cache"]["cache_hit"])
@@ -554,6 +558,58 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(
                 _without_runtime_fields(first),
                 _without_runtime_fields({**second, "cache": {**second["cache"], "cache_hit": False}}),
+            )
+
+    def test_agent_json_api_does_not_reuse_cache_when_agent_model_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            base_request = {
+                "nodes": {
+                    "character": str(character),
+                    "action": str(action),
+                },
+                "style": str(style),
+                "extra_prompt": "soles toward viewer",
+                "negative": "face focus",
+                "character_scope": "foot_detail",
+                "cache": {
+                    "cache_dir": str(cache_dir),
+                },
+            }
+            api = GenerationJsonApi()
+            v1_request = {
+                **base_request,
+                "agent": {
+                    "model": "agent-model-v1",
+                    "instructions": ["局部特写只保留脚部相关角色细节"],
+                    "result": {
+                        "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
+                        "negative": "extra toes, face focus",
+                        "character_scope": "foot_detail",
+                        "included_character_sections": ["character", "feet"],
+                        "suppressed_character_sections": ["eyes", "upper_clothes"],
+                    },
+                },
+            }
+            v2_request = {
+                **base_request,
+                "agent": {
+                    "model": "agent-model-v2",
+                    "instructions": ["局部特写只保留脚部相关角色细节"],
+                },
+            }
+
+            ready = api.resolve_agent(v1_request)
+            missing_v2 = api.resolve_agent(v2_request)
+
+            self.assertEqual(ready["status"], "ready")
+            self.assertEqual(missing_v2["status"], "requires_agent")
+            self.assertEqual(missing_v2["agent_task"]["agent_model"], "agent-model-v2")
+            self.assertNotEqual(
+                ready["prompt_bundle"]["cache"]["cache_key"],
+                missing_v2["agent_task"]["cache_key"],
             )
 
     def test_resolve_agent_json_api_returns_task_on_cache_miss_then_cached_bundle(self):
@@ -635,6 +691,7 @@ class JsonApiTest(unittest.TestCase):
                     "negative": "face focus",
                     "character_scope": "foot_detail",
                     "agent": {
+                        "model": "agent-model-v1",
                         "instructions": ["局部特写只保留脚部相关角色细节"],
                         "result": {
                             "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
@@ -667,6 +724,7 @@ class JsonApiTest(unittest.TestCase):
                 "compose": {
                     **request["compose"],
                     "agent": {
+                        "model": "agent-model-v1",
                         "instructions": ["局部特写只保留脚部相关角色细节"],
                     },
                 },
@@ -681,6 +739,7 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(first["schema"], "tags-machine-core.compose-render-plan-result/v1")
             self.assertEqual(first_bundle["meta"]["composer_type"], "agent")
             self.assertEqual(first_bundle["meta"]["style_ref"], "api_style")
+            self.assertEqual(first_bundle["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
             self.assertEqual(first_bundle["meta"]["composition"]["character_scope"], "foot_detail")
             self.assertEqual(first_bundle["meta"]["composition"]["suppressed_character_sections"], ["eyes", "upper_clothes"])
             self.assertEqual(first_bundle["prompt"]["positive"], "akemi homura, bare soles, foot focus, soles toward viewer")
@@ -720,6 +779,7 @@ class JsonApiTest(unittest.TestCase):
                     "negative": "face focus",
                     "character_scope": "foot_detail",
                     "agent": {
+                        "model": "agent-model-v1",
                         "instructions": ["局部特写只保留脚部相关角色细节"],
                     },
                     "cache": {
@@ -745,6 +805,7 @@ class JsonApiTest(unittest.TestCase):
                 "compose": {
                     **request["compose"],
                     "agent": {
+                        "model": "agent-model-v1",
                         "instructions": ["局部特写只保留脚部相关角色细节"],
                         "result": {
                             "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
@@ -766,10 +827,12 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(missing["status"], "requires_agent")
             self.assertEqual(missing["agent_task"]["nodes"]["character"]["id"], "homura")
             self.assertEqual(missing["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+            self.assertEqual(missing["agent_task"]["agent_model"], "agent-model-v1")
             self.assertNotIn("render_request", missing)
 
             self.assertEqual(ready["status"], "ready")
             self.assertFalse(ready["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(ready["prompt_bundle"]["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
             self.assertEqual(ready["render_request"]["backend"], "novelai")
             self.assertEqual(ready["render_request"]["seed"], 2468)
             self.assertEqual(ready["render_request"]["params"]["n_samples"], 2)

@@ -64,6 +64,7 @@ def cmd_agent_task_nodes(args) -> int:
         style_ref=args.style_ref,
         character_scope=args.character_scope or args.body_scope,
         instructions=args.instruction or [],
+        agent_model=args.agent_model,
     )
     print_json(task, full=args.full)
     return 0
@@ -83,6 +84,7 @@ def cmd_compose_agent_nodes(args) -> int:
         style_ref=args.style_ref,
         character_scope=args.character_scope or args.body_scope,
         instructions=args.instruction or [],
+        agent_model=args.agent_model,
         result=result,
         cache=cache,
     )
@@ -1242,6 +1244,10 @@ def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> No
         "--instruction",
         action="append",
         help="Instruction passed through to the external agent; can be repeated",
+    )
+    parser.add_argument(
+        "--agent-model",
+        help="External agent model/version identifier included in the prompt cache key",
     )
     if result:
         parser.add_argument("--agent-result", help="Path to agent result JSON")
