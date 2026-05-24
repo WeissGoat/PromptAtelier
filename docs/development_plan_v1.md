@@ -156,15 +156,17 @@ RenderRequest JSON -> GenerationResult JSON
 
 ```powershell
 uv run python -m tags_machine_core api-compose api_compose.json
-uv run python -m tags_machine_core api-agent-task agent_request.json --output agent_task.json
-uv run python -m tags_machine_core api-compose-agent agent_request.json --output prompt_bundle.json
-uv run python -m tags_machine_core api-resolve-agent agent_request.json --output agent_resolution.json
+uv run python -m tags_machine_core api-agent-task examples\requests\agent_resolution_requires_agent.json --output agent_task.json
+uv run python -m tags_machine_core api-compose-agent examples\requests\agent_compose_with_result.json --output prompt_bundle.json
+uv run python -m tags_machine_core api-resolve-agent examples\requests\agent_resolution_requires_agent.json --output agent_resolution.json
 uv run python -m tags_machine_core api-render-plan api_render_plan.json
-uv run python -m tags_machine_core api-compose-render-plan api_request.json --output api_response.json
+uv run python -m tags_machine_core api-compose-render-plan examples\requests\compose_render_plan_novelai.json --output api_response.json
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 ```
 
 `GenerationJsonApi.agent_task()`、`GenerationJsonApi.compose_agent()` 和 `GenerationJsonApi.resolve_agent()` 是 agent 拼接的本地 JSON 边界。`agent_task()` 只生成稳定任务 JSON，不调用模型；`compose_agent()` 接收外部 agent result，落成 `PromptBundle` 并写入缓存，缓存缺失且没有 `agent.result` 时保持严格失败；`resolve_agent()` 面向前端和 worker，缓存命中或请求里带 `agent.result` 时返回 `status: "ready"` 和 `prompt_bundle`，缓存缺失时返回 `status: "requires_agent"` 和 `agent_task`，避免调用方靠异常解析流程状态。`api-compose` 在请求里带 `"composer": "agent"`、`agent.result` 或 `agent` 对象时，也会走同一条 agent composer 路径。`api-compose-render-plan` 的 `compose` 段也可以直接使用 agent 请求体和缓存配置，用于一步生成 agent `PromptBundle` 与对应的 `RenderRequest`。
+
+`examples/requests/` 保存可直接运行的 JSON 请求样例：`agent_resolution_requires_agent.json` 用于缓存缺失状态分支，`agent_compose_with_result.json` 用于 agent result 落成 `PromptBundle`，`compose_render_plan_novelai.json` 用于脚本 composer 到 NovelAI `RenderRequest`，`agent_compose_render_plan_novelai.json` 用于 agent composer 一步生成 NovelAI render plan。测试会从仓库根目录读取这些文件，保证相对节点路径和 JSON 契约不漂移。
 
 `GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_render_request()`，并关闭实验后端，只支持 NovelAI，符合 v1 正式范围。
 
@@ -279,13 +281,13 @@ uv run python -m tags_machine_core compose-agent-nodes `
 面向前端和 worker 的等价文件入口是 `api-agent-task`、`api-compose-agent` 与 `api-resolve-agent`。它们读取同一类 JSON 请求，支持把 `agent.instructions`、`agent.result` 和 `cache.cache_dir` 放在请求体里，便于队列记录完整上下文：
 
 ```powershell
-uv run python -m tags_machine_core api-agent-task agent_request.json `
+uv run python -m tags_machine_core api-agent-task examples\requests\agent_resolution_requires_agent.json `
   --output agent_task.json
 
-uv run python -m tags_machine_core api-compose-agent agent_request.json `
+uv run python -m tags_machine_core api-compose-agent examples\requests\agent_compose_with_result.json `
   --output prompt_bundle.json
 
-uv run python -m tags_machine_core api-resolve-agent agent_request.json `
+uv run python -m tags_machine_core api-resolve-agent examples\requests\agent_resolution_requires_agent.json `
   --output agent_resolution.json
 ```
 
@@ -346,7 +348,7 @@ uv run python -m tags_machine_core render-plan --config configs\local.example.ya
 uv run python -m tags_machine_core render-plan-nodes --backend novelai --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123
 uv run python -m tags_machine_core run-prompt --dry-run --prompt "akemi homura, bare soles, foot focus" --style-node examples\nodes\styles\anime_comfy --seed 123 --nt 3
 uv run python -m tags_machine_core run-prompt --prompt-file agent_prompt.txt --style-ref 20260412_2 --config configs\local.example.yaml --output-dir outputs --seed 123 --nt 3
-uv run python -m tags_machine_core api-compose-render-plan api_request.json --output api_response.json
+uv run python -m tags_machine_core api-compose-render-plan examples\requests\compose_render_plan_novelai.json --output api_response.json
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 uv run python -m tags_machine_core execute-render-request core_render_request.json --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml

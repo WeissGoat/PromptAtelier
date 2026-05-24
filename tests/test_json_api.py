@@ -1,8 +1,9 @@
 import io
 import json
+import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,6 +12,24 @@ from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.cli import main
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.verification import build_acceptance_record
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@contextmanager
+def _project_cwd():
+    previous = os.getcwd()
+    os.chdir(PROJECT_ROOT)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def _load_example_request(name: str) -> dict:
+    path = PROJECT_ROOT / "examples" / "requests" / name
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_sample_nodes(root: Path) -> tuple[Path, Path, Path]:
@@ -762,6 +781,57 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(written["agent_task"]["nodes"]["character"]["id"], "homura")
             self.assertEqual(written["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
             self.assertFalse(any(cache_dir.glob("*.json")))
+
+    def test_example_request_files_are_valid_json_api_inputs(self):
+        api = GenerationJsonApi()
+
+        with _project_cwd():
+            missing = api.resolve_agent(
+                _load_example_request("agent_resolution_requires_agent.json")
+            )
+            bundle = api.compose_agent(
+                _load_example_request("agent_compose_with_result.json")
+            )
+            plan = api.compose_render_plan(
+                _load_example_request("compose_render_plan_novelai.json")
+            )
+            agent_plan = api.compose_render_plan(
+                _load_example_request("agent_compose_render_plan_novelai.json")
+            )
+
+        self.assertEqual(missing["status"], "requires_agent")
+        self.assertEqual(missing["agent_task"]["nodes"]["character"]["id"], "homura")
+        self.assertEqual(missing["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+        self.assertEqual(missing["agent_task"]["style_ref"], "anime_comfy")
+
+        self.assertEqual(bundle["meta"]["composer_type"], "agent")
+        self.assertEqual(bundle["meta"]["style_ref"], "anime_comfy")
+        self.assertIn("bare soles", bundle["prompt"]["positive"])
+        self.assertEqual(
+            bundle["meta"]["composition"]["included_character_sections"],
+            ["character", "copyright", "feet"],
+        )
+        self.assertEqual(
+            bundle["meta"]["composition"]["suppressed_character_sections"],
+            ["hair", "eyes", "upper_clothes"],
+        )
+
+        self.assertEqual(plan["prompt_bundle"]["meta"]["composer_type"], "script")
+        self.assertEqual(plan["prompt_bundle"]["meta"]["composition"]["character_scope"], "foot_detail")
+        self.assertIn("bare soles", plan["prompt_bundle"]["prompt"]["positive"])
+        self.assertNotIn("purple eyes", plan["prompt_bundle"]["prompt"]["positive"])
+        self.assertEqual(plan["render_request"]["backend"], "novelai")
+        self.assertEqual(plan["render_request"]["seed"], 123)
+        self.assertEqual(plan["render_request"]["size"], {"width": 832, "height": 1216})
+        self.assertEqual(plan["render_request"]["params"]["n_samples"], 1)
+        self.assertEqual(plan["render_request"]["params"]["cfg_rescale"], 0.15)
+        self.assertIn("v4_prompt", plan["render_request"]["params"])
+
+        self.assertEqual(agent_plan["prompt_bundle"]["meta"]["composer_type"], "agent")
+        self.assertEqual(agent_plan["render_request"]["meta"]["composer_type"], "agent")
+        self.assertEqual(agent_plan["render_request"]["backend"], "novelai")
+        self.assertIn("low angle close-up", agent_plan["render_request"]["prompt"])
+        self.assertIn("worst quality", agent_plan["render_request"]["negative_prompt"])
 
     def test_generate_json_api_uses_injected_executor(self):
         calls = []

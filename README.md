@@ -119,17 +119,19 @@ uv run python -m tags_machine_core compose-agent-nodes `
 ```
 
 ```powershell
-uv run python -m tags_machine_core api-agent-task agent_request.json `
+uv run python -m tags_machine_core api-agent-task examples\requests\agent_resolution_requires_agent.json `
   --output agent_task.json
 
-uv run python -m tags_machine_core api-compose-agent agent_request.json `
+uv run python -m tags_machine_core api-compose-agent examples\requests\agent_compose_with_result.json `
   --output prompt_bundle.json
 
-uv run python -m tags_machine_core api-resolve-agent agent_request.json `
+uv run python -m tags_machine_core api-resolve-agent examples\requests\agent_resolution_requires_agent.json `
   --output agent_resolution.json
 ```
 
 `api-agent-task`、`api-compose-agent` 和 `api-resolve-agent` 也不调用模型。前者只生成 agent 可读任务；`api-compose-agent` 是严格落库入口，缓存缺失且没有 `agent.result` 时会失败；`api-resolve-agent` 是前端/worker 友好的分支入口，缓存命中或请求里带 `agent.result` 时返回 `status: "ready"` 和 `prompt_bundle`，否则返回 `status: "requires_agent"` 和 `agent_task`，调用方再把任务交给外部 agent。
+
+仓库里的 `examples/requests/agent_resolution_requires_agent.json`、`examples/requests/agent_compose_with_result.json`、`examples/requests/compose_render_plan_novelai.json` 和 `examples/requests/agent_compose_render_plan_novelai.json` 是可直接运行的请求样例，并由测试保证能从仓库根目录解析节点相对路径。
 
 NovelAI render plan 示例：
 
@@ -196,7 +198,7 @@ JSON API 边界示例：
 ```
 
 ```powershell
-uv run python -m tags_machine_core api-compose-render-plan api_request.json `
+uv run python -m tags_machine_core api-compose-render-plan examples\requests\compose_render_plan_novelai.json `
   --output api_response.json
 ```
 

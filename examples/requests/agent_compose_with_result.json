@@ -1,0 +1,33 @@
+{
+  "nodes": {
+    "character": "examples/nodes/characters/homura",
+    "action": "examples/nodes/actions/foot_closeup"
+  },
+  "style": "examples/nodes/styles/anime_comfy",
+  "extra_prompt": "low angle close-up",
+  "negative": "face focus",
+  "character_scope": "foot_detail",
+  "agent": {
+    "instructions": [
+      "组合角色和动作，局部特写不要带入头发、眼睛和上半身服装。"
+    ],
+    "result": {
+      "positive": "akemi homura, puella magi madoka magica, bare soles, foot focus, soles toward viewer, toes spread, low angle close-up",
+      "negative": "extra toes, face focus, full body",
+      "character_scope": "foot_detail",
+      "included_character_sections": [
+        "character",
+        "copyright",
+        "feet"
+      ],
+      "suppressed_character_sections": [
+        "hair",
+        "eyes",
+        "upper_clothes"
+      ],
+      "notes": [
+        "agent 已按 foot_detail 只保留角色身份和脚部相关素材。"
+      ]
+    }
+  }
+}
