@@ -233,6 +233,86 @@ class JsonApiTest(unittest.TestCase):
                 ["eyes", "upper_clothes"],
             )
 
+    def test_cli_api_compose_render_plan_matches_run_prompt_for_full_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, _, style = _write_sample_nodes(root)
+            prompt = "akemi homura, bare soles, foot focus, soles toward viewer"
+            request = root / "api_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "compose": {
+                            "prompt": prompt,
+                            "negative": "bad feet",
+                            "style": str(style),
+                        },
+                        "render": {
+                            "backend": "novelai",
+                            "style": str(style),
+                            "seed": 2468,
+                            "width": 832,
+                            "height": 1216,
+                            "params": {
+                                "n_samples": 2,
+                                "scale": 6.0,
+                                "cfg_rescale": 0.15,
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            run_prompt_stdout = io.StringIO()
+            with redirect_stdout(run_prompt_stdout):
+                run_prompt_exit = main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--full",
+                        "--prompt",
+                        prompt,
+                        "--negative",
+                        "bad feet",
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "2468",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--nt",
+                        "2",
+                        "--params-json",
+                        '{"scale": 6.0, "cfg_rescale": 0.15}',
+                    ]
+                )
+
+            api_stdout = io.StringIO()
+            with redirect_stdout(api_stdout):
+                api_exit = main(["api-compose-render-plan", str(request), "--full"])
+
+            run_prompt = json.loads(run_prompt_stdout.getvalue())
+            api_result = json.loads(api_stdout.getvalue())
+
+            self.assertEqual(run_prompt_exit, 0)
+            self.assertEqual(api_exit, 0)
+            self.assertEqual(
+                _without_runtime_fields(api_result["prompt_bundle"]),
+                _without_runtime_fields(run_prompt["prompt_bundle"]),
+            )
+            self.assertEqual(api_result["render_request"], run_prompt["render_request"])
+            self.assertEqual(api_result["prompt_bundle"]["meta"]["character_ref"], None)
+            self.assertEqual(api_result["prompt_bundle"]["meta"]["action_ref"], None)
+            self.assertEqual(
+                api_result["prompt_bundle"]["meta"]["composition"]["included_character_sections"],
+                [],
+            )
+            self.assertEqual(api_result["render_request"]["params"]["n_samples"], 2)
+            self.assertEqual(api_result["render_request"]["params"]["cfg_rescale"], 0.15)
+
     def test_generate_json_api_uses_injected_executor(self):
         calls = []
 
@@ -495,6 +575,18 @@ class JsonApiTest(unittest.TestCase):
 
             self.assertIn("only NovelAI", str(raised.exception))
             self.assertFalse(response.exists())
+
+
+def _without_runtime_fields(value):
+    if isinstance(value, dict):
+        return {
+            key: _without_runtime_fields(item)
+            for key, item in value.items()
+            if key != "created_at"
+        }
+    if isinstance(value, list):
+        return [_without_runtime_fields(item) for item in value]
+    return value
 
 
 if __name__ == "__main__":
