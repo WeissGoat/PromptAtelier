@@ -461,6 +461,41 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(saved_path.suffix, ".png")
             self.assertEqual(saved_path.read_bytes(), b"image-bytes")
 
+    def test_cli_api_generate_rejects_non_novelai_backend_in_v1_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _write_config(root)
+            request = root / "api_generate_comfyui.json"
+            response = root / "api_generate_response.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "render_request": {
+                            "backend": "comfyui",
+                            "prompt": "akemi homura",
+                            "negative_prompt": "bad anatomy",
+                            "params": {"workflow": "portrait_workflow"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValueError) as raised:
+                main(
+                    [
+                        "api-generate",
+                        str(request),
+                        "--config",
+                        str(config),
+                        "--output",
+                        str(response),
+                    ]
+                )
+
+            self.assertIn("only NovelAI", str(raised.exception))
+            self.assertFalse(response.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
