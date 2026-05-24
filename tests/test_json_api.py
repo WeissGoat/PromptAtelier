@@ -446,6 +446,61 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(api_result["render_request"]["params"]["n_samples"], 2)
             self.assertEqual(api_result["render_request"]["params"]["cfg_rescale"], 0.15)
 
+    def test_example_full_prompt_render_plan_matches_run_prompt(self):
+        request_path = "examples\\requests\\full_prompt_render_plan_novelai.json"
+        prompt = "akemi homura, bare soles, foot focus, soles toward viewer"
+        with _project_cwd():
+            run_prompt_stdout = io.StringIO()
+            with redirect_stdout(run_prompt_stdout):
+                run_prompt_exit = main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--full",
+                        "--prompt",
+                        prompt,
+                        "--negative",
+                        "bad feet",
+                        "--style-node",
+                        "examples\\nodes\\styles\\anime_comfy",
+                        "--seed",
+                        "123",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--nt",
+                        "1",
+                        "--params-json",
+                        '{"cfg_rescale": 0.15}',
+                    ]
+                )
+
+            api_stdout = io.StringIO()
+            with redirect_stdout(api_stdout):
+                api_exit = main(["api-compose-render-plan", request_path, "--full"])
+
+        run_prompt = json.loads(run_prompt_stdout.getvalue())
+        api_result = json.loads(api_stdout.getvalue())
+
+        self.assertEqual(run_prompt_exit, 0)
+        self.assertEqual(api_exit, 0)
+        self.assertEqual(
+            _without_runtime_fields(api_result["prompt_bundle"]),
+            _without_runtime_fields(run_prompt["prompt_bundle"]),
+        )
+        self.assertEqual(api_result["render_request"], run_prompt["render_request"])
+        self.assertIsNone(api_result["prompt_bundle"]["meta"]["character_ref"])
+        self.assertIsNone(api_result["prompt_bundle"]["meta"]["action_ref"])
+        self.assertEqual(
+            api_result["prompt_bundle"]["meta"]["composition"]["included_character_sections"],
+            [],
+        )
+        self.assertEqual(
+            api_result["prompt_bundle"]["meta"]["composition"]["suppressed_character_sections"],
+            [],
+        )
+
     def test_agent_json_api_builds_task_and_reuses_cached_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
