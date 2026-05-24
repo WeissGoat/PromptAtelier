@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import struct
 import tempfile
@@ -257,6 +258,93 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(record["diff"]["unapproved_diff_count"], 0)
             self.assertEqual(record["composition"]["character_scope"], "foot_detail")
             self.assertEqual(record["notes"], ["sample acceptance"])
+
+    def test_build_acceptance_record_records_image_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            legacy_image = root / "legacy.png"
+            core_image = root / "core.png"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            _write_png_with_text(
+                legacy_image,
+                {
+                    "Comment": json.dumps(_sample_parameters()),
+                    "Source": "NovelAI V4.5",
+                },
+            )
+            _write_png_with_text(
+                core_image,
+                {
+                    "Comment": json.dumps(_sample_parameters()),
+                    "Source": "NovelAI V4.5",
+                },
+            )
+
+            record = build_acceptance_record(
+                case_id="image_evidence",
+                legacy_source=legacy,
+                core_source=core,
+                legacy_image=legacy_image,
+                core_image=core_image,
+            )
+
+            legacy_evidence = record["image_evidence"]["legacy"]
+            core_evidence = record["image_evidence"]["core"]
+            self.assertTrue(legacy_evidence["exists"])
+            self.assertEqual(legacy_evidence["bytes"], legacy_image.stat().st_size)
+            self.assertEqual(
+                legacy_evidence["sha256"],
+                hashlib.sha256(legacy_image.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                legacy_evidence["png_info"]["parameters"]["prompt"],
+                "akemi homura, foot focus",
+            )
+            self.assertEqual(core_evidence["png_info"]["png_text"]["Source"], "NovelAI V4.5")
+
+    def test_verify_acceptance_record_recomputes_image_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record_dir = root / "acceptance"
+            record_dir.mkdir()
+            legacy = record_dir / "legacy.json"
+            core = record_dir / "core.json"
+            image = record_dir / "legacy.png"
+            record_path = record_dir / "image_record.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            _write_png_with_text(
+                image,
+                {
+                    "Comment": json.dumps(_sample_parameters()),
+                    "Source": "NovelAI V4.5",
+                },
+            )
+            record_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.acceptance-record/v1",
+                        "case_id": "image_evidence",
+                        "legacy": {"source_path": "legacy.json", "image_path": "legacy.png"},
+                        "core": {"source_path": "core.json"},
+                        "diff": {"whitelist": []},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = verify_acceptance_record(record_path)
+
+            self.assertTrue(result["match"])
+            evidence = result["image_evidence"]["legacy"]
+            self.assertTrue(evidence["exists"])
+            self.assertEqual(evidence["sha256"], hashlib.sha256(image.read_bytes()).hexdigest())
+            self.assertEqual(evidence["png_info"]["png_text"]["Source"], "NovelAI V4.5")
 
     def test_build_acceptance_record_fails_on_unapproved_diff(self):
         with tempfile.TemporaryDirectory() as tmp:

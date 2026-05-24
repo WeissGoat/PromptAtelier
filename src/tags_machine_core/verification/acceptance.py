@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import yaml
 
 from tags_machine_core.contracts import utc_now_iso
+from tags_machine_core.verification.image_params import read_image_parameters
 from tags_machine_core.verification.render_params import (
     compare_render_parameters,
     load_render_parameter_source,
@@ -40,6 +42,8 @@ def build_acceptance_record(
 ) -> dict[str, Any]:
     legacy_source_path = Path(legacy_source)
     core_source_path = Path(core_source)
+    legacy_image_path = _effective_image_path(legacy_source_path, legacy_image)
+    core_image_path = _effective_image_path(core_source_path, core_image)
     legacy_data = load_render_parameter_source(legacy_source_path)
     core_data = load_render_parameter_source(core_source_path)
     diffs = [diff.as_dict() for diff in compare_render_parameters(legacy_data, core_data)]
@@ -58,11 +62,11 @@ def build_acceptance_record(
         "created_at": utc_now_iso(),
         "legacy": _legacy_record_paths(
             source=legacy_source_path,
-            image=Path(legacy_image) if legacy_image else None,
+            image=legacy_image_path,
         ),
         "core": _core_record_paths(
             source=core_source_path,
-            image=Path(core_image) if core_image else None,
+            image=core_image_path,
             prompt_bundle=Path(prompt_bundle) if prompt_bundle else None,
         ),
         "diff": {
@@ -85,6 +89,10 @@ def build_acceptance_record(
         "normalized": {
             "legacy": normalize_render_parameters(legacy_data),
             "core": normalize_render_parameters(core_data),
+        },
+        "image_evidence": {
+            "legacy": _image_evidence(legacy_image_path),
+            "core": _image_evidence(core_image_path),
         },
         "notes": notes or [],
     }
@@ -134,6 +142,7 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
         "diff": rebuilt["diff"],
         "intentional_differences": rebuilt["intentional_differences"],
         "composition": rebuilt["composition"],
+        "image_evidence": rebuilt["image_evidence"],
     }
 
 
@@ -244,6 +253,44 @@ def _legacy_record_paths(*, source: Path, image: Path | None) -> dict[str, str]:
     else:
         data["params_path"] = str(source)
     return data
+
+
+def _effective_image_path(source: Path, image: str | Path | None) -> Path | None:
+    if image is not None:
+        return Path(image)
+    if source.suffix.lower() == ".png":
+        return source
+    return None
+
+
+def _image_evidence(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    evidence: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.exists(),
+    }
+    if not path.exists():
+        return evidence
+    if not path.is_file():
+        evidence["error"] = "Not a file"
+        return evidence
+
+    evidence["bytes"] = path.stat().st_size
+    evidence["sha256"] = _file_sha256(path)
+    try:
+        evidence["png_info"] = read_image_parameters(path)
+    except Exception as exc:  # 旧图或后端输出可能不是 PNG，保留错误便于验收判断。
+        evidence["png_error"] = str(exc)
+    return evidence
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _core_record_paths(

@@ -465,6 +465,21 @@ legacy:
 core:
   image_path: F:/.../core.png
   render_request_path: F:/.../core_render_request.json
+image_evidence:
+  legacy:
+    exists: true
+    bytes: 123456
+    sha256: "..."
+    png_info:
+      parameters:
+        seed: 123
+  core:
+    exists: true
+    bytes: 123450
+    sha256: "..."
+    png_info:
+      parameters:
+        seed: 123
 diff:
   normalized_equal: true
   whitelist:
