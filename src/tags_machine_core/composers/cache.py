@@ -18,10 +18,13 @@ class PromptCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def get(self, key: str) -> PromptBundle | None:
+        key = str(key).strip()
         path = self._path_for(key)
         if not path.exists():
             return None
         bundle = PromptBundle.model_validate_json(path.read_text(encoding="utf-8"))
+        if bundle.cache.cache_key != key:
+            return None
         bundle.cache.cache_hit = True
         return bundle
 

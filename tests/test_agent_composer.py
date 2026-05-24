@@ -226,6 +226,34 @@ class AgentComposerTest(unittest.TestCase):
         self.assertNotEqual(first.cache.cache_key, raised.exception.task.cache_key)
         self.assertEqual(raised.exception.task.agent_model, "agent-model-v2")
 
+    def test_prompt_cache_rejects_file_with_mismatched_internal_cache_key(self):
+        composer = AgentComposer()
+        result = {
+            "positive": "akemi homura, bare soles, foot focus",
+            "negative": "extra toes, face focus",
+            "character_scope": "foot_detail",
+            "included_character_sections": ["character", "feet"],
+            "suppressed_character_sections": ["eyes", "upper_clothes"],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PromptCache(Path(tmp) / "prompt")
+            bundle = composer.compose_nodes(
+                character=_character(),
+                action=_action(),
+                character_scope="foot_detail",
+                agent_model="agent-model-v1",
+                result=result,
+            )
+            mismatched_key = "sha256:" + "b" * 64
+            cache._path_for(mismatched_key).write_text(
+                bundle.model_dump_json(indent=2, by_alias=True),
+                encoding="utf-8",
+            )
+
+            self.assertIsNone(cache.get(mismatched_key))
+            self.assertIsNone(cache.get("  " + mismatched_key + "  "))
+
     def test_prompt_cache_keeps_standard_sha256_filename_compatible(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache = PromptCache(Path(tmp) / "prompt")
