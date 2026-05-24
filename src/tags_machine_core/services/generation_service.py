@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tags_machine_core.backends import ensure_backend_can_build_render_plan
 from tags_machine_core.composers import (
     AgentComposer,
     AgentCompositionResult,
@@ -154,6 +155,10 @@ class GenerationService:
         action: str = "render-plan",
         params: dict[str, Any] | None = None,
     ) -> RenderRequest:
+        ensure_backend_can_build_render_plan(
+            backend,
+            entrypoint="GenerationService.build_render_request",
+        )
         if backend == "novelai":
             return self.novelai_adapter.build_request(
                 bundle,

@@ -217,6 +217,18 @@ class MultiBackendRendererTest(unittest.TestCase):
         self.assertIn("style prefix", request.prompt)
         self.assertIn("anime style", request.prompt)
 
+    def test_generation_service_uses_backend_support_policy_for_unknown_backend(self):
+        with self.assertRaises(ValueError) as raised:
+            GenerationService().build_render_request(
+                _bundle(),
+                backend="unknown",
+                seed=3,
+                style=_style_node(),
+            )
+
+        self.assertIn("Unsupported backend: unknown", str(raised.exception))
+        self.assertIn("expected one of: novelai, comfyui, sd", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

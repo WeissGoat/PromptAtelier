@@ -7,6 +7,7 @@ from tags_machine_core.backends import (
     EXPERIMENTAL_EXECUTION_BACKENDS,
     RENDER_BACKENDS,
     backend_support_report,
+    ensure_backend_can_build_render_plan,
     ensure_backend_can_execute,
 )
 from tags_machine_core.cli import main
@@ -42,6 +43,16 @@ class BackendSupportTest(unittest.TestCase):
 
         self.assertIn("only NovelAI by default", str(raised.exception))
         self.assertIn("--allow-experimental-backend", str(raised.exception))
+
+    def test_render_plan_gate_accepts_documented_backends(self):
+        for backend in RENDER_BACKENDS:
+            with self.subTest(backend=backend):
+                ensure_backend_can_build_render_plan(backend)
+
+        with self.assertRaises(ValueError) as raised:
+            ensure_backend_can_build_render_plan("unknown")
+
+        self.assertIn("expected one of: novelai, comfyui, sd", str(raised.exception))
 
     def test_api_generate_gate_mentions_execute_render_request_for_experimental_backends(self):
         with self.assertRaises(ValueError) as raised:

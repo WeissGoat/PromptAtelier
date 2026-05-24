@@ -96,6 +96,16 @@ def backend_support_report() -> dict[str, object]:
     }
 
 
+def ensure_backend_can_build_render_plan(
+    backend: str,
+    *,
+    entrypoint: str = "render-plan",
+) -> None:
+    support = get_backend_support(backend)
+    if not support.render_plan_supported:
+        raise ValueError(f"{entrypoint} does not support render planning for backend: {backend}")
+
+
 def ensure_backend_can_execute(
     backend: str,
     *,
