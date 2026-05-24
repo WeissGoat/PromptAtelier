@@ -20,6 +20,7 @@ from tags_machine_core.nodes import (
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
     migrate_legacy_style_tags,
+    plan_legacy_tags_migration,
 )
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationJsonApi, GenerationService
@@ -474,6 +475,18 @@ def cmd_audit_legacy_tags(args) -> int:
     if args.output:
         _write_structured_output(report, Path(args.output), output_format=args.format)
     print_json(report, full=args.full)
+    return 0
+
+
+def cmd_plan_legacy_tags_migration(args) -> int:
+    plan = plan_legacy_tags_migration(
+        args.source,
+        kind=args.kind,
+        output_root=args.output_root,
+    )
+    if args.output:
+        _write_structured_output(plan, Path(args.output), output_format=args.format)
+    print_json(plan, full=args.full)
     return 0
 
 
@@ -1387,6 +1400,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output file format when --output is used",
     )
     audit_legacy_tags_parser.set_defaults(func=cmd_audit_legacy_tags)
+
+    plan_legacy_tags_migration_parser = subparsers.add_parser(
+        "plan-legacy-tags-migration",
+        parents=[output_parent],
+        help="Plan legacy tags.txt migration targets without writing node YAML",
+    )
+    plan_legacy_tags_migration_parser.add_argument(
+        "source",
+        help="Legacy tags root, node directory, or tags.txt path",
+    )
+    plan_legacy_tags_migration_parser.add_argument(
+        "--kind",
+        required=True,
+        choices=("style", "character", "action", "background"),
+        help="Legacy node kind to plan",
+    )
+    plan_legacy_tags_migration_parser.add_argument(
+        "--output-root",
+        required=True,
+        help="Root directory for planned migrated output, for example migrated",
+    )
+    plan_legacy_tags_migration_parser.add_argument("--output", help="Write migration plan JSON/YAML")
+    plan_legacy_tags_migration_parser.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    plan_legacy_tags_migration_parser.set_defaults(func=cmd_plan_legacy_tags_migration)
 
     return parser
 

@@ -11,6 +11,7 @@ from tags_machine_core.nodes import (
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
     migrate_legacy_style_tags,
+    plan_legacy_tags_migration,
 )
 
 
@@ -299,6 +300,55 @@ blue_eyes,short_hair,jacket
                 {"character_unclassified_tags", "character_legacy_extension_archived"},
             )
             self.assertEqual(items_by_id["needs_review"]["character_id"], "sample_character")
+
+    def test_plan_legacy_tags_migration_reports_targets_and_blockers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "migrated"
+
+            ready_action = root / "ready_action"
+            ready_action.mkdir()
+            (ready_action / "tags.txt").write_text("foot focus, toes focus", encoding="utf-8")
+
+            existing_target = output_root / "nodes" / "actions" / "ready_action" / "meta.yaml"
+            existing_target.parent.mkdir(parents=True)
+            existing_target.write_text("already exists", encoding="utf-8")
+
+            nested_a = root / "group_a" / "same"
+            nested_a.mkdir(parents=True)
+            (nested_a / "tags.txt").write_text("hand focus, grabbing", encoding="utf-8")
+            nested_b = root / "group_b" / "same"
+            nested_b.mkdir(parents=True)
+            (nested_b / "tags.txt").write_text("face focus, looking at viewer", encoding="utf-8")
+
+            plan = plan_legacy_tags_migration(root, kind="action", output_root=output_root)
+
+            self.assertEqual(
+                plan["schema"],
+                "tags-machine-core.legacy-tags-migration-plan/v1",
+            )
+            self.assertEqual(plan["kind"], "action")
+            self.assertEqual(plan["summary"]["total"], 3)
+            self.assertEqual(plan["summary"]["target_exists"], 1)
+            self.assertEqual(plan["summary"]["blocked"], 2)
+            self.assertEqual(plan["summary"]["issue_counts"]["target_file_exists"], 1)
+            self.assertEqual(plan["summary"]["issue_counts"]["target_path_collision"], 2)
+            items_by_source = {
+                Path(item["source_dir"]).relative_to(root).as_posix(): item
+                for item in plan["items"]
+            }
+            ready_item = items_by_source["ready_action"]
+            self.assertEqual(ready_item["target_file"], str(existing_target))
+            self.assertTrue(ready_item["target_exists"])
+            self.assertEqual(ready_item["migration_status"], "target_exists")
+            self.assertEqual(ready_item["safe_node_dir"], "ready_action")
+            self.assertEqual(items_by_source["group_a/same"]["migration_status"], "blocked")
+            self.assertEqual(items_by_source["group_b/same"]["migration_status"], "blocked")
+            collision_target = items_by_source["group_a/same"]["target_file"]
+            self.assertEqual(collision_target, items_by_source["group_b/same"]["target_file"])
+            self.assertFalse((ready_action / "meta.yaml").exists())
+            self.assertFalse((nested_a / "meta.yaml").exists())
+            self.assertFalse((nested_b / "meta.yaml").exists())
 
     def test_read_migrated_character_meta_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:

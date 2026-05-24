@@ -4,6 +4,7 @@ from .migration import (
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
     migrate_legacy_style_tags,
+    plan_legacy_tags_migration,
 )
 from .models import NodeDocument
 from .reader import NodeReader
@@ -16,4 +17,5 @@ __all__ = [
     "migrate_legacy_background_tags",
     "migrate_legacy_character_tags",
     "migrate_legacy_style_tags",
+    "plan_legacy_tags_migration",
 ]

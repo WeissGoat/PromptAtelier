@@ -1443,6 +1443,60 @@ node_background, flower field
             self.assertFalse((clean_action / "meta.yaml").exists())
             self.assertFalse((review_action / "meta.yaml").exists())
 
+    def test_plan_legacy_tags_migration_command_writes_plan_without_node_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            style_root = root / "legacy_styles"
+            style_root.mkdir()
+            style_dir = style_root / "anime_style"
+            style_dir.mkdir()
+            (style_dir / "tags.txt").write_text(
+                """
+soft anime style,
+=
+gen_json, {"reference_image_multiple": ["abc"], "reference_strength_multiple": [0.2]}
+""".strip(),
+                encoding="utf-8",
+            )
+            output_root = root / "migrated"
+            plan_path = root / "migration_plan.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "plan-legacy-tags-migration",
+                        str(style_root),
+                        "--kind",
+                        "style",
+                        "--output-root",
+                        str(output_root),
+                        "--output",
+                        str(plan_path),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            plan = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["schema"], "tags-machine-core.legacy-tags-migration-plan/v1")
+            self.assertEqual(data["kind"], "style")
+            self.assertEqual(data["summary"]["total"], 1)
+            self.assertEqual(data["summary"]["ready"], 1)
+            self.assertEqual(data["summary"]["issue_counts"]["style_reference_params_present"], 1)
+            item = data["items"][0]
+            self.assertEqual(item["node_id"], "anime_style")
+            self.assertEqual(item["safe_node_dir"], "anime_style")
+            self.assertEqual(item["migration_status"], "ready")
+            self.assertEqual(
+                item["target_file"],
+                str(output_root / "nodes" / "styles" / "anime_style" / "node.yaml"),
+            )
+            self.assertEqual(plan["summary"], data["summary"])
+            self.assertTrue(plan_path.exists())
+            self.assertFalse((style_dir / "node.yaml").exists())
+            self.assertFalse((output_root / "nodes" / "styles" / "anime_style" / "node.yaml").exists())
+
 
 def _without_runtime_fields(value):
     if isinstance(value, dict):

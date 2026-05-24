@@ -352,6 +352,7 @@ uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requ
 uv run python -m tags_machine_core compose --prompt "akemi homura, foot focus"
 uv run python -m tags_machine_core inspect-style --config configs\local.example.yaml --style-ref 20260412_2
 uv run python -m tags_machine_core audit-legacy-tags F:\my_project\new\tags_machine\design\动作改2 --kind action --output migration_audit_actions.yaml
+uv run python -m tags_machine_core plan-legacy-tags-migration F:\my_project\new\tags_machine\design\动作改2 --kind action --output-root migrated --output migration_plan_actions.yaml
 uv run python -m tags_machine_core migrate-style-tags F:\my_project\new\tags_machine\design\画风\20260412_2 --output migrated\nodes\styles\20260412_2\node.yaml
 uv run python -m tags_machine_core migrate-character-tags F:\my_project\new\tags_machine\design\角色\danbooru_angel_beats_207\danbooru_715_tachibana_kanade_立華かなで --variant school_uniform --output migrated\nodes\characters\tachibana_kanade\meta.yaml
 uv run python -m tags_machine_core migrate-action-tags F:\my_project\new\tags_machine\design\动作改2\next\17_20240706_1720261297 --character-scope foot_detail --output migrated\nodes\actions\foot_closeup\meta.yaml
@@ -384,6 +385,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
 - `audit-legacy-tags` 是迁移前预检入口，支持扫描单个 `tags.txt`、单个旧节点目录或旧节点根目录；它只读源目录，不生成 `meta.yaml` / `node.yaml`。报告包含 `summary` 和逐节点 `items`，用于定位 character 的 `unclassified`、action 的默认 `character_scope`、疑似混入角色外观词、旧扩展字段只归档不执行等人工复核点。
+- `plan-legacy-tags-migration` 是批量迁移计划入口，基于预检结果把旧节点映射到 `--output-root\nodes\{styles|characters|actions|backgrounds}\...\{node.yaml|meta.yaml}`；它只写计划文件，不生成节点 YAML，不覆盖旧项目或目标节点。计划会标出 `ready`、`needs_review`、`target_exists`、`blocked`、`error`，用于先确认迁移范围、目标路径和冲突。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`；`migrate-character-tags` 用于把旧角色 `tags.txt` 转成结构化 character `meta.yaml`；`migrate-action-tags` 用于把旧动作 `tags.txt` 转成结构化 action `meta.yaml`；`migrate-background-tags` 用于把旧背景 `tags.txt` 转成结构化 background `meta.yaml`。这些命令默认都不修改旧项目目录，只有传入 `--output` 时才写出迁移结果；style 迁移会保留 NovelAI 画风扩展参数，character 迁移只提升角色事实 tags，action 迁移只提升动作 tags、动作负向词和 `character_scope`，background 迁移不提升 `gen_json` 等后端扩展。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录；如果记录包含 `PromptBundle`，回放时会检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。

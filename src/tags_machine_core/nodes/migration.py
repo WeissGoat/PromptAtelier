@@ -16,6 +16,20 @@ LEGACY_PROMPT_DIRECTIVE_KEYS = {
     "type",
 }
 
+MIGRATION_OUTPUT_DIRS = {
+    "style": "styles",
+    "character": "characters",
+    "action": "actions",
+    "background": "backgrounds",
+}
+
+MIGRATION_OUTPUT_FILES = {
+    "style": "node.yaml",
+    "character": "meta.yaml",
+    "action": "meta.yaml",
+    "background": "meta.yaml",
+}
+
 
 def audit_legacy_tags(source: str | Path, *, kind: str) -> dict[str, Any]:
     """扫描旧 tags.txt 并生成迁移预检报告；只读源目录，不写旧项目。"""
@@ -68,6 +82,81 @@ def audit_legacy_tags(source: str | Path, *, kind: str) -> dict[str, Any]:
         "kind": kind,
         "source": str(source_path),
         "summary": summary,
+        "items": items,
+    }
+
+
+def plan_legacy_tags_migration(
+    source: str | Path,
+    *,
+    kind: str,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """生成旧 tags.txt 批量迁移计划；只输出计划，不写节点 YAML。"""
+    if kind not in MIGRATION_OUTPUT_DIRS:
+        raise ValueError(f"Unsupported legacy tag kind: {kind}")
+
+    audit = audit_legacy_tags(source, kind=kind)
+    output_root_path = Path(output_root)
+    items: list[dict[str, Any]] = []
+    target_counts: dict[str, int] = {}
+
+    for audit_item in audit["items"]:
+        node_id = str(audit_item.get("node_id") or Path(audit_item["source_dir"]).name)
+        target_dir_name = _safe_migration_node_dir_name(node_id)
+        target_file = (
+            output_root_path
+            / "nodes"
+            / MIGRATION_OUTPUT_DIRS[kind]
+            / target_dir_name
+            / MIGRATION_OUTPUT_FILES[kind]
+        )
+        target_file_text = str(target_file)
+        target_counts[target_file_text] = target_counts.get(target_file_text, 0) + 1
+        issues = [dict(issue) for issue in audit_item.get("issues", [])]
+        target_exists = target_file.exists()
+        if target_exists:
+            _append_issue(
+                issues,
+                "target_file_exists",
+                "review",
+                "目标节点文件已经存在；批量写入前需要决定跳过或显式覆盖。",
+            )
+
+        items.append(
+            {
+                "source_file": audit_item["source_file"],
+                "source_dir": audit_item["source_dir"],
+                "kind": kind,
+                "node_id": node_id,
+                "safe_node_dir": target_dir_name,
+                "target_dir": str(target_file.parent),
+                "target_file": target_file_text,
+                "target_exists": target_exists,
+                "audit_status": audit_item["status"],
+                "migration_status": _migration_status(audit_item["status"], target_exists, issues),
+                "issues": issues,
+            }
+        )
+
+    for item in items:
+        if target_counts[item["target_file"]] <= 1:
+            continue
+        _append_issue(
+            item["issues"],
+            "target_path_collision",
+            "error",
+            "多个旧节点会写入同一个目标路径；需要人工调整节点 id 或输出路径。",
+        )
+        item["migration_status"] = "blocked"
+
+    return {
+        "schema": "tags-machine-core.legacy-tags-migration-plan/v1",
+        "kind": kind,
+        "source": str(Path(source)),
+        "output_root": str(output_root_path),
+        "summary": _migration_plan_summary(items),
+        "audit_summary": audit["summary"],
         "items": items,
     }
 
@@ -305,6 +394,47 @@ def _collect_legacy_tags_paths(source: Path) -> list[Path]:
     if direct_tags.exists():
         return [direct_tags]
     return sorted(path for path in source.rglob("tags.txt") if path.is_file())
+
+
+def _safe_migration_node_dir_name(node_id: str) -> str:
+    value = "".join("_" if char in '<>:"/\\|?*' or ord(char) < 32 else char for char in node_id)
+    value = value.strip().rstrip(".")
+    if not value or value in {".", ".."}:
+        return "unnamed"
+    return value
+
+
+def _migration_status(audit_status: str, target_exists: bool, issues: list[dict[str, Any]]) -> str:
+    if audit_status == "error":
+        return "error"
+    if target_exists:
+        return "target_exists"
+    if any(issue.get("severity") == "error" for issue in issues):
+        return "blocked"
+    if audit_status == "needs_review":
+        return "needs_review"
+    return "ready"
+
+
+def _migration_plan_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    issue_counts: dict[str, int] = {}
+    for item in items:
+        status = str(item.get("migration_status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        for issue in item.get("issues", []):
+            code = str(issue.get("code") or "unknown")
+            issue_counts[code] = issue_counts.get(code, 0) + 1
+    return {
+        "total": len(items),
+        "ready": status_counts.get("ready", 0),
+        "needs_review": status_counts.get("needs_review", 0),
+        "target_exists": status_counts.get("target_exists", 0),
+        "blocked": status_counts.get("blocked", 0),
+        "errors": status_counts.get("error", 0),
+        "status_counts": dict(sorted(status_counts.items())),
+        "issue_counts": dict(sorted(issue_counts.items())),
+    }
 
 
 def _audit_migrated_node(node: dict[str, Any], *, kind: str, tags_path: Path) -> dict[str, Any]:
