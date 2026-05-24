@@ -437,11 +437,12 @@ def cmd_api_generate(args) -> int:
     def executor(request: RenderRequest, request_data: dict[str, Any]) -> GenerationResult:
         if request.backend != "novelai":
             raise ValueError("api-generate currently supports only NovelAI in the v1 scope")
-        return _execute_novelai_generation(
+        return _execute_render_request(
             config,
             request,
             output_dir=args.output_dir or request_data.get("output_dir"),
             image_format=config.defaults.image_format,
+            allow_experimental_backend=False,
         )
 
     result = GenerationJsonApi(generation_executor=executor).generate(

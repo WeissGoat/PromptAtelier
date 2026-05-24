@@ -654,6 +654,55 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(saved_path.suffix, ".png")
             self.assertEqual(saved_path.read_bytes(), b"image-bytes")
 
+    def test_cli_api_generate_uses_unified_execution_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _write_config(root)
+            output_dir = root / "api_outputs"
+            request = root / "api_generate.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "render_request": {
+                            "backend": "novelai",
+                            "prompt": "akemi homura",
+                            "seed": 123,
+                        },
+                        "output_dir": str(output_dir),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("tags_machine_core.cli._execute_render_request") as executor:
+                executor.return_value = GenerationResult(
+                    backend="novelai",
+                    request_body={"parameters": {"seed": 123}},
+                )
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "api-generate",
+                            str(request),
+                            "--config",
+                            str(config),
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["backend"], "novelai")
+            executor.assert_called_once()
+            called_config, called_request = executor.call_args.args
+            self.assertEqual(called_config.novelai.base_url, "http://novelai.local")
+            self.assertEqual(called_request.backend, "novelai")
+            self.assertEqual(called_request.prompt, "akemi homura")
+            self.assertEqual(executor.call_args.kwargs["output_dir"], str(output_dir))
+            self.assertEqual(executor.call_args.kwargs["image_format"], "png")
+            self.assertIs(executor.call_args.kwargs["allow_experimental_backend"], False)
+
     def test_cli_api_generate_rejects_non_novelai_backend_in_v1_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

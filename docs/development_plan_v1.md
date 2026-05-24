@@ -128,7 +128,7 @@ execute_render_request(config, render_request, ...)
 -> GenerationResult
 ```
 
-当前正式执行边界在 `src/tags_machine_core/execution.py`。`execute-render-request` 通过 `execute_render_request()` 做后端分发，默认只允许 NovelAI；`api-generate` 和 `run-prompt` / `generate` 的真实出图路径复用 `execute_novelai_generation()`。`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
+当前正式执行边界在 `src/tags_machine_core/execution.py`。`execute-render-request` 和 `api-generate` 通过 `execute_render_request()` 做后端分发，默认只允许 NovelAI；`run-prompt` / `generate` 的真实出图路径复用 `execute_novelai_generation()`。`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
 
 ComfyUI / SD 的真实执行函数也放在 execution 层，便于后续接入时复用同一边界；但它们仍属于预研能力，必须通过显式实验开关触发，不进入 v1 正式验收范围。
 
@@ -158,7 +158,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json --ou
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 ```
 
-`GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_novelai_generation()`，只支持 NovelAI，符合 v1 正式范围。
+`GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_render_request()`，并关闭实验后端，只支持 NovelAI，符合 v1 正式范围。
 
 UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参数。
 
