@@ -40,6 +40,21 @@ MINIMUM_SCOPE_CASES = {
         "suppressed_all": ("hair", "eyes", "upper_clothes", "feet"),
     },
 }
+MINIMUM_DEFAULT_ACTION_REQUIRED_PARAMS = (
+    "prompt",
+    "negative_prompt",
+    "seed",
+    "width",
+    "height",
+    "sampler",
+    "steps",
+    "scale",
+    "cfg_rescale",
+    "noise_schedule",
+    "v4_prompt",
+    "v4_negative_prompt",
+)
+MINIMUM_COMPLEX_CHARACTER_REQUIRED_INCLUDED = ("hair", "eyes", "upper_clothes")
 ACCEPTANCE_RECORD_EXTENSIONS = {".json", ".yaml", ".yml"}
 ACCEPTANCE_PATH_FIELDS = {
     "source_path",
@@ -683,8 +698,12 @@ def _minimum_case_checks(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         records = _records_for_required_case(required_case, results)
         if not records:
             continue
-        if required_case in MINIMUM_SCOPE_CASES:
+        if required_case == "default_action":
+            checks.append(_default_action_case_check(records))
+        elif required_case in MINIMUM_SCOPE_CASES:
             checks.append(_scope_case_check(required_case, records))
+        elif required_case == "complex_character":
+            checks.append(_complex_character_case_check(records))
         elif required_case == "reference_style":
             checks.append(_reference_style_case_check(records))
     return checks
@@ -741,6 +760,88 @@ def _scope_case_errors(record: dict[str, Any], rule: dict[str, Any]) -> list[str
     return errors
 
 
+def _default_action_case_check(records: list[dict[str, Any]]) -> dict[str, Any]:
+    failures: list[str] = []
+    for record in records:
+        errors = _default_action_case_errors(record)
+        if not errors:
+            return {
+                "required_case": "default_action",
+                "case_ids": [str(item.get("case_id")) for item in records],
+                "matched_case_id": str(record.get("case_id")),
+                "result": "pass",
+                "messages": [],
+            }
+        failures.append(f"{record.get('case_id')}: {'; '.join(errors)}")
+    return {
+        "required_case": "default_action",
+        "case_ids": [str(item.get("case_id")) for item in records],
+        "matched_case_id": None,
+        "result": "fail",
+        "messages": failures,
+    }
+
+
+def _default_action_case_errors(record: dict[str, Any]) -> list[str]:
+    params = _normalized_core_parameters(record)
+    if not isinstance(params, dict):
+        return ["missing normalized core parameters"]
+
+    errors: list[str] = []
+    missing_params = [
+        key for key in MINIMUM_DEFAULT_ACTION_REQUIRED_PARAMS if key not in params
+    ]
+    if missing_params:
+        errors.append(f"missing core parameters {missing_params}")
+
+    for key in ("v4_prompt", "v4_negative_prompt"):
+        value = params.get(key)
+        if not isinstance(value, dict):
+            errors.append(f"{key} must be an object")
+            continue
+        caption = value.get("caption")
+        if not isinstance(caption, dict) or "base_caption" not in caption:
+            errors.append(f"{key}.caption.base_caption missing")
+    return errors
+
+
+def _complex_character_case_check(records: list[dict[str, Any]]) -> dict[str, Any]:
+    failures: list[str] = []
+    for record in records:
+        errors = _complex_character_case_errors(record)
+        if not errors:
+            return {
+                "required_case": "complex_character",
+                "case_ids": [str(item.get("case_id")) for item in records],
+                "matched_case_id": str(record.get("case_id")),
+                "result": "pass",
+                "messages": [],
+            }
+        failures.append(f"{record.get('case_id')}: {'; '.join(errors)}")
+    return {
+        "required_case": "complex_character",
+        "case_ids": [str(item.get("case_id")) for item in records],
+        "matched_case_id": None,
+        "result": "fail",
+        "messages": failures,
+    }
+
+
+def _complex_character_case_errors(record: dict[str, Any]) -> list[str]:
+    composition = record.get("composition") if isinstance(record.get("composition"), dict) else {}
+    included = set(_normalized_string_list(composition.get("included_character_sections")))
+    suppressed = set(_normalized_string_list(composition.get("suppressed_character_sections")))
+    required = set(MINIMUM_COMPLEX_CHARACTER_REQUIRED_INCLUDED)
+    errors: list[str] = []
+    missing_included = sorted(required - included)
+    if missing_included:
+        errors.append(f"missing included sections {missing_included}")
+    incorrectly_suppressed = sorted(required & suppressed)
+    if incorrectly_suppressed:
+        errors.append(f"unexpected suppressed sections {incorrectly_suppressed}")
+    return errors
+
+
 def _reference_style_case_check(records: list[dict[str, Any]]) -> dict[str, Any]:
     failures: list[str] = []
     for record in records:
@@ -764,11 +865,7 @@ def _reference_style_case_check(records: list[dict[str, Any]]) -> dict[str, Any]
 
 
 def _reference_style_case_errors(record: dict[str, Any]) -> list[str]:
-    params = (
-        ((record.get("normalized") or {}).get("core") or {}).get("parameters")
-        if isinstance(record.get("normalized"), dict)
-        else {}
-    )
+    params = _normalized_core_parameters(record)
     if not isinstance(params, dict):
         return ["missing normalized core parameters"]
     references = params.get("reference_image_multiple") or []
@@ -782,6 +879,17 @@ def _reference_style_case_errors(record: dict[str, Any]) -> list[str]:
     if not isinstance(information, list) or len(information) != len(references):
         errors.append("reference_information_extracted_multiple length mismatch")
     return errors
+
+
+def _normalized_core_parameters(record: dict[str, Any]) -> dict[str, Any] | None:
+    normalized = record.get("normalized")
+    if not isinstance(normalized, dict):
+        return None
+    core = normalized.get("core")
+    if not isinstance(core, dict):
+        return None
+    params = core.get("parameters")
+    return params if isinstance(params, dict) else None
 
 
 def _normalized_string_list(value: Any) -> list[str]:
