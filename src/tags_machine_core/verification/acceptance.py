@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from tags_machine_core.verification.render_params import (
 
 
 ACCEPTANCE_SCHEMA = "tags-machine-core.acceptance-record/v1"
+ACCEPTANCE_ARCHIVE_SCHEMA = "tags-machine-core.acceptance-archive/v1"
+ACCEPTANCE_SUITE_MANIFEST_SCHEMA = "tags-machine-core.acceptance-suite/v1"
 ACCEPTANCE_SUITE_SCHEMA = "tags-machine-core.acceptance-suite-verification/v1"
 MINIMUM_ACCEPTANCE_CASES = (
     "default_action",
@@ -26,6 +29,21 @@ MINIMUM_ACCEPTANCE_CASES = (
     "reference_style",
 )
 ACCEPTANCE_RECORD_EXTENSIONS = {".json", ".yaml", ".yml"}
+ACCEPTANCE_PATH_FIELDS = {
+    "source_path",
+    "params_path",
+    "image_path",
+    "render_request_path",
+    "prompt_bundle_path",
+    "generation_result_path",
+    "legacy_source",
+    "core_source",
+    "legacy_image",
+    "core_image",
+    "prompt_bundle",
+    "generation_result",
+    "case_dir",
+}
 
 
 def build_acceptance_record(
@@ -98,6 +116,123 @@ def build_acceptance_record(
     }
     record["result"] = "pass" if not unapproved_diffs else "fail"
     return record
+
+
+def archive_acceptance_case(
+    *,
+    case_id: str,
+    output_dir: str | Path,
+    legacy_source: str | Path,
+    core_source: str | Path,
+    legacy_image: str | Path | None = None,
+    core_image: str | Path | None = None,
+    prompt_bundle: str | Path | None = None,
+    generation_result: str | Path | None = None,
+    whitelist: list[dict[str, str]] | None = None,
+    intentional_differences: list[dict[str, str]] | None = None,
+    notes: list[str] | None = None,
+    manifest: str | Path | None = None,
+    required_cases: list[str] | None = None,
+    update_manifest: bool = True,
+    overwrite: bool = False,
+    record_format: str = "yaml",
+) -> dict[str, Any]:
+    """归档一条旧项目 oracle 对照样例，生成可回放的 record 和 suite manifest。"""
+
+    case_id = _validate_case_id(case_id)
+    output_dir = Path(output_dir)
+    case_dir = output_dir / case_id
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    legacy_dir = case_dir / "legacy"
+    core_dir = case_dir / "core"
+    legacy_source_copy = _copy_acceptance_artifact(
+        legacy_source,
+        legacy_dir,
+        _artifact_filename("source", legacy_source),
+        overwrite=overwrite,
+    )
+    core_source_copy = _copy_acceptance_artifact(
+        core_source,
+        core_dir,
+        _artifact_filename("render_request", core_source),
+        overwrite=overwrite,
+    )
+    legacy_image_copy = _copy_optional_acceptance_artifact(
+        legacy_image,
+        legacy_dir,
+        _artifact_filename("image", legacy_image) if legacy_image else None,
+        overwrite=overwrite,
+        fallback=legacy_source_copy if _is_png_path(legacy_source_copy) else None,
+    )
+    core_image_copy = _copy_optional_acceptance_artifact(
+        core_image,
+        core_dir,
+        _artifact_filename("image", core_image) if core_image else None,
+        overwrite=overwrite,
+        fallback=core_source_copy if _is_png_path(core_source_copy) else None,
+    )
+    prompt_bundle_copy = _copy_optional_acceptance_artifact(
+        prompt_bundle,
+        core_dir,
+        _artifact_filename("prompt_bundle", prompt_bundle) if prompt_bundle else None,
+        overwrite=overwrite,
+    )
+    generation_result_copy = _copy_optional_acceptance_artifact(
+        generation_result,
+        core_dir,
+        _artifact_filename("generation_result", generation_result) if generation_result else None,
+        overwrite=overwrite,
+    )
+
+    record = build_acceptance_record(
+        case_id=case_id,
+        legacy_source=legacy_source_copy,
+        core_source=core_source_copy,
+        legacy_image=legacy_image_copy,
+        core_image=core_image_copy,
+        prompt_bundle=prompt_bundle_copy,
+        whitelist=whitelist,
+        intentional_differences=intentional_differences,
+        notes=notes,
+    )
+    if generation_result_copy is not None:
+        record.setdefault("core", {})["generation_result_path"] = str(generation_result_copy)
+    record["archive"] = {
+        "schema": ACCEPTANCE_ARCHIVE_SCHEMA,
+        "case_dir": str(case_dir),
+        "artifacts": _archive_artifacts(
+            legacy_source=legacy_source_copy,
+            core_source=core_source_copy,
+            legacy_image=legacy_image_copy,
+            core_image=core_image_copy,
+            prompt_bundle=prompt_bundle_copy,
+            generation_result=generation_result_copy,
+        ),
+    }
+    record = _relativize_acceptance_record_paths(record, case_dir)
+
+    record_path = case_dir / f"acceptance.{_record_suffix(record_format)}"
+    _write_acceptance_document(record, record_path, output_format=record_format)
+
+    manifest_path: Path | None = None
+    if update_manifest:
+        manifest_path = Path(manifest) if manifest else output_dir / "suite.yaml"
+        _upsert_acceptance_suite_manifest(
+            manifest_path,
+            record_path=record_path,
+            required_cases=required_cases or [],
+        )
+
+    return {
+        "schema": ACCEPTANCE_ARCHIVE_SCHEMA,
+        "case_id": case_id,
+        "case_dir": str(case_dir),
+        "record_path": str(record_path),
+        "manifest_path": str(manifest_path) if manifest_path is not None else None,
+        "result": record["result"],
+        "record": record,
+    }
 
 
 def load_acceptance_record(path: str | Path) -> dict[str, Any]:
@@ -416,3 +551,197 @@ def _unique_strings(values) -> list[str]:
 def _case_requirement_satisfied(required_case: str, case_ids: list[str]) -> bool:
     prefix = f"{required_case}_"
     return any(case_id == required_case or case_id.startswith(prefix) for case_id in case_ids)
+
+
+def _validate_case_id(case_id: str) -> str:
+    value = str(case_id).strip()
+    if not value:
+        raise ValueError("case_id must not be empty")
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError(f"case_id must be a plain directory name: {case_id!r}")
+    return value
+
+
+def _artifact_filename(prefix: str, source: str | Path) -> str:
+    suffix = Path(source).suffix or ".json"
+    return f"{prefix}{suffix}"
+
+
+def _copy_acceptance_artifact(
+    source: str | Path,
+    target_dir: Path,
+    filename: str,
+    *,
+    overwrite: bool,
+) -> Path:
+    source_path = Path(source)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Acceptance artifact not found: {source_path}")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / filename
+    if target_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"Acceptance artifact already exists, pass --overwrite to replace: {target_path}"
+        )
+    if source_path.resolve() != target_path.resolve():
+        shutil.copy2(source_path, target_path)
+    return target_path
+
+
+def _copy_optional_acceptance_artifact(
+    source: str | Path | None,
+    target_dir: Path,
+    filename: str | None,
+    *,
+    overwrite: bool,
+    fallback: Path | None = None,
+) -> Path | None:
+    if source is None:
+        return fallback
+    if filename is None:
+        raise ValueError("Optional artifact filename is required when source is provided")
+    source_path = Path(source)
+    if fallback is not None and source_path.resolve() == fallback.resolve():
+        return fallback
+    return _copy_acceptance_artifact(
+        source_path,
+        target_dir,
+        filename,
+        overwrite=overwrite,
+    )
+
+
+def _is_png_path(path: Path | None) -> bool:
+    return path is not None and path.suffix.lower() == ".png"
+
+
+def _archive_artifacts(**paths: Path | None) -> dict[str, str]:
+    return {name: str(path) for name, path in paths.items() if path is not None}
+
+
+def _record_suffix(record_format: str) -> str:
+    if record_format == "auto":
+        return "yaml"
+    if record_format in {"yaml", "yml"}:
+        return "yaml"
+    if record_format == "json":
+        return "json"
+    raise ValueError(f"Unsupported acceptance record format: {record_format}")
+
+
+def _write_acceptance_document(
+    data: dict[str, Any],
+    path: Path,
+    *,
+    output_format: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    format_name = output_format
+    if format_name == "auto":
+        format_name = "yaml" if path.suffix.lower() in {".yaml", ".yml"} else "json"
+    if format_name in {"yaml", "yml"}:
+        path.write_text(
+            yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        return
+    if format_name == "json":
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return
+    raise ValueError(f"Unsupported acceptance document format: {output_format}")
+
+
+def _relativize_acceptance_record_paths(
+    record: dict[str, Any],
+    base_dir: Path,
+) -> dict[str, Any]:
+    return _relativize_path_fields(record, base_dir)
+
+
+def _relativize_path_fields(value: Any, base_dir: Path) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _relative_path_string(item, base_dir)
+            if key in ACCEPTANCE_PATH_FIELDS or (key == "path" and _looks_like_file_path(item))
+            else _relativize_path_fields(item, base_dir)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_relativize_path_fields(item, base_dir) for item in value]
+    return value
+
+
+def _relative_path_string(value: Any, base_dir: Path) -> Any:
+    if not isinstance(value, str):
+        return value
+    path = Path(value)
+    if not path.is_absolute():
+        return value.replace("\\", "/")
+    try:
+        return path.relative_to(base_dir).as_posix()
+    except ValueError:
+        return value
+
+
+def _looks_like_file_path(value: Any) -> bool:
+    if not isinstance(value, str) or value.startswith("$"):
+        return False
+    path = Path(value)
+    return path.is_absolute() or "/" in value or "\\" in value
+
+
+def _upsert_acceptance_suite_manifest(
+    manifest_path: Path,
+    *,
+    record_path: Path,
+    required_cases: list[str],
+) -> None:
+    if manifest_path.exists():
+        manifest = load_acceptance_record(manifest_path)
+    else:
+        manifest = {
+            "schema": ACCEPTANCE_SUITE_MANIFEST_SCHEMA,
+            "required_cases": [],
+            "records": [],
+        }
+
+    manifest["schema"] = manifest.get("schema") or ACCEPTANCE_SUITE_MANIFEST_SCHEMA
+    existing_required = manifest.get("required_cases") or []
+    if not isinstance(existing_required, list):
+        raise ValueError(f"Acceptance suite required_cases must be a list: {manifest_path}")
+    manifest["required_cases"] = _unique_strings([*existing_required, *required_cases])
+
+    existing_records = manifest.get("records") or []
+    if not isinstance(existing_records, list):
+        raise ValueError(f"Acceptance suite records must be a list: {manifest_path}")
+    relative_record = _manifest_record_path(record_path, manifest_path.parent)
+    existing_record_paths = {
+        str(_manifest_entry_path(entry)).replace("\\", "/")
+        for entry in existing_records
+        if _manifest_entry_path(entry)
+    }
+    if relative_record not in existing_record_paths:
+        existing_records.append(relative_record)
+    manifest["records"] = existing_records
+
+    _write_acceptance_document(
+        manifest,
+        manifest_path,
+        output_format="yaml" if manifest_path.suffix.lower() in {".yaml", ".yml"} else "json",
+    )
+
+
+def _manifest_record_path(record_path: Path, base_dir: Path) -> str:
+    try:
+        return record_path.resolve().relative_to(base_dir.resolve()).as_posix()
+    except ValueError:
+        return str(record_path)
+
+
+def _manifest_entry_path(entry: Any) -> str | None:
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        value = entry.get("path") or entry.get("record_path")
+        return str(value) if value else None
+    return None

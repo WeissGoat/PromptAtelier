@@ -1,4 +1,5 @@
 from .acceptance import (
+    archive_acceptance_case,
     build_acceptance_record,
     load_acceptance_record,
     parse_intentional_difference_args,
@@ -16,6 +17,7 @@ from .render_params import (
 
 __all__ = [
     "RenderParamDiff",
+    "archive_acceptance_case",
     "build_acceptance_record",
     "compare_render_parameters",
     "load_acceptance_record",

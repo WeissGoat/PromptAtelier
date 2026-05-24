@@ -19,6 +19,7 @@ from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import (
+    archive_acceptance_case,
     build_acceptance_record,
     compare_render_parameters,
     load_render_parameter_source,
@@ -326,6 +327,29 @@ def cmd_create_acceptance_record(args) -> int:
         _write_structured_output(record, Path(args.output), output_format=args.format)
     print_json(record, full=args.full)
     return 0 if record["result"] == "pass" else 2
+
+
+def cmd_archive_acceptance_case(args) -> int:
+    archive = archive_acceptance_case(
+        case_id=args.case_id,
+        output_dir=args.output_dir,
+        legacy_source=args.legacy_source,
+        core_source=args.core_source,
+        legacy_image=args.legacy_image,
+        core_image=args.core_image,
+        prompt_bundle=args.prompt_bundle,
+        generation_result=args.generation_result,
+        whitelist=parse_whitelist_args(args.whitelist),
+        intentional_differences=parse_intentional_difference_args(args.intentional_difference),
+        notes=args.note or [],
+        manifest=args.manifest,
+        required_cases=args.required_case or [],
+        update_manifest=not args.no_manifest,
+        overwrite=args.overwrite,
+        record_format=args.format,
+    )
+    print_json(archive, full=args.full)
+    return 0 if archive["result"] == "pass" else 2
 
 
 def cmd_verify_acceptance_record(args) -> int:
@@ -696,6 +720,64 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output file format when --output is used",
     )
     create_acceptance_record.set_defaults(func=cmd_create_acceptance_record)
+
+    archive_acceptance = subparsers.add_parser(
+        "archive-acceptance-case",
+        parents=[output_parent],
+        help="Copy legacy/core artifacts into a replayable acceptance case directory",
+    )
+    archive_acceptance.add_argument("--case-id", required=True)
+    archive_acceptance.add_argument("--output-dir", required=True)
+    archive_acceptance.add_argument("--legacy-source", required=True)
+    archive_acceptance.add_argument("--core-source", required=True)
+    archive_acceptance.add_argument("--legacy-image")
+    archive_acceptance.add_argument("--core-image")
+    archive_acceptance.add_argument("--prompt-bundle")
+    archive_acceptance.add_argument("--generation-result")
+    archive_acceptance.add_argument(
+        "--whitelist",
+        action="append",
+        help="Approved diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    archive_acceptance.add_argument(
+        "--intentional-difference",
+        action="append",
+        help=(
+            "Intentional core-vs-legacy diff path with optional reason, "
+            "for example $.parameters.prompt=foot_detail filters face tags"
+        ),
+    )
+    archive_acceptance.add_argument(
+        "--note",
+        action="append",
+        help="Human note stored in the acceptance record; can be repeated",
+    )
+    archive_acceptance.add_argument(
+        "--manifest",
+        help="Suite manifest to create or update; defaults to output-dir\\suite.yaml",
+    )
+    archive_acceptance.add_argument(
+        "--required-case",
+        action="append",
+        help="Required suite case id/prefix to add to the manifest; can be repeated",
+    )
+    archive_acceptance.add_argument(
+        "--no-manifest",
+        action="store_true",
+        help="Do not create or update a suite manifest",
+    )
+    archive_acceptance.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing copied artifacts in the case directory",
+    )
+    archive_acceptance.add_argument(
+        "--format",
+        default="yaml",
+        choices=("json", "yaml"),
+        help="Acceptance record format written inside the case directory",
+    )
+    archive_acceptance.set_defaults(func=cmd_archive_acceptance_case)
 
     verify_acceptance = subparsers.add_parser(
         "verify-acceptance-record",

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from tags_machine_core.cli import main
 from tags_machine_core.verification import (
+    archive_acceptance_case,
     build_acceptance_record,
     compare_render_parameters,
     normalize_render_parameters,
@@ -587,6 +588,92 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(result["record_count"], 0)
             self.assertEqual(result["errors"], ["No acceptance records found"])
 
+    def test_archive_acceptance_case_creates_replayable_oracle_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "source"
+            source_dir.mkdir()
+            legacy = source_dir / "legacy_request.json"
+            core = source_dir / "core_render_request.json"
+            legacy_image = source_dir / "legacy.png"
+            core_image = source_dir / "core.png"
+            prompt_bundle = source_dir / "prompt_bundle.json"
+            generation_result = source_dir / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_png_with_text(legacy_image, {"Comment": json.dumps(_sample_parameters())})
+            _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
+            prompt_bundle.write_text(
+                json.dumps(
+                    {
+                        "meta": {
+                            "composition": {
+                                "character_scope": "foot_detail",
+                                "included_character_sections": ["character", "feet"],
+                                "suppressed_character_sections": ["eyes", "upper_clothes"],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps({"schema": "tags-machine-core.generation-result/v1", "images": []}),
+                encoding="utf-8",
+            )
+
+            archive = archive_acceptance_case(
+                case_id="foot_detail_homura_001",
+                output_dir=root / "acceptance",
+                legacy_source=legacy,
+                core_source=core,
+                legacy_image=legacy_image,
+                core_image=core_image,
+                prompt_bundle=prompt_bundle,
+                generation_result=generation_result,
+                required_cases=["foot_detail"],
+                notes=["oracle package"],
+            )
+            suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
+
+            case_dir = Path(archive["case_dir"])
+            record_path = Path(archive["record_path"])
+            record = archive["record"]
+            self.assertEqual(archive["result"], "pass")
+            self.assertTrue(record_path.exists())
+            self.assertTrue((case_dir / "legacy" / "source.json").exists())
+            self.assertTrue((case_dir / "core" / "render_request.json").exists())
+            self.assertEqual(record["legacy"]["source_path"], "legacy/source.json")
+            self.assertEqual(record["core"]["render_request_path"], "core/render_request.json")
+            self.assertEqual(record["core"]["prompt_bundle_path"], "core/prompt_bundle.json")
+            self.assertEqual(
+                record["core"]["generation_result_path"],
+                "core/generation_result.json",
+            )
+            self.assertEqual(record["archive"]["artifacts"]["legacy_image"], "legacy/image.png")
+            self.assertEqual(record["composition"]["character_scope"], "foot_detail")
+            self.assertTrue(suite["match"])
+            self.assertEqual(suite["missing_required_cases"], [])
+
     def test_cli_create_and_verify_acceptance_record(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -734,6 +821,48 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertFalse(data["match"])
             self.assertEqual(data["missing_required_cases"], ["foot_detail"])
+
+    def test_cli_archive_acceptance_case_updates_suite_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "archive-acceptance-case",
+                        "--case-id",
+                        "default_action_001",
+                        "--output-dir",
+                        str(root / "acceptance"),
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                        "--required-case",
+                        "default_action",
+                    ]
+                )
+            archive = json.loads(stdout.getvalue())
+
+            verify_stdout = io.StringIO()
+            with redirect_stdout(verify_stdout):
+                verify_exit = main(
+                    ["verify-acceptance-suite", str(root / "acceptance" / "suite.yaml")]
+                )
+            suite = json.loads(verify_stdout.getvalue())
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(verify_exit, 0)
+            self.assertEqual(archive["result"], "pass")
+            self.assertTrue(Path(archive["record_path"]).exists())
+            self.assertEqual(suite["record_count"], 1)
+            self.assertEqual(suite["missing_required_cases"], [])
 
 
 if __name__ == "__main__":
