@@ -1309,6 +1309,16 @@ class JsonApiTest(unittest.TestCase):
             shapes["schema"],
             "tags-machine-core.json-api-response-shapes/v1",
         )
+        shape_requests = sorted(case["request"] for case in shapes["cases"])
+        example_requests = sorted(
+            f"examples/requests/{path.name}"
+            for path in (PROJECT_ROOT / "examples" / "requests").glob("*.json")
+        )
+        self.assertEqual(shape_requests, example_requests)
+        self.assertEqual(
+            len({case["id"] for case in shapes["cases"]}),
+            len(shapes["cases"]),
+        )
 
         with _project_cwd():
             for case in shapes["cases"]:

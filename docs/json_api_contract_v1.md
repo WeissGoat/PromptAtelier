@@ -352,7 +352,7 @@ compose.prompt 已经包含完整角色 + 动作
 
 - `examples/responses/json_api_response_shapes.json`
 
-这个文件不是完整响应快照，而是前端/worker 需要依赖的字段形状、状态分支和关键常量。测试会读取该文件，实际调用 `GenerationJsonApi`，并校验每个样例的 `schema`、`status`、核心节点引用、NovelAI `RenderRequest` 字段、V4 payload、缺失字段，以及 `PromptBundle.meta` 不输出 `shot` / `constraints`。
+这个文件不是完整响应快照，而是前端/worker 需要依赖的字段形状、状态分支和关键常量。测试会读取该文件，确认它覆盖 `examples/requests/` 下的每个请求样例，再实际调用 `GenerationJsonApi`，并校验每个样例的 `schema`、`status`、核心节点引用、NovelAI `RenderRequest` 字段、V4 payload、缺失字段，以及 `PromptBundle.meta` 不输出 `shot` / `constraints`。
 
 ## CLI 对照
 
