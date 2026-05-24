@@ -89,6 +89,59 @@ def migrate_legacy_style_tags(
     }
 
 
+def migrate_legacy_character_tags(
+    source: str | Path,
+    *,
+    node_id: str | None = None,
+    name: str | None = None,
+    character_id: str | None = None,
+    variant: str | None = None,
+) -> dict[str, Any]:
+    """把旧角色 tags.txt 转成结构化 character meta，旧替换规则只归档不执行。"""
+    tags_path = _resolve_tags_path(source)
+    character_dir = tags_path.parent
+    prompt_lines, ext_lines = _split_legacy_style_lines(tags_path)
+    prompt_tags_by_line = [_split_top_level_commas(line) for line in prompt_lines]
+    identity_tags = prompt_tags_by_line[0] if prompt_tags_by_line else []
+    tags: dict[str, list[str]] = {}
+
+    if identity_tags:
+        tags["character"] = identity_tags[:1]
+    if len(identity_tags) > 1:
+        tags["copyright"] = identity_tags[1:]
+
+    for line_tags in prompt_tags_by_line[1:]:
+        for tag in line_tags:
+            section = _classify_legacy_character_tag(tag)
+            tags.setdefault(section, []).append(tag)
+
+    result: dict[str, Any] = {
+        "schema": "tags-machine.character/v1",
+        "kind": "character",
+        "id": node_id or character_dir.name,
+        "name": name or character_dir.name,
+        "character_id": character_id or (identity_tags[0] if identity_tags else character_dir.name),
+        "description": "由旧角色 tags.txt 迁移生成。请人工复核 tags 分组；旧替换规则只保留在 legacy。",
+        "tags": tags,
+        "negative_prompt": _collect_legacy_negative_prompt(ext_lines),
+        "legacy": {
+            "source_file": str(tags_path),
+            "raw_lines": prompt_lines + (["="] if ext_lines else []) + ext_lines,
+            "raw_sections": {
+                "prompt": prompt_lines,
+                "extension": ext_lines,
+            },
+        },
+        "agent": {
+            "summary": "从旧 tags.txt 自动迁移的角色节点，只包含角色素材事实；旧替换规则没有提升为 v1 规则字段。",
+            "labels": ["character", "migrated", "legacy_tags_txt", "needs_review"],
+        },
+    }
+    if variant:
+        result["variant"] = variant
+    return result
+
+
 def migrate_legacy_action_tags(
     source: str | Path,
     *,
@@ -310,6 +363,109 @@ def _infer_action_character_scope(action_tags: list[str], source: Path) -> str:
     if has_any(("full body",)):
         return "full_body"
     return "default"
+
+
+def _classify_legacy_character_tag(tag: str) -> str:
+    normalized = tag.lower().strip().replace(" ", "_")
+    if any(marker in normalized for marker in ("_hair", "hair_", "hairclip", "hairband", "ahoge")):
+        if any(marker in normalized for marker in ("hairclip", "hairband", "hair_ornament", "hair_bow")):
+            return "head_accessories"
+        return "hair"
+    if "_eyes" in normalized or normalized.endswith("_eye") or normalized in {"heterochromia"}:
+        return "eyes"
+    if any(marker in normalized for marker in ("mouth", "smile", "fang", "scar_across_eye")):
+        return "face"
+    if any(
+        marker in normalized
+        for marker in (
+            "hat",
+            "ribbon",
+            "halo",
+            "horn",
+            "headdress",
+            "headband",
+            "hair_ornament",
+            "hairclip",
+            "hair_bow",
+            "crown",
+        )
+    ):
+        return "head_accessories"
+    if "ear" in normalized:
+        return "ears"
+    if "tail" in normalized:
+        return "tail"
+    if "wing" in normalized:
+        return "wings"
+    if any(marker in normalized for marker in ("glove", "mitten", "handwear")):
+        return "handwear"
+    if any(
+        marker in normalized
+        for marker in (
+            "thighhigh",
+            "pantyhose",
+            "socks",
+            "kneehigh",
+            "legwear",
+            "stocking",
+            "garter",
+        )
+    ):
+        return "legwear"
+    if any(
+        marker in normalized
+        for marker in (
+            "shoe",
+            "boot",
+            "sneaker",
+            "loafers",
+            "high_heels",
+            "mary_janes",
+            "footwear",
+        )
+    ):
+        return "footwear"
+    if any(marker in normalized for marker in ("barefoot", "bare_feet", "feet", "toe", "soles")):
+        return "feet"
+    if any(marker in normalized for marker in ("sword", "gun", "shield", "weapon", "shirasaya", "wand")):
+        return "weapons"
+    if any(marker in normalized for marker in ("plush", "bag", "book", "umbrella", "instrument")):
+        return "props"
+    if any(
+        marker in normalized
+        for marker in (
+            "dress",
+            "kimono",
+            "school_uniform",
+            "uniform",
+            "serafuku",
+        )
+    ):
+        return "full_body_clothes"
+    if any(marker in normalized for marker in ("skirt", "pants", "shorts", "bloomers")):
+        return "lower_clothes"
+    if any(
+        marker in normalized
+        for marker in (
+            "blazer",
+            "jacket",
+            "shirt",
+            "coat",
+            "sweater",
+            "hoodie",
+            "sailor",
+            "collar",
+            "sleeves",
+            "armor",
+            "bra",
+        )
+    ):
+        return "upper_clothes"
+    if any(marker in normalized for marker in ("breasts", "skin", "navel", "body", "thighs")):
+        return "body"
+    if any(marker in normalized for marker in ("necklace", "choker", "belt", "logo", "badge")):
+        return "accessories"
+    return "unclassified"
 
 
 def _parse_json_value(value: str, source: Path) -> dict[str, Any]:

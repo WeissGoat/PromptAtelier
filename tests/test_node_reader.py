@@ -8,6 +8,7 @@ from tags_machine_core.nodes import (
     NodeReader,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
+    migrate_legacy_character_tags,
     migrate_legacy_style_tags,
 )
 
@@ -209,6 +210,82 @@ gen_json, {"sampler": "ignored_for_action"}
             self.assertEqual(node["character_scope"], "foot_detail")
             self.assertNotIn("renderers", node)
             self.assertIn("node_background, flower field", node["legacy"]["raw_sections"]["extension"])
+
+    def test_migrate_legacy_character_tags_txt_to_character_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            character_dir = Path(tmp) / "old_character"
+            character_dir.mkdir()
+            (character_dir / "tags.txt").write_text(
+                """
+tachibana_kanade,angel_beats!
+yellow_eyes,grey_hair,hairband
+blazer,pleated_skirt,thighhighs
+shirasaya
+=
+leg_wear, stirrup legwear|toeless legwear
+shoes, shoes|boots|loafers
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_character_tags(
+                character_dir,
+                node_id="migrated_character",
+                variant="school_uniform",
+            )
+
+            self.assertEqual(node["schema"], "tags-machine.character/v1")
+            self.assertEqual(node["kind"], "character")
+            self.assertEqual(node["id"], "migrated_character")
+            self.assertEqual(node["character_id"], "tachibana_kanade")
+            self.assertEqual(node["variant"], "school_uniform")
+            self.assertEqual(node["tags"]["character"], ["tachibana_kanade"])
+            self.assertEqual(node["tags"]["copyright"], ["angel_beats!"])
+            self.assertEqual(node["tags"]["eyes"], ["yellow_eyes"])
+            self.assertEqual(node["tags"]["hair"], ["grey_hair"])
+            self.assertEqual(node["tags"]["head_accessories"], ["hairband"])
+            self.assertEqual(node["tags"]["upper_clothes"], ["blazer"])
+            self.assertEqual(node["tags"]["lower_clothes"], ["pleated_skirt"])
+            self.assertEqual(node["tags"]["legwear"], ["thighhighs"])
+            self.assertEqual(node["tags"]["weapons"], ["shirasaya"])
+            self.assertNotIn("rules", node)
+            self.assertNotIn("profiles", node)
+            self.assertIn("leg_wear, stirrup legwear|toeless legwear", node["legacy"]["raw_sections"]["extension"])
+
+    def test_read_migrated_character_meta_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            character_dir = Path(tmp) / "old_character"
+            character_dir.mkdir()
+            (character_dir / "tags.txt").write_text(
+                """
+amiya_(arknights),arknights
+brown_hair,long_hair,blue_eyes,hair_between_eyes
+rabbit_ears,jacket,long_sleeves
+""".strip(),
+                encoding="utf-8",
+            )
+            output = character_dir / "meta.yaml"
+            output.write_text(
+                yaml.safe_dump(
+                    migrate_legacy_character_tags(character_dir),
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            node = NodeReader().read(character_dir)
+
+            self.assertEqual(node.kind, "character")
+            self.assertEqual(node.id, "old_character")
+            self.assertEqual(node.character_id, "amiya_(arknights)")
+            self.assertEqual(node.tags["character"], ["amiya_(arknights)"])
+            self.assertEqual(node.tags["copyright"], ["arknights"])
+            self.assertEqual(node.tags["hair"], ["brown_hair", "long_hair", "hair_between_eyes"])
+            self.assertEqual(node.tags["eyes"], ["blue_eyes"])
+            self.assertEqual(node.tags["ears"], ["rabbit_ears"])
+            self.assertEqual(node.tags["upper_clothes"], ["jacket", "long_sleeves"])
+            self.assertEqual(node.renderers, {})
 
     def test_migrate_legacy_action_tags_allows_character_scope_override(self):
         with tempfile.TemporaryDirectory() as tmp:

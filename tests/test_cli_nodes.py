@@ -1315,6 +1315,60 @@ gen_json, {"sampler": "ignored_for_action"}
             self.assertEqual(node.character_scope, "foot_detail")
             self.assertEqual(node.renderers, {})
 
+    def test_migrate_character_tags_command_writes_structured_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character_dir = root / "legacy_character"
+            character_dir.mkdir()
+            (character_dir / "tags.txt").write_text(
+                """
+tachibana_kanade,angel_beats!
+yellow_eyes,grey_hair,hairband
+blazer,pleated_skirt,thighhighs
+shirasaya
+=
+leg_wear, stirrup legwear|toeless legwear
+shoes, shoes|boots|loafers
+""".strip(),
+                encoding="utf-8",
+            )
+            output = character_dir / "meta.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "migrate-character-tags",
+                        str(character_dir),
+                        "--id",
+                        "migrated_character",
+                        "--variant",
+                        "school_uniform",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            node = NodeReader().read(output)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["id"], "migrated_character")
+            self.assertTrue(output.exists())
+            self.assertEqual(node.kind, "character")
+            self.assertEqual(node.id, "migrated_character")
+            self.assertEqual(node.character_id, "tachibana_kanade")
+            self.assertEqual(node.variant, "school_uniform")
+            self.assertEqual(node.tags["character"], ["tachibana_kanade"])
+            self.assertEqual(node.tags["copyright"], ["angel_beats!"])
+            self.assertEqual(node.tags["eyes"], ["yellow_eyes"])
+            self.assertEqual(node.tags["hair"], ["grey_hair"])
+            self.assertEqual(node.tags["head_accessories"], ["hairband"])
+            self.assertEqual(node.tags["upper_clothes"], ["blazer"])
+            self.assertEqual(node.tags["lower_clothes"], ["pleated_skirt"])
+            self.assertEqual(node.tags["legwear"], ["thighhighs"])
+            self.assertEqual(node.tags["weapons"], ["shirasaya"])
+            self.assertEqual(node.renderers, {})
+
 
 def _without_runtime_fields(value):
     if isinstance(value, dict):

@@ -41,6 +41,7 @@
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
 - `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
+- `migrate-character-tags`：把旧角色 `tags.txt` 转成结构化 character `meta.yaml`
 - `migrate-action-tags`：把旧动作 `tags.txt` 转成结构化 action `meta.yaml`
 - `migrate-background-tags`：把旧背景 `tags.txt` 转成结构化 background `meta.yaml`
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
@@ -185,6 +186,11 @@ uv run python -m tags_machine_core migrate-style-tags `
   F:\my_project\new\tags_machine\design\画风\sample_style `
   --output migrated\nodes\styles\sample_style\node.yaml
 
+uv run python -m tags_machine_core migrate-character-tags `
+  F:\my_project\new\tags_machine\design\角色\danbooru_angel_beats_207\danbooru_715_tachibana_kanade_立華かなで `
+  --variant school_uniform `
+  --output migrated\nodes\characters\tachibana_kanade\meta.yaml
+
 uv run python -m tags_machine_core migrate-action-tags `
   F:\my_project\new\tags_machine\design\动作改2\next\17_20240706_1720261297 `
   --character-scope foot_detail `
@@ -195,7 +201,7 @@ uv run python -m tags_machine_core migrate-background-tags `
   --output migrated\nodes\backgrounds\simple_room\meta.yaml
 ```
 
-这些迁移命令默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。style 迁移会保留 NovelAI 画风扩展参数；action 迁移只提升动作 tags、动作负向词和 `character_scope`，旧扩展保留在 `legacy.raw_sections`；background 迁移只提升场景 tags 和背景级负向词，不把 `gen_json` 等旧扩展转成后端参数。
+这些迁移命令默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。style 迁移会保留 NovelAI 画风扩展参数；character 迁移只提升角色事实 tags，旧替换规则保留在 `legacy.raw_sections`；action 迁移只提升动作 tags、动作负向词和 `character_scope`；background 迁移只提升场景 tags 和背景级负向词，不把 `gen_json` 等旧扩展转成后端参数。
 
 旧项目对照验收示例：
 

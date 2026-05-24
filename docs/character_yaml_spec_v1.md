@@ -280,6 +280,39 @@ character tags section
 
 含有 `{}`、`[]`、`:`、`#`、`,` 或首尾空格的字符串建议加引号，避免 YAML 解析歧义。
 
+## 旧 `tags.txt` 迁移
+
+旧项目的角色 `tags.txt` 常见形态是前几行逗号分隔素材，例如：
+
+```text
+tachibana_kanade,angel_beats!
+yellow_eyes,grey_hair,hairband
+blazer,pleated_skirt,thighhighs
+shirasaya
+=
+leg_wear, stirrup legwear|toeless legwear
+shoes, shoes|boots|loafers
+```
+
+v1 提供保守迁移命令：
+
+```powershell
+uv run python -m tags_machine_core migrate-character-tags `
+  F:\my_project\new\tags_machine\design\角色\danbooru_angel_beats_207\danbooru_715_tachibana_kanade_立華かなで `
+  --variant school_uniform `
+  --output migrated\nodes\characters\tachibana_kanade\meta.yaml
+```
+
+迁移策略：
+
+- 第一行第一个 tag 进入 `tags.character`，后续 tag 进入 `tags.copyright`。
+- 其余正向 tag 按关键词分入 `hair`、`eyes`、`head_accessories`、`upper_clothes`、`lower_clothes`、`legwear`、`footwear`、`weapons` 等 section。
+- 无法稳定判断的 tag 会进入 `unclassified`，方便人工复核；composer 当前不会把 `unclassified` 纳入局部镜头策略。
+- `origin_uc`、`uc`、`negative_prompt`、`after_uc`、`after_negative_prompt` 会提升为角色级 `negative_prompt`。
+- `=` 后旧项目的 `leg_wear`、`shoes` 等替换规则只保留在 `legacy.raw_sections`，不提升为 `rules`、`profiles` 或 scope 规则。
+
+迁移工具不会修改旧项目目录；只有传入 `--output` 时才写出新 YAML。迁移结果必须人工复核 tags 分组，尤其是服装、道具、身份称号和旧规则混杂的节点。
+
 ## 当前冻结点
 
 character v1 暂时冻结以下决策：
@@ -290,4 +323,4 @@ character v1 暂时冻结以下决策：
 - 不把通用 section 过滤规则写进 character。
 - composer 负责把 character tags 渲染成最终 prompt。
 
-后续讨论重点应转向 style / background YAML，以及继续用旧项目回归样例校准 `character_scope` 策略。
+后续讨论重点应继续用旧项目回归样例校准 `character_scope` 策略。

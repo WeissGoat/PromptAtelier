@@ -17,6 +17,7 @@ from tags_machine_core.nodes import (
     NodeReader,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
+    migrate_legacy_character_tags,
     migrate_legacy_style_tags,
 )
 from tags_machine_core.renderers import NovelAIStyleRepository
@@ -425,6 +426,23 @@ def cmd_migrate_action_tags(args) -> int:
         node_id=args.id,
         name=args.name,
         character_scope=args.character_scope,
+    )
+    if args.output:
+        output_path = Path(args.output)
+        if output_path.exists() and not args.overwrite:
+            raise FileExistsError(f"Output already exists, pass --overwrite to replace: {output_path}")
+        _write_structured_output(node, output_path, output_format=args.format)
+    print_json(node, full=args.full)
+    return 0
+
+
+def cmd_migrate_character_tags(args) -> int:
+    node = migrate_legacy_character_tags(
+        args.source,
+        node_id=args.id,
+        name=args.name,
+        character_id=args.character_id,
+        variant=args.variant,
     )
     if args.output:
         output_path = Path(args.output)
@@ -1290,6 +1308,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace --output if it already exists",
     )
     migrate_action_tags.set_defaults(func=cmd_migrate_action_tags)
+
+    migrate_character_tags = subparsers.add_parser(
+        "migrate-character-tags",
+        parents=[output_parent],
+        help="Convert a legacy character tags.txt into a structured character meta node",
+    )
+    migrate_character_tags.add_argument("source", help="Legacy character directory or tags.txt path")
+    migrate_character_tags.add_argument("--id", help="Override generated character node id")
+    migrate_character_tags.add_argument("--name", help="Override generated character node name")
+    migrate_character_tags.add_argument("--character-id", help="Override stable character_id")
+    migrate_character_tags.add_argument("--variant", help="Optional character variant label")
+    migrate_character_tags.add_argument("--output", help="Write meta.yaml to this path")
+    migrate_character_tags.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    migrate_character_tags.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace --output if it already exists",
+    )
+    migrate_character_tags.set_defaults(func=cmd_migrate_character_tags)
 
     migrate_background_tags = subparsers.add_parser(
         "migrate-background-tags",

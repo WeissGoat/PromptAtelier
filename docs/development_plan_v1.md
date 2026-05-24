@@ -352,6 +352,7 @@ uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requ
 uv run python -m tags_machine_core compose --prompt "akemi homura, foot focus"
 uv run python -m tags_machine_core inspect-style --config configs\local.example.yaml --style-ref 20260412_2
 uv run python -m tags_machine_core migrate-style-tags F:\my_project\new\tags_machine\design\画风\20260412_2 --output migrated\nodes\styles\20260412_2\node.yaml
+uv run python -m tags_machine_core migrate-character-tags F:\my_project\new\tags_machine\design\角色\danbooru_angel_beats_207\danbooru_715_tachibana_kanade_立華かなで --variant school_uniform --output migrated\nodes\characters\tachibana_kanade\meta.yaml
 uv run python -m tags_machine_core migrate-action-tags F:\my_project\new\tags_machine\design\动作改2\next\17_20240706_1720261297 --character-scope foot_detail --output migrated\nodes\actions\foot_closeup\meta.yaml
 uv run python -m tags_machine_core migrate-background-tags F:\my_project\new\tags_machine\design\背景\simple_room --output migrated\nodes\backgrounds\simple_room\meta.yaml
 uv run python -m tags_machine_core render-plan --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
@@ -381,7 +382,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约；请求样例在 `examples/requests/`，响应形状 golden 在 `examples/responses/json_api_response_shapes.json`。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
-- `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`；`migrate-action-tags` 用于把旧动作 `tags.txt` 转成结构化 action `meta.yaml`；`migrate-background-tags` 用于把旧背景 `tags.txt` 转成结构化 background `meta.yaml`。这些命令默认都不修改旧项目目录，只有传入 `--output` 时才写出迁移结果；style 迁移会保留 NovelAI 画风扩展参数，action 迁移只提升动作 tags、动作负向词和 `character_scope`，background 迁移不提升 `gen_json` 等后端扩展。
+- `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`；`migrate-character-tags` 用于把旧角色 `tags.txt` 转成结构化 character `meta.yaml`；`migrate-action-tags` 用于把旧动作 `tags.txt` 转成结构化 action `meta.yaml`；`migrate-background-tags` 用于把旧背景 `tags.txt` 转成结构化 background `meta.yaml`。这些命令默认都不修改旧项目目录，只有传入 `--output` 时才写出迁移结果；style 迁移会保留 NovelAI 画风扩展参数，character 迁移只提升角色事实 tags，action 迁移只提升动作 tags、动作负向词和 `character_scope`，background 迁移不提升 `gen_json` 等后端扩展。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录；如果记录包含 `PromptBundle`，回放时会检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - 提供 `--generation-result` 时，验收记录会生成 `generation_result_evidence`，并检查 `GenerationResult.request_body` 与 core `RenderRequest` 归一化后一致，包括 reference/vibe 数组和 `director_reference_images`。
@@ -437,7 +438,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 确认角色 `meta.yaml` 轻量事实库格式。
 - 设计并落地 action / style / background 的结构化规范。
 - 给动作、画风节点补结构化字段。
-- 编写旧 `tags.txt` 辅助迁移脚本。当前已支持旧画风 `tags.txt` 到 style `node.yaml`、旧动作 `tags.txt` 到 action `meta.yaml`、旧背景 `tags.txt` 到 background `meta.yaml` 的迁移；character 是否需要迁移工具，后续根据真实素材形态确认。
+- 编写旧 `tags.txt` 辅助迁移脚本。当前已支持旧画风 `tags.txt` 到 style `node.yaml`、旧角色 `tags.txt` 到 character `meta.yaml`、旧动作 `tags.txt` 到 action `meta.yaml`、旧背景 `tags.txt` 到 background `meta.yaml` 的迁移；迁移结果仍需要人工复核 tags 分组。
 
 第三阶段：composer 拆分
 
