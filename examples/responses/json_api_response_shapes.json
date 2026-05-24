@@ -105,6 +105,44 @@
       }
     },
     {
+      "id": "full_prompt_render_plan_novelai",
+      "entry": "compose_render_plan",
+      "request": "examples/requests/full_prompt_render_plan_novelai.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.compose-render-plan-result/v1",
+          "$.prompt_bundle.meta.composer_type": "script",
+          "$.prompt_bundle.meta.character_ref": null,
+          "$.prompt_bundle.meta.action_ref": null,
+          "$.prompt_bundle.meta.composition.included_character_sections": [],
+          "$.prompt_bundle.meta.composition.suppressed_character_sections": [],
+          "$.render_request.backend": "novelai",
+          "$.render_request.seed": 123,
+          "$.render_request.size": {
+            "width": 832,
+            "height": 1216
+          },
+          "$.render_request.params.n_samples": 1,
+          "$.render_request.params.cfg_rescale": 0.15
+        },
+        "contains": {
+          "$.prompt_bundle.prompt.positive": "bare soles",
+          "$.prompt_bundle.prompt.negative": "bad feet",
+          "$.render_request.prompt": "anime style",
+          "$.render_request.negative_prompt": "worst quality"
+        },
+        "required": [
+          "$.render_request.params.v4_prompt",
+          "$.render_request.params.v4_negative_prompt",
+          "$.render_request.style_payload"
+        ],
+        "absent": [
+          "$.status",
+          "$.agent_task"
+        ]
+      }
+    },
+    {
       "id": "resolve_compose_render_plan_ready_agent",
       "entry": "resolve_compose_render_plan",
       "request": "examples/requests/agent_compose_render_plan_novelai.json",

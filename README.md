@@ -107,7 +107,7 @@ uv run python -m tags_machine_core api-resolve-agent examples\requests\agent_res
 
 `api-agent-task`、`api-compose-agent` 和 `api-resolve-agent` 也不调用模型。`api-resolve-agent` 会返回 `ready` 或 `requires_agent` 状态，调用方再决定复用缓存、落库 agent result，或把任务交给外部 agent。
 
-仓库里的 `examples/requests/agent_resolution_requires_agent.json`、`examples/requests/agent_compose_with_result.json`、`examples/requests/compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_requires_agent.json` 和 `examples/requests/generate_novelai_mock.json` 是可直接运行的请求样例，并由测试保证能从仓库根目录解析节点相对路径。
+仓库里的 `examples/requests/agent_resolution_requires_agent.json`、`examples/requests/agent_compose_with_result.json`、`examples/requests/compose_render_plan_novelai.json`、`examples/requests/full_prompt_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_requires_agent.json` 和 `examples/requests/generate_novelai_mock.json` 是可直接运行的请求样例，并由测试保证能从仓库根目录解析节点相对路径。
 
 NovelAI render plan 示例：
 

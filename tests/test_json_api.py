@@ -991,6 +991,9 @@ class JsonApiTest(unittest.TestCase):
             plan = api.compose_render_plan(
                 _load_example_request("compose_render_plan_novelai.json")
             )
+            full_prompt_plan = api.compose_render_plan(
+                _load_example_request("full_prompt_render_plan_novelai.json")
+            )
             agent_plan = api.compose_render_plan(
                 _load_example_request("agent_compose_render_plan_novelai.json")
             )
@@ -1028,6 +1031,18 @@ class JsonApiTest(unittest.TestCase):
         self.assertEqual(plan["render_request"]["params"]["n_samples"], 1)
         self.assertEqual(plan["render_request"]["params"]["cfg_rescale"], 0.15)
         self.assertIn("v4_prompt", plan["render_request"]["params"])
+
+        self.assertEqual(full_prompt_plan["prompt_bundle"]["meta"]["composer_type"], "script")
+        self.assertIsNone(full_prompt_plan["prompt_bundle"]["meta"]["character_ref"])
+        self.assertIsNone(full_prompt_plan["prompt_bundle"]["meta"]["action_ref"])
+        self.assertEqual(
+            full_prompt_plan["prompt_bundle"]["meta"]["composition"]["included_character_sections"],
+            [],
+        )
+        self.assertIn("bare soles", full_prompt_plan["prompt_bundle"]["prompt"]["positive"])
+        self.assertIn("anime style", full_prompt_plan["render_request"]["prompt"])
+        self.assertIn("worst quality", full_prompt_plan["render_request"]["negative_prompt"])
+        self.assertIn("v4_prompt", full_prompt_plan["render_request"]["params"])
 
         self.assertEqual(agent_plan["prompt_bundle"]["meta"]["composer_type"], "agent")
         self.assertEqual(agent_plan["render_request"]["meta"]["composer_type"], "agent")

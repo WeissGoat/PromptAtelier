@@ -226,6 +226,7 @@
 示例请求：
 
 - `examples/requests/compose_render_plan_novelai.json`
+- `examples/requests/full_prompt_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_novelai.json`
 
 ### api-resolve-compose-render-plan
@@ -332,6 +333,7 @@ compose.prompt 已经包含完整角色 + 动作
 - `examples/requests/agent_resolution_requires_agent.json`
 - `examples/requests/agent_compose_with_result.json`
 - `examples/requests/compose_render_plan_novelai.json`
+- `examples/requests/full_prompt_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_requires_agent.json`
 - `examples/requests/generate_novelai_mock.json`
