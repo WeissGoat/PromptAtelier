@@ -136,7 +136,7 @@ ComfyUI / SD 的真实执行函数也放在 execution 层，便于后续接入�
 
 ### 前端/服务通信
 
-未来如果做前端 UI，推荐的 API 边界是 JSON。当前 v1 已先落地本地 JSON API 层 `GenerationJsonApi`，并提供 CLI 文件入口；后续 HTTP 服务可以很薄地包在这些函数外面：
+未来如果做前端 UI，推荐的 API 边界是 JSON。当前 v1 已先落地本地 JSON API 层 `GenerationJsonApi`，并提供 CLI 文件入口；详细请求、响应和状态分支契约集中维护在 `docs/json_api_contract_v1.md`，后续 HTTP 服务可以很薄地包在这些函数外面：
 
 ```text
 POST /compose
@@ -165,9 +165,11 @@ uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requ
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 ```
 
-`GenerationJsonApi.agent_task()`、`GenerationJsonApi.compose_agent()`、`GenerationJsonApi.resolve_agent()` 和 `GenerationJsonApi.resolve_compose_render_plan()` 是 agent 拼接的本地 JSON 边界。`agent_task()` 只生成稳定任务 JSON，不调用模型；`compose_agent()` 接收外部 agent result，落成 `PromptBundle` 并写入缓存，缓存缺失且没有 `agent.result` 时保持严格失败；`resolve_agent()` 面向前端和 worker，缓存命中或请求里带 `agent.result` 时返回 `status: "ready"` 和 `prompt_bundle`，缓存缺失时返回 `status: "requires_agent"` 和 `agent_task`，避免调用方靠异常解析流程状态。`resolve_compose_render_plan()` 进一步覆盖预览态：可生成计划时返回 `status: "ready"`、`prompt_bundle` 和 `render_request`，缺少 agent result 且缓存未命中时返回 `status: "requires_agent"` 和 `agent_task`。`api-compose` 在请求里带 `"composer": "agent"`、`agent.result` 或 `agent` 对象时，也会走同一条 agent composer 路径。`api-compose-render-plan` 的 `compose` 段也可以直接使用 agent 请求体和缓存配置，用于一步生成 agent `PromptBundle` 与对应的 `RenderRequest`。
+`GenerationJsonApi.agent_task()`、`GenerationJsonApi.compose_agent()`、`GenerationJsonApi.resolve_agent()` 和 `GenerationJsonApi.resolve_compose_render_plan()` 是 agent 拼接的本地 JSON 边界。`agent_task()` 只生成稳定任务 JSON，不调用模型；`compose_agent()` 接收外部 agent result，落成 `PromptBundle` 并写入缓存，缓存缺失且没有 `agent.result` 时保持严格失败；`resolve_agent()` 面向前端和 worker，缓存命中或请求里带 `agent.result` 时返回 `status: "ready"` 和 `prompt_bundle`，缓存缺失时返回 `status: "requires_agent"` 和 `agent_task`，避免调用方靠异常解析流程状态。`resolve_compose_render_plan()` 进一步覆盖预览态：可生成计划时返回 `status: "ready"`、`prompt_bundle` 和 `render_request`，缺少 agent result 且缓存未命中时返回 `status: "requires_agent"` 和 `agent_task`。`api-compose` 在请求里带 `"composer": "agent"`、`agent.result` 或 `agent` 对象时，也会走同一条 agent composer 路径。`api-compose-render-plan` 的 `compose` 段也可以直接使用 agent 请求体和缓存配置，用于一步生成 agent `PromptBundle` 与对应的 `RenderRequest`。`compose-render-plan` 和状态分支响应已经用 Pydantic 响应模型约束，未使用的顶层分支保持旧契约直接省略，而不是输出 `null`。
 
-`examples/requests/` 保存可直接运行的 JSON 请求样例：`agent_resolution_requires_agent.json` 用于缓存缺失状态分支，`agent_compose_with_result.json` 用于 agent result 落成 `PromptBundle`，`compose_render_plan_novelai.json` 用于脚本 composer 到 NovelAI `RenderRequest`，`agent_compose_render_plan_novelai.json` 用于 agent composer 一步生成 NovelAI render plan，`agent_compose_render_plan_requires_agent.json` 用于缺少 agent result 时的 render-plan 状态分支。测试会从仓库根目录读取这些文件，保证相对节点路径和 JSON 契约不漂移。
+`examples/requests/` 保存可直接运行的 JSON 请求样例：`agent_resolution_requires_agent.json` 用于缓存缺失状态分支，`agent_compose_with_result.json` 用于 agent result 落成 `PromptBundle`，`compose_render_plan_novelai.json` 用于脚本 composer 到 NovelAI `RenderRequest`，`agent_compose_render_plan_novelai.json` 用于 agent composer 一步生成 NovelAI render plan，`agent_compose_render_plan_requires_agent.json` 用于缺少 agent result 时的 render-plan 状态分支，`generate_novelai_mock.json` 用于无联网 mock executor 验证 `RenderRequest -> GenerationResult` 边界。测试会从仓库根目录读取这些文件，保证相对节点路径和 JSON 契约不漂移。
+
+`examples/responses/json_api_response_shapes.json` 保存响应形状 golden，不锁完整响应快照，只约束前端/worker 需要依赖的 `schema`、`status`、关键节点引用、NovelAI `RenderRequest` 字段、V4 payload、`GenerationResult` 关键字段和缺失分支。测试会实际调用 `GenerationJsonApi` 校验这些形状。
 
 `GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_render_request()`，并关闭实验后端，只支持 NovelAI，符合 v1 正式范围。
 
@@ -369,7 +371,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网；当前正式验收只要求 NovelAI 链路稳定。
 - `run-prompt` 面向完整角色+动作混合 prompt。它不读取 character/action 节点，也不做 `character_scope` 裁剪，只把完整 prompt 落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--dry-run` 输出 `PromptBundle + RenderRequest`，去掉 `--dry-run` 后需要 `NAI_ACCESS_TOKEN` 并真实生图；`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
-- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约。
+- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约；请求样例在 `examples/requests/`，响应形状 golden 在 `examples/responses/json_api_response_shapes.json`。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
