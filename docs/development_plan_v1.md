@@ -215,7 +215,7 @@ UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参
 
 - `images`：本地图片路径、文件名和图片级 meta。进入验收资料包时，图片路径必须改写为资料包内相对路径，避免回放依赖生成时的临时目录。
 - `request_body`：发送给后端的请求体，默认展示时会截断图片 base64。
-- `png_info`：生成后自动尝试读取保存图片里的 PNG 文本参数。`png_info.images` 必须和 `images` 一一对应；每个条目要么包含读取到的 `parameters`，要么包含读取失败的 `error`。如果图片不是 PNG 或没有可读参数，会保留读取错误，方便验收记录判断。
+- `png_info`：生成后自动尝试读取保存图片里的 PNG 文本参数。`png_info.images` 必须和 `images` 一一对应；每个条目要么包含读取到的 `parameters`，要么包含读取失败的 `error`。如果存在 `parameters`，验收会再读取对应图片里的 PNG 参数并做归一化对比，防止结果 JSON 和图片证据脱节。如果图片不是 PNG 或没有可读参数，会保留读取错误，方便验收记录判断。
 - `cache_hit`：是否命中缓存。
 
 ## 节点格式策略
@@ -499,7 +499,7 @@ v1 冻结验收补充：
 
 - `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。
 - `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；ComfyUI / SD 暂不作为本阶段验收范围。
-- `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。真实旧项目 oracle 的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
+- `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。若 `png_info.images` 条目包含 `parameters`，这些参数还必须和对应图片实际内嵌 PNG 参数归一化后一致。真实旧项目 oracle 的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
 - 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本、显式输入参数和 agent 模型版本，避免旧素材更新或 agent 模型升级后误用旧结果。
 - 回放验收：任意一条验收记录都应该能在不运行旧项目代码的情况下重算 core 侧 diff；旧项目只负责提前产出 oracle 文件或基准图片。
 
@@ -512,7 +512,7 @@ v1 冻结验收补充：
 - 第三优先级才是图片视觉：图片可以作为人工抽检材料，但不能替代参数 diff；如果参数不同，先修参数，如果参数相同但像素不同，记录原因。
 - 验收脚本不能依赖旧项目运行时代码。旧项目可以生成 oracle 文件，core 的测试只读取 oracle JSON、PNG 参数或素材文件。
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
-- 若归档真实生图结果，`GenerationResult.request_body` 必须能和 core `RenderRequest` 对齐；`GenerationResult.images` 中声明的图片也必须在资料包内可访问并能计算 hash，`png_info.images` 也必须指向同一批图片，并且每张图必须有可读参数或读取错误。不一致、图片丢失或 `png_info.images` 只有空路径时验收失败，避免图片证据和请求参数脱节。
+- 若归档真实生图结果，`GenerationResult.request_body` 必须能和 core `RenderRequest` 对齐；`GenerationResult.images` 中声明的图片也必须在资料包内可访问并能计算 hash，`png_info.images` 也必须指向同一批图片，并且每张图必须有可读参数或读取错误。若 `png_info.images` 记录了参数但和图片内嵌 PNG 参数不一致，也必须失败。不一致、图片丢失或 `png_info.images` 只有空路径时验收失败，避免图片证据和请求参数脱节。
 - 回归样例集需要能用 `verify-acceptance-suite` 一次性回放；空目录、未批准差异、缺少必需样例都必须返回非 0。
 - 使用 `--require-minimum-set` 时，suite 不只检查 case id：
   - `default_action` 必须验证 `prompt`、`negative_prompt`、`seed`、`width`、`height`、`sampler`、`steps`、`scale`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt` 等 NovelAI 核心参数仍在，并验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 作为默认空数组稳定输出。

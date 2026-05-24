@@ -830,6 +830,11 @@ def _generation_result_png_info_image_summaries(
             "has_parameters": bool(item.get("parameters")),
             "has_error": bool(item.get("error")),
         }
+        item_parameters = item.get("parameters")
+        if item_parameters is not None and not isinstance(item_parameters, dict):
+            errors.append(
+                f"GenerationResult png_info image[{index}] parameters must be an object"
+            )
         if path is None:
             errors.append(f"GenerationResult png_info image[{index}] missing path")
         else:
@@ -843,8 +848,52 @@ def _generation_result_png_info_image_summaries(
                 errors.append(
                     f"GenerationResult png_info image[{index}] path differs from images[{index}]"
                 )
+            if isinstance(item_parameters, dict):
+                _append_generation_result_png_parameter_evidence(
+                    summary,
+                    errors,
+                    index=index,
+                    path=path,
+                    parameters=item_parameters,
+                )
         summaries.append(summary)
     return summaries, errors
+
+
+def _append_generation_result_png_parameter_evidence(
+    summary: dict[str, Any],
+    errors: list[str],
+    *,
+    index: int,
+    path: Path,
+    parameters: dict[str, Any],
+) -> None:
+    if not path.exists() or not path.is_file():
+        return
+    try:
+        image_parameters = read_image_parameters(path)
+    except Exception as exc:
+        summary["parameter_check"] = {"result": "fail", "error": str(exc)}
+        errors.append(
+            f"GenerationResult png_info image[{index}] parameters unreadable from image"
+        )
+        return
+    diffs = [
+        diff.as_dict()
+        for diff in compare_render_parameters(
+            {"parameters": parameters},
+            image_parameters,
+        )
+    ]
+    summary["parameter_check"] = {
+        "result": "pass" if not diffs else "fail",
+        "diff_count": len(diffs),
+        "diffs": diffs,
+    }
+    if diffs:
+        errors.append(
+            f"GenerationResult png_info image[{index}] parameters differ from image PNG"
+        )
 
 
 def _same_path(left: Path, right: Path) -> bool:
