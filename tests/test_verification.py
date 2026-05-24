@@ -752,7 +752,22 @@ class VerificationTest(unittest.TestCase):
                 encoding="utf-8",
             )
             generation_result.write_text(
-                json.dumps({"schema": "tags-machine-core.generation-result/v1", "images": []}),
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [
+                            {
+                                "path": str(core_image),
+                                "filename": "core.png",
+                                "meta": {"index": 1},
+                            }
+                        ],
+                        "request_body": payload,
+                        "png_info": {"images": [{"path": str(core_image)}]},
+                        "cache_hit": False,
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -784,10 +799,77 @@ class VerificationTest(unittest.TestCase):
                 record["core"]["generation_result_path"],
                 "core/generation_result.json",
             )
+            self.assertEqual(record["generation_result_evidence"]["result"], "pass")
+            self.assertEqual(
+                record["generation_result_evidence"]["request_body"]["diff"]["diff_count"],
+                0,
+            )
             self.assertEqual(record["archive"]["artifacts"]["legacy_image"], "legacy/image.png")
             self.assertEqual(record["composition"]["character_scope"], "foot_detail")
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
+
+    def test_build_acceptance_record_fails_generation_result_request_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            changed = {
+                **payload,
+                "parameters": {**_sample_parameters(), "steps": 30},
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [],
+                        "request_body": changed,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="generation_result_mismatch",
+                legacy_source=legacy,
+                core_source=core,
+                generation_result=generation_result,
+            )
+
+            self.assertEqual(record["result"], "fail")
+            evidence = record["generation_result_evidence"]
+            self.assertEqual(evidence["result"], "fail")
+            self.assertIn(
+                "GenerationResult request_body differs from core source",
+                evidence["errors"],
+            )
+            self.assertEqual(
+                evidence["request_body"]["diff"]["diffs"][0]["path"],
+                "$.parameters.steps",
+            )
 
     def test_cli_create_and_verify_acceptance_record(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -826,6 +908,75 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(created["result"], "pass")
             self.assertTrue(verified["match"])
             self.assertTrue(record_path.exists())
+
+    def test_cli_create_acceptance_record_accepts_generation_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            generation_result = root / "generation_result.json"
+            record_path = root / "acceptance.yaml"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [],
+                        "request_body": payload,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                create_exit = main(
+                    [
+                        "create-acceptance-record",
+                        "--case-id",
+                        "cli_generation_result",
+                        "--legacy-source",
+                        str(legacy),
+                        "--core-source",
+                        str(core),
+                        "--generation-result",
+                        str(generation_result),
+                        "--output",
+                        str(record_path),
+                    ]
+                )
+            created = json.loads(stdout.getvalue())
+
+            verify_stdout = io.StringIO()
+            with redirect_stdout(verify_stdout):
+                verify_exit = main(["verify-acceptance-record", str(record_path)])
+            verified = json.loads(verify_stdout.getvalue())
+
+            self.assertEqual(create_exit, 0)
+            self.assertEqual(verify_exit, 0)
+            self.assertEqual(created["generation_result_evidence"]["result"], "pass")
+            self.assertEqual(verified["generation_result_evidence"]["result"], "pass")
 
     def test_cli_create_acceptance_record_allows_intentional_difference(self):
         with tempfile.TemporaryDirectory() as tmp:

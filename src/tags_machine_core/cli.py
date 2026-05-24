@@ -319,6 +319,7 @@ def cmd_create_acceptance_record(args) -> int:
         legacy_image=args.legacy_image,
         core_image=args.core_image,
         prompt_bundle=args.prompt_bundle,
+        generation_result=args.generation_result,
         whitelist=parse_whitelist_args(args.whitelist),
         intentional_differences=parse_intentional_difference_args(args.intentional_difference),
         notes=args.note or [],
@@ -828,6 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_acceptance_record.add_argument("--legacy-image")
     create_acceptance_record.add_argument("--core-image")
     create_acceptance_record.add_argument("--prompt-bundle")
+    create_acceptance_record.add_argument("--generation-result")
     create_acceptance_record.add_argument(
         "--whitelist",
         action="append",

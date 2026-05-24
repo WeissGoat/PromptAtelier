@@ -66,6 +66,7 @@ def build_acceptance_record(
     legacy_image: str | Path | None = None,
     core_image: str | Path | None = None,
     prompt_bundle: str | Path | None = None,
+    generation_result: str | Path | None = None,
     whitelist: list[dict[str, str]] | None = None,
     intentional_differences: list[dict[str, str]] | None = None,
     notes: list[str] | None = None,
@@ -74,6 +75,7 @@ def build_acceptance_record(
     core_source_path = Path(core_source)
     legacy_image_path = _effective_image_path(legacy_source_path, legacy_image)
     core_image_path = _effective_image_path(core_source_path, core_image)
+    generation_result_path = Path(generation_result) if generation_result else None
     legacy_data = load_render_parameter_source(legacy_source_path)
     core_data = load_render_parameter_source(core_source_path)
     diffs = [diff.as_dict() for diff in compare_render_parameters(legacy_data, core_data)]
@@ -98,6 +100,7 @@ def build_acceptance_record(
             source=core_source_path,
             image=core_image_path,
             prompt_bundle=Path(prompt_bundle) if prompt_bundle else None,
+            generation_result=generation_result_path,
         ),
         "diff": {
             "normalized_equal": not diffs,
@@ -124,9 +127,17 @@ def build_acceptance_record(
             "legacy": _image_evidence(legacy_image_path),
             "core": _image_evidence(core_image_path),
         },
+        "generation_result_evidence": _generation_result_evidence(
+            generation_result_path,
+            core_data=core_data,
+        ),
         "notes": notes or [],
     }
-    record["result"] = "pass" if not unapproved_diffs else "fail"
+    record["result"] = (
+        "pass"
+        if not unapproved_diffs and _generation_result_evidence_pass(record)
+        else "fail"
+    )
     return record
 
 
@@ -204,12 +215,11 @@ def archive_acceptance_case(
         legacy_image=legacy_image_copy,
         core_image=core_image_copy,
         prompt_bundle=prompt_bundle_copy,
+        generation_result=generation_result_copy,
         whitelist=whitelist,
         intentional_differences=intentional_differences,
         notes=notes,
     )
-    if generation_result_copy is not None:
-        record.setdefault("core", {})["generation_result_path"] = str(generation_result_copy)
     record["archive"] = {
         "schema": ACCEPTANCE_ARCHIVE_SCHEMA,
         "case_dir": str(case_dir),
@@ -276,6 +286,10 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
             (record.get("core") or {}).get("prompt_bundle_path"),
             base_dir,
         ),
+        generation_result=_optional_record_path(
+            (record.get("core") or {}).get("generation_result_path"),
+            base_dir,
+        ),
         whitelist=(record.get("diff") or {}).get("whitelist") or [],
         intentional_differences=_record_intentional_differences(record),
         notes=record.get("notes") or [],
@@ -291,6 +305,7 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
         "composition": rebuilt["composition"],
         "normalized": rebuilt["normalized"],
         "image_evidence": rebuilt["image_evidence"],
+        "generation_result_evidence": rebuilt["generation_result_evidence"],
     }
 
 
@@ -437,6 +452,95 @@ def _image_evidence(path: Path | None) -> dict[str, Any] | None:
     return evidence
 
 
+def _generation_result_evidence(
+    path: Path | None,
+    *,
+    core_data: dict[str, Any],
+) -> dict[str, Any] | None:
+    if path is None:
+        return None
+
+    evidence: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "result": "fail",
+        "errors": [],
+    }
+    errors: list[str] = evidence["errors"]
+    if not path.exists():
+        errors.append("GenerationResult file does not exist")
+        return evidence
+    if not path.is_file():
+        errors.append("GenerationResult path is not a file")
+        return evidence
+
+    try:
+        data = _load_json_mapping(path)
+    except Exception as exc:
+        errors.append(f"Unable to read GenerationResult JSON: {exc}")
+        return evidence
+
+    evidence["schema"] = data.get("schema")
+    evidence["backend"] = data.get("backend")
+    evidence["cache_hit"] = data.get("cache_hit")
+    images = data.get("images")
+    evidence["image_count"] = len(images) if isinstance(images, list) else 0
+    evidence["images"] = _generation_result_image_summaries(images)
+
+    request_body = data.get("request_body")
+    if not isinstance(request_body, dict) or not request_body:
+        errors.append("GenerationResult missing request_body")
+    else:
+        diffs = [
+            diff.as_dict()
+            for diff in compare_render_parameters(core_data, request_body)
+        ]
+        evidence["request_body"] = {
+            "normalized": normalize_render_parameters(request_body),
+            "diff": {
+                "normalized_equal": not diffs,
+                "diff_count": len(diffs),
+                "diffs": diffs,
+            },
+        }
+        if diffs:
+            errors.append("GenerationResult request_body differs from core source")
+
+    png_info = data.get("png_info")
+    if isinstance(png_info, dict):
+        evidence["png_info"] = {
+            "image_count": len(png_info.get("images") or [])
+            if isinstance(png_info.get("images"), list)
+            else 0,
+            "keys": sorted(str(key) for key in png_info.keys()),
+        }
+
+    evidence["result"] = "pass" if not errors else "fail"
+    return evidence
+
+
+def _generation_result_image_summaries(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    summaries: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        summaries.append(
+            {
+                "path": item.get("path"),
+                "filename": item.get("filename"),
+                "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
+            }
+        )
+    return summaries
+
+
+def _generation_result_evidence_pass(record: dict[str, Any]) -> bool:
+    evidence = record.get("generation_result_evidence")
+    return evidence is None or evidence.get("result") == "pass"
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as f:
@@ -450,6 +554,7 @@ def _core_record_paths(
     source: Path,
     image: Path | None,
     prompt_bundle: Path | None,
+    generation_result: Path | None,
 ) -> dict[str, str]:
     data = {"source_path": str(source)}
     if image is not None:
@@ -460,6 +565,8 @@ def _core_record_paths(
         data["render_request_path"] = str(source)
     if prompt_bundle is not None:
         data["prompt_bundle_path"] = str(prompt_bundle)
+    if generation_result is not None:
+        data["generation_result_path"] = str(generation_result)
     return data
 
 
