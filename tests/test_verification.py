@@ -11,6 +11,7 @@ import unittest
 import zlib
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
 from tags_machine_core.cli import main
 from tags_machine_core.verification import (
@@ -19,6 +20,7 @@ from tags_machine_core.verification import (
     compare_render_parameters,
     normalize_render_parameters,
     read_image_parameters,
+    run_core_verification,
     verify_acceptance_record,
     verify_acceptance_suite,
 )
@@ -97,6 +99,64 @@ def _minimum_case_parameters(case_id: str) -> dict:
 
 
 class VerificationTest(unittest.TestCase):
+    def test_run_core_verification_dry_run_lists_no_network_gate(self):
+        result = run_core_verification(cwd=PROJECT_ROOT, dry_run=True)
+
+        labels = [item["label"] for item in result["commands"]]
+        self.assertEqual(result["schema"], "tags-machine-core.core-verification/v1")
+        self.assertEqual(result["result"], "dry_run")
+        self.assertTrue(result["match"])
+        self.assertEqual(
+            labels,
+            [
+                "compileall",
+                "unittest_discover",
+                "validate_example_nodes",
+                "fixture_acceptance_suite",
+                "git_diff_check",
+            ],
+        )
+        self.assertTrue(
+            any(
+                "verify-acceptance-suite" in item["command_text"]
+                and "--require-minimum-set" in item["command_text"]
+                for item in result["commands"]
+            )
+        )
+
+    def test_run_core_verification_reports_failed_command(self):
+        calls: list[list[str]] = []
+
+        def runner(command, cwd):
+            calls.append(list(command))
+            returncode = 1 if len(calls) == 2 else 0
+            return SimpleNamespace(
+                returncode=returncode,
+                stdout="ok" if returncode == 0 else "unit test failure",
+                stderr="",
+            )
+
+        result = run_core_verification(cwd=PROJECT_ROOT, runner=runner)
+
+        self.assertFalse(result["match"])
+        self.assertEqual(result["result"], "fail")
+        self.assertEqual(result["summary"]["total"], 5)
+        self.assertEqual(result["summary"]["fail_count"], 1)
+        self.assertEqual(result["commands"][1]["label"], "unittest_discover")
+        self.assertEqual(result["commands"][1]["status"], "fail")
+        self.assertIn("unit test failure", result["commands"][1]["stdout_tail"])
+        self.assertEqual(len(calls), 5)
+
+    def test_cli_verify_core_dry_run(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            exit_code = main(["verify-core", "--dry-run"])
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["result"], "dry_run")
+        self.assertEqual(data["commands"][0]["label"], "compileall")
+
     def test_read_png_parameters_keeps_full_comment(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.png"

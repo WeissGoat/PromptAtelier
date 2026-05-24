@@ -35,6 +35,7 @@ from tags_machine_core.verification import (
     parse_intentional_difference_args,
     parse_whitelist_args,
     read_image_parameters,
+    run_core_verification,
     verify_acceptance_record,
     verify_acceptance_suite,
 )
@@ -413,6 +414,12 @@ def cmd_verify_acceptance_suite(args) -> int:
         require_legacy_oracle=args.require_legacy_oracle,
         require_legacy_evidence=args.require_legacy_evidence,
     )
+    print_json(result, full=args.full)
+    return 0 if result["match"] else 2
+
+
+def cmd_verify_core(args) -> int:
+    result = run_core_verification(cwd=args.cwd, dry_run=args.dry_run)
     print_json(result, full=args.full)
     return 0 if result["match"] else 2
 
@@ -1320,6 +1327,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     verify_acceptance_suite_parser.set_defaults(func=cmd_verify_acceptance_suite)
+
+    verify_core = subparsers.add_parser(
+        "verify-core",
+        parents=[output_parent],
+        help="Run the local no-network core verification gate",
+    )
+    verify_core.add_argument(
+        "--cwd",
+        default=".",
+        help="Repository root to run verification commands from",
+    )
+    verify_core.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only print the verification commands without executing them",
+    )
+    verify_core.set_defaults(func=cmd_verify_core)
 
     migrate_style_tags = subparsers.add_parser(
         "migrate-style-tags",

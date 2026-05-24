@@ -53,6 +53,7 @@
 - `archive-novelai-acceptance-prompt`：从完整 prompt 生成 NovelAI core 产物并归档旧项目对照资料包
 - `verify-acceptance-record`：重算验收记录并检查未批准差异
 - `verify-acceptance-suite`：批量重算验收记录，并检查必需样例是否齐全
+- `verify-core`：运行当前无联网核心门禁，覆盖 compileall、unittest、示例节点校验、fixture 验收和 `git diff --check`
 - `config`：查看配置解析结果
 
 默认输出会截断图片/base64 字段，避免调试输出过大。需要完整 JSON 时使用 `--full`。
@@ -274,6 +275,7 @@ uv run python -m tags_machine_core archive-novelai-acceptance-prompt `
   --overwrite
 uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set
 uv run python -m tags_machine_core verify-acceptance-suite examples\acceptance\suite.yaml --require-minimum-set
+uv run python -m tags_machine_core verify-core
 ```
 
 `compare-render-params` 会完整比较 NovelAI 请求关键字段，包括 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等。图片/base64 字段会用长度和 sha256 摘要比较，避免把大段 base64 打进终端。
@@ -281,6 +283,8 @@ uv run python -m tags_machine_core verify-acceptance-suite examples\acceptance\s
 `create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异、`PromptBundle.meta.composition` 和可选 `GenerationResult` 归档成 JSON/YAML；如果提供 `--prompt-bundle`，会记录 `prompt_bundle_contract_evidence`，检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`；如果提供 `--generation-result`，会验证其中的 `request_body` 与 core `RenderRequest` 归一化后一致，并检查 `GenerationResult.images` 指向的图片文件存在、大小和 sha256。`archive-acceptance-case` 会进一步把这些证据复制到独立样例目录，归档时会把 `generation_result.json` 里的图片路径改写为资料包内相对路径，并更新 suite manifest，方便后续不运行旧项目也能回放。`archive-novelai-acceptance-nodes` 会先从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再复用同一套归档逻辑，适合批量补结构化节点 oracle 样例。`archive-novelai-acceptance-prompt` 面向完整 prompt / agent prompt 样例，只叠加 NovelAI 画风后归档，用来验证它和旧 `run_action` 或旧 `run-prompt` oracle 的 render plan 等价。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异、非法 `PromptBundle` 契约字段或丢失的生成图片证据时返回非 0。`verify-acceptance-suite` 可以验证单个 record、record 目录或 manifest；`--require-minimum-set` 会要求 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例都存在，并输出 `case_checks` 检查局部镜头 composition 和 reference/vibe 数组是否真的覆盖到。
 
 `examples/acceptance/` 提供仓库内置的静态 dry-run 最小资料包，覆盖上述五类 case，并包含 `PromptBundle`、NovelAI `RenderRequest`、`GenerationResult`、PNG 参数证据和 suite manifest。它用于测试验收格式、参数归一化、图片证据读取和 `--require-minimum-set` 语义检查是否稳定；它不是旧 `tags_machine` 的真实 oracle，不能通过 `--require-legacy-oracle` 或 `--require-legacy-evidence`。真实旧项目对照仍需要用 `archive-acceptance-case` / `archive-novelai-acceptance-*` 归档旧项目产物后补充。
+
+`verify-core` 是当前仓库内的无联网门禁快捷入口，适合每个开发切片提交前运行。它不会证明真实旧项目 oracle 已归档；真实 oracle 仍需要对 acceptance 目录单独运行 `verify-acceptance-suite --require-legacy-oracle --require-legacy-evidence`。
 
 `--require-minimum-set` 不只是检查样例名字：
 

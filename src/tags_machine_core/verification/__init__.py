@@ -7,6 +7,7 @@ from .acceptance import (
     verify_acceptance_record,
     verify_acceptance_suite,
 )
+from .core import run_core_verification
 from .image_params import read_png_text_chunks, read_image_parameters
 from .render_params import (
     RenderParamDiff,
@@ -27,6 +28,7 @@ __all__ = [
     "parse_whitelist_args",
     "read_image_parameters",
     "read_png_text_chunks",
+    "run_core_verification",
     "verify_acceptance_record",
     "verify_acceptance_suite",
 ]
