@@ -1206,6 +1206,13 @@ class JsonApiTest(unittest.TestCase):
         self.assertEqual(result["request_body"]["parameters"]["steps"], 28)
         self.assertEqual(result["request_body"]["parameters"]["width"], 832)
         self.assertEqual(result["request_body"]["parameters"]["height"], 1216)
+        self.assertEqual(result["request_body"]["parameters"]["reference_image_multiple"], [])
+        self.assertEqual(result["request_body"]["parameters"]["reference_strength_multiple"], [])
+        self.assertEqual(
+            result["request_body"]["parameters"]["reference_information_extracted_multiple"],
+            [],
+        )
+        self.assertEqual(result["request_body"]["parameters"]["director_reference_images"], [])
         self.assertEqual(result["png_info"]["images"], [])
         self.assertEqual(calls[0][1]["queue"]["job_id"], "example-generate-001")
 

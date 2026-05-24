@@ -14,7 +14,11 @@
       "steps": 28,
       "scale": 5.0,
       "sampler": "k_euler_ancestral",
-      "n_samples": 1
+      "n_samples": 1,
+      "reference_image_multiple": [],
+      "reference_strength_multiple": [],
+      "reference_information_extracted_multiple": [],
+      "director_reference_images": []
     },
     "meta": {
       "action": "generate",

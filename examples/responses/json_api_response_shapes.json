@@ -216,6 +216,10 @@
           "$.request_body.model": "nai-diffusion-4-5-full",
           "$.request_body.parameters.steps": 28,
           "$.request_body.parameters.n_samples": 1,
+          "$.request_body.parameters.reference_image_multiple": [],
+          "$.request_body.parameters.reference_strength_multiple": [],
+          "$.request_body.parameters.reference_information_extracted_multiple": [],
+          "$.request_body.parameters.director_reference_images": [],
           "$.png_info.images": [],
           "$.cache_hit": false
         },
