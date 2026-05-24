@@ -10,7 +10,7 @@
 
 - JSON API 是本地服务契约，不绑定 HTTP 框架；未来 HTTP 只需要薄封装 `GenerationJsonApi`。
 - 输入文件路径按调用进程的当前工作目录解析；仓库示例默认从仓库根目录运行。
-- `api-compose`、`api-agent-task`、`api-compose-agent`、`api-resolve-agent`、`api-render-plan`、`api-compose-render-plan`、`api-resolve-compose-render-plan` 都不联网。
+- `api-compose`、`api-agent-task`、`api-compose-agent`、`api-resolve-agent`、`api-render-plan`、`api-compose-render-plan`、`api-resolve-compose-render-plan`、`api-backend-support` 都不联网。
 - `api-generate` 会进入真实执行层，v1 默认只允许 NovelAI。
 - Agent 拼接采用外部 agent 契约：core 只生成 agent task JSON，接收 agent result JSON，不直接绑定某个 LLM SDK。
 - `PromptBundle.meta` 不包含 `shot` / `constraints`。动作镜头裁剪由 action `character_scope` 和最终 `meta.composition` 解释。
@@ -295,6 +295,30 @@ v1 中 `api-generate` 只接受 NovelAI。ComfyUI / SD 即使存在预研 client
 
 仓库测试会用 mock executor 验证这个请求的 `RenderRequest -> GenerationResult` JSON 边界，不会联网。
 
+### api-backend-support
+
+输入：空 JSON object。
+
+用途：返回后端支持矩阵，供前端、worker 和队列判断哪些后端可以生成 plan、哪些后端可以默认执行、哪些后端需要实验开关。
+
+```json
+{}
+```
+
+返回：
+
+```json
+{
+  "schema": "tags-machine-core.backend-support/v1",
+  "render_plan_backends": ["novelai", "comfyui", "sd"],
+  "default_execution_backends": ["novelai"],
+  "experimental_execution_backends": ["comfyui", "sd"],
+  "items": []
+}
+```
+
+示例请求：`examples/requests/backend_support.json`
+
 ## 推荐工作流
 
 ### 脚本 composer 预览
@@ -343,6 +367,7 @@ compose.prompt 已经包含完整角色 + 动作
 - `examples/requests/agent_compose_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_requires_agent.json`
 - `examples/requests/generate_novelai_mock.json`
+- `examples/requests/backend_support.json`
 
 这些路径由测试门禁校验：文档引用必须存在，仓库内请求样例必须被文档引用，并且样例能从仓库根目录解析相对节点路径。
 
@@ -367,6 +392,7 @@ compose.prompt 已经包含完整角色 + 动作
 | `api-render-plan` | `POST /render-plan` | `RenderRequest` |
 | `api-compose-render-plan` | `POST /compose-render-plan` | `PromptBundle + RenderRequest` |
 | `api-resolve-compose-render-plan` | `POST /resolve-compose-render-plan` | 预览状态响应 |
+| `api-backend-support` | `POST /backend-support` | 后端支持矩阵 |
 | `api-generate` | `POST /generate` | `GenerationResult` |
 
 ## 验收要求

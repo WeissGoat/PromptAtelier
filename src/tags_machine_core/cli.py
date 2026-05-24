@@ -584,6 +584,14 @@ def cmd_api_resolve_compose_render_plan(args) -> int:
     return 0
 
 
+def cmd_api_backend_support(args) -> int:
+    result = GenerationJsonApi().backend_support(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_api_generate(args) -> int:
     config = load_config(Path(args.config))
 
@@ -918,6 +926,14 @@ def build_parser() -> argparse.ArgumentParser:
     api_resolve_compose_render_plan.set_defaults(
         func=cmd_api_resolve_compose_render_plan
     )
+
+    api_backend_support = subparsers.add_parser(
+        "api-backend-support",
+        parents=[output_parent],
+        help="Return backend support policy from a JSON API request file",
+    )
+    _add_api_request_arguments(api_backend_support)
+    api_backend_support.set_defaults(func=cmd_api_backend_support)
 
     api_generate = subparsers.add_parser(
         "api-generate",

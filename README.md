@@ -35,7 +35,7 @@
 - `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
-- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
+- `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-backend-support` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关
 - `backend-support`：输出后端支持矩阵；NovelAI 是默认执行后端，ComfyUI / SD 标记为预研执行后端
@@ -113,7 +113,7 @@ uv run python -m tags_machine_core api-resolve-agent examples\requests\agent_res
 
 `api-agent-task`、`api-compose-agent` 和 `api-resolve-agent` 也不调用模型。`api-resolve-agent` 会返回 `ready` 或 `requires_agent` 状态，调用方再决定复用缓存、落库 agent result，或把任务交给外部 agent。
 
-仓库里的 `examples/requests/agent_resolution_requires_agent.json`、`examples/requests/agent_compose_with_result.json`、`examples/requests/compose_render_plan_novelai.json`、`examples/requests/full_prompt_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_requires_agent.json` 和 `examples/requests/generate_novelai_mock.json` 是可直接运行的请求样例，并由测试保证能从仓库根目录解析节点相对路径。
+仓库里的 `examples/requests/agent_resolution_requires_agent.json`、`examples/requests/agent_compose_with_result.json`、`examples/requests/compose_render_plan_novelai.json`、`examples/requests/full_prompt_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_requires_agent.json`、`examples/requests/generate_novelai_mock.json` 和 `examples/requests/backend_support.json` 是可直接运行的请求样例，并由测试保证能从仓库根目录解析节点相对路径。
 
 NovelAI render plan 示例：
 
@@ -168,9 +168,12 @@ uv run python -m tags_machine_core api-compose-render-plan examples\requests\com
 
 uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requests\agent_compose_render_plan_requires_agent.json `
   --output api_resolution.json
+
+uv run python -m tags_machine_core api-backend-support examples\requests\backend_support.json `
+  --output backend_support.json
 ```
 
-`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。`api-resolve-compose-render-plan` 是状态入口，可返回 `ready` 或 `requires_agent`。已有 `RenderRequest` 可以通过本地 JSON API 执行：
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。`api-resolve-compose-render-plan` 是状态入口，可返回 `ready` 或 `requires_agent`。`api-backend-support` 返回同一份后端支持矩阵，供前端和 worker 决定默认执行和实验后端入口。已有 `RenderRequest` 可以通过本地 JSON API 执行：
 
 ```powershell
 uv run python -m tags_machine_core api-generate api_generate.json `

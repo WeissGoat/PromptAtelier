@@ -66,6 +66,17 @@ class BackendSupportTest(unittest.TestCase):
         self.assertEqual(data["default_execution_backends"], ["novelai"])
         self.assertEqual(data["experimental_execution_backends"], ["comfyui", "sd"])
 
+    def test_cli_api_backend_support_reads_json_request_file(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            exit_code = main(["api-backend-support", "examples/requests/backend_support.json"])
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["schema"], "tags-machine-core.backend-support/v1")
+        self.assertEqual(data["render_plan_backends"], ["novelai", "comfyui", "sd"])
+        self.assertEqual(data["default_execution_backends"], ["novelai"])
+
 
 if __name__ == "__main__":
     unittest.main()

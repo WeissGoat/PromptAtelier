@@ -241,6 +241,50 @@
           "$.agent_task"
         ]
       }
+    },
+    {
+      "id": "backend_support",
+      "entry": "backend_support",
+      "request": "examples/requests/backend_support.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.backend-support/v1",
+          "$.render_plan_backends": [
+            "novelai",
+            "comfyui",
+            "sd"
+          ],
+          "$.default_execution_backends": [
+            "novelai"
+          ],
+          "$.experimental_execution_backends": [
+            "comfyui",
+            "sd"
+          ],
+          "$.items[0].backend": "novelai",
+          "$.items[0].stage": "stable",
+          "$.items[0].executes_by_default": true,
+          "$.items[1].backend": "comfyui",
+          "$.items[1].stage": "experimental",
+          "$.items[1].requires_experimental_execution": true,
+          "$.items[2].backend": "sd",
+          "$.items[2].stage": "experimental",
+          "$.items[2].requires_experimental_execution": true
+        },
+        "contains": {
+          "$.items[1].note": "预研后端"
+        },
+        "required": [
+          "$.items[0].display_name",
+          "$.items[1].display_name",
+          "$.items[2].display_name"
+        ],
+        "absent": [
+          "$.prompt_bundle",
+          "$.render_request",
+          "$.generation_result"
+        ]
+      }
     }
   ]
 }

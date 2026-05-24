@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
 
+from tags_machine_core.backends import backend_support_report
 from tags_machine_core.composers import AgentCompositionRequired
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
@@ -33,6 +34,11 @@ class GenerationJsonApi:
         self.service = service or GenerationService()
         self.node_reader = node_reader or NodeReader()
         self.generation_executor = generation_executor
+
+    def backend_support(self, request: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        if request is not None:
+            _mapping(request, "backend-support request")
+        return backend_support_report()
 
     def compose(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "compose request")
