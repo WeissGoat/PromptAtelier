@@ -612,6 +612,64 @@ class JsonApiTest(unittest.TestCase):
                 missing_v2["agent_task"]["cache_key"],
             )
 
+    def test_agent_json_api_accepts_cache_dir_alias_locations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            base_request = {
+                "nodes": {
+                    "character": str(character),
+                    "action": str(action),
+                },
+                "style": str(style),
+                "extra_prompt": "soles toward viewer",
+                "negative": "face focus",
+                "character_scope": "foot_detail",
+            }
+            result = {
+                "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
+                "negative": "extra toes, face focus",
+                "character_scope": "foot_detail",
+                "included_character_sections": ["character", "feet"],
+                "suppressed_character_sections": ["eyes", "upper_clothes"],
+            }
+            api = GenerationJsonApi()
+            cases = [
+                ("top_level_cache_dir", {"cache_dir": str(root / "top-level")}, {}),
+                ("agent_cache_dir", {}, {"cache_dir": str(root / "agent-level")}),
+                ("cache_object_cache_root", {"cache": {"cache_root": str(root / "cache-object")}}, {}),
+            ]
+
+            for case_id, request_extra, agent_extra in cases:
+                with self.subTest(case=case_id):
+                    agent_base = {
+                        "model": "agent-model-v1",
+                        "instructions": ["局部特写只保留脚部相关角色细节"],
+                        **agent_extra,
+                    }
+                    first = api.compose_agent(
+                        {
+                            **base_request,
+                            **request_extra,
+                            "agent": {
+                                **agent_base,
+                                "result": result,
+                            },
+                        }
+                    )
+                    second = api.compose_agent(
+                        {
+                            **base_request,
+                            **request_extra,
+                            "agent": agent_base,
+                        }
+                    )
+
+                    self.assertFalse(first["cache"]["cache_hit"])
+                    self.assertTrue(second["cache"]["cache_hit"])
+                    self.assertEqual(first["cache"]["cache_key"], second["cache"]["cache_key"])
+                    self.assertEqual(second["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+
     def test_resolve_agent_json_api_returns_task_on_cache_miss_then_cached_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

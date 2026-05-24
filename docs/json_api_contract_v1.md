@@ -57,6 +57,8 @@
 
 请求里推荐使用 `agent.model` 传入模型/版本；同时兼容顶层 `agent_model`、`agent.agent_model` 和 `agent.model_version`。这些字段只用于 agent 任务和缓存追溯，不代表生图后端模型。
 
+agent 缓存目录推荐使用 `cache.cache_dir`；同时兼容顶层 `cache_dir`、顶层 `cache_root`、`agent.cache_dir`、`agent.cache_root`、`cache.cache_root`。这些字段只影响 `PromptBundle` 缓存读写，不进入 `cache_key`。
+
 外部 agent 返回的最小结果：
 
 ```json
