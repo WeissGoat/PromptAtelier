@@ -192,29 +192,11 @@ def cmd_execute_render_request(args) -> int:
         )
 
     if request.backend == "novelai":
-        access_token = os.environ.get(config.novelai.access_token_env)
-        if not access_token:
-            raise RuntimeError(
-                f"Missing NovelAI token environment variable: {config.novelai.access_token_env}"
-            )
-        client = NovelAIClient(
-            access_token=access_token,
-            base_url=config.novelai.base_url,
-            timeout=config.novelai.timeout,
-            retry=config.novelai.retry,
-        )
-        images = _save_generated_images(
-            client.generate_images(request),
+        result = _execute_novelai_generation(
+            config,
+            request,
             output_dir=output_dir,
-            request=request,
-            default_format=config.defaults.image_format,
-        )
-        result = GenerationResult(
-            backend="novelai",
-            images=images,
-            request_body=client.build_payload(request),
-            png_info=_collect_png_info(images),
-            cache_hit=False,
+            image_format=config.defaults.image_format,
         )
     elif request.backend == "comfyui":
         client = ComfyUIClient(

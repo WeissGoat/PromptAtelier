@@ -677,6 +677,84 @@ renderers:
             self.assertIn("only NovelAI by default", str(raised.exception))
             client_cls.assert_not_called()
 
+    def test_execute_render_request_executes_novelai_without_experimental_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            output_dir = root / "novelai_outputs"
+            request = root / "novelai_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "backend": "novelai",
+                        "prompt": "akemi homura",
+                        "negative_prompt": "bad anatomy",
+                        "seed": 135,
+                        "params": {
+                            "prompt": "akemi homura",
+                            "negative_prompt": "bad anatomy",
+                            "seed": 135,
+                            "n_samples": 2,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.dict("os.environ", {"NAI_ACCESS_TOKEN": "token"}),
+                patch("tags_machine_core.cli.NovelAIClient") as client_cls,
+            ):
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="nai_result", content=b"image-bytes")
+                ]
+                client.build_payload.return_value = {
+                    "input": "akemi homura",
+                    "model": "nai-diffusion-4-5-full",
+                    "action": "generate",
+                    "parameters": {
+                        "prompt": "akemi homura",
+                        "negative_prompt": "bad anatomy",
+                        "seed": 135,
+                        "n_samples": 2,
+                    },
+                }
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "execute-render-request",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            client_cls.assert_called_once_with(
+                access_token="token",
+                base_url="https://image.novelai.net",
+                timeout=120,
+                retry=3,
+            )
+            client.generate_images.assert_called_once()
+            called_request = client.generate_images.call_args.args[0]
+            self.assertEqual(called_request.backend, "novelai")
+            self.assertEqual(called_request.params["n_samples"], 2)
+            self.assertEqual(data["backend"], "novelai")
+            self.assertEqual(data["request_body"]["parameters"]["seed"], 135)
+            self.assertEqual(len(data["images"]), 1)
+            saved_path = Path(data["images"][0]["path"])
+            self.assertEqual(saved_path.parent, output_dir)
+            self.assertEqual(saved_path.suffix, ".png")
+            self.assertEqual(saved_path.read_bytes(), b"image-bytes")
+            self.assertIn("Not a PNG file", data["png_info"]["images"][0]["error"])
+
     def test_execute_render_request_saves_comfyui_images(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
