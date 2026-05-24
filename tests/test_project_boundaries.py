@@ -70,6 +70,29 @@ class ProjectBoundaryTest(unittest.TestCase):
             "CLI must use tags_machine_core.execution for backend execution",
         )
 
+    def test_cli_uses_unified_execution_entrypoint(self):
+        cli_path = PROJECT_ROOT / "src" / "tags_machine_core" / "cli.py"
+        tree = ast.parse(cli_path.read_text(encoding="utf-8"), filename=str(cli_path))
+        violations: list[str] = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "tags_machine_core.execution":
+                for alias in node.names:
+                    if alias.name != "execute_render_request":
+                        violations.append(
+                            f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: {alias.name}"
+                        )
+            elif isinstance(node, ast.Name) and node.id == "execute_novelai_generation":
+                violations.append(
+                    f"{cli_path.relative_to(PROJECT_ROOT)}:{node.lineno}: direct execution function"
+                )
+
+        self.assertEqual(
+            violations,
+            [],
+            "CLI must call the unified execute_render_request boundary",
+        )
+
 
 def _iter_python_sources():
     for root in PYTHON_SOURCE_ROOTS:

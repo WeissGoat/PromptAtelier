@@ -11,10 +11,7 @@ from tags_machine_core.composers import load_agent_result
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
-from tags_machine_core.execution import (
-    execute_novelai_generation as _execute_novelai_generation,
-    execute_render_request as _execute_render_request,
-)
+from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 from tags_machine_core.renderers import NovelAIStyleRepository
@@ -144,11 +141,12 @@ def cmd_run_prompt(args) -> int:
         if not args.config:
             raise ValueError("run-prompt without --dry-run requires --config")
         config = load_config(Path(args.config))
-        result["generation_result"] = _execute_novelai_generation(
+        result["generation_result"] = _execute_render_request(
             config,
             request,
             output_dir=args.output_dir,
             image_format=args.format,
+            allow_experimental_backend=False,
         )
     print_json(result, full=args.full)
     return 0
@@ -171,11 +169,12 @@ def cmd_generate(args) -> int:
         model=args.model,
         params=_load_json_arg(args.params_json),
     )
-    result = _execute_novelai_generation(
+    result = _execute_render_request(
         config,
         request,
         output_dir=args.output_dir,
         image_format=config.defaults.image_format,
+        allow_experimental_backend=False,
     )
     print_json(result, full=args.full)
     return 0

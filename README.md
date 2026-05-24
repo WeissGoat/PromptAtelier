@@ -24,7 +24,7 @@
 
 当前确定接入和验收主线只按 NovelAI 推进。ComfyUI / SD WebUI / Forge 相关代码只作为预研和未来扩展保留，等后续规范明确后再进入正式接入范围。
 
-真实生图统一通过 `execution.py`：CLI、JSON API 和未来 worker 先拿到 `RenderRequest`，再进入 execution 层。`execute_render_request()` 负责 `execute-render-request` 和 `api-generate` 的后端分发；当前默认只允许 NovelAI，并委托 `execute_novelai_generation()` 创建 `NovelAIClient`、保存图片、收集 PNG 内嵌参数、记录最终 request body，最后返回 `GenerationResult`。ComfyUI / SD 的真实执行仍需要显式实验开关。
+真实生图统一通过 `execution.py`：CLI、JSON API 和未来 worker 先拿到 `RenderRequest`，再进入 execution 层。`execute_render_request()` 负责 `run-prompt`、`generate`、`api-generate` 和 `execute-render-request` 的后端分发；当前默认只允许 NovelAI，并委托 `execute_novelai_generation()` 创建 `NovelAIClient`、保存图片、收集 PNG 内嵌参数、记录最终 request body，最后返回 `GenerationResult`。ComfyUI / SD 的真实执行仍需要显式实验开关。
 
 ## CLI
 

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from tags_machine_core.cli import main
+from tags_machine_core.contracts import GenerationResult
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import verify_acceptance_suite
@@ -230,6 +231,94 @@ novelai:
             self.assertEqual(saved_path.suffix, ".webp")
             self.assertEqual(saved_path.read_bytes(), b"image-bytes")
             self.assertIn("error", result["png_info"]["images"][0])
+
+    def test_run_prompt_uses_unified_execution_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            style = _write_style_node(root)
+            config = self._write_config(root)
+            output_dir = root / "custom_outputs"
+
+            with patch("tags_machine_core.cli._execute_render_request") as executor:
+                executor.return_value = GenerationResult(
+                    backend="novelai",
+                    request_body={"parameters": {"n_samples": 2}},
+                )
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-prompt",
+                            "--prompt",
+                            "akemi homura, foot focus",
+                            "--style-node",
+                            str(style),
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                            "--seed",
+                            "111",
+                            "--nt",
+                            "2",
+                            "--format",
+                            "webp",
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["generation_result"]["backend"], "novelai")
+            executor.assert_called_once()
+            called_config, called_request = executor.call_args.args
+            self.assertEqual(called_config.novelai.base_url, "http://novelai.local")
+            self.assertEqual(called_request.backend, "novelai")
+            self.assertEqual(called_request.params["n_samples"], 2)
+            self.assertEqual(executor.call_args.kwargs["output_dir"], str(output_dir))
+            self.assertEqual(executor.call_args.kwargs["image_format"], "webp")
+            self.assertIs(executor.call_args.kwargs["allow_experimental_backend"], False)
+
+    def test_generate_uses_unified_execution_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            output_dir = root / "generated_outputs"
+
+            with patch("tags_machine_core.cli._execute_render_request") as executor:
+                executor.return_value = GenerationResult(
+                    backend="novelai",
+                    request_body={"parameters": {"seed": 222}},
+                )
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "generate",
+                            "--prompt",
+                            "akemi homura",
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                            "--seed",
+                            "222",
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["backend"], "novelai")
+            executor.assert_called_once()
+            called_config, called_request = executor.call_args.args
+            self.assertEqual(called_config.novelai.base_url, "http://novelai.local")
+            self.assertEqual(called_request.backend, "novelai")
+            self.assertEqual(called_request.prompt, "akemi homura")
+            self.assertEqual(called_request.seed, 222)
+            self.assertEqual(executor.call_args.kwargs["output_dir"], str(output_dir))
+            self.assertEqual(executor.call_args.kwargs["image_format"], "png")
+            self.assertIs(executor.call_args.kwargs["allow_experimental_backend"], False)
 
     def test_archive_novelai_acceptance_prompt_builds_core_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

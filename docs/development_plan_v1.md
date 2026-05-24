@@ -128,7 +128,7 @@ execute_render_request(config, render_request, ...)
 -> GenerationResult
 ```
 
-当前正式执行边界在 `src/tags_machine_core/execution.py`。`execute-render-request` 和 `api-generate` 通过 `execute_render_request()` 做后端分发，默认只允许 NovelAI；`run-prompt` / `generate` 的真实出图路径复用 `execute_novelai_generation()`。`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
+当前正式执行边界在 `src/tags_machine_core/execution.py`。`run-prompt`、`generate`、`api-generate` 和 `execute-render-request` 都通过 `execute_render_request()` 做后端分发，默认只允许 NovelAI；NovelAI 路径再委托 `execute_novelai_generation()` 创建 `NovelAIClient`。`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
 
 ComfyUI / SD 的真实执行函数也放在 execution 层，便于后续接入时复用同一边界；但它们仍属于预研能力，必须通过显式实验开关触发，不进入 v1 正式验收范围。
 
