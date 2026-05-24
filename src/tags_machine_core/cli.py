@@ -13,7 +13,11 @@ from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
-from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
+from tags_machine_core.nodes import (
+    NodeReader,
+    migrate_legacy_background_tags,
+    migrate_legacy_style_tags,
+)
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationJsonApi, GenerationService
 from tags_machine_core.verification import (
@@ -401,6 +405,21 @@ def cmd_verify_acceptance_suite(args) -> int:
 
 def cmd_migrate_style_tags(args) -> int:
     node = migrate_legacy_style_tags(
+        args.source,
+        node_id=args.id,
+        name=args.name,
+    )
+    if args.output:
+        output_path = Path(args.output)
+        if output_path.exists() and not args.overwrite:
+            raise FileExistsError(f"Output already exists, pass --overwrite to replace: {output_path}")
+        _write_structured_output(node, output_path, output_format=args.format)
+    print_json(node, full=args.full)
+    return 0
+
+
+def cmd_migrate_background_tags(args) -> int:
+    node = migrate_legacy_background_tags(
         args.source,
         node_id=args.id,
         name=args.name,
@@ -1228,6 +1247,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace --output if it already exists",
     )
     migrate_style_tags.set_defaults(func=cmd_migrate_style_tags)
+
+    migrate_background_tags = subparsers.add_parser(
+        "migrate-background-tags",
+        parents=[output_parent],
+        help="Convert a legacy background tags.txt into a structured background meta node",
+    )
+    migrate_background_tags.add_argument("source", help="Legacy background directory or tags.txt path")
+    migrate_background_tags.add_argument("--id", help="Override generated background node id")
+    migrate_background_tags.add_argument("--name", help="Override generated background node name")
+    migrate_background_tags.add_argument("--output", help="Write meta.yaml to this path")
+    migrate_background_tags.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    migrate_background_tags.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace --output if it already exists",
+    )
+    migrate_background_tags.set_defaults(func=cmd_migrate_background_tags)
 
     return parser
 

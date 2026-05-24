@@ -1221,6 +1221,48 @@ gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multipl
             self.assertEqual(node.renderers["novelai"]["params"]["reference_image_multiple"], ["abc"])
             self.assertEqual(node.renderers["novelai"]["params"]["reference_strength_multiple"], [0.2])
 
+    def test_migrate_background_tags_command_writes_structured_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            background_dir = root / "legacy_background"
+            background_dir.mkdir()
+            (background_dir / "tags.txt").write_text(
+                """
+simple room,
+wooden floor
+=
+origin_uc, crowded background
+after_uc, messy room
+gen_json, {"sampler": "ignored_for_background"}
+""".strip(),
+                encoding="utf-8",
+            )
+            output = background_dir / "meta.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "migrate-background-tags",
+                        str(background_dir),
+                        "--id",
+                        "migrated_background",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            node = NodeReader().read(output)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["id"], "migrated_background")
+            self.assertTrue(output.exists())
+            self.assertEqual(node.kind, "background")
+            self.assertEqual(node.id, "migrated_background")
+            self.assertEqual(node.tags["background"], ["simple room", "wooden floor"])
+            self.assertEqual(node.negative_prompt, ["crowded background", "messy room"])
+            self.assertEqual(node.renderers, {})
+
 
 def _without_runtime_fields(value):
     if isinstance(value, dict):

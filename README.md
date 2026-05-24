@@ -41,6 +41,7 @@
 - `inspect-node`：读取节点文件或目录
 - `inspect-style`：读取旧画风节点
 - `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
+- `migrate-background-tags`：把旧背景 `tags.txt` 转成结构化 background `meta.yaml`
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
 - `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest`
 - `create-acceptance-record`：生成旧项目对照验收记录
@@ -176,15 +177,19 @@ uv run python -m tags_machine_core api-generate api_generate.json `
 
 `generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 默认只执行 NovelAI；ComfyUI / SD WebUI / Forge 真实执行需要 `--allow-experimental-backend`，属于预研代码，不作为本阶段接入承诺。
 
-旧画风节点迁移示例：
+旧 `tags.txt` 节点迁移示例：
 
 ```powershell
 uv run python -m tags_machine_core migrate-style-tags `
   F:\my_project\new\tags_machine\design\画风\sample_style `
   --output migrated\nodes\styles\sample_style\node.yaml
+
+uv run python -m tags_machine_core migrate-background-tags `
+  F:\my_project\new\tags_machine\design\背景\simple_room `
+  --output migrated\nodes\backgrounds\simple_room\meta.yaml
 ```
 
-`migrate-style-tags` 默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。
+`migrate-style-tags` 和 `migrate-background-tags` 默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。style 迁移会保留 NovelAI 画风扩展参数；background 迁移只提升场景 tags 和背景级负向词，不把 `gen_json` 等旧扩展转成后端参数。
 
 旧项目对照验收示例：
 

@@ -4,7 +4,11 @@ from pathlib import Path
 
 import yaml
 
-from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
+from tags_machine_core.nodes import (
+    NodeReader,
+    migrate_legacy_background_tags,
+    migrate_legacy_style_tags,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +145,64 @@ not_quality_prompts
             self.assertEqual(novelai["params"]["reference_image_multiple"], ["abc"])
             self.assertEqual(novelai["params"]["reference_strength_multiple"], [0.2])
             self.assertEqual(novelai["flags"], ["not_quality_prompts"])
+
+    def test_migrate_legacy_background_tags_txt_to_background_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            background_dir = Path(tmp) / "old_background"
+            background_dir.mkdir()
+            (background_dir / "tags.txt").write_text(
+                """
+simple room,
+wooden floor
+=
+origin_uc, crowded background
+after_uc, messy room
+gen_json, {"sampler": "ignored_for_background"}
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_background_tags(
+                background_dir,
+                node_id="migrated_background",
+            )
+
+            self.assertEqual(node["schema"], "tags-machine.background/v1")
+            self.assertEqual(node["kind"], "background")
+            self.assertEqual(node["id"], "migrated_background")
+            self.assertEqual(node["tags"]["background"], ["simple room", "wooden floor"])
+            self.assertEqual(node["negative_prompt"], ["crowded background", "messy room"])
+            self.assertNotIn("renderers", node)
+
+    def test_read_migrated_background_meta_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            background_dir = Path(tmp) / "old_background"
+            background_dir.mkdir()
+            (background_dir / "tags.txt").write_text(
+                """
+simple room,
+=
+uc, crowded background
+""".strip(),
+                encoding="utf-8",
+            )
+            output = background_dir / "meta.yaml"
+            output.write_text(
+                yaml.safe_dump(
+                    migrate_legacy_background_tags(background_dir),
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            node = NodeReader().read(background_dir)
+
+            self.assertEqual(node.kind, "background")
+            self.assertEqual(node.id, "old_background")
+            self.assertEqual(node.tags["background"], ["simple room"])
+            self.assertEqual(node.negative_prompt, ["crowded background"])
+            self.assertEqual(node.renderers, {})
 
     def test_read_migrated_style_node_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:
