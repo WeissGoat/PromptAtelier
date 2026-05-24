@@ -241,6 +241,15 @@ uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-
 
 `create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异、`PromptBundle.meta.composition` 和可选 `GenerationResult` 归档成 JSON/YAML；如果提供 `--generation-result`，会验证其中的 `request_body` 与 core `RenderRequest` 归一化后一致。`archive-acceptance-case` 会进一步把这些证据复制到独立样例目录，并更新 suite manifest，方便后续不运行旧项目也能回放。`archive-novelai-acceptance-nodes` 会先从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再复用同一套归档逻辑，适合批量补结构化节点 oracle 样例。`archive-novelai-acceptance-prompt` 面向完整 prompt / agent prompt 样例，只叠加 NovelAI 画风后归档，用来验证它和旧 `run_action` 或旧 `run-prompt` oracle 的 render plan 等价。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异时返回非 0。`verify-acceptance-suite` 可以验证单个 record、record 目录或 manifest；`--require-minimum-set` 会要求 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例都存在，并输出 `case_checks` 检查局部镜头 composition 和 reference/vibe 数组是否真的覆盖到。
 
+`--require-minimum-set` 不只是检查样例名字：
+
+- `default_action`：检查 NovelAI 核心参数、默认 negative、V4/V4.5 payload 没有丢。
+- `foot_detail` / `hand_detail`：检查 `PromptBundle.meta.composition` 的 scope、纳入 section、抑制 section 是否符合局部镜头规则。
+- `complex_character`：检查默认角色组合没有误过滤 `hair`、`eyes`、`upper_clothes`。
+- `reference_style`：检查 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 非空且长度一致。
+
+`examples/nodes` 也有测试门禁：character/action/background 使用 `meta.yaml`，style 使用 `node.yaml`；action 必须显式声明 `character_scope`；v1 样例里不能重新引入 `shot`、`constraints`、`rules`、`include_scopes` / `exclude_scopes` 等字段。
+
 详细文档：
 
 - [整体设计与开发方案](docs/development_plan_v1.md)

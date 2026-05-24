@@ -7,6 +7,9 @@ import yaml
 from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 class NodeReaderTest(unittest.TestCase):
     def test_read_tags_txt_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -233,6 +236,95 @@ constraints:
             self.assertEqual(node.character_scope, None)
             self.assertNotIn("shot", payload)
             self.assertNotIn("constraints", payload)
+
+    def test_example_nodes_follow_v1_yaml_scope_contract(self):
+        examples_root = PROJECT_ROOT / "examples" / "nodes"
+        forbidden_keys_by_kind = {
+            "character": {
+                "rules",
+                "profiles",
+                "include_scopes",
+                "exclude_scopes",
+                "shot",
+                "constraints",
+            },
+            "action": {
+                "rules",
+                "profiles",
+                "include_scopes",
+                "exclude_scopes",
+                "shot",
+                "constraints",
+                "pose",
+                "camera",
+                "focus",
+            },
+            "background": {
+                "rules",
+                "profiles",
+                "include_scopes",
+                "exclude_scopes",
+                "shot",
+                "constraints",
+                "renderers",
+            },
+            "style": {
+                "rules",
+                "profiles",
+                "include_scopes",
+                "exclude_scopes",
+                "shot",
+                "constraints",
+            },
+        }
+        expected_file_by_kind = {
+            "character": "meta.yaml",
+            "action": "meta.yaml",
+            "background": "meta.yaml",
+            "style": "node.yaml",
+        }
+        violations: list[str] = []
+        yaml_paths = sorted(examples_root.rglob("*.yaml"))
+
+        for path in yaml_paths:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if not isinstance(data, dict):
+                violations.append(f"{path.relative_to(PROJECT_ROOT)}: expected YAML mapping")
+                continue
+
+            kind = str(data.get("kind") or "").strip()
+            relative = path.relative_to(PROJECT_ROOT)
+            expected_file = expected_file_by_kind.get(kind)
+            if expected_file and path.name != expected_file:
+                violations.append(f"{relative}: {kind} node should use {expected_file}")
+
+            forbidden_keys = forbidden_keys_by_kind.get(kind, set())
+            for key_path in _forbidden_yaml_key_paths(data, forbidden_keys):
+                violations.append(f"{relative}: forbidden v1 field {key_path}")
+
+            if kind == "action" and not str(data.get("character_scope") or "").strip():
+                violations.append(f"{relative}: action node missing character_scope")
+            if kind == "style":
+                renderers = data.get("renderers")
+                if not isinstance(renderers, dict) or not isinstance(renderers.get("novelai"), dict):
+                    violations.append(f"{relative}: style node missing renderers.novelai")
+
+        self.assertEqual(violations, [])
+
+
+def _forbidden_yaml_key_paths(value, forbidden_keys: set[str], prefix: str = "$") -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            key_path = f"{prefix}.{key_text}"
+            if key_text in forbidden_keys:
+                paths.append(key_path)
+            paths.extend(_forbidden_yaml_key_paths(item, forbidden_keys, key_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            paths.extend(_forbidden_yaml_key_paths(item, forbidden_keys, f"{prefix}[{index}]"))
+    return paths
 
 
 if __name__ == "__main__":
