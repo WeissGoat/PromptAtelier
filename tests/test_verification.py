@@ -695,7 +695,12 @@ class VerificationTest(unittest.TestCase):
             self.assertIn("No legacy_oracle acceptance records found", required["errors"])
 
             fixture_evidence = verify_acceptance_suite(root, require_legacy_evidence=True)
-            self.assertTrue(fixture_evidence["match"])
+            self.assertFalse(fixture_evidence["match"])
+            self.assertEqual(fixture_evidence["result"], "fail")
+            self.assertIn(
+                "No legacy_oracle acceptance records found",
+                fixture_evidence["errors"],
+            )
             self.assertEqual(fixture_evidence["legacy_oracle_evidence_checks"], [])
 
     def test_verify_acceptance_suite_can_require_legacy_oracle_evidence(self):

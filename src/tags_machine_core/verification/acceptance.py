@@ -427,7 +427,9 @@ def verify_acceptance_suite(
     errors: list[str] = []
     if not results:
         errors.append("No acceptance records found")
-    if require_legacy_oracle and not oracle_kind_counts.get("legacy_oracle"):
+    if (require_legacy_oracle or require_legacy_evidence) and not oracle_kind_counts.get(
+        "legacy_oracle"
+    ):
         errors.append("No legacy_oracle acceptance records found")
     if legacy_oracle_evidence_fail_count:
         errors.append("Legacy oracle evidence incomplete")

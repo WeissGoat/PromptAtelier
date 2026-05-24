@@ -1314,8 +1314,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-legacy-evidence",
         action="store_true",
         help=(
-            "Fail unless every legacy_oracle record has legacy/core image evidence, "
-            "GenerationResult evidence, and PromptBundle contract evidence"
+            "Fail unless the suite contains legacy_oracle records and every legacy_oracle "
+            "record has legacy/core image evidence, GenerationResult evidence, and "
+            "PromptBundle contract evidence"
         ),
     )
     verify_acceptance_suite_parser.set_defaults(func=cmd_verify_acceptance_suite)
