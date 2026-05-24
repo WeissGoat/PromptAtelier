@@ -54,6 +54,16 @@ MINIMUM_DEFAULT_ACTION_REQUIRED_PARAMS = (
     "noise_schedule",
     "v4_prompt",
     "v4_negative_prompt",
+    "reference_image_multiple",
+    "reference_strength_multiple",
+    "reference_information_extracted_multiple",
+    "director_reference_images",
+)
+MINIMUM_DEFAULT_ACTION_EMPTY_ARRAY_PARAMS = (
+    "reference_image_multiple",
+    "reference_strength_multiple",
+    "reference_information_extracted_multiple",
+    "director_reference_images",
 )
 MINIMUM_COMPLEX_CHARACTER_REQUIRED_INCLUDED = ("hair", "eyes", "upper_clothes")
 MINIMUM_SUPPRESSED_SECTION_PROMPT_TERMS = {
@@ -958,6 +968,15 @@ def _default_action_case_errors(record: dict[str, Any]) -> list[str]:
     ]
     if missing_params:
         errors.append(f"missing core parameters {missing_params}")
+
+    for key in MINIMUM_DEFAULT_ACTION_EMPTY_ARRAY_PARAMS:
+        if key not in params:
+            continue
+        value = params.get(key)
+        if not isinstance(value, list):
+            errors.append(f"{key} must be an array")
+        elif value:
+            errors.append(f"{key} must be empty for default_action")
 
     for key in ("v4_prompt", "v4_negative_prompt"):
         value = params.get(key)

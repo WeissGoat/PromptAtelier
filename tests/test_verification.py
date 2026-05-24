@@ -78,6 +78,11 @@ def _sample_parameters(reference: str = "base64-reference") -> dict:
 
 def _minimum_case_parameters(case_id: str) -> dict:
     params = _sample_parameters()
+    if case_id.startswith("default_action"):
+        params["reference_image_multiple"] = []
+        params["reference_strength_multiple"] = []
+        params["reference_information_extracted_multiple"] = []
+        params["director_reference_images"] = []
     if case_id.startswith("hand_detail"):
         prompt = "akemi homura, hand focus, reaching hand"
         negative = "bad hands"
@@ -1122,6 +1127,93 @@ class VerificationTest(unittest.TestCase):
             self.assertIn("noise_schedule", default_check["messages"][0])
             self.assertIn("v4_prompt", default_check["messages"][0])
             self.assertIn("v4_negative_prompt", default_check["messages"][0])
+
+    def test_verify_acceptance_suite_fails_default_action_reference_arrays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_record(
+                case_id: str,
+                *,
+                composition: dict | None = None,
+                parameters: dict | None = None,
+            ) -> None:
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                bundle = root / f"{case_id}_bundle.json"
+                record_path = root / f"{case_id}.json"
+                payload = {"parameters": parameters or _minimum_case_parameters(case_id)}
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                prompt_bundle = None
+                if composition is not None:
+                    bundle.write_text(
+                        json.dumps({"meta": {"composition": composition}}),
+                        encoding="utf-8",
+                    )
+                    prompt_bundle = bundle
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                    prompt_bundle=prompt_bundle,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            bad_default_params = _minimum_case_parameters("default_action_001")
+            bad_default_params["reference_image_multiple"] = ["unexpected-reference"]
+            bad_default_params["reference_strength_multiple"] = [0.2]
+            del bad_default_params["reference_information_extracted_multiple"]
+            bad_default_params["director_reference_images"] = ["unexpected-director"]
+            write_record("default_action_001", parameters=bad_default_params)
+            write_record(
+                "foot_detail_001",
+                composition={
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes"],
+                },
+            )
+            write_record(
+                "hand_detail_001",
+                composition={
+                    "character_scope": "hand_detail",
+                    "included_character_sections": ["character", "hands"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes", "feet"],
+                },
+            )
+            write_record(
+                "complex_character_001",
+                composition={
+                    "character_scope": "default",
+                    "included_character_sections": ["character", "hair", "eyes", "upper_clothes"],
+                    "suppressed_character_sections": [],
+                },
+            )
+            write_record("reference_style_001")
+
+            result = verify_acceptance_suite(root, require_minimum_set=True)
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["missing_required_cases"], [])
+            self.assertEqual(result["case_check_fail_count"], 1)
+            default_check = [
+                check for check in result["case_checks"] if check["required_case"] == "default_action"
+            ][0]
+            self.assertEqual(default_check["result"], "fail")
+            self.assertIn("reference_information_extracted_multiple", default_check["messages"][0])
+            self.assertIn(
+                "reference_image_multiple must be empty for default_action",
+                default_check["messages"][0],
+            )
+            self.assertIn(
+                "reference_strength_multiple must be empty for default_action",
+                default_check["messages"][0],
+            )
+            self.assertIn(
+                "director_reference_images must be empty for default_action",
+                default_check["messages"][0],
+            )
 
     def test_verify_acceptance_suite_fails_complex_character_scope_regression(self):
         with tempfile.TemporaryDirectory() as tmp:

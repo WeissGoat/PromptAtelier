@@ -510,7 +510,7 @@ v1 冻结验收补充：
 - 若归档真实生图结果，`GenerationResult.request_body` 必须能和 core `RenderRequest` 对齐；`GenerationResult.images` 中声明的图片也必须在资料包内可访问并能计算 hash。不一致或图片丢失时验收失败，避免图片证据和请求参数脱节。
 - 回归样例集需要能用 `verify-acceptance-suite` 一次性回放；空目录、未批准差异、缺少必需样例都必须返回非 0。
 - 使用 `--require-minimum-set` 时，suite 不只检查 case id：
-  - `default_action` 必须验证 `prompt`、`negative_prompt`、`seed`、`width`、`height`、`sampler`、`steps`、`scale`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt` 等 NovelAI 核心参数仍在。
+  - `default_action` 必须验证 `prompt`、`negative_prompt`、`seed`、`width`、`height`、`sampler`、`steps`、`scale`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt` 等 NovelAI 核心参数仍在，并验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 作为默认空数组稳定输出。
   - `foot_detail` / `hand_detail` 必须验证 `PromptBundle.meta.composition` 的 scope、included sections 和 suppressed sections，并检查最终 prompt 没有残留被 suppressed sections 代表的典型角色片段。
   - `complex_character` 必须验证默认 scope 下 `hair`、`eyes`、`upper_clothes` 纳入角色组合，且没有被误放入 suppressed sections。
   - `reference_style` 必须验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 数组非空且长度一致，并验证 `director_reference_images` 非空。
