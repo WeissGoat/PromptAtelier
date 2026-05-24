@@ -203,6 +203,59 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(request["params"]["scheduler"], "karras")
             self.assertEqual(request["params"]["positive_prompt"], bundle["prompt"]["positive"])
 
+    def test_render_plan_json_api_rejects_unknown_backend_with_support_matrix_error(self):
+        bundle = {
+            "schema": "tags-machine-core.prompt-bundle/v1",
+            "prompt": {
+                "positive": "akemi homura",
+                "negative": "",
+            },
+        }
+
+        with self.assertRaises(ValueError) as raised:
+            GenerationJsonApi().render_plan(
+                {
+                    "prompt_bundle": bundle,
+                    "backend": "unknown",
+                }
+            )
+
+        self.assertIn("Unsupported backend: unknown", str(raised.exception))
+        self.assertIn("expected one of: novelai, comfyui, sd", str(raised.exception))
+
+    def test_cli_api_compose_render_plan_rejects_unknown_backend_without_writing_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            request = root / "api_request.json"
+            output = root / "api_response.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "compose": {
+                            "prompt": "akemi homura",
+                        },
+                        "render": {
+                            "backend": "unknown",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValueError) as raised:
+                main(
+                    [
+                        "api-compose-render-plan",
+                        str(request),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertIn("Unsupported backend: unknown", str(raised.exception))
+            self.assertIn("expected one of: novelai, comfyui, sd", str(raised.exception))
+            self.assertFalse(output.exists())
+
     def test_cli_api_compose_render_plan_reads_json_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1683,6 +1736,45 @@ class JsonApiTest(unittest.TestCase):
                 )
 
             self.assertIn("only NovelAI", str(raised.exception))
+            self.assertFalse(response.exists())
+
+    def test_cli_api_generate_rejects_sd_backend_in_v1_scope_before_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _write_config(root)
+            request = root / "api_generate_sd.json"
+            response = root / "api_generate_response.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "render_request": {
+                            "backend": "sd",
+                            "prompt": "akemi homura",
+                            "negative_prompt": "bad anatomy",
+                            "params": {"steps": 24},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("tags_machine_core.cli._execute_render_request") as executor:
+                with self.assertRaises(ValueError) as raised:
+                    main(
+                        [
+                            "api-generate",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--output",
+                            str(response),
+                        ]
+                    )
+
+            self.assertIn("api-generate", str(raised.exception))
+            self.assertIn("only NovelAI", str(raised.exception))
+            self.assertIn("Use execute-render-request", str(raised.exception))
+            executor.assert_not_called()
             self.assertFalse(response.exists())
 
 
