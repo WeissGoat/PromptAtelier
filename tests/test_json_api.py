@@ -233,6 +233,119 @@ class JsonApiTest(unittest.TestCase):
                 ["eyes", "upper_clothes"],
             )
 
+    def test_cli_api_compose_render_plan_matches_node_cli_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            request = root / "api_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "compose": {
+                            "nodes": {
+                                "character": str(character),
+                                "action": str(action),
+                            },
+                            "style": str(style),
+                            "extra_prompt": "dynamic low angle",
+                            "negative": "messy crop",
+                        },
+                        "render": {
+                            "backend": "novelai",
+                            "style": str(style),
+                            "seed": 1357,
+                            "width": 832,
+                            "height": 1216,
+                            "params": {
+                                "scale": 6.0,
+                                "cfg_rescale": 0.15,
+                                "reference_image_multiple": ["base64-reference"],
+                                "reference_strength_multiple": [0.2],
+                                "reference_information_extracted_multiple": [1.0],
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            compose_stdout = io.StringIO()
+            with redirect_stdout(compose_stdout):
+                compose_exit = main(
+                    [
+                        "compose-nodes",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-ref",
+                        "api_style",
+                        "--extra-prompt",
+                        "dynamic low angle",
+                        "--negative",
+                        "messy crop",
+                    ]
+                )
+
+            render_stdout = io.StringIO()
+            with redirect_stdout(render_stdout):
+                render_exit = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "novelai",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--extra-prompt",
+                        "dynamic low angle",
+                        "--negative",
+                        "messy crop",
+                        "--seed",
+                        "1357",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--params-json",
+                        (
+                            '{"scale": 6.0, "cfg_rescale": 0.15, '
+                            '"reference_image_multiple": ["base64-reference"], '
+                            '"reference_strength_multiple": [0.2], '
+                            '"reference_information_extracted_multiple": [1.0]}'
+                        ),
+                    ]
+                )
+
+            api_stdout = io.StringIO()
+            with redirect_stdout(api_stdout):
+                api_exit = main(["api-compose-render-plan", str(request), "--full"])
+
+            prompt_bundle = json.loads(compose_stdout.getvalue())
+            render_request = json.loads(render_stdout.getvalue())
+            api_result = json.loads(api_stdout.getvalue())
+
+            self.assertEqual(compose_exit, 0)
+            self.assertEqual(render_exit, 0)
+            self.assertEqual(api_exit, 0)
+            self.assertEqual(
+                _without_runtime_fields(api_result["prompt_bundle"]),
+                _without_runtime_fields(prompt_bundle),
+            )
+            self.assertEqual(api_result["render_request"], render_request)
+            self.assertEqual(
+                api_result["prompt_bundle"]["meta"]["composition"]["character_scope"],
+                "foot_detail",
+            )
+            self.assertEqual(
+                api_result["render_request"]["params"]["reference_image_multiple"],
+                ["base64-reference"],
+            )
+            self.assertEqual(api_result["render_request"]["params"]["cfg_rescale"], 0.15)
+
     def test_cli_api_compose_render_plan_matches_run_prompt_for_full_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
