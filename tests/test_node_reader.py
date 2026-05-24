@@ -6,6 +6,7 @@ import yaml
 
 from tags_machine_core.nodes import (
     NodeReader,
+    migrate_legacy_action_tags,
     migrate_legacy_background_tags,
     migrate_legacy_style_tags,
 )
@@ -173,6 +174,88 @@ gen_json, {"sampler": "ignored_for_background"}
             self.assertEqual(node["tags"]["background"], ["simple room", "wooden floor"])
             self.assertEqual(node["negative_prompt"], ["crowded background", "messy room"])
             self.assertNotIn("renderers", node)
+
+    def test_migrate_legacy_action_tags_txt_to_action_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            action_dir = Path(tmp) / "old_action"
+            action_dir.mkdir()
+            (action_dir / "tags.txt").write_text(
+                """
+(soles detailed:1.2,toenails), presenting toes, toes focus, close up
+type,need_before
+=
+origin_uc, bad feet, extra toes
+node_background, flower field
+gen_json, {"sampler": "ignored_for_action"}
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_action_tags(action_dir, node_id="migrated_action")
+
+            self.assertEqual(node["schema"], "tags-machine.action/v1")
+            self.assertEqual(node["kind"], "action")
+            self.assertEqual(node["id"], "migrated_action")
+            self.assertEqual(
+                node["tags"]["action"],
+                [
+                    "(soles detailed:1.2,toenails)",
+                    "presenting toes",
+                    "toes focus",
+                    "close up",
+                ],
+            )
+            self.assertEqual(node["negative_prompt"], ["bad feet, extra toes"])
+            self.assertEqual(node["character_scope"], "foot_detail")
+            self.assertNotIn("renderers", node)
+            self.assertIn("node_background, flower field", node["legacy"]["raw_sections"]["extension"])
+
+    def test_migrate_legacy_action_tags_allows_character_scope_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            action_dir = Path(tmp) / "old_action"
+            action_dir.mkdir()
+            (action_dir / "tags.txt").write_text(
+                """
+upper body, looking at viewer
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_action_tags(action_dir, character_scope="portrait")
+
+            self.assertEqual(node["character_scope"], "portrait")
+            self.assertIn("character_scope_override", node["agent"]["labels"])
+
+    def test_read_migrated_action_meta_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            action_dir = Path(tmp) / "old_action"
+            action_dir.mkdir()
+            (action_dir / "tags.txt").write_text(
+                """
+pov hands, grabbing
+=
+uc, bad hands
+""".strip(),
+                encoding="utf-8",
+            )
+            output = action_dir / "meta.yaml"
+            output.write_text(
+                yaml.safe_dump(
+                    migrate_legacy_action_tags(action_dir),
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            node = NodeReader().read(action_dir)
+
+            self.assertEqual(node.kind, "action")
+            self.assertEqual(node.id, "old_action")
+            self.assertEqual(node.tags["action"], ["pov hands", "grabbing"])
+            self.assertEqual(node.negative_prompt, ["bad hands"])
+            self.assertEqual(node.character_scope, "hand_detail")
+            self.assertEqual(node.renderers, {})
 
     def test_read_migrated_background_meta_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:

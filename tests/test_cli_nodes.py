@@ -1263,6 +1263,58 @@ gen_json, {"sampler": "ignored_for_background"}
             self.assertEqual(node.negative_prompt, ["crowded background", "messy room"])
             self.assertEqual(node.renderers, {})
 
+    def test_migrate_action_tags_command_writes_structured_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            action_dir = root / "legacy_action"
+            action_dir.mkdir()
+            (action_dir / "tags.txt").write_text(
+                """
+(soles detailed:1.2,toenails), presenting toes, toes focus, close up
+=
+origin_uc, bad feet, extra toes
+node_background, flower field
+gen_json, {"sampler": "ignored_for_action"}
+""".strip(),
+                encoding="utf-8",
+            )
+            output = action_dir / "meta.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "migrate-action-tags",
+                        str(action_dir),
+                        "--id",
+                        "migrated_action",
+                        "--character-scope",
+                        "foot_detail",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            node = NodeReader().read(output)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["id"], "migrated_action")
+            self.assertTrue(output.exists())
+            self.assertEqual(node.kind, "action")
+            self.assertEqual(node.id, "migrated_action")
+            self.assertEqual(
+                node.tags["action"],
+                [
+                    "(soles detailed:1.2,toenails)",
+                    "presenting toes",
+                    "toes focus",
+                    "close up",
+                ],
+            )
+            self.assertEqual(node.negative_prompt, ["bad feet, extra toes"])
+            self.assertEqual(node.character_scope, "foot_detail")
+            self.assertEqual(node.renderers, {})
+
 
 def _without_runtime_fields(value):
     if isinstance(value, dict):

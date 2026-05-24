@@ -188,6 +188,27 @@ character_scope: foot_detail
 
 这些字段以后如果确实被 composer 用到了，可以进入 action v2。v1 不提前结构化暂时不用的信息。
 
+## 旧 `tags.txt` 迁移
+
+旧项目的动作 `tags.txt` 常见形态是一整行逗号分隔 prompt，并在 `=` 后追加 `origin_uc`、`node_background`、`gen_json` 等扩展行。v1 提供保守迁移命令：
+
+```powershell
+uv run python -m tags_machine_core migrate-action-tags `
+  F:\my_project\new\tags_machine\design\动作改2\next\17_20240706_1720261297 `
+  --character-scope foot_detail `
+  --output migrated\nodes\actions\foot_closeup\meta.yaml
+```
+
+迁移策略：
+
+- 只生成 `schema`、`kind`、`id`、`name`、`tags.action`、`negative_prompt`、`character_scope`、`legacy` 和 `agent`。
+- 正向 prompt 会按顶层逗号拆成 `tags.action`；括号、方括号、花括号内部的逗号不会被拆开，避免破坏 `(soles detailed:1.2,toenails)` 这类权重组合。
+- `origin_uc`、`uc`、`negative_prompt`、`after_uc`、`after_negative_prompt` 会提升为动作级 `negative_prompt`。
+- `node_background`、`node_artist`、`gen_json` 等旧扩展只保留在 `legacy.raw_sections`，不提升为 action v1 字段。
+- `character_scope` 可以通过 `--character-scope` 显式指定；没有指定时，迁移工具会根据有限关键词推断，例如 `toes focus` / `soles` 推断为 `foot_detail`，`pov hands` 推断为 `hand_detail`。推断结果必须人工复核。
+
+迁移工具不会修改旧项目目录；只有传入 `--output` 时才写出新 YAML。
+
 ## 例子
 
 ### 脚底特写

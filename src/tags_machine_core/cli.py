@@ -15,6 +15,7 @@ from tags_machine_core.execution import execute_render_request as _execute_rende
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import (
     NodeReader,
+    migrate_legacy_action_tags,
     migrate_legacy_background_tags,
     migrate_legacy_style_tags,
 )
@@ -408,6 +409,22 @@ def cmd_migrate_style_tags(args) -> int:
         args.source,
         node_id=args.id,
         name=args.name,
+    )
+    if args.output:
+        output_path = Path(args.output)
+        if output_path.exists() and not args.overwrite:
+            raise FileExistsError(f"Output already exists, pass --overwrite to replace: {output_path}")
+        _write_structured_output(node, output_path, output_format=args.format)
+    print_json(node, full=args.full)
+    return 0
+
+
+def cmd_migrate_action_tags(args) -> int:
+    node = migrate_legacy_action_tags(
+        args.source,
+        node_id=args.id,
+        name=args.name,
+        character_scope=args.character_scope,
     )
     if args.output:
         output_path = Path(args.output)
@@ -1247,6 +1264,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace --output if it already exists",
     )
     migrate_style_tags.set_defaults(func=cmd_migrate_style_tags)
+
+    migrate_action_tags = subparsers.add_parser(
+        "migrate-action-tags",
+        parents=[output_parent],
+        help="Convert a legacy action tags.txt into a structured action meta node",
+    )
+    migrate_action_tags.add_argument("source", help="Legacy action directory or tags.txt path")
+    migrate_action_tags.add_argument("--id", help="Override generated action node id")
+    migrate_action_tags.add_argument("--name", help="Override generated action node name")
+    migrate_action_tags.add_argument(
+        "--character-scope",
+        help="Override inferred action character_scope, for example foot_detail",
+    )
+    migrate_action_tags.add_argument("--output", help="Write meta.yaml to this path")
+    migrate_action_tags.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    migrate_action_tags.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace --output if it already exists",
+    )
+    migrate_action_tags.set_defaults(func=cmd_migrate_action_tags)
 
     migrate_background_tags = subparsers.add_parser(
         "migrate-background-tags",
