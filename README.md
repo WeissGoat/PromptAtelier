@@ -92,31 +92,7 @@ uv run python -m tags_machine_core compose-agent-nodes `
 
 `agent-task-nodes` 不调用模型，只输出稳定任务 JSON。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
 
-等价的 JSON API 文件入口适合前端和 worker 使用：
-
-```json
-{
-  "nodes": {
-    "character": "examples/nodes/characters/homura",
-    "action": "examples/nodes/actions/foot_closeup"
-  },
-  "style": "examples/nodes/styles/anime_comfy",
-  "character_scope": "foot_detail",
-  "agent": {
-    "instructions": ["组合角色和动作，局部特写不要带入无关角色细节"],
-    "result": {
-      "positive": "akemi homura, bare soles, foot focus",
-      "negative": "extra toes, face focus",
-      "character_scope": "foot_detail",
-      "included_character_sections": ["character", "feet"],
-      "suppressed_character_sections": ["eyes", "upper_clothes"]
-    }
-  },
-  "cache": {
-    "cache_dir": "cache/prompt"
-  }
-}
-```
+等价的 JSON API 文件入口适合前端和 worker 使用。完整请求/响应契约见 [JSON API 契约](docs/json_api_contract_v1.md)，README 只保留常用命令：
 
 ```powershell
 uv run python -m tags_machine_core api-agent-task examples\requests\agent_resolution_requires_agent.json `
@@ -129,7 +105,7 @@ uv run python -m tags_machine_core api-resolve-agent examples\requests\agent_res
   --output agent_resolution.json
 ```
 
-`api-agent-task`、`api-compose-agent` 和 `api-resolve-agent` 也不调用模型。前者只生成 agent 可读任务；`api-compose-agent` 是严格落库入口，缓存缺失且没有 `agent.result` 时会失败；`api-resolve-agent` 是前端/worker 友好的分支入口，缓存命中或请求里带 `agent.result` 时返回 `status: "ready"` 和 `prompt_bundle`，否则返回 `status: "requires_agent"` 和 `agent_task`，调用方再把任务交给外部 agent。
+`api-agent-task`、`api-compose-agent` 和 `api-resolve-agent` 也不调用模型。`api-resolve-agent` 会返回 `ready` 或 `requires_agent` 状态，调用方再决定复用缓存、落库 agent result，或把任务交给外部 agent。
 
 仓库里的 `examples/requests/agent_resolution_requires_agent.json`、`examples/requests/agent_compose_with_result.json`、`examples/requests/compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_novelai.json`、`examples/requests/agent_compose_render_plan_requires_agent.json` 和 `examples/requests/generate_novelai_mock.json` 是可直接运行的请求样例，并由测试保证能从仓库根目录解析节点相对路径。
 
@@ -178,24 +154,7 @@ uv run python -m tags_machine_core run-prompt `
 
 `run-prompt` 用于“agent 或人工已经给出完整角色+动作混合 prompt”的场景。它不会再按 `character_scope` 裁剪角色节点，只把输入落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
 
-JSON API 边界示例：
-
-```json
-{
-  "compose": {
-    "nodes": {
-      "character": "examples/nodes/characters/homura",
-      "action": "examples/nodes/actions/foot_closeup"
-    },
-    "style": "examples/nodes/styles/anime_comfy"
-  },
-  "render": {
-    "backend": "novelai",
-    "style": "examples/nodes/styles/anime_comfy",
-    "seed": 123
-  }
-}
-```
+JSON API 边界入口：
 
 ```powershell
 uv run python -m tags_machine_core api-compose-render-plan examples\requests\compose_render_plan_novelai.json `
@@ -205,22 +164,7 @@ uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requ
   --output api_resolution.json
 ```
 
-`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。它的 `compose` 段可以直接包含 `agent.instructions`、`agent.result` 和 `cache.cache_dir`，用于一步完成 agent prompt 落库和 NovelAI render plan 预览。`api-resolve-compose-render-plan` 是状态入口：可预览时返回 `status: "ready"`、`prompt_bundle` 和 `render_request`；缺少 agent result 且缓存未命中时返回 `status: "requires_agent"` 和 `agent_task`。`api-compose` 也可以通过 `"composer": "agent"` 或 `agent.result` 走 agent composer 路径，效果等价于 `api-compose-agent`。已有 `RenderRequest` 可以通过本地 JSON API 执行：
-
-```json
-{
-  "render_request": {
-    "backend": "novelai",
-    "prompt": "akemi homura, foot focus",
-    "negative_prompt": "bad anatomy",
-    "seed": 123,
-    "params": {
-      "n_samples": 3
-    }
-  },
-  "output_dir": "outputs"
-}
-```
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。`api-resolve-compose-render-plan` 是状态入口，可返回 `ready` 或 `requires_agent`。已有 `RenderRequest` 可以通过本地 JSON API 执行：
 
 ```powershell
 uv run python -m tags_machine_core api-generate api_generate.json `
@@ -228,7 +172,7 @@ uv run python -m tags_machine_core api-generate api_generate.json `
   --output api_generate_response.json
 ```
 
-`api-generate` 对应未来 `POST /generate` 的本地文件入口，输入 `RenderRequest` JSON，输出 `GenerationResult` JSON；v1 正式执行范围只包含 NovelAI。
+`api-generate` 对应未来 `POST /generate` 的本地文件入口，输入 `RenderRequest` JSON，输出 `GenerationResult` JSON；v1 正式执行范围只包含 NovelAI。无需联网的 mock 请求样例见 `examples/requests/generate_novelai_mock.json`，响应形状 golden 见 `examples/responses/json_api_response_shapes.json`。
 
 `generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 默认只执行 NovelAI；ComfyUI / SD WebUI / Forge 真实执行需要 `--allow-experimental-backend`，属于预研代码，不作为本阶段接入承诺。
 
