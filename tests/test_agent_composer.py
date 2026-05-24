@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,12 @@ from pathlib import Path
 from tags_machine_core.composers import AgentComposer, AgentCompositionRequired
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.nodes.models import NodeDocument
+
+
+def _stable_bundle_json(bundle) -> str:
+    data = bundle.model_dump(mode="json", by_alias=True)
+    data["cache"]["cache_hit"] = False
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _character(path: str | None = None) -> NodeDocument:
@@ -168,6 +175,7 @@ class AgentComposerTest(unittest.TestCase):
 
         self.assertFalse(first.cache.cache_hit)
         self.assertTrue(second.cache.cache_hit)
+        self.assertEqual(_stable_bundle_json(first), _stable_bundle_json(second))
         self.assertEqual(second.prompt.positive, "akemi homura, bare soles, foot focus")
         self.assertEqual(second.meta.composer_type, "agent")
         self.assertEqual(second.meta.composition.character_scope, "foot_detail")
