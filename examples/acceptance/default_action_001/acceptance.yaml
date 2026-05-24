@@ -1,0 +1,16 @@
+schema: tags-machine-core.acceptance-record/v1
+case_id: default_action_001
+legacy:
+  source_path: legacy/source.json
+  image_path: legacy/image.png
+core:
+  source_path: core/render_request.json
+  image_path: core/image.png
+  render_request_path: core/render_request.json
+  prompt_bundle_path: core/prompt_bundle.json
+  generation_result_path: core/generation_result.json
+diff:
+  whitelist: []
+intentional_differences: []
+notes:
+  - 静态 dry-run 最小验收样例；不包含真实联网生图。

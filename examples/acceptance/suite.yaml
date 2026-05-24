@@ -1,0 +1,14 @@
+schema: tags-machine-core.acceptance-suite/v1
+description: 静态 dry-run 最小验收资料包，用于验证 acceptance 格式和五类最低语义检查。
+required_cases:
+  - default_action
+  - foot_detail
+  - hand_detail
+  - complex_character
+  - reference_style
+records:
+  - default_action_001/acceptance.yaml
+  - foot_detail_001/acceptance.yaml
+  - hand_detail_001/acceptance.yaml
+  - complex_character_001/acceptance.yaml
+  - reference_style_001/acceptance.yaml

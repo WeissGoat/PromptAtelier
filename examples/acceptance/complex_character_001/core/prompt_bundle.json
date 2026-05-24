@@ -1,0 +1,35 @@
+{
+  "schema": "tags-machine-core.prompt-bundle/v1",
+  "prompt": {
+    "positive": "akemi homura, long black hair, purple eyes, school uniform, ribbon, full body, masterpiece, best quality",
+    "negative": "bad anatomy, low quality"
+  },
+  "meta": {
+    "character_ref": "examples/nodes/characters/homura",
+    "action_ref": "full_body",
+    "style_ref": "examples/nodes/styles/anime_comfy",
+    "composer_type": "script",
+    "composer_version": "v1",
+    "composition": {
+      "character_scope": "default",
+      "included_character_sections": [
+        "character",
+        "hair",
+        "eyes",
+        "upper_clothes",
+        "head_accessories",
+        "body"
+      ],
+      "suppressed_character_sections": []
+    },
+    "source_nodes": [
+      "examples/nodes/characters/homura"
+    ]
+  },
+  "cache": {
+    "cacheable": true,
+    "cache_key": "sha256:example-complex-character",
+    "cache_hit": false
+  },
+  "created_at": "2026-05-25T00:00:00+00:00"
+}

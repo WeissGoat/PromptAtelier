@@ -1,0 +1,37 @@
+{
+  "schema": "tags-machine-core.prompt-bundle/v1",
+  "prompt": {
+    "positive": "akemi homura, portrait, soft anime style, masterpiece, best quality",
+    "negative": "bad anatomy, low quality"
+  },
+  "meta": {
+    "character_ref": "examples/nodes/characters/homura",
+    "action_ref": "portrait",
+    "style_ref": "examples/nodes/styles/anime_comfy",
+    "composer_type": "script",
+    "composer_version": "v1",
+    "composition": {
+      "character_scope": "portrait",
+      "included_character_sections": [
+        "character",
+        "hair",
+        "eyes",
+        "face",
+        "upper_clothes"
+      ],
+      "suppressed_character_sections": [
+        "feet"
+      ]
+    },
+    "source_nodes": [
+      "examples/nodes/characters/homura",
+      "examples/nodes/styles/anime_comfy"
+    ]
+  },
+  "cache": {
+    "cacheable": true,
+    "cache_key": "sha256:example-reference-style",
+    "cache_hit": false
+  },
+  "created_at": "2026-05-25T00:00:00+00:00"
+}

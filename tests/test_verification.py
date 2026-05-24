@@ -21,6 +21,9 @@ from tags_machine_core.verification import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     crc = zlib.crc32(chunk_type)
     crc = zlib.crc32(data, crc) & 0xFFFFFFFF
@@ -661,6 +664,33 @@ class VerificationTest(unittest.TestCase):
                     "reference_style",
                 },
             )
+
+    def test_examples_acceptance_minimum_suite_replays(self):
+        result = verify_acceptance_suite(
+            PROJECT_ROOT / "examples" / "acceptance" / "suite.yaml",
+            require_minimum_set=True,
+        )
+
+        self.assertTrue(result["match"])
+        self.assertEqual(result["record_count"], 5)
+        self.assertEqual(result["case_check_fail_count"], 0)
+        self.assertEqual(result["missing_required_cases"], [])
+        self.assertEqual(
+            {check["required_case"] for check in result["case_checks"]},
+            {
+                "default_action",
+                "foot_detail",
+                "hand_detail",
+                "complex_character",
+                "reference_style",
+            },
+        )
+        for record in result["records"]:
+            self.assertTrue(record["diff"]["normalized_equal"])
+            self.assertEqual(record["generation_result_evidence"]["result"], "pass")
+            self.assertEqual(record["generation_result_evidence"]["image_count"], 1)
+            self.assertTrue(record["image_evidence"]["legacy"]["exists"])
+            self.assertTrue(record["image_evidence"]["core"]["exists"])
 
     def test_verify_acceptance_suite_fails_bad_minimum_case_semantics(self):
         with tempfile.TemporaryDirectory() as tmp:
