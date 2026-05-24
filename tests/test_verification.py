@@ -1449,6 +1449,70 @@ class VerificationTest(unittest.TestCase):
                 "$.parameters.steps",
             )
 
+    def test_build_acceptance_record_fails_generation_result_missing_director_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            changed_params = _sample_parameters()
+            del changed_params["director_reference_images"]
+            changed = {
+                **payload,
+                "parameters": changed_params,
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [],
+                        "request_body": changed,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="generation_result_missing_director_reference",
+                legacy_source=legacy,
+                core_source=core,
+                generation_result=generation_result,
+            )
+
+            self.assertEqual(record["result"], "fail")
+            evidence = record["generation_result_evidence"]
+            self.assertEqual(evidence["result"], "fail")
+            self.assertIn(
+                "GenerationResult request_body differs from core source",
+                evidence["errors"],
+            )
+            self.assertEqual(
+                evidence["request_body"]["diff"]["diffs"][0]["path"],
+                "$.parameters.director_reference_images",
+            )
+
     def test_cli_create_and_verify_acceptance_record(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
