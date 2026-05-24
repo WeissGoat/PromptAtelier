@@ -70,6 +70,7 @@ ACCEPTANCE_PATH_FIELDS = {
     "prompt_bundle",
     "generation_result",
     "case_dir",
+    "resolved_path",
 }
 
 
@@ -221,6 +222,12 @@ def archive_acceptance_case(
         core_dir,
         _artifact_filename("generation_result", generation_result) if generation_result else None,
         overwrite=overwrite,
+    )
+    _rewrite_generation_result_image_paths(
+        generation_result_copy,
+        source_generation_result=Path(generation_result) if generation_result else None,
+        source_core_image=_generation_result_source_core_image(core_image, core_source),
+        archived_core_image=core_image_copy,
     )
 
     record = build_acceptance_record(
@@ -500,7 +507,12 @@ def _generation_result_evidence(
     evidence["cache_hit"] = data.get("cache_hit")
     images = data.get("images")
     evidence["image_count"] = len(images) if isinstance(images, list) else 0
-    evidence["images"] = _generation_result_image_summaries(images)
+    image_summaries, image_errors = _generation_result_image_summaries(
+        images,
+        base_dir=path.parent,
+    )
+    evidence["images"] = image_summaries
+    errors.extend(image_errors)
 
     request_body = data.get("request_body")
     if not isinstance(request_body, dict) or not request_body:
@@ -534,21 +546,126 @@ def _generation_result_evidence(
     return evidence
 
 
-def _generation_result_image_summaries(value: Any) -> list[dict[str, Any]]:
+def _generation_result_image_summaries(
+    value: Any,
+    *,
+    base_dir: Path,
+) -> tuple[list[dict[str, Any]], list[str]]:
     if not isinstance(value, list):
-        return []
+        if value is None:
+            return [], []
+        return [], ["GenerationResult images must be a list"]
     summaries: list[dict[str, Any]] = []
-    for item in value:
+    errors: list[str] = []
+    for index, item in enumerate(value):
         if not isinstance(item, dict):
+            errors.append(f"GenerationResult image[{index}] must be an object")
             continue
-        summaries.append(
-            {
-                "path": item.get("path"),
-                "filename": item.get("filename"),
-                "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
-            }
-        )
-    return summaries
+        raw_path = item.get("path")
+        path = _resolve_generation_result_image_path(raw_path, base_dir)
+        summary: dict[str, Any] = {
+            "path": raw_path,
+            "filename": item.get("filename"),
+            "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
+        }
+        if path is None:
+            summary["exists"] = False
+            errors.append(f"GenerationResult image[{index}] missing path")
+            summaries.append(summary)
+            continue
+
+        summary["resolved_path"] = str(path)
+        summary["exists"] = path.exists()
+        if not path.exists():
+            errors.append(f"GenerationResult image[{index}] does not exist: {path}")
+        elif not path.is_file():
+            summary["error"] = "Not a file"
+            errors.append(f"GenerationResult image[{index}] is not a file: {path}")
+        else:
+            summary["bytes"] = path.stat().st_size
+            summary["sha256"] = _file_sha256(path)
+        summaries.append(summary)
+    return summaries, errors
+
+
+def _resolve_generation_result_image_path(value: Any, base_dir: Path) -> Path | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    path = Path(text)
+    return path if path.is_absolute() else base_dir / path
+
+
+def _rewrite_generation_result_image_paths(
+    path: Path | None,
+    *,
+    source_generation_result: Path | None,
+    source_core_image: Path | None,
+    archived_core_image: Path | None,
+) -> None:
+    if path is None or archived_core_image is None or not path.is_file():
+        return
+
+    try:
+        data = _load_json_mapping(path)
+    except Exception:
+        return
+
+    source_base = source_generation_result.parent if source_generation_result else path.parent
+    relative_archived_image = _relative_path_string(str(archived_core_image), path.parent)
+    changed = False
+
+    images = data.get("images")
+    if isinstance(images, list):
+        for item in images:
+            if not isinstance(item, dict):
+                continue
+            if _generation_result_image_matches(item, source_base, source_core_image):
+                item["path"] = relative_archived_image
+                item["filename"] = item.get("filename") or archived_core_image.name
+                changed = True
+
+    png_info = data.get("png_info")
+    if isinstance(png_info, dict) and isinstance(png_info.get("images"), list):
+        for item in png_info["images"]:
+            if not isinstance(item, dict):
+                continue
+            if _generation_result_image_matches(item, source_base, source_core_image):
+                item["path"] = relative_archived_image
+                changed = True
+
+    if changed:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _generation_result_source_core_image(
+    core_image: str | Path | None,
+    core_source: str | Path,
+) -> Path | None:
+    if core_image:
+        return Path(core_image)
+    core_source_path = Path(core_source)
+    return core_source_path if _is_png_path(core_source_path) else None
+
+
+def _generation_result_image_matches(
+    item: dict[str, Any],
+    source_base: Path,
+    source_core_image: Path | None,
+) -> bool:
+    if source_core_image is None:
+        return False
+    raw_path = item.get("path")
+    if raw_path is None:
+        return False
+    path = Path(str(raw_path))
+    resolved = path if path.is_absolute() else source_base / path
+    try:
+        return resolved.resolve() == source_core_image.resolve()
+    except OSError:
+        return False
 
 
 def _generation_result_evidence_pass(record: dict[str, Any]) -> bool:

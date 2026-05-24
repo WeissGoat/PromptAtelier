@@ -1,6 +1,7 @@
 import io
 import hashlib
 import json
+import shutil
 import struct
 import tempfile
 import unittest
@@ -1065,10 +1066,86 @@ class VerificationTest(unittest.TestCase):
                 record["generation_result_evidence"]["request_body"]["diff"]["diff_count"],
                 0,
             )
+            generation_image = record["generation_result_evidence"]["images"][0]
+            self.assertEqual(generation_image["path"], "image.png")
+            self.assertEqual(generation_image["resolved_path"], "core/image.png")
+            self.assertTrue(generation_image["exists"])
+            self.assertEqual(generation_image["bytes"], core_image.stat().st_size)
+            self.assertEqual(
+                generation_image["sha256"],
+                hashlib.sha256(core_image.read_bytes()).hexdigest(),
+            )
+            archived_generation = json.loads(
+                (case_dir / "core" / "generation_result.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(archived_generation["images"][0]["path"], "image.png")
+            self.assertEqual(archived_generation["png_info"]["images"][0]["path"], "image.png")
             self.assertEqual(record["archive"]["artifacts"]["legacy_image"], "legacy/image.png")
             self.assertEqual(record["composition"]["character_scope"], "foot_detail")
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
+            shutil.rmtree(source_dir)
+            replayed_suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
+            self.assertTrue(replayed_suite["match"])
+            self.assertEqual(replayed_suite["records"][0]["generation_result_evidence"]["result"], "pass")
+
+    def test_build_acceptance_record_fails_generation_result_missing_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [
+                            {
+                                "path": "missing.png",
+                                "filename": "missing.png",
+                                "meta": {"index": 1},
+                            }
+                        ],
+                        "request_body": payload,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="missing_generation_image",
+                legacy_source=legacy,
+                core_source=core,
+                generation_result=generation_result,
+            )
+
+            evidence = record["generation_result_evidence"]
+            self.assertEqual(record["result"], "fail")
+            self.assertEqual(evidence["result"], "fail")
+            self.assertFalse(evidence["images"][0]["exists"])
+            self.assertIn("GenerationResult image[0] does not exist", evidence["errors"][0])
 
     def test_build_acceptance_record_fails_generation_result_request_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
