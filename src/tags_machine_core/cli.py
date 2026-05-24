@@ -17,7 +17,7 @@ from tags_machine_core.contracts import GeneratedImage, GenerationResult, Render
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import NodeReader, migrate_legacy_style_tags
 from tags_machine_core.renderers import NovelAIStyleRepository
-from tags_machine_core.services import GenerationService
+from tags_machine_core.services import GenerationJsonApi, GenerationService
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_acceptance_record,
@@ -383,12 +383,43 @@ def cmd_migrate_style_tags(args) -> int:
     return 0
 
 
+def cmd_api_compose(args) -> int:
+    result = GenerationJsonApi().compose(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
+def cmd_api_render_plan(args) -> int:
+    result = GenerationJsonApi().render_plan(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
+def cmd_api_compose_render_plan(args) -> int:
+    result = GenerationJsonApi().compose_render_plan(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
     data = json.loads(value)
     if not isinstance(data, dict):
         raise ValueError("--params-json must be a JSON object")
+    return data
+
+
+def _load_json_mapping_file(path: str | Path) -> dict[str, Any]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object: {path}")
     return data
 
 
@@ -587,6 +618,30 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan_nodes.add_argument("--params-json", help="Extra renderer params as a JSON object")
     render_plan_nodes.add_argument("--config", help="Load style nodes through this config file")
     render_plan_nodes.set_defaults(func=cmd_render_plan_nodes)
+
+    api_compose = subparsers.add_parser(
+        "api-compose",
+        parents=[output_parent],
+        help="Build a PromptBundle from a JSON API request file",
+    )
+    _add_api_request_arguments(api_compose)
+    api_compose.set_defaults(func=cmd_api_compose)
+
+    api_render_plan = subparsers.add_parser(
+        "api-render-plan",
+        parents=[output_parent],
+        help="Build a RenderRequest from a JSON API request file",
+    )
+    _add_api_request_arguments(api_render_plan)
+    api_render_plan.set_defaults(func=cmd_api_render_plan)
+
+    api_compose_render_plan = subparsers.add_parser(
+        "api-compose-render-plan",
+        parents=[output_parent],
+        help="Build PromptBundle and RenderRequest from one JSON API request file",
+    )
+    _add_api_request_arguments(api_compose_render_plan)
+    api_compose_render_plan.set_defaults(func=cmd_api_compose_render_plan)
 
     generate = subparsers.add_parser(
         "generate",
@@ -842,6 +897,17 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--style-ref")
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
+
+
+def _add_api_request_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("request", help="JSON request file")
+    parser.add_argument("--output", help="Write API response JSON/YAML to this path")
+    parser.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
 
 
 def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> None:

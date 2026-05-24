@@ -29,6 +29,7 @@
 - `compose-agent-nodes`：把外部 agent 结果落成 `PromptBundle`，支持缓存复用
 - `render-plan`：生成 NovelAI / ComfyUI / SD `RenderRequest`，不联网
 - `render-plan-nodes`：从结构化节点生成多后端 `RenderRequest`，不联网
+- `api-compose` / `api-render-plan` / `api-compose-render-plan`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并调用对应后端 client
 - `inspect-node`：读取节点文件或目录
@@ -104,6 +105,32 @@ uv run python -m tags_machine_core execute-render-request core_render_request.js
   --config configs\local.example.yaml `
   --output-dir outputs
 ```
+
+JSON API 边界示例：
+
+```json
+{
+  "compose": {
+    "nodes": {
+      "character": "examples/nodes/characters/homura",
+      "action": "examples/nodes/actions/foot_closeup"
+    },
+    "style": "examples/nodes/styles/anime_comfy"
+  },
+  "render": {
+    "backend": "comfyui",
+    "style": "examples/nodes/styles/anime_comfy",
+    "seed": 123
+  }
+}
+```
+
+```powershell
+uv run python -m tags_machine_core api-compose-render-plan api_request.json `
+  --output api_response.json
+```
+
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。
 
 `generate` 是 NovelAI 的快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片。`execute-render-request` 支持 NovelAI、ComfyUI、SD：NovelAI / SD 会保存返回图片，ComfyUI 当前会把 workflow 排入 `/prompt` 队列并返回 `prompt_id`。
 

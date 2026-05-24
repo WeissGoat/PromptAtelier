@@ -125,7 +125,7 @@ NovelAIClient.generate(render_request)
 
 ### 前端/服务通信
 
-未来如果做前端 UI，推荐的 API 边界是 JSON：
+未来如果做前端 UI，推荐的 API 边界是 JSON。当前 v1 已先落地本地 JSON API 层 `GenerationJsonApi`，并提供 CLI 文件入口；后续 HTTP 服务可以很薄地包在这些函数外面：
 
 ```text
 POST /compose
@@ -136,6 +136,14 @@ PromptBundle JSON -> RenderRequest JSON
 
 POST /generate
 RenderRequest JSON -> GenerationResult JSON
+```
+
+当前本地入口：
+
+```powershell
+uv run python -m tags_machine_core api-compose api_compose.json
+uv run python -m tags_machine_core api-render-plan api_render_plan.json
+uv run python -m tags_machine_core api-compose-render-plan api_request.json --output api_response.json
 ```
 
 UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参数。
@@ -301,6 +309,7 @@ uv run python -m tags_machine_core inspect-style --config configs\local.example.
 uv run python -m tags_machine_core migrate-style-tags F:\my_project\new\tags_machine\design\画风\20260412_2 --output migrated\nodes\styles\20260412_2\node.yaml
 uv run python -m tags_machine_core render-plan --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 uv run python -m tags_machine_core render-plan-nodes --backend comfyui --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123
+uv run python -m tags_machine_core api-compose-render-plan api_request.json --output api_response.json
 uv run python -m tags_machine_core execute-render-request core_render_request.json --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
@@ -312,6 +321,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 说明：
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网，支持 `novelai`、`comfyui`、`sd`。
+- `api-compose` / `api-render-plan` / `api-compose-render-plan` 是面向前端、worker 和队列的本地 JSON 边界，输出同样的 `PromptBundle` / `RenderRequest` 契约。
 - `generate` 当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`。
 - `execute-render-request` 读取已有 `RenderRequest` 后联网执行：NovelAI / SD 会保存图片；ComfyUI 默认会排队、轮询 history、下载图片并保存，使用 `--comfyui-no-wait` 时只返回 `prompt_id`。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
