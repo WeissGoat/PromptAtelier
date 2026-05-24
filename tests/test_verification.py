@@ -288,7 +288,56 @@ class VerificationTest(unittest.TestCase):
             self.assertTrue(record["diff"]["normalized_equal"])
             self.assertEqual(record["diff"]["unapproved_diff_count"], 0)
             self.assertEqual(record["composition"]["character_scope"], "foot_detail")
+            self.assertEqual(record["prompt_bundle_contract_evidence"]["result"], "pass")
             self.assertEqual(record["notes"], ["sample acceptance"])
+
+    def test_verify_acceptance_record_fails_prompt_bundle_contract_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            bundle = root / "bundle.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            bundle.write_text(
+                json.dumps(
+                    {
+                        "prompt": {
+                            "positive": "akemi homura, foot focus",
+                            "negative": "bad feet",
+                        },
+                        "meta": {
+                            "action_ref": "foot_closeup",
+                            "shot": {"body_scope": "foot_detail"},
+                            "constraints": {"forbidden_parts": ["eyes"]},
+                            "composition": {
+                                "character_scope": "foot_detail",
+                                "included_character_sections": ["character", "feet"],
+                                "suppressed_character_sections": ["eyes", "upper_clothes"],
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            record = build_acceptance_record(
+                case_id="foot_detail_homura_001",
+                legacy_source=legacy,
+                core_source=core,
+                prompt_bundle=bundle,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            verified = verify_acceptance_record(record_path)
+
+            self.assertFalse(verified["match"])
+            self.assertEqual(verified["result"], "fail")
+            self.assertEqual(
+                verified["prompt_bundle_contract_evidence"]["forbidden_meta_fields"],
+                ["shot", "constraints"],
+            )
 
     def test_build_acceptance_record_records_image_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -700,6 +749,7 @@ class VerificationTest(unittest.TestCase):
         for record in result["records"]:
             self.assertTrue(record["diff"]["normalized_equal"])
             self.assertEqual(record["generation_result_evidence"]["result"], "pass")
+            self.assertEqual(record["prompt_bundle_contract_evidence"]["result"], "pass")
             self.assertEqual(record["generation_result_evidence"]["image_count"], 1)
             self.assertTrue(record["image_evidence"]["legacy"]["exists"])
             self.assertTrue(record["image_evidence"]["core"]["exists"])

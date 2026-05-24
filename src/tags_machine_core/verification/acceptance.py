@@ -160,11 +160,18 @@ def build_acceptance_record(
             generation_result_path,
             core_data=core_data,
         ),
+        "prompt_bundle_contract_evidence": _prompt_bundle_contract_evidence(
+            Path(prompt_bundle) if prompt_bundle else None,
+        ),
         "notes": notes or [],
     }
     record["result"] = (
         "pass"
-        if not unapproved_diffs and _generation_result_evidence_pass(record)
+        if (
+            not unapproved_diffs
+            and _generation_result_evidence_pass(record)
+            and _prompt_bundle_contract_evidence_pass(record)
+        )
         else "fail"
     )
     return record
@@ -341,6 +348,7 @@ def verify_acceptance_record(path: str | Path) -> dict[str, Any]:
         "normalized": rebuilt["normalized"],
         "image_evidence": rebuilt["image_evidence"],
         "generation_result_evidence": rebuilt["generation_result_evidence"],
+        "prompt_bundle_contract_evidence": rebuilt["prompt_bundle_contract_evidence"],
     }
 
 
@@ -686,6 +694,11 @@ def _generation_result_evidence_pass(record: dict[str, Any]) -> bool:
     return evidence is None or evidence.get("result") == "pass"
 
 
+def _prompt_bundle_contract_evidence_pass(record: dict[str, Any]) -> bool:
+    evidence = record.get("prompt_bundle_contract_evidence")
+    return evidence is None or evidence.get("result") == "pass"
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as f:
@@ -727,6 +740,23 @@ def _load_composition(
             return composition
     composition = ((core_data.get("meta") or {}).get("composition") or {})
     return composition if isinstance(composition, dict) else {}
+
+
+def _prompt_bundle_contract_evidence(prompt_bundle: Path | None) -> dict[str, Any] | None:
+    if prompt_bundle is None:
+        return None
+    bundle_data = _load_json_mapping(prompt_bundle)
+    meta = bundle_data.get("meta") if isinstance(bundle_data.get("meta"), dict) else {}
+    forbidden = [
+        key
+        for key in ("shot", "constraints")
+        if key in meta
+    ]
+    return {
+        "path": str(prompt_bundle),
+        "forbidden_meta_fields": forbidden,
+        "result": "fail" if forbidden else "pass",
+    }
 
 
 def _load_json_mapping(path: Path) -> dict[str, Any]:

@@ -376,7 +376,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
-- `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录。
+- `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录；如果记录包含 `PromptBundle`，回放时会检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - 提供 `--generation-result` 时，验收记录会生成 `generation_result_evidence`，并检查 `GenerationResult.request_body` 与 core `RenderRequest` 归一化后一致。
 - `archive-acceptance-case` 会把旧项目 oracle 和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
@@ -483,7 +483,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 v1 冻结验收补充：
 
-- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来。
+- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来；验收资料包会用 `prompt_bundle_contract_evidence` 回放检查这一点。
 - `meta.composition` 必须记录 composer 的实际选择，而不是重复 action 原始字段；验收时检查 `character_scope`、`included_character_sections`、`suppressed_character_sections` 是否和本次最终 prompt 一致。
 - 如果 core 为了修复旧项目割裂问题而有意过滤某些旧 prompt 片段，例如 `foot_detail` 过滤 `hair`、`eyes`、`upper_clothes`，这类差异不能简单算失败，但必须写进验收记录的 `intentional_differences`，并说明来自哪条统一 composer 规则。
 - 旧项目基准只负责提供 oracle：旧 `run_action` 的最终 prompt、请求体、PNG 内嵌参数和基准图。core 侧验收不得在测试或运行时 import 旧项目代码。
