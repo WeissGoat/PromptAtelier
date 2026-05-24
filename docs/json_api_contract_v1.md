@@ -4,7 +4,7 @@
 
 当前 v1 的正式执行范围只包含 NovelAI。ComfyUI / SD 相关字段和代码可以用于 dry-run 或预研，但不能作为 v1 真实生图验收标准。
 
-`compose-render-plan` 和状态分支响应由运行时 Pydantic 模型约束。状态响应会保持旧契约：未使用的顶层分支直接省略，例如 `requires_agent` 不输出 `prompt_bundle: null`。
+`compose-render-plan` 和状态分支响应由运行时 Pydantic 模型约束。状态响应是互斥分支，并保持旧契约：未使用的顶层分支直接省略，例如 `requires_agent` 不输出 `prompt_bundle: null`。
 
 ## 基本原则
 

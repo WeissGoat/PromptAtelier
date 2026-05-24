@@ -2,7 +2,7 @@ import unittest
 from pydantic import ValidationError
 
 from tags_machine_core.contracts import PromptBundle
-from tags_machine_core.composers import ScriptComposer
+from tags_machine_core.composers import AgentCompositionTask, ScriptComposer
 from tags_machine_core.renderers import NovelAIRenderAdapter
 from tags_machine_core.services.json_api_models import (
     AgentComposeResolution,
@@ -71,6 +71,41 @@ class ContractsTest(unittest.TestCase):
             AgentComposeResolution(status="ready")
         with self.assertRaises(ValidationError):
             ComposeRenderPlanResolution(status="requires_agent")
+
+    def test_json_api_status_response_models_reject_mixed_branches(self):
+        bundle = ScriptComposer().compose_full_prompt(prompt="akemi homura")
+        request = NovelAIRenderAdapter().build_request(bundle, seed=123)
+        task = AgentCompositionTask(
+            nodes={},
+            cache_key="sha256:example",
+        )
+
+        with self.assertRaises(ValidationError):
+            AgentComposeResolution(
+                status="ready",
+                prompt_bundle=bundle,
+                agent_task=task,
+            )
+        with self.assertRaises(ValidationError):
+            AgentComposeResolution(
+                status="requires_agent",
+                prompt_bundle=bundle,
+                agent_task=task,
+            )
+        with self.assertRaises(ValidationError):
+            ComposeRenderPlanResolution(
+                status="ready",
+                prompt_bundle=bundle,
+                render_request=request,
+                agent_task=task,
+            )
+        with self.assertRaises(ValidationError):
+            ComposeRenderPlanResolution(
+                status="requires_agent",
+                prompt_bundle=bundle,
+                render_request=request,
+                agent_task=task,
+            )
 
 
 if __name__ == "__main__":

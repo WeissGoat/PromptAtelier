@@ -24,10 +24,16 @@ class AgentComposeResolution(BaseModel):
 
     @model_validator(mode="after")
     def validate_status_payload(self):
-        if self.status == "ready" and self.prompt_bundle is None:
-            raise ValueError("ready agent resolution requires prompt_bundle")
-        if self.status == "requires_agent" and self.agent_task is None:
-            raise ValueError("requires_agent resolution requires agent_task")
+        if self.status == "ready":
+            if self.prompt_bundle is None:
+                raise ValueError("ready agent resolution requires prompt_bundle")
+            if self.agent_task is not None:
+                raise ValueError("ready agent resolution must not include agent_task")
+        if self.status == "requires_agent":
+            if self.agent_task is None:
+                raise ValueError("requires_agent resolution requires agent_task")
+            if self.prompt_bundle is not None:
+                raise ValueError("requires_agent resolution must not include prompt_bundle")
         return self
 
 
@@ -58,7 +64,16 @@ class ComposeRenderPlanResolution(BaseModel):
     def validate_status_payload(self):
         if self.status == "ready":
             if self.prompt_bundle is None or self.render_request is None:
-                raise ValueError("ready compose render plan resolution requires prompt_bundle and render_request")
-        if self.status == "requires_agent" and self.agent_task is None:
-            raise ValueError("requires_agent compose render plan resolution requires agent_task")
+                raise ValueError(
+                    "ready compose render plan resolution requires prompt_bundle and render_request"
+                )
+            if self.agent_task is not None:
+                raise ValueError("ready compose render plan resolution must not include agent_task")
+        if self.status == "requires_agent":
+            if self.agent_task is None:
+                raise ValueError("requires_agent compose render plan resolution requires agent_task")
+            if self.prompt_bundle is not None or self.render_request is not None:
+                raise ValueError(
+                    "requires_agent compose render plan resolution must not include prompt_bundle or render_request"
+                )
         return self
