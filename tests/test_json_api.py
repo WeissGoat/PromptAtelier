@@ -4,7 +4,10 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.cli import main
 from tags_machine_core.services import GenerationJsonApi
 
@@ -78,6 +81,30 @@ renderers:
         encoding="utf-8",
     )
     return character, action, style
+
+
+def _write_config(root: Path) -> Path:
+    legacy_root = root / "legacy"
+    design_root = legacy_root / "design"
+    output_dir = root / "outputs"
+    design_root.mkdir(parents=True)
+    config = root / "config.yaml"
+    config.write_text(
+        f"""
+legacy:
+  tags_machine_root: "{legacy_root.as_posix()}"
+  design_root: "{design_root.as_posix()}"
+runtime:
+  output_dir: "{output_dir.as_posix()}"
+novelai:
+  base_url: "http://novelai.local"
+  access_token_env: "NAI_ACCESS_TOKEN"
+  timeout: 30
+  retry: 1
+""".strip(),
+        encoding="utf-8",
+    )
+    return config
 
 
 class JsonApiTest(unittest.TestCase):
@@ -204,6 +231,121 @@ class JsonApiTest(unittest.TestCase):
                 written["prompt_bundle"]["meta"]["composition"]["suppressed_character_sections"],
                 ["eyes", "upper_clothes"],
             )
+
+    def test_generate_json_api_uses_injected_executor(self):
+        calls = []
+
+        def executor(render_request: RenderRequest, request_data):
+            calls.append((render_request, request_data))
+            return GenerationResult(
+                backend=render_request.backend,
+                request_body={
+                    "input": render_request.prompt,
+                    "parameters": render_request.params,
+                },
+                png_info={"images": []},
+            )
+
+        request = {
+            "render_request": {
+                "backend": "novelai",
+                "prompt": "akemi homura",
+                "negative_prompt": "bad anatomy",
+                "seed": 123,
+                "params": {"steps": 30},
+            },
+            "queue": {"job_id": "job-1"},
+        }
+
+        result = GenerationJsonApi(generation_executor=executor).generate(request)
+
+        self.assertEqual(result["schema"], "tags-machine-core.generation-result/v1")
+        self.assertEqual(result["backend"], "novelai")
+        self.assertEqual(result["request_body"]["input"], "akemi homura")
+        self.assertEqual(result["request_body"]["parameters"]["steps"], 30)
+        self.assertEqual(calls[0][0].prompt, "akemi homura")
+        self.assertEqual(calls[0][1]["queue"]["job_id"], "job-1")
+
+    def test_generate_json_api_requires_executor(self):
+        with self.assertRaises(ValueError) as raised:
+            GenerationJsonApi().generate(
+                {
+                    "render_request": {
+                        "backend": "novelai",
+                        "prompt": "akemi homura",
+                    }
+                }
+            )
+
+        self.assertIn("generation_executor", str(raised.exception))
+
+    def test_cli_api_generate_executes_novelai_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _write_config(root)
+            output_dir = root / "api_outputs"
+            request = root / "api_generate.json"
+            response = root / "api_generate_response.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "render_request": {
+                            "backend": "novelai",
+                            "prompt": "akemi homura",
+                            "negative_prompt": "bad anatomy",
+                            "seed": 123,
+                            "params": {"steps": 30},
+                        },
+                        "output_dir": str(output_dir),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.dict("os.environ", {"NAI_ACCESS_TOKEN": "token"}),
+                patch("tags_machine_core.cli.NovelAIClient") as client_cls,
+            ):
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="nai_result", content=b"image-bytes")
+                ]
+                client.build_payload.return_value = {
+                    "input": "akemi homura",
+                    "parameters": {"steps": 30},
+                }
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "api-generate",
+                            str(request),
+                            "--config",
+                            str(config),
+                            "--output",
+                            str(response),
+                        ]
+                    )
+
+            printed = json.loads(stdout.getvalue())
+            written = json.loads(response.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            client_cls.assert_called_once_with(
+                access_token="token",
+                base_url="http://novelai.local",
+                timeout=30,
+                retry=1,
+            )
+            client.generate_images.assert_called_once()
+            self.assertEqual(client.generate_images.call_args.args[0].prompt, "akemi homura")
+            self.assertEqual(printed["schema"], "tags-machine-core.generation-result/v1")
+            self.assertEqual(printed["backend"], "novelai")
+            self.assertEqual(written["request_body"]["parameters"]["steps"], 30)
+            saved_path = Path(written["images"][0]["path"])
+            self.assertEqual(saved_path.parent, output_dir)
+            self.assertEqual(saved_path.suffix, ".png")
+            self.assertEqual(saved_path.read_bytes(), b"image-bytes")
 
 
 if __name__ == "__main__":

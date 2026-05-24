@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
 
-from tags_machine_core.contracts import PromptBundle
+from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.services.generation_service import GenerationService
+
+GenerationExecutor = Callable[[RenderRequest, Mapping[str, Any]], GenerationResult | Mapping[str, Any]]
 
 
 class GenerationJsonApi:
@@ -18,9 +21,11 @@ class GenerationJsonApi:
         *,
         service: GenerationService | None = None,
         node_reader: NodeReader | None = None,
+        generation_executor: GenerationExecutor | None = None,
     ):
         self.service = service or GenerationService()
         self.node_reader = node_reader or NodeReader()
+        self.generation_executor = generation_executor
 
     def compose(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "compose request")
@@ -96,6 +101,19 @@ class GenerationJsonApi:
             "prompt_bundle": bundle,
             "render_request": self.render_plan(render_request),
         }
+
+    def generate(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        data = _mapping(request, "generate request")
+        request_data = data.get("render_request") or data.get("request")
+        if request_data is None:
+            raise ValueError("generate request must include render_request")
+        render_request = RenderRequest.model_validate(request_data)
+        if self.generation_executor is None:
+            raise ValueError("generate request requires a generation_executor")
+        result = self.generation_executor(render_request, data)
+        if isinstance(result, GenerationResult):
+            return to_jsonable(result)
+        return to_jsonable(GenerationResult.model_validate(result))
 
     def _load_optional_node(self, value: Any) -> NodeDocument | None:
         if value is None or value == "":

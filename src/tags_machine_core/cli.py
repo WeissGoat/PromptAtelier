@@ -503,6 +503,28 @@ def cmd_api_compose_render_plan(args) -> int:
     return 0
 
 
+def cmd_api_generate(args) -> int:
+    config = load_config(Path(args.config))
+
+    def executor(request: RenderRequest, request_data: dict[str, Any]) -> GenerationResult:
+        if request.backend != "novelai":
+            raise ValueError("api-generate currently supports only NovelAI in the v1 scope")
+        return _execute_novelai_generation(
+            config,
+            request,
+            output_dir=args.output_dir or request_data.get("output_dir"),
+            image_format=config.defaults.image_format,
+        )
+
+    result = GenerationJsonApi(generation_executor=executor).generate(
+        _load_json_mapping_file(args.request)
+    )
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
@@ -854,6 +876,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_api_request_arguments(api_compose_render_plan)
     api_compose_render_plan.set_defaults(func=cmd_api_compose_render_plan)
+
+    api_generate = subparsers.add_parser(
+        "api-generate",
+        parents=[output_parent],
+        help="Execute a RenderRequest JSON API request and return a GenerationResult",
+    )
+    _add_api_request_arguments(api_generate)
+    api_generate.add_argument("--config", required=True, help="Load runtime and NovelAI config")
+    api_generate.add_argument("--output-dir", help="Override generated image output directory")
+    api_generate.set_defaults(func=cmd_api_generate)
 
     generate = subparsers.add_parser(
         "generate",

@@ -32,7 +32,7 @@
 - `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
-- `api-compose` / `api-render-plan` / `api-compose-render-plan`：从 JSON 请求文件完成前端/worker 边界往返
+- `api-compose` / `api-render-plan` / `api-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并调用对应后端 client
 - `inspect-node`：读取节点文件或目录
@@ -156,7 +156,30 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json `
   --output api_response.json
 ```
 
-`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。已有 `RenderRequest` 可以通过本地 JSON API 执行：
+
+```json
+{
+  "render_request": {
+    "backend": "novelai",
+    "prompt": "akemi homura, foot focus",
+    "negative_prompt": "bad anatomy",
+    "seed": 123,
+    "params": {
+      "n_samples": 3
+    }
+  },
+  "output_dir": "outputs"
+}
+```
+
+```powershell
+uv run python -m tags_machine_core api-generate api_generate.json `
+  --config configs\local.example.yaml `
+  --output api_generate_response.json
+```
+
+`api-generate` 对应未来 `POST /generate` 的本地文件入口，输入 `RenderRequest` JSON，输出 `GenerationResult` JSON；v1 正式执行范围只包含 NovelAI。
 
 `generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 当前验收只要求 NovelAI 链路稳定；ComfyUI / SD WebUI / Forge 入口属于预研代码，不作为本阶段接入承诺。
 
