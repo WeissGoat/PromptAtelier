@@ -43,7 +43,11 @@ class ComfyUIClient:
         return payload
 
     def build_workflow(self, request: RenderRequest) -> dict[str, Any]:
-        workflow = request.params.get("workflow_json") or request.params.get("workflow")
+        workflow = (
+            request.params["workflow_json"]
+            if "workflow_json" in request.params
+            else request.params.get("workflow")
+        )
         if not isinstance(workflow, dict):
             raise ValueError(
                 "ComfyUIClient requires params.workflow_json or params.workflow to be a workflow mapping"

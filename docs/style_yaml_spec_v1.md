@@ -170,6 +170,7 @@ renderers:
 renderers:
   comfyui:
     workflow: portrait_workflow
+    workflow_path: workflows/portrait.json
     checkpoint: anime_comfy.safetensors
     loras:
       - name: lineart
@@ -187,7 +188,11 @@ renderers:
       scheduler: karras
 ```
 
-ComfyUI adapter 只产出 dry-run `RenderRequest`，真实 workflow 展开和节点 patch 由后续 client / executor 负责。
+`workflow` 是给人和 UI 看的工作流标识，`workflow_path` 是相对 style 节点目录的 ComfyUI workflow JSON 路径。adapter 会把 JSON 展开到 `RenderRequest.params.workflow_json`，`execute-render-request` 可以直接把它交给 ComfyUI `/prompt`。如果 workflow JSON 已经内联，也可以直接写 `workflow_json`。
+
+`node_overrides` 使用点路径覆盖 workflow，例如 `"12.inputs.cfg": 6.5`。它在 client 排队前应用，适合把 prompt、seed、cfg、尺寸等值写入具体 ComfyUI 节点。
+
+覆盖值可以使用 adapter 提供的占位符，例如 `{positive_prompt}`、`{negative_prompt}`、`{seed}`、`{width}`、`{height}`、`{steps}`、`{cfg}`、`{sampler}`、`{scheduler}`。当整个值正好是一个占位符时，adapter 会保留原始类型，例如 `{seed}` 仍然是整数；当占位符嵌在字符串中时，会按字符串替换，例如 `tmc_{seed}_{width}x{height}`。
 
 ## SD 配置
 

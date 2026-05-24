@@ -354,6 +354,74 @@ sd:
             self.assertEqual(data["params"]["scheduler"], "karras")
             self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
 
+    def test_render_plan_nodes_expands_comfyui_workflow_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            style = root / "style_with_workflow"
+            workflow_dir = style / "workflows"
+            workflow_dir.mkdir(parents=True)
+            (workflow_dir / "portrait.json").write_text(
+                json.dumps(
+                    {
+                        "12": {"inputs": {"cfg": 5.0}},
+                        "17": {"inputs": {"text": ""}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (style / "node.yaml").write_text(
+                """
+schema: tags-machine.style/v1
+kind: style
+id: comfy_workflow_style
+renderers:
+  comfyui:
+    workflow: portrait_workflow
+    workflow_path: workflows/portrait.json
+    checkpoint: anime_comfy.safetensors
+    node_overrides:
+      "17.inputs.text": "{positive_prompt}"
+      "18.inputs.seed": "{seed}"
+      "18.inputs.width": "{width}"
+    params:
+      steps: 32
+      cfg: 6.5
+""".strip(),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "comfyui",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "123",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(data["backend"], "comfyui")
+            self.assertEqual(data["params"]["workflow"], "portrait_workflow")
+            self.assertEqual(data["params"]["workflow_json"]["12"]["inputs"]["cfg"], 5.0)
+            self.assertEqual(data["params"]["workflow_json"]["17"]["inputs"]["text"], "")
+            self.assertEqual(
+                data["params"]["node_overrides"]["17.inputs.text"],
+                "akemi homura, bare soles, foot focus",
+            )
+            self.assertEqual(data["params"]["node_overrides"]["18.inputs.seed"], 123)
+            self.assertEqual(data["params"]["node_overrides"]["18.inputs.width"], 1024)
+
     def test_render_plan_nodes_supports_novelai_structured_style_node(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

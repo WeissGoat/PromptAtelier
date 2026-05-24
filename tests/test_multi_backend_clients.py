@@ -76,6 +76,18 @@ class MultiBackendClientTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.build_payload(request)
 
+    def test_comfyui_client_accepts_empty_workflow_json(self):
+        client = ComfyUIClient()
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="akemi homura",
+            params={"workflow_json": {}},
+        )
+
+        payload = client.build_payload(request)
+
+        self.assertEqual(payload["prompt"], {})
+
     def test_comfyui_client_error_keeps_payload_sanitized(self):
         session = FakePostSession(FakeJsonResponse(400, data={"error": "bad"}, text="bad request"))
         client = ComfyUIClient(http_client=session)

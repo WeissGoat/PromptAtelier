@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
@@ -36,6 +38,7 @@ class ComfyUIRenderAdapter:
             width=width,
             height=height,
             model=model,
+            style=style,
             style_payload=style_payload,
             params={**style_params, **(params or {})},
         )
@@ -59,6 +62,7 @@ class ComfyUIRenderAdapter:
         width: int,
         height: int,
         model: str | None,
+        style: NodeDocument | dict[str, Any] | None,
         style_payload: dict[str, Any],
         params: dict[str, Any],
     ) -> dict[str, Any]:
@@ -70,12 +74,10 @@ class ComfyUIRenderAdapter:
             or style_payload.get("model")
             or "default_comfy_checkpoint"
         )
-        workflow = (
-            params.get("workflow")
-            or params.get("workflow_template")
-            or style_payload.get("workflow")
-            or style_payload.get("workflow_template")
-            or "default"
+        workflow, workflow_json = self._resolve_workflow(
+            style=style,
+            style_payload=style_payload,
+            params=params,
         )
         final_params: dict[str, Any] = {
             "workflow": workflow,
@@ -97,7 +99,104 @@ class ComfyUIRenderAdapter:
                 style_payload.get("node_overrides", {}),
             ),
         }
+        if workflow_json is not None:
+            final_params["workflow_json"] = workflow_json
+        final_params["node_overrides"] = self._resolve_node_override_templates(
+            final_params["node_overrides"],
+            final_params,
+        )
         final_params.update(
-            preserve_extra_params(params, reserved=set(final_params) | {"model", "cfg_scale"})
+            preserve_extra_params(
+                params,
+                reserved=set(final_params)
+                | {
+                    "model",
+                    "cfg_scale",
+                    "workflow_path",
+                    "workflow_template_path",
+                    "workflow_template",
+                },
+            )
         )
         return final_params
+
+    def _resolve_workflow(
+        self,
+        *,
+        style: NodeDocument | dict[str, Any] | None,
+        style_payload: dict[str, Any],
+        params: dict[str, Any],
+    ) -> tuple[str, dict[str, Any] | None]:
+        inline_workflow = (
+            params["workflow_json"]
+            if "workflow_json" in params
+            else style_payload.get("workflow_json")
+        )
+        if inline_workflow is not None:
+            if not isinstance(inline_workflow, dict):
+                raise ValueError("ComfyUI workflow_json must be a mapping")
+            workflow_label = params.get("workflow") or style_payload.get("workflow") or "inline"
+            return str(workflow_label), copy.deepcopy(inline_workflow)
+
+        workflow_path = (
+            params.get("workflow_path")
+            or params.get("workflow_template_path")
+            or style_payload.get("workflow_path")
+            or style_payload.get("workflow_template_path")
+        )
+        workflow_label = (
+            params.get("workflow")
+            or params.get("workflow_template")
+            or style_payload.get("workflow")
+            or style_payload.get("workflow_template")
+            or (Path(str(workflow_path)).stem if workflow_path else "default")
+        )
+        if workflow_path:
+            path = self._resolve_workflow_path(workflow_path, style)
+            return str(workflow_label), self._load_workflow_json(path)
+        return str(workflow_label), None
+
+    def _resolve_workflow_path(
+        self,
+        value: str | Path,
+        style: NodeDocument | dict[str, Any] | None,
+    ) -> Path:
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        if isinstance(style, NodeDocument) and style.path is not None:
+            return style.path / path
+        return path
+
+    def _load_workflow_json(self, path: Path) -> dict[str, Any]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError(f"ComfyUI workflow JSON must be a mapping: {path}")
+        return data
+
+    def _resolve_node_override_templates(
+        self,
+        value: Any,
+        context: dict[str, Any],
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: self._resolve_node_override_templates(item, context)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._resolve_node_override_templates(item, context) for item in value]
+        if not isinstance(value, str):
+            return value
+
+        if value.startswith("{") and value.endswith("}") and value.count("{") == 1:
+            key = value[1:-1]
+            if key in context:
+                return context[key]
+
+        resolved = value
+        for key, item in context.items():
+            if isinstance(item, (dict, list)):
+                continue
+            resolved = resolved.replace(f"{{{key}}}", str(item))
+        return resolved

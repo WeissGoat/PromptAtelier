@@ -39,6 +39,7 @@ renderers:
 
   comfyui:
     workflow: portrait_workflow
+    workflow_path: workflows/portrait.json
     checkpoint: anime_comfy.safetensors
     loras:
       - name: lineart
@@ -46,7 +47,17 @@ renderers:
     embeddings: []
     control:
       enabled: false
-    node_overrides: {}
+    node_overrides:
+      "1.inputs.ckpt_name": anime_comfy.safetensors
+      "2.inputs.text": "{positive_prompt}"
+      "3.inputs.text": "{negative_prompt}"
+      "4.inputs.width": "{width}"
+      "4.inputs.height": "{height}"
+      "5.inputs.seed": "{seed}"
+      "5.inputs.steps": "{steps}"
+      "5.inputs.cfg": "{cfg}"
+      "5.inputs.sampler_name": "{sampler}"
+      "5.inputs.scheduler": "{scheduler}"
     params:
       steps: 32
       cfg: 6.5

@@ -270,13 +270,14 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 当前已完成 adapter 和基础 client 第一版：
 
 - 根据 `style_ref` 选择工作流模板。
-- 可从结构化 style node 的 `renderers.comfyui` 读取 workflow、checkpoint、LoRA、embedding、control、node_overrides 等后端配置。
+- 可从结构化 style node 的 `renderers.comfyui` 读取 workflow、workflow_path、workflow_json、checkpoint、LoRA、embedding、control、node_overrides 等后端配置。
+- adapter 会把 `workflow_path` 指向的 JSON 展开到 `RenderRequest.params.workflow_json`，也支持直接内联 `workflow_json`。
 - `PromptBundle` 不关心具体 ComfyUI 节点编号。
 - adapter 产出统一 `RenderRequest` 执行计划，不负责联网。
 - CLI 可通过 `render-plan --backend comfyui` 或 `render-plan-nodes --backend comfyui` 生成 dry-run 请求。
 - `execute-render-request` 可读取已有 `RenderRequest`，调用 ComfyUI `/prompt` 排队，并在 `GenerationResult.png_info.comfyui` 里记录 `prompt_id` 和原始响应。
 
-后续仍需要补齐 workflow JSON 模板加载、队列状态轮询、图片下载和更完整的节点级 patch。
+后续仍需要补齐队列状态轮询、图片下载和更完整的节点级 patch。
 
 ### SD adapter
 
@@ -406,6 +407,15 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 局部镜头样例需要额外检查 `PromptBundle.meta.composition`：例如 `foot_detail` 必须包含脚部相关 section，并抑制 `hair`、`eyes`、`upper_clothes` 等不应进入脚底特写的角色 section。
 - 新增 `run-prompt` / agent composer 入口时，必须能和旧 `run_action` 在同一基准样例上产出等价的 render plan；若 prompt 表达不完全相同，需要给出差异说明和可接受范围。
 
+v1 冻结验收补充：
+
+- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来。
+- `meta.composition` 必须记录 composer 的实际选择，而不是重复 action 原始字段；验收时检查 `character_scope`、`included_character_sections`、`suppressed_character_sections` 是否和本次最终 prompt 一致。
+- 如果 core 为了修复旧项目割裂问题而有意过滤某些旧 prompt 片段，例如 `foot_detail` 过滤 `hair`、`eyes`、`upper_clothes`，这类差异不能简单算失败，但必须写进验收记录的 `intentional_differences`，并说明来自哪条统一 composer 规则。
+- 旧项目基准只负责提供 oracle：旧 `run_action` 的最终 prompt、请求体、PNG 内嵌参数和基准图。core 侧验收不得在测试或运行时 import 旧项目代码。
+- `run-prompt`、脚本 composer、agent composer 三种入口只要目标是同一个样例，最终都必须能落到可比较的 `PromptBundle` 和 `RenderRequest`；验收通过线看归一化 diff，而不是看入口名称。
+- 新增任何节点格式字段时，必须能回答它被哪个模块消费；没有消费方的字段先放入 `meta.extra` 或节点 `extra`，不得提升为 v1 契约字段。
+
 模块通信格式的通过线：
 
 - `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。
@@ -458,6 +468,9 @@ diff:
   whitelist:
     - path: $.parameters.sampler
       reason: adapter normalized sampler alias
+intentional_differences:
+  - path: $.prompt.positive
+    reason: foot_detail 按统一 composer 规则过滤 hair / eyes / upper_clothes
 composition:
   character_scope: foot_detail
   included_character_sections: [character, copyright, body, feet, legwear, footwear]
