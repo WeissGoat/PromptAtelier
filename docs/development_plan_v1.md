@@ -285,8 +285,9 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 - CLI 可通过 `render-plan --backend comfyui` 或 `render-plan-nodes --backend comfyui` 生成 dry-run 请求。
 - `execute-render-request` 可读取已有 `RenderRequest`，调用 ComfyUI `/prompt` 排队，轮询 `/history/{prompt_id}`，通过 `/view` 下载输出图片，并写入 `GenerationResult.images`。
 - `GenerationResult.png_info.comfyui` 会记录 `prompt_id`、排队响应和 history；如果使用 `--comfyui-no-wait`，则只排队并返回 `prompt_id`。
+- history 进入 `error` / `failed` 状态时，client 会抛出带 `prompt_id`、status、history 摘要的 `ComfyUIClientError`，避免把失败误判成“完成但无图”。
 
-后续仍需要补齐更完整的节点级 patch、失败状态归因和更细的 ComfyUI workflow 校准。
+后续仍需要补齐更完整的节点级 patch 和更细的 ComfyUI workflow 校准。
 
 ### SD adapter
 

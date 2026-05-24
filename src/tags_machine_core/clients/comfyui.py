@@ -158,10 +158,19 @@ class ComfyUIClient:
         while True:
             history = self.get_history(prompt_id)
             entry = self._history_entry(history, prompt_id)
-            if entry is not None and (
-                self._history_has_images(entry) or self._history_is_terminal(entry)
-            ):
-                return history
+            if entry is not None:
+                if self._history_failed(entry):
+                    raise ComfyUIClientError(
+                        status_code=200,
+                        response_text=self._history_failure_text(prompt_id, entry),
+                        sanitized_payload={
+                            "prompt_id": prompt_id,
+                            "status": entry.get("status"),
+                            "history": sanitize_json_for_display(history),
+                        },
+                    )
+                if self._history_has_images(entry) or self._history_completed(entry):
+                    return history
             if time.monotonic() - started_at >= max_wait:
                 raise TimeoutError(f"Timed out waiting for ComfyUI prompt: {prompt_id}")
             time.sleep(poll_interval)
@@ -264,13 +273,29 @@ class ComfyUIClient:
                 return True
         return False
 
-    def _history_is_terminal(self, entry: dict[str, Any]) -> bool:
+    def _history_completed(self, entry: dict[str, Any]) -> bool:
         status = entry.get("status")
         if not isinstance(status, dict):
             return False
-        if status.get("completed") is True:
-            return True
-        return str(status.get("status_str") or "").lower() in {"success", "error", "failed"}
+        return status.get("completed") is True or self._status_text(status) == "success"
+
+    def _history_failed(self, entry: dict[str, Any]) -> bool:
+        status = entry.get("status")
+        if not isinstance(status, dict):
+            return False
+        return self._status_text(status) in {"error", "failed"}
+
+    def _history_failure_text(self, prompt_id: str, entry: dict[str, Any]) -> str:
+        status = entry.get("status") if isinstance(entry.get("status"), dict) else {}
+        messages = entry.get("messages")
+        error = entry.get("error")
+        return (
+            f"ComfyUI prompt failed: {prompt_id}; "
+            f"status={status}; error={error}; messages={messages}"
+        )
+
+    def _status_text(self, status: dict[str, Any]) -> str:
+        return str(status.get("status_str") or status.get("status") or "").lower()
 
     def _set_workflow_value(self, workflow: dict[str, Any], path: str, value: Any) -> None:
         parts = [part for part in path.split(".") if part]

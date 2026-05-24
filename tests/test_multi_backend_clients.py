@@ -207,6 +207,39 @@ class MultiBackendClientTest(unittest.TestCase):
         self.assertEqual(result.history, history)
         self.assertEqual(result.images, [])
 
+    def test_comfyui_client_raises_on_failed_history(self):
+        history = {
+            "abc123": {
+                "outputs": {},
+                "status": {"status_str": "error", "completed": False},
+                "error": {"node_id": "17", "exception_message": "missing checkpoint"},
+                "messages": [["execution_error", {"node_id": "17"}]],
+            }
+        }
+        session = FakeComfySession(
+            FakeJsonResponse(200, data={"prompt_id": "abc123"}),
+            [FakeJsonResponse(200, data=history)],
+        )
+        client = ComfyUIClient(http_client=session)
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="akemi homura",
+            params={"workflow_json": {}},
+        )
+
+        with self.assertRaises(ComfyUIClientError) as ctx:
+            client.generate_images(request, poll_interval=0, max_wait_seconds=1)
+
+        self.assertEqual(ctx.exception.status_code, 200)
+        self.assertIn("ComfyUI prompt failed: abc123", ctx.exception.response_text)
+        self.assertIn("missing checkpoint", ctx.exception.response_text)
+        self.assertEqual(ctx.exception.sanitized_payload["prompt_id"], "abc123")
+        self.assertEqual(
+            ctx.exception.sanitized_payload["status"],
+            {"status_str": "error", "completed": False},
+        )
+        self.assertEqual(ctx.exception.sanitized_payload["history"], history)
+
     def test_sd_client_builds_txt2img_payload_and_decodes_images(self):
         image_bytes = b"png-bytes"
         image_base64 = base64.b64encode(image_bytes).decode("ascii")
