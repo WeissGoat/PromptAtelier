@@ -636,7 +636,9 @@ class JsonApiTest(unittest.TestCase):
             api = GenerationJsonApi()
             cases = [
                 ("top_level_cache_dir", {"cache_dir": str(root / "top-level")}, {}),
+                ("top_level_cache_root", {"cache_root": str(root / "top-level-root")}, {}),
                 ("agent_cache_dir", {}, {"cache_dir": str(root / "agent-level")}),
+                ("agent_cache_root", {}, {"cache_root": str(root / "agent-level-root")}),
                 ("cache_object_cache_root", {"cache": {"cache_root": str(root / "cache-object")}}, {}),
             ]
 
