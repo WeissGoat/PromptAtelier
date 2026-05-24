@@ -6,6 +6,7 @@ import yaml
 
 from tags_machine_core.nodes import (
     NodeReader,
+    audit_legacy_tags,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
@@ -251,6 +252,53 @@ shoes, shoes|boots|loafers
             self.assertNotIn("rules", node)
             self.assertNotIn("profiles", node)
             self.assertIn("leg_wear, stirrup legwear|toeless legwear", node["legacy"]["raw_sections"]["extension"])
+
+    def test_audit_legacy_character_tags_reports_review_risks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reviewed = root / "needs_review"
+            reviewed.mkdir()
+            (reviewed / "tags.txt").write_text(
+                """
+sample_character,sample_copyright
+blue_eyes,signature_motif
+=
+leg_wear, stirrup legwear|toeless legwear
+""".strip(),
+                encoding="utf-8",
+            )
+            clean = root / "clean"
+            clean.mkdir()
+            (clean / "tags.txt").write_text(
+                """
+clean_character,clean_copyright
+blue_eyes,short_hair,jacket
+""".strip(),
+                encoding="utf-8",
+            )
+
+            report = audit_legacy_tags(root, kind="character")
+
+            self.assertEqual(report["schema"], "tags-machine-core.legacy-tags-audit/v1")
+            self.assertEqual(report["kind"], "character")
+            self.assertEqual(report["summary"]["total"], 2)
+            self.assertEqual(report["summary"]["ok"], 1)
+            self.assertEqual(report["summary"]["needs_review"], 1)
+            self.assertEqual(report["summary"]["errors"], 0)
+            self.assertEqual(report["summary"]["issue_counts"]["character_unclassified_tags"], 1)
+            self.assertEqual(report["summary"]["issue_counts"]["character_legacy_extension_archived"], 1)
+            items_by_id = {item["node_id"]: item for item in report["items"]}
+            self.assertEqual(items_by_id["clean"]["status"], "ok")
+            self.assertEqual(items_by_id["needs_review"]["status"], "needs_review")
+            issue_codes = {
+                issue["code"]
+                for issue in items_by_id["needs_review"]["issues"]
+            }
+            self.assertEqual(
+                issue_codes,
+                {"character_unclassified_tags", "character_legacy_extension_archived"},
+            )
+            self.assertEqual(items_by_id["needs_review"]["character_id"], "sample_character")
 
     def test_read_migrated_character_meta_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:

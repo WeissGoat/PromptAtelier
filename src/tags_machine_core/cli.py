@@ -15,6 +15,7 @@ from tags_machine_core.execution import execute_render_request as _execute_rende
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import (
     NodeReader,
+    audit_legacy_tags,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
@@ -465,6 +466,14 @@ def cmd_migrate_background_tags(args) -> int:
             raise FileExistsError(f"Output already exists, pass --overwrite to replace: {output_path}")
         _write_structured_output(node, output_path, output_format=args.format)
     print_json(node, full=args.full)
+    return 0
+
+
+def cmd_audit_legacy_tags(args) -> int:
+    report = audit_legacy_tags(args.source, kind=args.kind)
+    if args.output:
+        _write_structured_output(report, Path(args.output), output_format=args.format)
+    print_json(report, full=args.full)
     return 0
 
 
@@ -1354,6 +1363,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace --output if it already exists",
     )
     migrate_background_tags.set_defaults(func=cmd_migrate_background_tags)
+
+    audit_legacy_tags_parser = subparsers.add_parser(
+        "audit-legacy-tags",
+        parents=[output_parent],
+        help="Audit legacy tags.txt files before structured node migration",
+    )
+    audit_legacy_tags_parser.add_argument(
+        "source",
+        help="Legacy tags root, node directory, or tags.txt path",
+    )
+    audit_legacy_tags_parser.add_argument(
+        "--kind",
+        required=True,
+        choices=("style", "character", "action", "background"),
+        help="Legacy node kind to audit",
+    )
+    audit_legacy_tags_parser.add_argument("--output", help="Write audit report JSON/YAML")
+    audit_legacy_tags_parser.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output file format when --output is used",
+    )
+    audit_legacy_tags_parser.set_defaults(func=cmd_audit_legacy_tags)
 
     return parser
 

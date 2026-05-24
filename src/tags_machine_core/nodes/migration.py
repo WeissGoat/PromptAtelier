@@ -17,6 +17,61 @@ LEGACY_PROMPT_DIRECTIVE_KEYS = {
 }
 
 
+def audit_legacy_tags(source: str | Path, *, kind: str) -> dict[str, Any]:
+    """扫描旧 tags.txt 并生成迁移预检报告；只读源目录，不写旧项目。"""
+    migrators = {
+        "style": migrate_legacy_style_tags,
+        "character": migrate_legacy_character_tags,
+        "action": migrate_legacy_action_tags,
+        "background": migrate_legacy_background_tags,
+    }
+    if kind not in migrators:
+        raise ValueError(f"Unsupported legacy tag kind: {kind}")
+
+    source_path = Path(source)
+    tags_paths = _collect_legacy_tags_paths(source_path)
+    items: list[dict[str, Any]] = []
+    issue_counts: dict[str, int] = {}
+
+    for tags_path in tags_paths:
+        try:
+            node = migrators[kind](tags_path)
+            item = _audit_migrated_node(node, kind=kind, tags_path=tags_path)
+        except Exception as exc:  # pragma: no cover - 具体错误形态由被审计文件决定
+            item = {
+                "source_file": str(tags_path),
+                "source_dir": str(tags_path.parent),
+                "kind": kind,
+                "status": "error",
+                "issues": [
+                    {
+                        "code": "migration_error",
+                        "severity": "error",
+                        "message": str(exc),
+                    }
+                ],
+            }
+        items.append(item)
+        for issue in item.get("issues", []):
+            code = str(issue.get("code") or "unknown")
+            issue_counts[code] = issue_counts.get(code, 0) + 1
+
+    summary = {
+        "total": len(items),
+        "ok": sum(1 for item in items if item["status"] == "ok"),
+        "needs_review": sum(1 for item in items if item["status"] == "needs_review"),
+        "errors": sum(1 for item in items if item["status"] == "error"),
+        "issue_counts": dict(sorted(issue_counts.items())),
+    }
+    return {
+        "schema": "tags-machine-core.legacy-tags-audit/v1",
+        "kind": kind,
+        "source": str(source_path),
+        "summary": summary,
+        "items": items,
+    }
+
+
 def migrate_legacy_style_tags(
     source: str | Path,
     *,
@@ -239,6 +294,261 @@ def _resolve_tags_path(source: str | Path) -> Path:
     if path.name.lower() != "tags.txt":
         raise ValueError(f"Expected a tags.txt file or directory containing tags.txt: {path}")
     return path
+
+
+def _collect_legacy_tags_paths(source: Path) -> list[Path]:
+    if source.is_file():
+        return [_resolve_tags_path(source)]
+    if not source.exists():
+        raise FileNotFoundError(f"Legacy tags source not found: {source}")
+    direct_tags = source / "tags.txt"
+    if direct_tags.exists():
+        return [direct_tags]
+    return sorted(path for path in source.rglob("tags.txt") if path.is_file())
+
+
+def _audit_migrated_node(node: dict[str, Any], *, kind: str, tags_path: Path) -> dict[str, Any]:
+    tags = node.get("tags") if isinstance(node.get("tags"), dict) else {}
+    issues: list[dict[str, Any]] = []
+    extension_keys = _legacy_extension_keys(node)
+
+    if kind == "style":
+        _audit_style_node(node, tags, extension_keys, issues)
+    elif kind == "character":
+        _audit_character_node(node, tags, extension_keys, issues)
+    elif kind == "action":
+        _audit_action_node(node, tags, extension_keys, issues)
+    elif kind == "background":
+        _audit_background_node(node, tags, extension_keys, issues)
+
+    needs_review = any(issue.get("severity") != "info" for issue in issues)
+    item: dict[str, Any] = {
+        "source_file": str(tags_path),
+        "source_dir": str(tags_path.parent),
+        "kind": kind,
+        "status": "needs_review" if needs_review else "ok",
+        "node_id": node.get("id"),
+        "name": node.get("name"),
+        "schema": node.get("schema"),
+        "tag_counts_by_section": {
+            str(section): len(values) for section, values in sorted(tags.items())
+        },
+        "negative_prompt_count": len(node.get("negative_prompt") or []),
+        "extension_keys": extension_keys,
+        "issues": issues,
+    }
+    if kind == "action":
+        item["character_scope"] = node.get("character_scope")
+        item["character_scope_source"] = _action_scope_source(node)
+    if kind == "character":
+        item["character_id"] = node.get("character_id")
+        if node.get("variant"):
+            item["variant"] = node.get("variant")
+    return item
+
+
+def _audit_style_node(
+    node: dict[str, Any],
+    tags: dict[str, list[str]],
+    extension_keys: list[str],
+    issues: list[dict[str, Any]],
+) -> None:
+    if not tags.get("style"):
+        _append_issue(issues, "empty_style_tags", "review", "画风节点没有可迁移的正向 tags。")
+    known_keys = {
+        "origin_uc",
+        "uc",
+        "after_uc",
+        "gen_json",
+        "not_quailty_prompts",
+        "not_quality_prompts",
+    }
+    unknown_keys = [key for key in extension_keys if key not in known_keys]
+    if unknown_keys:
+        _append_issue(
+            issues,
+            "style_unknown_legacy_extension",
+            "review",
+            "画风包含未提升为结构化字段的旧扩展，需要确认是否仍要保留。",
+            samples=unknown_keys,
+            count=len(unknown_keys),
+        )
+    params = ((node.get("renderers") or {}).get("novelai") or {}).get("params") or {}
+    reference_keys = [
+        key
+        for key in (
+            "reference_image_multiple",
+            "reference_strength_multiple",
+            "reference_information_extracted_multiple",
+            "director_reference_images",
+        )
+        if key in params
+    ]
+    if reference_keys:
+        _append_issue(
+            issues,
+            "style_reference_params_present",
+            "info",
+            "画风包含 NovelAI reference/vibe 参数，迁移后验收需要覆盖这些数组字段。",
+            samples=reference_keys,
+            count=len(reference_keys),
+        )
+
+
+def _audit_character_node(
+    node: dict[str, Any],
+    tags: dict[str, list[str]],
+    extension_keys: list[str],
+    issues: list[dict[str, Any]],
+) -> None:
+    if not tags.get("character"):
+        _append_issue(issues, "missing_character_identity", "review", "角色节点缺少 character 身份 tag。")
+    unclassified = list(tags.get("unclassified") or [])
+    if unclassified:
+        _append_issue(
+            issues,
+            "character_unclassified_tags",
+            "review",
+            "角色 tags 中存在无法自动分类的条目，需要人工确认 section。",
+            samples=unclassified[:10],
+            count=len(unclassified),
+        )
+    archived_keys = [key for key in extension_keys if key not in NEGATIVE_EXTENSION_KEYS]
+    if archived_keys:
+        _append_issue(
+            issues,
+            "character_legacy_extension_archived",
+            "review",
+            "旧角色替换/扩展规则只归档到 legacy，不会在 v1 节点中执行。",
+            samples=archived_keys,
+            count=len(archived_keys),
+        )
+
+
+def _audit_action_node(
+    node: dict[str, Any],
+    tags: dict[str, list[str]],
+    extension_keys: list[str],
+    issues: list[dict[str, Any]],
+) -> None:
+    action_tags = list(tags.get("action") or [])
+    if not action_tags:
+        _append_issue(issues, "empty_action_tags", "review", "动作节点没有可迁移的动作 tags。")
+    if node.get("character_scope") == "default" and _action_scope_source(node) == "inferred":
+        _append_issue(
+            issues,
+            "action_default_scope_needs_review",
+            "review",
+            "动作节点只能推断为 default，局部镜头需要人工补 character_scope。",
+        )
+    mixed_tags = _probable_character_tags_in_action(action_tags)
+    if mixed_tags:
+        _append_issue(
+            issues,
+            "action_maybe_contains_character_tags",
+            "review",
+            "动作 tags 疑似混入角色外观词，迁移后建议拆回 character 节点或交给 agent 重组。",
+            samples=mixed_tags[:10],
+            count=len(mixed_tags),
+        )
+    archived_keys = [key for key in extension_keys if key not in NEGATIVE_EXTENSION_KEYS]
+    if archived_keys:
+        _append_issue(
+            issues,
+            "action_legacy_extension_archived",
+            "review",
+            "旧动作扩展只归档到 legacy，不会作为 v1 规则或后端参数执行。",
+            samples=archived_keys,
+            count=len(archived_keys),
+        )
+
+
+def _audit_background_node(
+    node: dict[str, Any],
+    tags: dict[str, list[str]],
+    extension_keys: list[str],
+    issues: list[dict[str, Any]],
+) -> None:
+    if not tags.get("background"):
+        _append_issue(issues, "empty_background_tags", "review", "背景节点没有可迁移的场景 tags。")
+    ignored_keys = [key for key in extension_keys if key not in NEGATIVE_EXTENSION_KEYS]
+    if ignored_keys:
+        _append_issue(
+            issues,
+            "background_legacy_extension_ignored",
+            "review",
+            "背景迁移不会提升旧后端扩展参数，需要确认是否应移到 style 或 renderer adapter。",
+            samples=ignored_keys,
+            count=len(ignored_keys),
+        )
+
+
+def _legacy_extension_keys(node: dict[str, Any]) -> list[str]:
+    legacy = node.get("legacy") if isinstance(node.get("legacy"), dict) else {}
+    raw_sections = legacy.get("raw_sections") if isinstance(legacy.get("raw_sections"), dict) else {}
+    ext_lines = raw_sections.get("extension") if isinstance(raw_sections.get("extension"), list) else []
+    keys: set[str] = set()
+    for line in ext_lines:
+        key, _ = _split_ext_line(str(line))
+        if key:
+            keys.add(key)
+    return sorted(keys)
+
+
+def _action_scope_source(node: dict[str, Any]) -> str:
+    labels = ((node.get("agent") or {}).get("labels") or [])
+    for label in labels:
+        value = str(label)
+        if value.startswith("character_scope_"):
+            return value.removeprefix("character_scope_")
+    return "unknown"
+
+
+def _probable_character_tags_in_action(action_tags: list[str]) -> list[str]:
+    character_sections = {
+        "hair",
+        "eyes",
+        "face",
+        "head_accessories",
+        "ears",
+        "tail",
+        "wings",
+        "handwear",
+        "legwear",
+        "footwear",
+        "upper_clothes",
+        "lower_clothes",
+        "full_body_clothes",
+        "accessories",
+        "weapons",
+        "props",
+    }
+    return [
+        tag
+        for tag in action_tags
+        if _classify_legacy_character_tag(tag) in character_sections
+    ]
+
+
+def _append_issue(
+    issues: list[dict[str, Any]],
+    code: str,
+    severity: str,
+    message: str,
+    *,
+    samples: list[str] | None = None,
+    count: int | None = None,
+) -> None:
+    issue: dict[str, Any] = {
+        "code": code,
+        "severity": severity,
+        "message": message,
+    }
+    if count is not None:
+        issue["count"] = count
+    if samples:
+        issue["samples"] = samples
+    issues.append(issue)
 
 
 def _split_legacy_style_lines(path: Path) -> tuple[list[str], list[str]]:

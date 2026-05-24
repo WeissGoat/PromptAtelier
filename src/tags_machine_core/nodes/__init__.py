@@ -1,4 +1,5 @@
 from .migration import (
+    audit_legacy_tags,
     migrate_legacy_action_tags,
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
@@ -10,6 +11,7 @@ from .reader import NodeReader
 __all__ = [
     "NodeDocument",
     "NodeReader",
+    "audit_legacy_tags",
     "migrate_legacy_action_tags",
     "migrate_legacy_background_tags",
     "migrate_legacy_character_tags",

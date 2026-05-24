@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import yaml
+
 from tags_machine_core.cli import main
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.services import GenerationService
@@ -1368,6 +1370,78 @@ shoes, shoes|boots|loafers
             self.assertEqual(node.tags["legwear"], ["thighhighs"])
             self.assertEqual(node.tags["weapons"], ["shirasaya"])
             self.assertEqual(node.renderers, {})
+
+    def test_audit_legacy_tags_command_writes_report_without_node_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            action_root = root / "legacy_actions"
+            action_root.mkdir()
+            clean_action = action_root / "foot_detail"
+            clean_action.mkdir()
+            (clean_action / "tags.txt").write_text(
+                """
+foot focus, toes focus
+=
+uc, bad feet
+""".strip(),
+                encoding="utf-8",
+            )
+            review_action = action_root / "default_with_character_tags"
+            review_action.mkdir()
+            (review_action / "tags.txt").write_text(
+                """
+standing, looking at viewer, blue eyes, long hair
+=
+node_background, flower field
+""".strip(),
+                encoding="utf-8",
+            )
+            report_path = root / "audit_report.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "audit-legacy-tags",
+                        str(action_root),
+                        "--kind",
+                        "action",
+                        "--output",
+                        str(report_path),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(report_path.exists())
+            self.assertEqual(data["schema"], "tags-machine-core.legacy-tags-audit/v1")
+            self.assertEqual(data["summary"]["total"], 2)
+            self.assertEqual(data["summary"]["ok"], 1)
+            self.assertEqual(data["summary"]["needs_review"], 1)
+            self.assertEqual(
+                data["summary"]["issue_counts"]["action_default_scope_needs_review"],
+                1,
+            )
+            self.assertEqual(
+                data["summary"]["issue_counts"]["action_maybe_contains_character_tags"],
+                1,
+            )
+            self.assertEqual(
+                data["summary"]["issue_counts"]["action_legacy_extension_archived"],
+                1,
+            )
+            items_by_id = {item["node_id"]: item for item in data["items"]}
+            self.assertEqual(items_by_id["foot_detail"]["status"], "ok")
+            self.assertEqual(items_by_id["foot_detail"]["character_scope"], "foot_detail")
+            self.assertEqual(items_by_id["default_with_character_tags"]["status"], "needs_review")
+            self.assertEqual(
+                items_by_id["default_with_character_tags"]["character_scope"],
+                "default",
+            )
+            self.assertEqual(report["summary"], data["summary"])
+            self.assertFalse((clean_action / "meta.yaml").exists())
+            self.assertFalse((review_action / "meta.yaml").exists())
 
 
 def _without_runtime_fields(value):

@@ -182,6 +182,11 @@ uv run python -m tags_machine_core api-generate api_generate.json `
 旧 `tags.txt` 节点迁移示例：
 
 ```powershell
+uv run python -m tags_machine_core audit-legacy-tags `
+  F:\my_project\new\tags_machine\design\动作改2 `
+  --kind action `
+  --output migration_audit_actions.yaml
+
 uv run python -m tags_machine_core migrate-style-tags `
   F:\my_project\new\tags_machine\design\画风\sample_style `
   --output migrated\nodes\styles\sample_style\node.yaml
@@ -200,6 +205,8 @@ uv run python -m tags_machine_core migrate-background-tags `
   F:\my_project\new\tags_machine\design\背景\simple_room `
   --output migrated\nodes\backgrounds\simple_room\meta.yaml
 ```
+
+`audit-legacy-tags` 用于迁移前预检，可以扫描单个 `tags.txt`、单个旧节点目录或一个旧节点根目录；它只读源目录，不会生成 `meta.yaml` / `node.yaml`。报告里的 `summary` 会统计 `ok`、`needs_review`、`errors` 和 issue code 数量；`items` 会列出每个旧节点的迁移风险，例如 character 的 `unclassified`、action 的默认 `character_scope`、疑似混入角色外观词、旧扩展字段是否只归档不执行。
 
 这些迁移命令默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。style 迁移会保留 NovelAI 画风扩展参数；character 迁移只提升角色事实 tags，旧替换规则保留在 `legacy.raw_sections`；action 迁移只提升动作 tags、动作负向词和 `character_scope`；background 迁移只提升场景 tags 和背景级负向词，不把 `gen_json` 等旧扩展转成后端参数。
 
