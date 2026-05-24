@@ -49,6 +49,7 @@ class NovelAIStyleTest(unittest.TestCase):
         self.assertEqual(params["reference_image_multiple"], [])
         self.assertEqual(params["reference_strength_multiple"], [])
         self.assertEqual(params["reference_information_extracted_multiple"], [])
+        self.assertEqual(params["director_reference_images"], [])
         self.assertEqual(params["extra_noise_seed"], 123)
         self.assertEqual(params["v4_prompt"]["caption"]["base_caption"], request.prompt)
         self.assertEqual(

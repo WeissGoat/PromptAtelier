@@ -78,7 +78,7 @@
 - `model`：后端模型名。
 - `seed`：随机种子。
 - `size.width` / `size.height`：图片尺寸。
-- `params`：后端参数；NovelAI 会包含 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple` 等关键字段。
+- `params`：后端参数；NovelAI 会包含 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等关键字段。
 - `style_payload`：style node 解析结果，便于调试和验收。
 - `meta`：composer、action、style 等链路信息。
 

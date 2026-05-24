@@ -311,7 +311,7 @@ uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requ
 - 支持 `nai-diffusion-4-5-full` 默认模型。
 - 生成 `v4_prompt` 和 `v4_negative_prompt`。
 - 兼容旧画风节点里的 `gen_json`。
-- 保留 `reference_image_multiple`、`reference_strength_multiple` 等 vibe 字段。
+- 保留 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等 reference/vibe 字段；默认无参考图时也输出空数组，避免 diff 出现缺字段漂移。
 - `ddim` 在新模型下转换为 `ddim_v3`。
 - `k_euler_ancestral` 搭配非 native scheduler 时补 `deliberate_euler_ancestral_bug=false` 和 `prefer_brownian=true`。
 - CLI 默认截断图片 base64，避免调试输出污染上下文。

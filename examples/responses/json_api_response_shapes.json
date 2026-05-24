@@ -88,7 +88,8 @@
           },
           "$.render_request.params.n_samples": 1,
           "$.render_request.params.cfg_rescale": 0.15,
-          "$.render_request.params.reference_image_multiple": []
+          "$.render_request.params.reference_image_multiple": [],
+          "$.render_request.params.director_reference_images": []
         },
         "contains": {
           "$.render_request.prompt": "bare soles",
@@ -127,7 +128,8 @@
             "height": 1216
           },
           "$.render_request.params.n_samples": 1,
-          "$.render_request.params.cfg_rescale": 0.15
+          "$.render_request.params.cfg_rescale": 0.15,
+          "$.render_request.params.director_reference_images": []
         },
         "contains": {
           "$.prompt_bundle.prompt.positive": "bare soles",

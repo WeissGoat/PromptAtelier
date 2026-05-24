@@ -134,6 +134,7 @@ class NovelAIRenderAdapter:
                 "reference_information_extracted_multiple", []
             ),
             "reference_strength_multiple": params.get("reference_strength_multiple", []),
+            "director_reference_images": params.get("director_reference_images", []),
             "extra_noise_seed": params.get("extra_noise_seed", seed or params.get("seed") or 0),
             "v4_prompt": {
                 "use_coords": False,
@@ -221,6 +222,7 @@ class NovelAIRenderAdapter:
             "reference_image_multiple",
             "reference_information_extracted_multiple",
             "reference_strength_multiple",
+            "director_reference_images",
             "extra_noise_seed",
             "v4_prompt",
             "v4_negative_prompt",
