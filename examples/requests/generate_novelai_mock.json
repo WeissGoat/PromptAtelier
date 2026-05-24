@@ -1,0 +1,28 @@
+{
+  "render_request": {
+    "schema": "tags-machine-core.render-request/v1",
+    "backend": "novelai",
+    "prompt": "akemi homura, bare soles, foot focus",
+    "negative_prompt": "bad anatomy, extra toes",
+    "model": "nai-diffusion-4-5-full",
+    "seed": 123,
+    "size": {
+      "width": 832,
+      "height": 1216
+    },
+    "params": {
+      "steps": 28,
+      "scale": 5.0,
+      "sampler": "k_euler_ancestral",
+      "n_samples": 1
+    },
+    "meta": {
+      "action": "generate",
+      "style_ref": "anime_comfy"
+    }
+  },
+  "output_dir": "outputs",
+  "queue": {
+    "job_id": "example-generate-001"
+  }
+}

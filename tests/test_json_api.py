@@ -1057,6 +1057,7 @@ class JsonApiTest(unittest.TestCase):
 
     def test_json_api_response_shape_examples_match_runtime_outputs(self):
         api = GenerationJsonApi()
+        generate_api = GenerationJsonApi(generation_executor=_shape_generation_executor)
         shape_path = PROJECT_ROOT / "examples" / "responses" / "json_api_response_shapes.json"
         shapes = json.loads(shape_path.read_text(encoding="utf-8"))
 
@@ -1071,7 +1072,8 @@ class JsonApiTest(unittest.TestCase):
                     request = json.loads(
                         (PROJECT_ROOT / case["request"]).read_text(encoding="utf-8")
                     )
-                    result = getattr(api, case["entry"])(request)
+                    case_api = generate_api if case["entry"] == "generate" else api
+                    result = getattr(case_api, case["entry"])(request)
                     expected = case["expect"]
                     for path, value in expected.get("equals", {}).items():
                         self.assertEqual(_json_path(result, path), value)
@@ -1115,6 +1117,27 @@ class JsonApiTest(unittest.TestCase):
         self.assertEqual(result["request_body"]["parameters"]["steps"], 30)
         self.assertEqual(calls[0][0].prompt, "akemi homura")
         self.assertEqual(calls[0][1]["queue"]["job_id"], "job-1")
+
+    def test_example_generate_request_uses_injected_executor(self):
+        calls = []
+
+        def executor(render_request: RenderRequest, request_data):
+            calls.append((render_request, request_data))
+            return _shape_generation_executor(render_request, request_data)
+
+        with _project_cwd():
+            result = GenerationJsonApi(generation_executor=executor).generate(
+                _load_example_request("generate_novelai_mock.json")
+            )
+
+        self.assertEqual(result["schema"], "tags-machine-core.generation-result/v1")
+        self.assertEqual(result["backend"], "novelai")
+        self.assertEqual(result["request_body"]["input"], "akemi homura, bare soles, foot focus")
+        self.assertEqual(result["request_body"]["parameters"]["steps"], 28)
+        self.assertEqual(result["request_body"]["parameters"]["width"], 832)
+        self.assertEqual(result["request_body"]["parameters"]["height"], 1216)
+        self.assertEqual(result["png_info"]["images"], [])
+        self.assertEqual(calls[0][1]["queue"]["job_id"], "example-generate-001")
 
     def test_generate_json_api_requires_executor(self):
         with self.assertRaises(ValueError) as raised:
@@ -1405,6 +1428,25 @@ def _without_runtime_fields(value):
     if isinstance(value, list):
         return [_without_runtime_fields(item) for item in value]
     return value
+
+
+def _shape_generation_executor(render_request: RenderRequest, request_data):
+    return GenerationResult(
+        backend=render_request.backend,
+        request_body={
+            "input": render_request.prompt,
+            "model": render_request.model,
+            "action": render_request.meta.get("action", "generate"),
+            "parameters": {
+                **render_request.params,
+                "seed": render_request.seed,
+                "width": render_request.size.width,
+                "height": render_request.size.height,
+            },
+        },
+        png_info={"images": []},
+        cache_hit=False,
+    )
 
 
 def _json_path(value, path: str):

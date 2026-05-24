@@ -284,6 +284,10 @@
 
 v1 中 `api-generate` 只接受 NovelAI。ComfyUI / SD 即使存在预研 client，也不能通过该入口默认执行。
 
+示例请求：`examples/requests/generate_novelai_mock.json`
+
+仓库测试会用 mock executor 验证这个请求的 `RenderRequest -> GenerationResult` JSON 边界，不会联网。
+
 ## 推荐工作流
 
 ### 脚本 composer 预览
@@ -330,6 +334,7 @@ compose.prompt 已经包含完整角色 + 动作
 - `examples/requests/compose_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_requires_agent.json`
+- `examples/requests/generate_novelai_mock.json`
 
 这些路径由测试门禁校验：文档引用必须存在，仓库内请求样例必须被文档引用，并且样例能从仓库根目录解析相对节点路径。
 

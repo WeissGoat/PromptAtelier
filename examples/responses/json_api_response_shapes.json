@@ -156,6 +156,35 @@
           "$.render_request"
         ]
       }
+    },
+    {
+      "id": "generate_novelai_mock",
+      "entry": "generate",
+      "request": "examples/requests/generate_novelai_mock.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.generation-result/v1",
+          "$.backend": "novelai",
+          "$.request_body.model": "nai-diffusion-4-5-full",
+          "$.request_body.parameters.steps": 28,
+          "$.request_body.parameters.n_samples": 1,
+          "$.png_info.images": [],
+          "$.cache_hit": false
+        },
+        "contains": {
+          "$.request_body.input": "bare soles"
+        },
+        "required": [
+          "$.request_body.parameters.seed",
+          "$.request_body.parameters.width",
+          "$.request_body.parameters.height"
+        ],
+        "absent": [
+          "$.prompt_bundle",
+          "$.render_request",
+          "$.agent_task"
+        ]
+      }
     }
   ]
 }
