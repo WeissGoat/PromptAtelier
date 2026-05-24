@@ -396,7 +396,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `apply-legacy-tags-migration` 是保守批量写出入口，会重新生成迁移计划，只写 `ready` 项对应的结构化节点；`needs_review`、`target_exists`、`blocked`、`error` 均跳过并写入结果报告。它不覆盖目标文件，也不会写旧项目目录。
 - `validate-node-tree` 是迁移后结构化节点验收入口，只读扫描 `node.yaml` / `meta.yaml`，检查 schema/kind、v1 文件名契约、必需 `tags` section、action 的 `character_scope`、style 的 `renderers.novelai`，以及节点中不应承载的规则字段。失败时退出码为 2，适合接在 `apply-legacy-tags-migration` 后面做批量迁移门禁。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`；`migrate-character-tags` 用于把旧角色 `tags.txt` 转成结构化 character `meta.yaml`；`migrate-action-tags` 用于把旧动作 `tags.txt` 转成结构化 action `meta.yaml`；`migrate-background-tags` 用于把旧背景 `tags.txt` 转成结构化 background `meta.yaml`。这些命令默认都不修改旧项目目录，只有传入 `--output` 时才写出迁移结果；style 迁移会保留 NovelAI 画风扩展参数，character 迁移只提升角色事实 tags，action 迁移只提升动作 tags、动作负向词和 `character_scope`，background 迁移不提升 `gen_json` 等后端扩展。
-- `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录；如果记录包含 `PromptBundle`，回放时会检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`。
+- `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录；如果记录包含 `PromptBundle`，回放时会检查完整 v1 `PromptBundle` 基础形状，包括 `schema`、`prompt.positive` / `prompt.negative`、`meta.composer_type`、`meta.composer_version` 和 `meta.composition` 列表字段，同时确认 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - 提供 `--generation-result` 时，验收记录会生成 `generation_result_evidence`，并检查 `GenerationResult.request_body` 与 core `RenderRequest` 归一化后一致，包括 reference/vibe 数组和 `director_reference_images`。
 - `archive-acceptance-case` 会把旧项目 oracle 和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
@@ -506,7 +506,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 v1 冻结验收补充：
 
-- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来；验收资料包会用 `prompt_bundle_contract_evidence` 回放检查这一点。
+- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来；验收资料包会用 `prompt_bundle_contract_evidence` 回放检查这一点，同时检查 v1 基础字段是否完整。
 - `PromptBundle` 不得携带后端专属字段，例如 `backend`、`params`、`style_payload`、`v4_prompt`、`reference_image_multiple`、`workflow_json`、`checkpoint` 等。`prompt_bundle_contract_evidence` 会递归检查这类字段，防止 NovelAI / ComfyUI / SD 细节反向污染提示词生成层。
 - `meta.composition` 必须记录 composer 的实际选择，而不是重复 action 原始字段；验收时检查 `character_scope`、`included_character_sections`、`suppressed_character_sections` 是否和本次最终 prompt 一致。
 - 如果 core 为了修复旧项目割裂问题而有意过滤某些旧 prompt 片段，例如 `foot_detail` 过滤 `hair`、`eyes`、`upper_clothes`，这类差异不能简单算失败，但必须写进验收记录的 `intentional_differences`，并说明来自哪条统一 composer 规则。
@@ -516,7 +516,7 @@ v1 冻结验收补充：
 
 模块通信格式的通过线：
 
-- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。验收还会检查 `PromptBundle` 没有混入 `RenderRequest` 或后端 adapter 字段。
+- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。验收还会检查 `PromptBundle` 满足 v1 基础形状，并且没有混入 `RenderRequest` 或后端 adapter 字段。
 - `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；ComfyUI / SD 暂不作为本阶段验收范围。
 - `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。若 `png_info.images` 条目包含 `parameters`，这些参数还必须和对应图片实际内嵌 PNG 参数归一化后一致；若条目包含 `error`，对应图片也必须确实不可读。真实旧项目 oracle 的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
 - 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本、显式输入参数和 agent 模型版本，避免旧素材更新或 agent 模型升级后误用旧结果。

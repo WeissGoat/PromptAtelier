@@ -22,6 +22,7 @@ ACCEPTANCE_SCHEMA = "tags-machine-core.acceptance-record/v1"
 ACCEPTANCE_ARCHIVE_SCHEMA = "tags-machine-core.acceptance-archive/v1"
 ACCEPTANCE_SUITE_MANIFEST_SCHEMA = "tags-machine-core.acceptance-suite/v1"
 ACCEPTANCE_SUITE_SCHEMA = "tags-machine-core.acceptance-suite-verification/v1"
+PROMPT_BUNDLE_SCHEMA = "tags-machine-core.prompt-bundle/v1"
 ACCEPTANCE_ORACLE_KINDS = ("legacy_oracle", "fixture")
 DEFAULT_ACCEPTANCE_ORACLE_KIND = "legacy_oracle"
 MINIMUM_ACCEPTANCE_CASES = (
@@ -81,6 +82,11 @@ MINIMUM_SUPPRESSED_SECTION_PROMPT_TERMS = {
     "feet": ("feet", "foot", "bare soles", "soles", "toes"),
 }
 PROMPT_BUNDLE_FORBIDDEN_META_FIELDS = ("shot", "constraints")
+PROMPT_BUNDLE_COMPOSER_TYPES = {"script", "agent", "legacy"}
+PROMPT_BUNDLE_COMPOSITION_LIST_FIELDS = (
+    "included_character_sections",
+    "suppressed_character_sections",
+)
 PROMPT_BUNDLE_FORBIDDEN_BACKEND_FIELDS = {
     "backend",
     "cfg_rescale",
@@ -1117,12 +1123,66 @@ def _prompt_bundle_contract_evidence(prompt_bundle: Path | None) -> dict[str, An
         if key in meta
     ]
     forbidden_backend_fields = _prompt_bundle_forbidden_backend_field_paths(bundle_data)
+    contract_errors = _prompt_bundle_contract_errors(bundle_data)
     return {
         "path": str(prompt_bundle),
+        "schema": bundle_data.get("schema"),
+        "composer_type": meta.get("composer_type") if isinstance(meta, dict) else None,
+        "contract_errors": contract_errors,
         "forbidden_meta_fields": forbidden_meta_fields,
         "forbidden_backend_fields": forbidden_backend_fields,
-        "result": "fail" if forbidden_meta_fields or forbidden_backend_fields else "pass",
+        "result": "fail"
+        if contract_errors or forbidden_meta_fields or forbidden_backend_fields
+        else "pass",
     }
+
+
+def _prompt_bundle_contract_errors(bundle_data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if bundle_data.get("schema") != PROMPT_BUNDLE_SCHEMA:
+        errors.append(f"$.schema must be {PROMPT_BUNDLE_SCHEMA}")
+
+    prompt = bundle_data.get("prompt")
+    if not isinstance(prompt, dict):
+        errors.append("$.prompt must be an object")
+    else:
+        for key in ("positive", "negative"):
+            if not isinstance(prompt.get(key), str):
+                errors.append(f"$.prompt.{key} must be a string")
+
+    meta = bundle_data.get("meta")
+    if not isinstance(meta, dict):
+        errors.append("$.meta must be an object")
+        return errors
+
+    composer_type = meta.get("composer_type")
+    if composer_type not in PROMPT_BUNDLE_COMPOSER_TYPES:
+        expected = ", ".join(sorted(PROMPT_BUNDLE_COMPOSER_TYPES))
+        errors.append(f"$.meta.composer_type must be one of: {expected}")
+    if not isinstance(meta.get("composer_version"), str):
+        errors.append("$.meta.composer_version must be a string")
+
+    composition = meta.get("composition")
+    if not isinstance(composition, dict):
+        errors.append("$.meta.composition must be an object")
+        return errors
+
+    if "character_scope" not in composition:
+        errors.append("$.meta.composition.character_scope is required")
+    elif composition.get("character_scope") is not None and not isinstance(
+        composition.get("character_scope"),
+        str,
+    ):
+        errors.append("$.meta.composition.character_scope must be a string or null")
+    for key in PROMPT_BUNDLE_COMPOSITION_LIST_FIELDS:
+        value = composition.get(key)
+        if not isinstance(value, list):
+            errors.append(f"$.meta.composition.{key} must be a list")
+            continue
+        for index, item in enumerate(value):
+            if not isinstance(item, str):
+                errors.append(f"$.meta.composition.{key}[{index}] must be a string")
+    return errors
 
 
 def _prompt_bundle_forbidden_backend_field_paths(value: Any, prefix: str = "$") -> list[str]:

@@ -39,6 +39,8 @@
 - `cache.cache_key`：agent 缓存 key。
 - `cache.cache_hit`：本次是否命中缓存。
 
+验收资料包里的 `prompt_bundle_contract_evidence` 会回放检查这些 v1 基础字段，至少包括固定 `schema`、字符串类型的 `prompt.positive` / `prompt.negative`、合法 `meta.composer_type`、字符串类型的 `meta.composer_version`，以及 `meta.composition.character_scope`、`included_character_sections`、`suppressed_character_sections`。它也会继续拦截 `meta.shot` / `meta.constraints` 和后端 adapter 专属字段，避免提示词生成层被 NovelAI 或其他后端细节污染。
+
 ### AgentCompositionTask
 
 发给外部 agent 的组合任务。

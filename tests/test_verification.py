@@ -98,6 +98,45 @@ def _minimum_case_parameters(case_id: str) -> dict:
     return params
 
 
+def _prompt_bundle_fixture(
+    composition: dict | None = None,
+    *,
+    prompt: str = "akemi homura, foot focus",
+    negative: str = "bad feet",
+    meta_extra: dict | None = None,
+) -> dict:
+    composition = composition or {
+        "character_scope": "foot_detail",
+        "included_character_sections": ["character", "feet"],
+        "suppressed_character_sections": ["eyes", "upper_clothes"],
+    }
+    meta = {
+        "character_ref": "homura",
+        "action_ref": "foot_closeup",
+        "style_ref": "test_style",
+        "composer_type": "script",
+        "composer_version": "v1",
+        "composition": composition,
+        "source_nodes": ["homura", "foot_closeup"],
+    }
+    if meta_extra:
+        meta.update(meta_extra)
+    return {
+        "schema": "tags-machine-core.prompt-bundle/v1",
+        "prompt": {
+            "positive": prompt,
+            "negative": negative,
+        },
+        "meta": meta,
+        "cache": {
+            "cacheable": True,
+            "cache_key": "sha256:test-fixture",
+            "cache_hit": False,
+        },
+        "created_at": "2026-05-25T00:00:00+00:00",
+    }
+
+
 class VerificationTest(unittest.TestCase):
     def test_run_core_verification_dry_run_lists_no_network_gate(self):
         result = run_core_verification(cwd=PROJECT_ROOT, dry_run=True)
@@ -331,15 +370,13 @@ class VerificationTest(unittest.TestCase):
             )
             bundle.write_text(
                 json.dumps(
-                    {
-                        "meta": {
-                            "composition": {
-                                "character_scope": "foot_detail",
-                                "included_character_sections": ["character", "feet"],
-                                "suppressed_character_sections": ["eyes", "upper_clothes"],
-                            }
+                    _prompt_bundle_fixture(
+                        {
+                            "character_scope": "foot_detail",
+                            "included_character_sections": ["character", "feet"],
+                            "suppressed_character_sections": ["eyes", "upper_clothes"],
                         }
-                    }
+                    )
                 ),
                 encoding="utf-8",
             )
@@ -371,22 +408,17 @@ class VerificationTest(unittest.TestCase):
             core.write_text(json.dumps(payload), encoding="utf-8")
             bundle.write_text(
                 json.dumps(
-                    {
-                        "prompt": {
-                            "positive": "akemi homura, foot focus",
-                            "negative": "bad feet",
+                    _prompt_bundle_fixture(
+                        {
+                            "character_scope": "foot_detail",
+                            "included_character_sections": ["character", "feet"],
+                            "suppressed_character_sections": ["eyes", "upper_clothes"],
                         },
-                        "meta": {
-                            "action_ref": "foot_closeup",
+                        meta_extra={
                             "shot": {"body_scope": "foot_detail"},
                             "constraints": {"forbidden_parts": ["eyes"]},
-                            "composition": {
-                                "character_scope": "foot_detail",
-                                "included_character_sections": ["character", "feet"],
-                                "suppressed_character_sections": ["eyes", "upper_clothes"],
-                            },
                         },
-                    }
+                    )
                 ),
                 encoding="utf-8",
             )
@@ -417,30 +449,25 @@ class VerificationTest(unittest.TestCase):
             payload = {"parameters": _sample_parameters()}
             legacy.write_text(json.dumps(payload), encoding="utf-8")
             core.write_text(json.dumps(payload), encoding="utf-8")
+            bundle_data = _prompt_bundle_fixture(
+                {
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["eyes", "upper_clothes"],
+                }
+            )
+            bundle_data.update(
+                {
+                    "backend": "novelai",
+                    "params": {
+                        "v4_prompt": {"caption": {"base_caption": "akemi homura"}},
+                        "reference_image_multiple": ["base64-ref"],
+                    },
+                    "style_payload": {"renderers": {"novelai": {}}},
+                }
+            )
             bundle.write_text(
-                json.dumps(
-                    {
-                        "schema": "tags-machine-core.prompt-bundle/v1",
-                        "prompt": {
-                            "positive": "akemi homura, foot focus",
-                            "negative": "bad feet",
-                        },
-                        "meta": {
-                            "action_ref": "foot_closeup",
-                            "composition": {
-                                "character_scope": "foot_detail",
-                                "included_character_sections": ["character", "feet"],
-                                "suppressed_character_sections": ["eyes", "upper_clothes"],
-                            },
-                        },
-                        "backend": "novelai",
-                        "params": {
-                            "v4_prompt": {"caption": {"base_caption": "akemi homura"}},
-                            "reference_image_multiple": ["base64-ref"],
-                        },
-                        "style_payload": {"renderers": {"novelai": {}}},
-                    }
-                ),
+                json.dumps(bundle_data),
                 encoding="utf-8",
             )
             record = build_acceptance_record(
@@ -466,6 +493,47 @@ class VerificationTest(unittest.TestCase):
                     "$.style_payload",
                     "$.style_payload.renderers",
                 ],
+            )
+
+    def test_verify_acceptance_record_fails_incomplete_prompt_bundle_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            bundle = root / "bundle.json"
+            record_path = root / "acceptance.json"
+            payload = {"parameters": _sample_parameters()}
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(json.dumps(payload), encoding="utf-8")
+            bundle.write_text(
+                json.dumps({"meta": {"composition": {"character_scope": "foot_detail"}}}),
+                encoding="utf-8",
+            )
+            record = build_acceptance_record(
+                case_id="prompt_bundle_incomplete_contract",
+                legacy_source=legacy,
+                core_source=core,
+                prompt_bundle=bundle,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            verified = verify_acceptance_record(record_path)
+
+            self.assertFalse(verified["match"])
+            evidence = verified["prompt_bundle_contract_evidence"]
+            self.assertEqual(evidence["result"], "fail")
+            self.assertIn(
+                "$.schema must be tags-machine-core.prompt-bundle/v1",
+                evidence["contract_errors"],
+            )
+            self.assertIn("$.prompt must be an object", evidence["contract_errors"])
+            self.assertIn(
+                "$.meta.composer_type must be one of: agent, legacy, script",
+                evidence["contract_errors"],
+            )
+            self.assertIn(
+                "$.meta.composition.included_character_sections must be a list",
+                evidence["contract_errors"],
             )
 
     def test_build_acceptance_record_records_image_evidence(self):
@@ -888,7 +956,7 @@ class VerificationTest(unittest.TestCase):
             _write_png_with_text(legacy_image, {"Software": "no parameters"})
             _write_png_with_text(core_image, {"Software": "no parameters"})
             prompt_bundle.write_text(
-                json.dumps({"meta": {"composition": {"character_scope": "foot_detail"}}}),
+                json.dumps(_prompt_bundle_fixture()),
                 encoding="utf-8",
             )
             generation_result.write_text(
@@ -957,7 +1025,7 @@ class VerificationTest(unittest.TestCase):
             _write_png_with_text(legacy_image, {"Comment": json.dumps(_sample_parameters())})
             _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
             prompt_bundle.write_text(
-                json.dumps({"meta": {"composition": {"character_scope": "foot_detail"}}}),
+                json.dumps(_prompt_bundle_fixture()),
                 encoding="utf-8",
             )
             generation_result.write_text(
@@ -1032,7 +1100,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1140,7 +1208,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1210,7 +1278,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1286,7 +1354,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1366,7 +1434,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1438,7 +1506,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1514,7 +1582,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1601,7 +1669,7 @@ class VerificationTest(unittest.TestCase):
                 prompt_bundle = None
                 if composition is not None:
                     bundle.write_text(
-                        json.dumps({"meta": {"composition": composition}}),
+                        json.dumps(_prompt_bundle_fixture(composition)),
                         encoding="utf-8",
                     )
                     prompt_bundle = bundle
@@ -1699,15 +1767,13 @@ class VerificationTest(unittest.TestCase):
             _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
             prompt_bundle.write_text(
                 json.dumps(
-                    {
-                        "meta": {
-                            "composition": {
-                                "character_scope": "foot_detail",
-                                "included_character_sections": ["character", "feet"],
-                                "suppressed_character_sections": ["eyes", "upper_clothes"],
-                            }
+                    _prompt_bundle_fixture(
+                        {
+                            "character_scope": "foot_detail",
+                            "included_character_sections": ["character", "feet"],
+                            "suppressed_character_sections": ["eyes", "upper_clothes"],
                         }
-                    }
+                    )
                 ),
                 encoding="utf-8",
             )
