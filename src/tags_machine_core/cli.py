@@ -22,6 +22,7 @@ from tags_machine_core.nodes import (
     migrate_legacy_character_tags,
     migrate_legacy_style_tags,
     plan_legacy_tags_migration,
+    validate_node_tree,
 )
 from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationJsonApi, GenerationService
@@ -220,6 +221,14 @@ def cmd_inspect_node(args) -> int:
     node = NodeReader().read(args.path)
     print_json(node, full=args.full)
     return 0
+
+
+def cmd_validate_node_tree(args) -> int:
+    result = validate_node_tree(args.path)
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0 if result["valid"] else 2
 
 
 def cmd_config(args) -> int:
@@ -961,6 +970,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_node.add_argument("path")
     inspect_node.set_defaults(func=cmd_inspect_node)
+
+    validate_node_tree_parser = subparsers.add_parser(
+        "validate-node-tree",
+        parents=[output_parent],
+        help="Validate structured node YAML files under a directory",
+    )
+    validate_node_tree_parser.add_argument("path")
+    validate_node_tree_parser.add_argument("--output", help="Write validation report JSON/YAML")
+    validate_node_tree_parser.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output report file format when --output is used",
+    )
+    validate_node_tree_parser.set_defaults(func=cmd_validate_node_tree)
 
     inspect_style = subparsers.add_parser(
         "inspect-style",

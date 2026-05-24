@@ -9,6 +9,7 @@ from .migration import (
 )
 from .models import NodeDocument
 from .reader import NodeReader
+from .validation import validate_node_tree
 
 __all__ = [
     "NodeDocument",
@@ -20,4 +21,5 @@ __all__ = [
     "migrate_legacy_character_tags",
     "migrate_legacy_style_tags",
     "plan_legacy_tags_migration",
+    "validate_node_tree",
 ]

@@ -1560,6 +1560,59 @@ signature_motif
             self.assertFalse((ready_character / "meta.yaml").exists())
             self.assertFalse((review_character / "meta.yaml").exists())
 
+    def test_validate_node_tree_command_reports_invalid_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            action_dir = root / "nodes" / "actions" / "missing_scope"
+            action_dir.mkdir(parents=True)
+            (action_dir / "meta.yaml").write_text(
+                """
+schema: tags-machine.action/v1
+kind: action
+id: missing_scope
+tags:
+  action:
+    - foot focus
+""".strip(),
+                encoding="utf-8",
+            )
+            style_dir = root / "nodes" / "styles" / "missing_renderer"
+            style_dir.mkdir(parents=True)
+            (style_dir / "node.yaml").write_text(
+                """
+schema: tags-machine.style/v1
+kind: style
+id: missing_renderer
+tags:
+  style:
+    - soft anime style
+""".strip(),
+                encoding="utf-8",
+            )
+            report_path = root / "node_validation.yaml"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "validate-node-tree",
+                        str(root / "nodes"),
+                        "--output",
+                        str(report_path),
+                    ]
+                )
+            data = json.loads(stdout.getvalue())
+            report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(data["valid"])
+            self.assertEqual(data["result"], "fail")
+            self.assertEqual(data["summary"]["total_files"], 2)
+            self.assertEqual(data["summary"]["fail_count"], 2)
+            self.assertEqual(data["summary"]["issue_counts"]["action_missing_character_scope"], 1)
+            self.assertEqual(data["summary"]["issue_counts"]["style_missing_renderers_novelai"], 1)
+            self.assertEqual(report["summary"], data["summary"])
+
 
 def _without_runtime_fields(value):
     if isinstance(value, dict):

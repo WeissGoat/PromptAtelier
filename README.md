@@ -39,6 +39,7 @@
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关
 - `inspect-node`：读取节点文件或目录
+- `validate-node-tree`：只读校验结构化节点目录，检查 v1 文件名、关键字段和禁止字段
 - `inspect-style`：读取旧画风节点
 - `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
 - `migrate-character-tags`：把旧角色 `tags.txt` 转成结构化 character `meta.yaml`
@@ -199,6 +200,10 @@ uv run python -m tags_machine_core apply-legacy-tags-migration `
   --output-root migrated `
   --output migration_apply_actions.yaml
 
+uv run python -m tags_machine_core validate-node-tree `
+  migrated\nodes `
+  --output migrated_node_validation.yaml
+
 uv run python -m tags_machine_core migrate-style-tags `
   F:\my_project\new\tags_machine\design\画风\sample_style `
   --output migrated\nodes\styles\sample_style\node.yaml
@@ -223,6 +228,8 @@ uv run python -m tags_machine_core migrate-background-tags `
 `plan-legacy-tags-migration` 在预检基础上生成批量迁移计划，只写计划文件，不写节点 YAML。计划会把旧 `tags.txt` 映射到 `--output-root\nodes\{styles|characters|actions|backgrounds}\...\{node.yaml|meta.yaml}`，并标出 `ready`、`needs_review`、`target_exists`、`blocked`、`error` 状态；遇到目标文件已存在或目标路径冲突时不会覆盖，需要人工处理。
 
 `apply-legacy-tags-migration` 会重新生成迁移计划，然后只写出 `ready` 项对应的结构化节点；`needs_review`、`target_exists`、`blocked`、`error` 都会跳过并写入结果报告。这个命令不覆盖目标文件，也不会写旧项目目录。
+
+`validate-node-tree` 用于迁移后只读校验结构化节点目录。它会扫描 `node.yaml` / `meta.yaml`，检查 character/action/background 是否使用 `meta.yaml`、style 是否使用 `node.yaml`、action 是否声明 `character_scope`、style 是否包含 `renderers.novelai`，并报告 v1 不允许写入节点的规则字段。失败时 CLI 退出码为 2，适合放进批量迁移后的验收脚本。
 
 这些迁移命令默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。style 迁移会保留 NovelAI 画风扩展参数；character 迁移只提升角色事实 tags，旧替换规则保留在 `legacy.raw_sections`；action 迁移只提升动作 tags、动作负向词和 `character_scope`；background 迁移只提升场景 tags 和背景级负向词，不把 `gen_json` 等旧扩展转成后端参数。
 

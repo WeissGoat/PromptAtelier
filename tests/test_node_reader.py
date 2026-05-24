@@ -13,6 +13,7 @@ from tags_machine_core.nodes import (
     migrate_legacy_character_tags,
     migrate_legacy_style_tags,
     plan_legacy_tags_migration,
+    validate_node_tree,
 )
 
 
@@ -611,6 +612,74 @@ constraints:
             self.assertEqual(node.character_scope, None)
             self.assertNotIn("shot", payload)
             self.assertNotIn("constraints", payload)
+
+    def test_validate_node_tree_reports_v1_contract_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            valid_character = root / "characters" / "homura"
+            valid_character.mkdir(parents=True)
+            (valid_character / "meta.yaml").write_text(
+                """
+schema: tags-machine.character/v1
+kind: character
+id: homura
+tags:
+  character:
+    - akemi homura
+""".strip(),
+                encoding="utf-8",
+            )
+            invalid_action = root / "actions" / "foot_closeup"
+            invalid_action.mkdir(parents=True)
+            (invalid_action / "node.yaml").write_text(
+                """
+schema: tags-machine.action/v1
+kind: action
+id: foot_closeup
+tags:
+  action:
+    - foot focus
+shot:
+  body_scope: foot_detail
+""".strip(),
+                encoding="utf-8",
+            )
+            invalid_style = root / "styles" / "simple"
+            invalid_style.mkdir(parents=True)
+            (invalid_style / "node.yaml").write_text(
+                """
+schema: tags-machine.style/v1
+kind: style
+id: simple
+tags:
+  style:
+    - soft anime style
+""".strip(),
+                encoding="utf-8",
+            )
+
+            result = validate_node_tree(root)
+
+            self.assertFalse(result["valid"])
+            self.assertEqual(result["result"], "fail")
+            self.assertEqual(result["summary"]["total_files"], 3)
+            self.assertEqual(result["summary"]["pass_count"], 1)
+            self.assertEqual(result["summary"]["fail_count"], 2)
+            self.assertEqual(result["summary"]["issue_counts"]["node_file_name_mismatch"], 1)
+            self.assertEqual(result["summary"]["issue_counts"]["action_missing_character_scope"], 1)
+            self.assertEqual(result["summary"]["issue_counts"]["forbidden_v1_field"], 1)
+            self.assertEqual(result["summary"]["issue_counts"]["style_missing_renderers_novelai"], 1)
+            items_by_id = {item["node_id"]: item for item in result["items"]}
+            self.assertEqual(items_by_id["homura"]["status"], "pass")
+            action_codes = {issue["code"] for issue in items_by_id["foot_closeup"]["issues"]}
+            self.assertEqual(
+                action_codes,
+                {
+                    "node_file_name_mismatch",
+                    "action_missing_character_scope",
+                    "forbidden_v1_field",
+                },
+            )
 
     def test_example_nodes_follow_v1_yaml_scope_contract(self):
         examples_root = PROJECT_ROOT / "examples" / "nodes"
