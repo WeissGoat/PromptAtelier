@@ -314,6 +314,7 @@ uv run python -m tags_machine_core execute-render-request core_render_request.js
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core archive-acceptance-case --case-id foot_detail_homura_001 --output-dir acceptance --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --required-case foot_detail
+uv run python -m tags_machine_core archive-novelai-acceptance-nodes --case-id foot_detail_homura_001 --output-dir acceptance --legacy-source old.png --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123 --required-case foot_detail --overwrite
 uv run python -m tags_machine_core verify-acceptance-suite acceptance --require-minimum-set
 uv run python -m tags_machine_core generate --config configs\local.example.yaml --prompt "akemi homura, foot focus" --seed 123
 ```
@@ -328,6 +329,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - `archive-acceptance-case` 会把旧项目 oracle 和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
+- `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；它不运行旧项目代码，也不联网生图。
 - `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
@@ -466,6 +468,7 @@ v1 冻结验收补充：
 
 - 每个样例至少归档旧项目最终请求体、旧图、旧图 PNG 参数、新 `PromptBundle`、新 `RenderRequest`、新图或 dry-run 结果、验收记录。
 - `archive-acceptance-case` 是 v1 默认的资料包生成入口；它只复制静态产物，不运行或 import 旧项目代码。
+- 对结构化节点样例，优先使用 `archive-novelai-acceptance-nodes` 生成 core 侧 `PromptBundle` / `RenderRequest` 并归档，减少手工保存中间文件造成的漏项。
 - oracle 资料包可以由旧项目脚本提前生成，但 core 的回放、测试和验收只能读取这些静态产物。
 - 若旧项目自身输出存在已知问题，例如局部镜头混入头发、眼睛、上衣等不相关 tags，core 可以修复；修复差异必须进入 `intentional_differences`，并标明对应 composer 规则。
 - 未归档 oracle 的新能力只能算开发完成，不能算旧项目对照验收完成。

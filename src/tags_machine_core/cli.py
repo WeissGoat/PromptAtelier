@@ -352,6 +352,57 @@ def cmd_archive_acceptance_case(args) -> int:
     return 0 if archive["result"] == "pass" else 2
 
 
+def cmd_archive_novelai_acceptance_nodes(args) -> int:
+    service = GenerationService()
+    style_ref, style = _load_novelai_style_for_nodes(args)
+    bundle = _build_bundle_from_nodes(service, args, style_ref=style_ref)
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=_load_json_arg(args.params_json),
+    )
+
+    case_dir = _acceptance_case_dir(args.output_dir, args.case_id)
+    core_dir = case_dir / "core"
+    prompt_bundle_path = core_dir / "prompt_bundle.json"
+    render_request_path = core_dir / "render_request.json"
+    _write_generated_core_artifact(
+        bundle.model_dump(by_alias=True, mode="json"),
+        prompt_bundle_path,
+        overwrite=args.overwrite,
+    )
+    _write_generated_core_artifact(
+        request.model_dump(by_alias=True, mode="json"),
+        render_request_path,
+        overwrite=args.overwrite,
+    )
+
+    archive = archive_acceptance_case(
+        case_id=args.case_id,
+        output_dir=args.output_dir,
+        legacy_source=args.legacy_source,
+        core_source=render_request_path,
+        legacy_image=args.legacy_image,
+        core_image=args.core_image,
+        prompt_bundle=prompt_bundle_path,
+        generation_result=args.generation_result,
+        whitelist=parse_whitelist_args(args.whitelist),
+        intentional_differences=parse_intentional_difference_args(args.intentional_difference),
+        notes=args.note or [],
+        manifest=args.manifest,
+        required_cases=args.required_case or [],
+        update_manifest=not args.no_manifest,
+        overwrite=args.overwrite,
+        record_format=args.format,
+    )
+    print_json(archive, full=args.full)
+    return 0 if archive["result"] == "pass" else 2
+
+
 def cmd_verify_acceptance_record(args) -> int:
     result = verify_acceptance_record(args.record)
     print_json(result, full=args.full)
@@ -480,6 +531,20 @@ def _load_render_style(args):
     return style_ref, None
 
 
+def _load_novelai_style_for_nodes(args):
+    if args.style_node:
+        node = NodeReader().read(args.style_node)
+        return args.style_ref or node.id, node
+
+    style_ref = args.style_ref
+    if args.config:
+        config = load_config(Path(args.config))
+        style_ref = style_ref or config.defaults.style_ref
+        if style_ref:
+            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+    return style_ref, None
+
+
 def _render_action(backend: str) -> str:
     return "generate" if backend == "novelai" else "render-plan"
 
@@ -496,6 +561,20 @@ def _write_structured_output(data: dict, path: Path, *, output_format: str | Non
         )
         return
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_generated_core_artifact(data: dict, path: Path, *, overwrite: bool) -> None:
+    # 这个入口会在验收包目录里生成 core 侧产物，默认不覆盖已有人工归档。
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"Output already exists, pass --overwrite to replace: {path}")
+    _write_structured_output(data, path, output_format="json")
+
+
+def _acceptance_case_dir(output_dir: str | Path, case_id: str) -> Path:
+    value = str(case_id).strip()
+    if not value or value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError(f"case_id must be a plain directory name: {case_id!r}")
+    return Path(output_dir) / value
 
 
 def _save_generated_images(
@@ -833,6 +912,76 @@ def build_parser() -> argparse.ArgumentParser:
         help="Acceptance record format written inside the case directory",
     )
     archive_acceptance.set_defaults(func=cmd_archive_acceptance_case)
+
+    archive_novelai_acceptance_nodes = subparsers.add_parser(
+        "archive-novelai-acceptance-nodes",
+        parents=[output_parent],
+        help="Build NovelAI core artifacts from nodes and archive a legacy acceptance case",
+    )
+    _add_node_compose_arguments(archive_novelai_acceptance_nodes)
+    archive_novelai_acceptance_nodes.add_argument("--case-id", required=True)
+    archive_novelai_acceptance_nodes.add_argument("--output-dir", required=True)
+    archive_novelai_acceptance_nodes.add_argument("--legacy-source", required=True)
+    archive_novelai_acceptance_nodes.add_argument("--legacy-image")
+    archive_novelai_acceptance_nodes.add_argument("--core-image")
+    archive_novelai_acceptance_nodes.add_argument("--generation-result")
+    archive_novelai_acceptance_nodes.add_argument("--style-node", help="Path to a structured style node")
+    archive_novelai_acceptance_nodes.add_argument("--config", help="Load legacy style refs through this config")
+    archive_novelai_acceptance_nodes.add_argument("--seed", type=int)
+    archive_novelai_acceptance_nodes.add_argument("--width", type=int, default=1024)
+    archive_novelai_acceptance_nodes.add_argument("--height", type=int, default=1024)
+    archive_novelai_acceptance_nodes.add_argument(
+        "--model",
+        default="nai-diffusion-4-5-full",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--params-json",
+        help="Extra NovelAI renderer params as a JSON object",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--whitelist",
+        action="append",
+        help="Approved diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--intentional-difference",
+        action="append",
+        help=(
+            "Intentional core-vs-legacy diff path with optional reason, "
+            "for example $.parameters.prompt=foot_detail filters face tags"
+        ),
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--note",
+        action="append",
+        help="Human note stored in the acceptance record; can be repeated",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--manifest",
+        help="Suite manifest to create or update; defaults to output-dir\\suite.yaml",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--required-case",
+        action="append",
+        help="Required suite case id/prefix to add to the manifest; can be repeated",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--no-manifest",
+        action="store_true",
+        help="Do not create or update a suite manifest",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing generated core artifacts and copied archive artifacts",
+    )
+    archive_novelai_acceptance_nodes.add_argument(
+        "--format",
+        default="yaml",
+        choices=("json", "yaml"),
+        help="Acceptance record format written inside the case directory",
+    )
+    archive_novelai_acceptance_nodes.set_defaults(func=cmd_archive_novelai_acceptance_nodes)
 
     verify_acceptance = subparsers.add_parser(
         "verify-acceptance-record",

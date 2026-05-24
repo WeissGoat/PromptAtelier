@@ -579,12 +579,13 @@ def _copy_acceptance_artifact(
         raise FileNotFoundError(f"Acceptance artifact not found: {source_path}")
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / filename
+    if source_path.resolve() == target_path.resolve():
+        return target_path
     if target_path.exists() and not overwrite:
         raise FileExistsError(
             f"Acceptance artifact already exists, pass --overwrite to replace: {target_path}"
         )
-    if source_path.resolve() != target_path.resolve():
-        shutil.copy2(source_path, target_path)
+    shutil.copy2(source_path, target_path)
     return target_path
 
 

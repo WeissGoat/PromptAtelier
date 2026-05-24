@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 from tags_machine_core.cli import main
 from tags_machine_core.nodes import NodeReader
+from tags_machine_core.services import GenerationService
+from tags_machine_core.verification import verify_acceptance_suite
 
 
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -462,6 +464,88 @@ renderers:
             self.assertIn("lowres", data["negative_prompt"])
             self.assertIn("bad anatomy", data["negative_prompt"])
             self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+
+    def test_archive_novelai_acceptance_nodes_builds_core_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            style = self._write_style_node(root)
+            reader = NodeReader()
+            service = GenerationService()
+            bundle = service.compose_nodes(
+                character=reader.read(character),
+                action=reader.read(action),
+                style_ref="cross_backend_style",
+            )
+            request = service.build_novelai_request(
+                bundle,
+                seed=789,
+                width=832,
+                height=1216,
+                style=reader.read(style),
+            )
+            legacy = root / "legacy_request.json"
+            legacy.write_text(
+                json.dumps(
+                    {
+                        "input": request.prompt,
+                        "model": request.model,
+                        "action": "generate",
+                        "parameters": request.params,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "archive-novelai-acceptance-nodes",
+                        "--case-id",
+                        "foot_detail_homura_001",
+                        "--output-dir",
+                        str(root / "acceptance"),
+                        "--legacy-source",
+                        str(legacy),
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "789",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--required-case",
+                        "foot_detail",
+                    ]
+                )
+            archive = json.loads(stdout.getvalue())
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(archive["result"], "pass")
+            case_dir = Path(archive["case_dir"])
+            render_request_path = case_dir / "core" / "render_request.json"
+            prompt_bundle_path = case_dir / "core" / "prompt_bundle.json"
+            self.assertTrue(render_request_path.exists())
+            self.assertTrue(prompt_bundle_path.exists())
+            self.assertTrue((case_dir / "legacy" / "source.json").exists())
+            generated_request = json.loads(render_request_path.read_text(encoding="utf-8"))
+            generated_bundle = json.loads(prompt_bundle_path.read_text(encoding="utf-8"))
+            self.assertEqual(generated_request["backend"], "novelai")
+            self.assertEqual(generated_request["params"]["reference_image_multiple"], ["abc"])
+            self.assertEqual(generated_bundle["meta"]["composition"]["character_scope"], "foot_detail")
+            self.assertEqual(
+                archive["record"]["core"]["render_request_path"],
+                "core/render_request.json",
+            )
+            suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
+            self.assertTrue(suite["match"])
+            self.assertEqual(suite["missing_required_cases"], [])
 
     def test_render_plan_nodes_supports_sd_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
