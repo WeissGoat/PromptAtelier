@@ -286,7 +286,7 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 - `PromptBundle` 不关心具体 ComfyUI 节点编号。
 - adapter 产出统一 `RenderRequest` 执行计划，不负责联网。
 - CLI 可通过 `render-plan --backend comfyui` 或 `render-plan-nodes --backend comfyui` 生成 dry-run 请求。
-- `execute-render-request` 可读取已有 `RenderRequest`，调用 ComfyUI `/prompt` 排队，轮询 `/history/{prompt_id}`，通过 `/view` 下载输出图片，并写入 `GenerationResult.images`。
+- `execute-render-request` 默认不执行 ComfyUI；只有显式传 `--allow-experimental-backend` 时，才会读取已有 `RenderRequest` 调用 ComfyUI `/prompt` 排队、轮询 `/history/{prompt_id}`、通过 `/view` 下载输出图片，并写入 `GenerationResult.images`。
 - `GenerationResult.png_info.comfyui` 会记录 `prompt_id`、排队响应和 history；如果使用 `--comfyui-no-wait`，则只排队并返回 `prompt_id`。
 - history 进入 `error` / `failed` 状态时，client 会抛出带 `prompt_id`、status、history 摘要的 `ComfyUIClientError`，避免把失败误判成“完成但无图”。
 
@@ -300,7 +300,7 @@ Agent 结果仍然要落到 `PromptBundle`，不能直接调用后端。
 - 可从结构化 style node 的 `renderers.sd` 读取 checkpoint、VAE、LoRA、embedding、ControlNet、hires_fix 等后端配置。
 - 将完整 positive / negative prompt 合成到 SD 请求计划。
 - 保持和 NovelAI/ComfyUI 一致的 `RenderRequest` 外壳。
-- CLI 里的 SD 能力只作为预研入口保留，不作为 v1 验收通过条件。
+- CLI 里的 SD 能力只作为预研入口保留，不作为 v1 验收通过条件；真实执行必须显式传 `--allow-experimental-backend`。
 
 后续等 SD/WebUI 规范明确后，再决定字段契约、img2img、ControlNet、Forge 差异字段和验收样例。
 
@@ -332,7 +332,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `run-prompt` 面向完整角色+动作混合 prompt。它不读取 character/action 节点，也不做 `character_scope` 裁剪，只把完整 prompt 落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--dry-run` 输出 `PromptBundle + RenderRequest`，去掉 `--dry-run` 后需要 `NAI_ACCESS_TOKEN` 并真实生图；`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
 - `api-compose` / `api-render-plan` / `api-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
-- `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；当前正式验收只要求 NovelAI 保存图片和参数归档稳定。
+- `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
 - `migrate-style-tags` 用于把旧画风 `tags.txt` 转成结构化 style `node.yaml`，默认不修改旧项目目录。
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。

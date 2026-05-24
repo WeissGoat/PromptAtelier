@@ -627,6 +627,7 @@ renderers:
                             str(request),
                             "--config",
                             str(config),
+                            "--allow-experimental-backend",
                             "--client-id",
                             "client-1",
                             "--comfyui-no-wait",
@@ -643,6 +644,38 @@ renderers:
             self.assertEqual(data["images"], [])
             self.assertEqual(data["request_body"]["client_id"], "client-1")
             self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
+
+    def test_execute_render_request_rejects_experimental_backend_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._write_config(root)
+            request = root / "comfy_request.json"
+            request.write_text(
+                json.dumps(
+                    {
+                        "backend": "comfyui",
+                        "prompt": "akemi homura",
+                        "params": {"workflow_json": {}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("tags_machine_core.cli.ComfyUIClient") as client_cls,
+                self.assertRaises(ValueError) as raised,
+            ):
+                main(
+                    [
+                        "execute-render-request",
+                        str(request),
+                        "--config",
+                        str(config),
+                    ]
+                )
+
+            self.assertIn("only NovelAI by default", str(raised.exception))
+            client_cls.assert_not_called()
 
     def test_execute_render_request_saves_comfyui_images(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -720,6 +753,7 @@ renderers:
                             str(request),
                             "--config",
                             str(config),
+                            "--allow-experimental-backend",
                             "--output-dir",
                             str(output_dir),
                             "--client-id",
@@ -790,6 +824,7 @@ renderers:
                             str(request),
                             "--config",
                             str(config),
+                            "--allow-experimental-backend",
                             "--output-dir",
                             str(output_dir),
                         ]
@@ -852,6 +887,7 @@ renderers:
                             str(request),
                             "--config",
                             str(config),
+                            "--allow-experimental-backend",
                             "--output-dir",
                             str(output_dir),
                         ]

@@ -185,6 +185,12 @@ def cmd_execute_render_request(args) -> int:
     request = _load_render_request(args.request)
     output_dir = Path(args.output_dir or config.runtime.output_dir)
 
+    if request.backend != "novelai" and not args.allow_experimental_backend:
+        raise ValueError(
+            "execute-render-request currently executes only NovelAI by default; "
+            "pass --allow-experimental-backend to run pre-v1 ComfyUI/SD clients"
+        )
+
     if request.backend == "novelai":
         access_token = os.environ.get(config.novelai.access_token_env)
         if not access_token:
@@ -931,6 +937,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--comfyui-max-wait-seconds",
         type=float,
         help="Maximum seconds to wait for ComfyUI output; defaults to comfyui.timeout",
+    )
+    execute_render_request.add_argument(
+        "--allow-experimental-backend",
+        action="store_true",
+        help="Allow executing pre-v1 ComfyUI/SD clients; NovelAI is the only default v1 backend",
     )
     execute_render_request.set_defaults(func=cmd_execute_render_request)
 

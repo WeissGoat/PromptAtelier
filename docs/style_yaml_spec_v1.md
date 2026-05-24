@@ -175,7 +175,7 @@ renderers:
       scheduler: karras
 ```
 
-`workflow` 是给人和 UI 看的工作流标识，`workflow_path` 是相对 style 节点目录的 ComfyUI workflow JSON 路径。adapter 会把 JSON 展开到 `RenderRequest.params.workflow_json`，`execute-render-request` 可以直接把它交给 ComfyUI `/prompt`。如果 workflow JSON 已经内联，也可以直接写 `workflow_json`。
+`workflow` 是给人和 UI 看的工作流标识，`workflow_path` 是相对 style 节点目录的 ComfyUI workflow JSON 路径。adapter 会把 JSON 展开到 `RenderRequest.params.workflow_json`；真实执行 ComfyUI 仍属于预研能力，`execute-render-request` 需要显式传 `--allow-experimental-backend` 才会把它交给 ComfyUI `/prompt`。如果 workflow JSON 已经内联，也可以直接写 `workflow_json`。
 
 `node_overrides` 使用点路径覆盖 workflow，例如 `"12.inputs.cfg": 6.5`。它在 client 排队前应用，适合把 prompt、seed、cfg、尺寸等值写入具体 ComfyUI 节点。
 
@@ -205,7 +205,7 @@ renderers:
       scheduler: karras
 ```
 
-SD adapter 的正式字段契约、img2img、ControlNet、Forge 差异字段和验收样例都等待后续规范确认。
+SD adapter 的正式字段契约、img2img、ControlNet、Forge 差异字段和验收样例都等待后续规范确认；真实执行 SD 请求同样需要显式传 `--allow-experimental-backend`。
 
 ## 与 PromptBundle 的关系
 
