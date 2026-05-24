@@ -52,7 +52,40 @@
   "png_info": {
     "images": [
       {
-        "path": "image.png"
+        "path": "image.png",
+        "parameters": {
+          "prompt": "akemi homura, long black hair, purple eyes, school uniform, ribbon, full body, masterpiece, best quality",
+          "negative_prompt": "bad anatomy, low quality",
+          "model": "nai-diffusion-4-5-full",
+          "width": 832,
+          "height": 1216,
+          "scale": 5.0,
+          "sampler": "k_euler",
+          "steps": 28,
+          "seed": 104,
+          "cfg_rescale": 0.0,
+          "noise_schedule": "native",
+          "reference_image_multiple": [],
+          "reference_strength_multiple": [],
+          "reference_information_extracted_multiple": [],
+          "director_reference_images": [],
+          "v4_prompt": {
+            "use_coords": false,
+            "use_order": false,
+            "caption": {
+              "base_caption": "akemi homura, long black hair, purple eyes, school uniform, ribbon, full body, masterpiece, best quality",
+              "char_captions": []
+            }
+          },
+          "v4_negative_prompt": {
+            "use_coords": false,
+            "use_order": false,
+            "caption": {
+              "base_caption": "bad anatomy, low quality",
+              "char_captions": []
+            }
+          }
+        }
       }
     ]
   },
