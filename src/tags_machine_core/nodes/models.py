@@ -78,29 +78,6 @@ class NodePrompt(BaseModel):
         return [{"text": str(value)}] if str(value).strip() else []
 
 
-class NodeShot(BaseModel):
-    framing: str | None = None
-    body_scope: str | None = None
-    camera: str | None = None
-
-
-class NodeConstraints(BaseModel):
-    required_parts: list[str] = Field(default_factory=list)
-    forbidden_parts: list[str] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
-
-    @field_validator("required_parts", "forbidden_parts", "notes", mode="before")
-    @classmethod
-    def normalize_string_list(cls, value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [value] if value.strip() else []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return [str(value).strip()] if str(value).strip() else []
-
-
 class NodeDocument(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -115,9 +92,7 @@ class NodeDocument(BaseModel):
     tags: dict[str, list[str]] = Field(default_factory=dict)
     negative_prompt: list[str] = Field(default_factory=list)
     description: str | None = None
-    shot: NodeShot = Field(default_factory=NodeShot)
     prompt: NodePrompt = Field(default_factory=NodePrompt)
-    constraints: NodeConstraints = Field(default_factory=NodeConstraints)
     generation: dict[str, Any] = Field(default_factory=dict)
     renderers: dict[str, Any] = Field(default_factory=dict)
     agent: dict[str, Any] = Field(default_factory=dict)

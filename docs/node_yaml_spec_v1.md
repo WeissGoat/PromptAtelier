@@ -58,6 +58,7 @@ node.yaml     # 通用结构化节点，后续用于 action/style/background 等
 - `tags.txt` 在迁移期继续可用。
 - 已经落地的 `design/角色/.../meta.yaml` 视为 character v1 的事实来源。
 - agent 可以读取 YAML，但 agent 不应该把临时推理规则写回每个角色节点。
+- `shot`、`constraints` 不是 v1 节点契约字段；reader 可以兼容忽略旧字段，但 composer 不会用它们决定角色裁剪。
 
 ## 字段命名原则
 
@@ -130,6 +131,7 @@ action v1 已确认：
 - 使用 `character_scope` 表示角色素材裁剪视角
 - 不写角色 section include/suppress 规则
 - 不提前拆 `pose` / `camera` / `focus`
+- 不使用 `shot.body_scope` 或 `constraints` 作为 composer 输入
 
 action 节点不应该关心某个角色有哪些 section。它只声明这个动作应使用哪种 `character_scope`。
 

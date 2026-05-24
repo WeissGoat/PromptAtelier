@@ -288,14 +288,10 @@ class ScriptComposer:
         character: NodeDocument | None,
         character_scope: str | None,
     ) -> str:
-        action_shot = action.shot if action else None
-        character_shot = character.shot if character else None
         return (
             character_scope
             or (action.character_scope if action else None)
-            or (action_shot.body_scope if action_shot else None)
             or (character.character_scope if character else None)
-            or (character_shot.body_scope if character_shot else None)
             or "default"
         )
 

@@ -103,6 +103,35 @@ class ScriptComposerTest(unittest.TestCase):
         self.assertIn("purple eyes", bundle.prompt.positive)
         self.assertNotIn("bare soles", bundle.prompt.positive)
 
+    def test_non_v1_shot_body_scope_does_not_drive_character_scope(self):
+        character = NodeDocument.model_validate(
+            {
+                "schema": "tags-machine.character/v1",
+                "kind": "character",
+                "id": "homura",
+                "tags": {
+                    "character": ["akemi homura"],
+                    "eyes": ["purple eyes"],
+                    "feet": ["bare soles"],
+                },
+            }
+        )
+        action = NodeDocument.model_validate(
+            {
+                "schema": "tags-machine.action/v1",
+                "kind": "action",
+                "id": "legacy_shot_action",
+                "tags": {"action": ["foot focus"]},
+                "shot": {"body_scope": "foot_detail"},
+            }
+        )
+
+        bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+        self.assertEqual(bundle.meta.composition.character_scope, "default")
+        self.assertIn("purple eyes", bundle.prompt.positive)
+        self.assertIn("bare soles", bundle.prompt.positive)
+
 
 if __name__ == "__main__":
     unittest.main()
