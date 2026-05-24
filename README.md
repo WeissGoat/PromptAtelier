@@ -38,6 +38,7 @@
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关
+- `backend-support`：输出后端支持矩阵；NovelAI 是默认执行后端，ComfyUI / SD 标记为预研执行后端
 - `inspect-node`：读取节点文件或目录
 - `validate-node-tree`：只读校验结构化节点目录，检查 v1 文件名、关键字段和禁止字段
 - `inspect-style`：读取旧画风节点
@@ -68,7 +69,7 @@ NovelAI 默认使用：
 - ComfyUI：`http://127.0.0.1:8188`
 - Stable Diffusion WebUI / Forge：`http://127.0.0.1:7860`
 
-预研后端真实执行需要在 `execute-render-request` 中显式传 `--allow-experimental-backend`；默认执行路径只承诺 NovelAI。
+预研后端真实执行需要在 `execute-render-request` 中显式传 `--allow-experimental-backend`；默认执行路径只承诺 NovelAI。前端、worker 或批量脚本需要判断后端能力时，读取 `backend-support` 的 JSON 输出，不要硬编码散落的后端范围。
 
 结构化节点示例：
 

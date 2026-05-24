@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from tags_machine_core.backends import ensure_backend_can_execute
 from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
@@ -102,11 +103,12 @@ def execute_render_request(
     comfyui_poll_interval: float = 1.0,
     comfyui_max_wait_seconds: float | None = None,
 ) -> GenerationResult:
-    if request.backend != "novelai" and not allow_experimental_backend:
-        raise ValueError(
-            "execute-render-request currently executes only NovelAI by default; "
-            "pass --allow-experimental-backend to run pre-v1 ComfyUI/SD clients"
-        )
+    ensure_backend_can_execute(
+        request.backend,
+        allow_experimental_backend=allow_experimental_backend,
+        entrypoint="execute-render-request",
+        experimental_flag="--allow-experimental-backend",
+    )
 
     if request.backend == "novelai":
         return execute_novelai_generation(

@@ -7,6 +7,11 @@ from typing import Any
 
 import yaml
 
+from tags_machine_core.backends import (
+    RENDER_BACKENDS,
+    backend_support_report,
+    ensure_backend_can_execute,
+)
 from tags_machine_core.composers import load_agent_result
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
@@ -39,9 +44,6 @@ from tags_machine_core.verification import (
     verify_acceptance_record,
     verify_acceptance_suite,
 )
-
-
-RENDER_BACKENDS = ("novelai", "comfyui", "sd")
 
 
 def print_json(value, *, full: bool = False) -> None:
@@ -235,6 +237,11 @@ def cmd_validate_node_tree(args) -> int:
 def cmd_config(args) -> int:
     config = load_config(Path(args.path))
     print_json(config, full=args.full)
+    return 0
+
+
+def cmd_backend_support(args) -> int:
+    print_json(backend_support_report(), full=args.full)
     return 0
 
 
@@ -581,8 +588,12 @@ def cmd_api_generate(args) -> int:
     config = load_config(Path(args.config))
 
     def executor(request: RenderRequest, request_data: dict[str, Any]) -> GenerationResult:
-        if request.backend != "novelai":
-            raise ValueError("api-generate currently supports only NovelAI in the v1 scope")
+        ensure_backend_can_execute(
+            request.backend,
+            allow_experimental_backend=False,
+            entrypoint="api-generate",
+            experimental_flag=None,
+        )
         return _execute_render_request(
             config,
             request,
@@ -1005,6 +1016,13 @@ def build_parser() -> argparse.ArgumentParser:
     config = subparsers.add_parser("config", parents=[output_parent], help="Read an app config file")
     config.add_argument("path")
     config.set_defaults(func=cmd_config)
+
+    backend_support = subparsers.add_parser(
+        "backend-support",
+        parents=[output_parent],
+        help="Print backend support stages and execution gate policy",
+    )
+    backend_support.set_defaults(func=cmd_backend_support)
 
     inspect_image_params = subparsers.add_parser(
         "inspect-image-params",

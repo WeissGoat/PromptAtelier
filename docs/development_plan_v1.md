@@ -44,6 +44,7 @@ flowchart LR
 核心原则：`PromptBundle` 是提示词生成层和生图层之间的分界线。它保存完整提示词、输入节点引用、composer 的关键选择结果和缓存信息，但不直接携带某个后端专属的工作流细节。
 
 当前 v1 的确定接入和验收主线只包含 NovelAI。ComfyUI / SD WebUI / Forge 可以保留已提交的预研代码和 dry-run 能力，但不作为当前阶段的成功标准；后续等规范明确后再进入正式 adapter 验收。
+后端范围由 `src/tags_machine_core/backends.py` 统一声明，并通过 `backend-support` CLI 输出给前端、worker 和批量脚本读取。当前矩阵中 NovelAI 是唯一默认执行后端；ComfyUI / SD 可以生成 render plan，但真实执行必须显式走实验开关。
 
 ## 模块通信格式
 
@@ -366,6 +367,7 @@ uv run python -m tags_machine_core run-prompt --prompt-file agent_prompt.txt --s
 uv run python -m tags_machine_core api-compose-render-plan examples\requests\compose_render_plan_novelai.json --output api_response.json
 uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requests\agent_compose_render_plan_requires_agent.json --output api_resolution.json
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
+uv run python -m tags_machine_core backend-support
 uv run python -m tags_machine_core execute-render-request core_render_request.json --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
@@ -387,6 +389,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest` 和 `GenerationResult` 契约；请求样例在 `examples/requests/`，响应形状 golden 在 `examples/responses/json_api_response_shapes.json`。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
+- `backend-support` 输出机器可读的后端支持矩阵，用于 UI、worker 和脚本判断哪些后端可生成计划、哪些后端可默认执行、哪些后端需要实验开关；不要在调用方重复硬编码这套策略。
 - `audit-legacy-tags` 是迁移前预检入口，支持扫描单个 `tags.txt`、单个旧节点目录或旧节点根目录；它只读源目录，不生成 `meta.yaml` / `node.yaml`。报告包含 `summary` 和逐节点 `items`，用于定位 character 的 `unclassified`、action 的默认 `character_scope`、疑似混入角色外观词、旧扩展字段只归档不执行等人工复核点。
 - `plan-legacy-tags-migration` 是批量迁移计划入口，基于预检结果把旧节点映射到 `--output-root\nodes\{styles|characters|actions|backgrounds}\...\{node.yaml|meta.yaml}`；它只写计划文件，不生成节点 YAML，不覆盖旧项目或目标节点。计划会标出 `ready`、`needs_review`、`target_exists`、`blocked`、`error`，用于先确认迁移范围、目标路径和冲突。
 - `apply-legacy-tags-migration` 是保守批量写出入口，会重新生成迁移计划，只写 `ready` 项对应的结构化节点；`needs_review`、`target_exists`、`blocked`、`error` 均跳过并写入结果报告。它不覆盖目标文件，也不会写旧项目目录。
