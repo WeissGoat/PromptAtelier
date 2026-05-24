@@ -678,6 +678,15 @@ def _generation_result_evidence(
     )
     evidence["images"] = image_summaries
     errors.extend(image_errors)
+    png_info = data.get("png_info")
+    png_info_summary, png_info_errors = _generation_result_png_info_summary(
+        png_info,
+        image_summaries=image_summaries,
+        base_dir=path.parent,
+    )
+    if png_info_summary is not None:
+        evidence["png_info"] = png_info_summary
+    errors.extend(png_info_errors)
 
     request_body = data.get("request_body")
     if not isinstance(request_body, dict) or not request_body:
@@ -697,15 +706,6 @@ def _generation_result_evidence(
         }
         if diffs:
             errors.append("GenerationResult request_body differs from core source")
-
-    png_info = data.get("png_info")
-    if isinstance(png_info, dict):
-        evidence["png_info"] = {
-            "image_count": len(png_info.get("images") or [])
-            if isinstance(png_info.get("images"), list)
-            else 0,
-            "keys": sorted(str(key) for key in png_info.keys()),
-        }
 
     evidence["result"] = "pass" if not errors else "fail"
     return evidence
@@ -751,6 +751,84 @@ def _generation_result_image_summaries(
             summary["sha256"] = _file_sha256(path)
         summaries.append(summary)
     return summaries, errors
+
+
+def _generation_result_png_info_summary(
+    value: Any,
+    *,
+    image_summaries: list[dict[str, Any]],
+    base_dir: Path,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    if not isinstance(value, dict):
+        if image_summaries:
+            return None, ["GenerationResult missing png_info.images"]
+        return None, []
+
+    summary: dict[str, Any] = {
+        "keys": sorted(str(key) for key in value.keys()),
+        "image_count": 0,
+    }
+    png_images = value.get("images")
+    if not isinstance(png_images, list):
+        if image_summaries:
+            return summary, ["GenerationResult png_info.images must be a list"]
+        return summary, []
+
+    summary["image_count"] = len(png_images)
+    image_items, errors = _generation_result_png_info_image_summaries(
+        png_images,
+        image_summaries=image_summaries,
+        base_dir=base_dir,
+    )
+    summary["images"] = image_items
+    if len(png_images) != len(image_summaries):
+        errors.append(
+            "GenerationResult png_info.images length differs from images length"
+        )
+    return summary, errors
+
+
+def _generation_result_png_info_image_summaries(
+    value: list[Any],
+    *,
+    image_summaries: list[dict[str, Any]],
+    base_dir: Path,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    summaries: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            errors.append(f"GenerationResult png_info image[{index}] must be an object")
+            continue
+        raw_path = item.get("path")
+        path = _resolve_generation_result_image_path(raw_path, base_dir)
+        summary: dict[str, Any] = {
+            "path": raw_path,
+            "has_parameters": bool(item.get("parameters")),
+            "has_error": bool(item.get("error")),
+        }
+        if path is None:
+            errors.append(f"GenerationResult png_info image[{index}] missing path")
+        else:
+            summary["resolved_path"] = str(path)
+            expected = (
+                image_summaries[index].get("resolved_path")
+                if index < len(image_summaries)
+                else None
+            )
+            if expected is not None and not _same_path(path, Path(str(expected))):
+                errors.append(
+                    f"GenerationResult png_info image[{index}] path differs from images[{index}]"
+                )
+        summaries.append(summary)
+    return summaries, errors
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left == right
 
 
 def _resolve_generation_result_image_path(value: Any, base_dir: Path) -> Path | None:

@@ -772,6 +772,7 @@ class VerificationTest(unittest.TestCase):
                         "backend": "novelai",
                         "images": [{"path": str(core_image), "filename": "core.png"}],
                         "request_body": payload,
+                        "png_info": {"images": [{"path": str(core_image)}]},
                     }
                 ),
                 encoding="utf-8",
@@ -1656,6 +1657,72 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(evidence["result"], "fail")
             self.assertFalse(evidence["images"][0]["exists"])
             self.assertIn("GenerationResult image[0] does not exist", evidence["errors"][0])
+
+    def test_build_acceptance_record_fails_generation_result_png_info_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            core_image = root / "core.png"
+            other_image = root / "other.png"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
+            _write_png_with_text(other_image, {"Comment": json.dumps(_sample_parameters())})
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [
+                            {
+                                "path": str(core_image),
+                                "filename": "core.png",
+                                "meta": {"index": 1},
+                            }
+                        ],
+                        "request_body": payload,
+                        "png_info": {"images": [{"path": str(other_image)}]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="generation_result_png_info_mismatch",
+                legacy_source=legacy,
+                core_source=core,
+                generation_result=generation_result,
+            )
+
+            evidence = record["generation_result_evidence"]
+            self.assertEqual(record["result"], "fail")
+            self.assertEqual(evidence["result"], "fail")
+            self.assertEqual(evidence["png_info"]["image_count"], 1)
+            self.assertIn(
+                "GenerationResult png_info image[0] path differs from images[0]",
+                evidence["errors"],
+            )
 
     def test_build_acceptance_record_fails_generation_result_request_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:

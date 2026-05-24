@@ -1428,7 +1428,14 @@ class JsonApiTest(unittest.TestCase):
                         "action": render_request.meta.get("action"),
                         "parameters": render_request.params,
                     },
-                    png_info={"images": []},
+                    png_info={
+                        "images": [
+                            {
+                                "path": str(generated_image),
+                                "error": "mock executor did not write PNG metadata",
+                            }
+                        ]
+                    },
                 )
 
             api = GenerationJsonApi(generation_executor=executor)
