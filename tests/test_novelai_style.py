@@ -8,6 +8,76 @@ from tags_machine_core.renderers import NovelAIRenderAdapter, NovelAIStyleReposi
 
 
 class NovelAIStyleTest(unittest.TestCase):
+    def test_novelai_adapter_builds_complete_v45_default_params(self):
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, foot focus",
+            negative="bad feet",
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            seed=123,
+            width=832,
+            height=1216,
+        )
+
+        params = request.params
+        self.assertEqual(request.model, "nai-diffusion-4-5-full")
+        self.assertEqual(params["params_version"], 1)
+        self.assertEqual(params["width"], 832)
+        self.assertEqual(params["height"], 1216)
+        self.assertEqual(params["scale"], 5.0)
+        self.assertEqual(params["sampler"], "k_euler")
+        self.assertEqual(params["steps"], 28)
+        self.assertEqual(params["seed"], 123)
+        self.assertEqual(params["n_samples"], 1)
+        self.assertEqual(params["ucPreset"], 3)
+        self.assertFalse(params["qualityToggle"])
+        self.assertFalse(params["sm"])
+        self.assertFalse(params["sm_dyn"])
+        self.assertFalse(params["dynamic_thresholding"])
+        self.assertEqual(params["controlnet_strength"], 1.0)
+        self.assertFalse(params["legacy"])
+        self.assertFalse(params["add_original_image"])
+        self.assertEqual(params["cfg_rescale"], 0.0)
+        self.assertEqual(params["noise_schedule"], "native")
+        self.assertFalse(params["legacy_v3_extend"])
+        self.assertEqual(params["uncond_scale"], 0.0)
+        self.assertEqual(params["prompt"], request.prompt)
+        self.assertEqual(params["negative_prompt"], request.negative_prompt)
+        self.assertEqual(params["reference_image_multiple"], [])
+        self.assertEqual(params["reference_strength_multiple"], [])
+        self.assertEqual(params["reference_information_extracted_multiple"], [])
+        self.assertEqual(params["extra_noise_seed"], 123)
+        self.assertEqual(params["v4_prompt"]["caption"]["base_caption"], request.prompt)
+        self.assertEqual(
+            params["v4_negative_prompt"]["caption"]["base_caption"],
+            request.negative_prompt,
+        )
+        self.assertFalse(params["v4_prompt"]["use_coords"])
+        self.assertFalse(params["v4_prompt"]["use_order"])
+        self.assertEqual(params["v4_prompt"]["caption"]["char_captions"], [])
+        self.assertNotIn("prefer_brownian", params)
+        self.assertNotIn("deliberate_euler_ancestral_bug", params)
+
+    def test_novelai_adapter_normalizes_ddim_sampler_for_v45(self):
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, foot focus",
+            negative="bad feet",
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            seed=123,
+            params={"sampler": "ddim", "sm": True, "sm_dyn": True},
+        )
+
+        self.assertEqual(request.params["sampler"], "ddim_v3")
+        self.assertFalse(request.params["sm"])
+        self.assertFalse(request.params["sm_dyn"])
+        self.assertNotIn("prefer_brownian", request.params)
+        self.assertNotIn("deliberate_euler_ancestral_bug", request.params)
+
     def test_read_style_and_build_modern_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             design_root = Path(tmp) / "design"
