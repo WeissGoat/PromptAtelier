@@ -47,11 +47,27 @@ FORBIDDEN_KEYS_BY_KIND = {
     },
 }
 
+SUPPORTED_V1_KINDS = {"character", "action", "background", "style"}
+
+EXPECTED_SCHEMA_BY_KIND = {
+    "character": "tags-machine.character/v1",
+    "action": "tags-machine.action/v1",
+    "background": "tags-machine.background/v1",
+    "style": "tags-machine.style/v1",
+}
+
 EXPECTED_FILE_BY_KIND = {
     "character": "meta.yaml",
     "action": "meta.yaml",
     "background": "meta.yaml",
     "style": "node.yaml",
+}
+
+REQUIRED_TAG_SECTIONS_BY_KIND = {
+    "character": ("character",),
+    "action": ("action",),
+    "background": ("background",),
+    "style": ("style",),
 }
 
 
@@ -140,6 +156,26 @@ def _validate_node_yaml(path: Path, source_root: Path) -> dict[str, Any]:
         )
 
     raw_kind = str(data.get("kind") or "").strip()
+    raw_node_id = str(data.get("id") or path.parent.name).strip() or path.parent.name
+    if not raw_kind:
+        _append_issue(issues, "missing_node_kind", "节点缺少 kind。")
+    elif raw_kind not in SUPPORTED_V1_KINDS:
+        _append_issue(
+            issues,
+            "unsupported_v1_kind",
+            f"v1 结构化节点暂不支持 kind={raw_kind}。",
+            details={"supported": sorted(SUPPORTED_V1_KINDS), "actual": raw_kind},
+        )
+    if issues:
+        return {
+            "path": str(path),
+            "relative_path": relative_path,
+            "status": "fail",
+            "kind": raw_kind or None,
+            "node_id": raw_node_id,
+            "issues": issues,
+        }
+
     try:
         node = NodeReader().read(path)
     except Exception as exc:
@@ -156,6 +192,16 @@ def _validate_node_yaml(path: Path, source_root: Path) -> dict[str, Any]:
         )
 
     kind = node.kind or raw_kind
+    expected_schema = EXPECTED_SCHEMA_BY_KIND.get(kind)
+    actual_schema = data.get("schema")
+    if expected_schema and actual_schema != expected_schema:
+        _append_issue(
+            issues,
+            "node_schema_mismatch",
+            f"{kind} 节点 schema 应为 {expected_schema}。",
+            details={"expected": expected_schema, "actual": actual_schema},
+        )
+
     expected_file = EXPECTED_FILE_BY_KIND.get(kind)
     if expected_file and path.name != expected_file:
         _append_issue(
@@ -172,6 +218,8 @@ def _validate_node_yaml(path: Path, source_root: Path) -> dict[str, Any]:
             "节点包含 v1 不允许的规则或结构字段。",
             details={"field": key_path},
         )
+
+    _validate_required_tag_sections(issues, data, kind)
 
     if kind == "action" and not str(data.get("character_scope") or "").strip():
         _append_issue(issues, "action_missing_character_scope", "action 节点缺少 character_scope。")
@@ -220,6 +268,47 @@ def _append_issue(
     if details:
         issue["details"] = details
     issues.append(issue)
+
+
+def _validate_required_tag_sections(
+    issues: list[dict[str, Any]],
+    data: dict[str, Any],
+    kind: str,
+) -> None:
+    required_sections = REQUIRED_TAG_SECTIONS_BY_KIND.get(kind, ())
+    if not required_sections:
+        return
+    tags = data.get("tags")
+    if not isinstance(tags, dict):
+        _append_issue(
+            issues,
+            "invalid_tags_mapping",
+            "节点 tags 必须是按 section 分组的 mapping。",
+        )
+        return
+    missing = [
+        section
+        for section in required_sections
+        if not _has_non_empty_tag_values(tags.get(section))
+    ]
+    if missing:
+        _append_issue(
+            issues,
+            "missing_required_tag_section",
+            "节点缺少 v1 必需的 tags section。",
+            details={
+                "missing": missing,
+                "available": sorted(str(key) for key in tags.keys()),
+            },
+        )
+
+
+def _has_non_empty_tag_values(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(str(item).strip() for item in value)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return False
 
 
 def _forbidden_yaml_key_paths(value: Any, forbidden_keys: set[str], prefix: str = "$") -> list[str]:

@@ -238,3 +238,22 @@ meta:
 `PromptBundle.prompt` 才是最终完整提示词。节点 YAML 只是输入素材。
 
 这里不使用 `meta.shot.body_scope`，因为 v1 的动作节点已经直接声明 `character_scope`。`PromptBundle.meta.composition` 记录的是 composer 本次实际采用的裁剪结果，用来调试、缓存和回放，而不是再发明一套镜头字段。
+
+## 校验门禁
+
+迁移后建议先运行结构化节点校验：
+
+```powershell
+uv run python -m tags_machine_core validate-node-tree migrated\nodes --output migrated_node_validation.yaml
+```
+
+当前校验覆盖：
+
+- `schema` / `kind` 必须匹配当前 v1 节点类型。
+- character/action/background 使用 `meta.yaml`，style 使用 `node.yaml`。
+- character/action/background/style 必须包含各自必需的 `tags` section。
+- action 必须声明 `character_scope`。
+- style 必须包含 `renderers.novelai`，因为当前正式生图主线只承诺 NovelAI。
+- v1 节点不能写入 `rules`、`profiles`、`shot`、`constraints`、`include_scopes` / `exclude_scopes` 等规则字段。
+
+`validate-node-tree` 失败时退出码为 2，可直接放进批量迁移或 CI 门禁。

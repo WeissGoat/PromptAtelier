@@ -229,7 +229,7 @@ uv run python -m tags_machine_core migrate-background-tags `
 
 `apply-legacy-tags-migration` 会重新生成迁移计划，然后只写出 `ready` 项对应的结构化节点；`needs_review`、`target_exists`、`blocked`、`error` 都会跳过并写入结果报告。这个命令不覆盖目标文件，也不会写旧项目目录。
 
-`validate-node-tree` 用于迁移后只读校验结构化节点目录。它会扫描 `node.yaml` / `meta.yaml`，检查 character/action/background 是否使用 `meta.yaml`、style 是否使用 `node.yaml`、action 是否声明 `character_scope`、style 是否包含 `renderers.novelai`，并报告 v1 不允许写入节点的规则字段。失败时 CLI 退出码为 2，适合放进批量迁移后的验收脚本。
+`validate-node-tree` 用于迁移后只读校验结构化节点目录。它会扫描 `node.yaml` / `meta.yaml`，检查 schema/kind 是否符合 v1、character/action/background 是否使用 `meta.yaml`、style 是否使用 `node.yaml`、必需 `tags` section 是否存在、action 是否声明 `character_scope`、style 是否包含 `renderers.novelai`，并报告 v1 不允许写入节点的规则字段。失败时 CLI 退出码为 2，适合放进批量迁移后的验收脚本。
 
 这些迁移命令默认不修改旧项目目录；只有传入 `--output` 时才写出结构化 YAML。style 迁移会保留 NovelAI 画风扩展参数；character 迁移只提升角色事实 tags，旧替换规则保留在 `legacy.raw_sections`；action 迁移只提升动作 tags、动作负向词和 `character_scope`；background 迁移只提升场景 tags 和背景级负向词，不把 `gen_json` 等旧扩展转成后端参数。
 
@@ -289,7 +289,7 @@ uv run python -m tags_machine_core verify-acceptance-suite examples\acceptance\s
 - `complex_character`：检查默认角色组合没有误过滤 `hair`、`eyes`、`upper_clothes`。
 - `reference_style`：检查 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple` 非空且长度一致，并检查 `director_reference_images` 非空。
 
-`examples/nodes` 也有测试门禁：character/action/background 使用 `meta.yaml`，style 使用 `node.yaml`；action 必须显式声明 `character_scope`；v1 样例里不能重新引入 `shot`、`constraints`、`rules`、`include_scopes` / `exclude_scopes` 等字段。
+`examples/nodes` 也有测试门禁：schema/kind 必须符合 v1；character/action/background 使用 `meta.yaml`，style 使用 `node.yaml`；节点必须包含对应的必需 `tags` section；action 必须显式声明 `character_scope`；v1 样例里不能重新引入 `shot`、`constraints`、`rules`、`include_scopes` / `exclude_scopes` 等字段。
 
 详细文档：
 

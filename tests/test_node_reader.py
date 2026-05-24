@@ -681,6 +681,75 @@ tags:
                 },
             )
 
+    def test_validate_node_tree_reports_schema_kind_and_required_tag_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            invalid_character = root / "characters" / "homura"
+            invalid_character.mkdir(parents=True)
+            (invalid_character / "meta.yaml").write_text(
+                """
+schema: tags-machine.action/v1
+kind: character
+id: homura
+tags:
+  hair:
+    - black hair
+""".strip(),
+                encoding="utf-8",
+            )
+            unsupported = root / "styles" / "legacy_artist"
+            unsupported.mkdir(parents=True)
+            (unsupported / "node.yaml").write_text(
+                """
+schema: tags-machine.style/v1
+kind: artist
+id: legacy_artist
+tags:
+  style:
+    - soft anime style
+renderers:
+  novelai: {}
+""".strip(),
+                encoding="utf-8",
+            )
+            invalid_action = root / "actions" / "flat_tags"
+            invalid_action.mkdir(parents=True)
+            (invalid_action / "meta.yaml").write_text(
+                """
+schema: tags-machine.action/v1
+kind: action
+id: flat_tags
+tags:
+  - foot focus
+character_scope: foot_detail
+""".strip(),
+                encoding="utf-8",
+            )
+
+            result = validate_node_tree(root)
+
+            self.assertFalse(result["valid"])
+            self.assertEqual(result["summary"]["fail_count"], 3)
+            self.assertEqual(result["summary"]["issue_counts"]["node_schema_mismatch"], 1)
+            self.assertEqual(
+                result["summary"]["issue_counts"]["missing_required_tag_section"],
+                1,
+            )
+            self.assertEqual(result["summary"]["issue_counts"]["unsupported_v1_kind"], 1)
+            self.assertEqual(result["summary"]["issue_counts"]["invalid_tags_mapping"], 1)
+            items_by_id = {item["node_id"]: item for item in result["items"]}
+            character_codes = {issue["code"] for issue in items_by_id["homura"]["issues"]}
+            self.assertEqual(
+                character_codes,
+                {"node_schema_mismatch", "missing_required_tag_section"},
+            )
+            artist_codes = {
+                issue["code"] for issue in items_by_id["legacy_artist"]["issues"]
+            }
+            self.assertEqual(artist_codes, {"unsupported_v1_kind"})
+            action_codes = {issue["code"] for issue in items_by_id["flat_tags"]["issues"]}
+            self.assertEqual(action_codes, {"invalid_tags_mapping"})
+
     def test_example_nodes_follow_v1_yaml_scope_contract(self):
         examples_root = PROJECT_ROOT / "examples" / "nodes"
         forbidden_keys_by_kind = {
@@ -754,6 +823,7 @@ tags:
                     violations.append(f"{relative}: style node missing renderers.novelai")
 
         self.assertEqual(violations, [])
+        self.assertTrue(validate_node_tree(examples_root)["valid"])
 
 
 def _forbidden_yaml_key_paths(value, forbidden_keys: set[str], prefix: str = "$") -> list[str]:
