@@ -572,6 +572,12 @@ def _append_image_evidence_messages(
         return
     if not evidence.get("sha256"):
         messages.append(f"{label} missing sha256")
+    if evidence.get("png_error"):
+        messages.append(f"{label} PNG parameters unreadable: {evidence['png_error']}")
+        return
+    png_info = evidence.get("png_info")
+    if not isinstance(png_info, dict) or not png_info.get("parameters"):
+        messages.append(f"{label} missing PNG parameters")
 
 
 def _append_generation_result_evidence_messages(messages: list[str], evidence: Any) -> None:

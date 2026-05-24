@@ -728,6 +728,74 @@ class VerificationTest(unittest.TestCase):
             self.assertIn("missing GenerationResult evidence", evidence_check["messages"])
             self.assertIn("missing PromptBundle contract evidence", evidence_check["messages"])
 
+    def test_verify_acceptance_suite_requires_png_parameters_for_legacy_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            legacy_image = root / "legacy.png"
+            core_image = root / "core.png"
+            prompt_bundle = root / "prompt_bundle.json"
+            generation_result = root / "generation_result.json"
+            record_path = root / "acceptance.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_png_with_text(legacy_image, {"Software": "no parameters"})
+            _write_png_with_text(core_image, {"Software": "no parameters"})
+            prompt_bundle.write_text(
+                json.dumps({"meta": {"composition": {"character_scope": "foot_detail"}}}),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [{"path": str(core_image), "filename": "core.png"}],
+                        "request_body": payload,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            record = build_acceptance_record(
+                case_id="legacy_without_png_parameters",
+                legacy_source=legacy,
+                core_source=core,
+                legacy_image=legacy_image,
+                core_image=core_image,
+                prompt_bundle=prompt_bundle,
+                generation_result=generation_result,
+            )
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            default = verify_acceptance_suite(root)
+            strict = verify_acceptance_suite(root, require_legacy_evidence=True)
+
+            self.assertTrue(default["match"])
+            self.assertFalse(strict["match"])
+            messages = strict["legacy_oracle_evidence_checks"][0]["messages"]
+            self.assertIn("legacy image missing PNG parameters", messages)
+            self.assertIn("core image missing PNG parameters", messages)
+
     def test_verify_acceptance_suite_reports_missing_minimum_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
