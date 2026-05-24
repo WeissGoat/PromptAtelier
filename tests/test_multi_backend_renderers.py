@@ -39,6 +39,7 @@ def _style_node() -> NodeDocument:
                         "steps": 30,
                         "reference_image_multiple": ["abc"],
                         "reference_strength_multiple": [0.25],
+                        "director_reference_images": ["director-abc"],
                     },
                 },
                 "comfyui": {
@@ -70,6 +71,7 @@ class MultiBackendRendererTest(unittest.TestCase):
         self.assertEqual(request.params["steps"], 30)
         self.assertEqual(request.params["reference_image_multiple"], ["abc"])
         self.assertEqual(request.params["reference_strength_multiple"], [0.25])
+        self.assertEqual(request.params["director_reference_images"], ["director-abc"])
         self.assertIn("style prefix", request.prompt)
         self.assertIn("akemi homura, foot focus", request.prompt)
         self.assertIn("anime style", request.prompt)

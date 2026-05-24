@@ -159,6 +159,20 @@ class VerificationTest(unittest.TestCase):
         self.assertEqual(len(diffs), 1)
         self.assertEqual(diffs[0].path, "$.parameters.reference_image_multiple[0].sha256")
 
+    def test_compare_render_parameters_reports_director_reference_differences(self):
+        left_params = _sample_parameters()
+        right_params = _sample_parameters()
+        left_params["director_reference_images"] = ["left-director"]
+        right_params["director_reference_images"] = ["rght-director"]
+
+        diffs = compare_render_parameters(
+            {"parameters": left_params},
+            {"parameters": right_params},
+        )
+
+        self.assertEqual(len(diffs), 1)
+        self.assertEqual(diffs[0].path, "$.parameters.director_reference_images[0].sha256")
+
     def test_cli_compare_render_params(self):
         with tempfile.TemporaryDirectory() as tmp:
             left = Path(tmp) / "left.json"
