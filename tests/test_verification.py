@@ -1957,6 +1957,97 @@ class VerificationTest(unittest.TestCase):
                 "fail",
             )
 
+    def test_build_acceptance_record_fails_generation_result_png_info_shape_errors(self):
+        cases = [
+            (
+                "generation_result_png_parameters_not_object",
+                {"parameters": "not an object"},
+                "GenerationResult png_info image[0] parameters must be an object",
+            ),
+            (
+                "generation_result_png_parameters_and_error",
+                {"parameters": _sample_parameters(), "error": "Not a PNG file"},
+                "GenerationResult png_info image[0] has both parameters and error",
+            ),
+            (
+                "generation_result_png_empty_error",
+                {"error": "   "},
+                "GenerationResult png_info image[0] error must be a non-empty string",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for case_id, png_info_extra, expected_error in cases:
+                with self.subTest(case_id=case_id):
+                    case_dir = root / case_id
+                    case_dir.mkdir()
+                    legacy = case_dir / "legacy.json"
+                    core = case_dir / "core.json"
+                    core_image = case_dir / "core.png"
+                    generation_result = case_dir / "generation_result.json"
+                    payload = {
+                        "input": "akemi homura, foot focus",
+                        "model": "nai-diffusion-4-5-full",
+                        "action": "generate",
+                        "parameters": _sample_parameters(),
+                    }
+                    legacy.write_text(json.dumps(payload), encoding="utf-8")
+                    core.write_text(
+                        json.dumps(
+                            {
+                                "schema": "tags-machine-core.render-request/v1",
+                                "backend": "novelai",
+                                "prompt": "akemi homura, foot focus",
+                                "negative_prompt": "bad feet",
+                                "model": "nai-diffusion-4-5-full",
+                                "params": _sample_parameters(),
+                                "meta": {"action": "generate"},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    _write_png_with_text(
+                        core_image,
+                        {"Comment": json.dumps(_sample_parameters())},
+                    )
+                    generation_result.write_text(
+                        json.dumps(
+                            {
+                                "schema": "tags-machine-core.generation-result/v1",
+                                "backend": "novelai",
+                                "images": [
+                                    {
+                                        "path": str(core_image),
+                                        "filename": "core.png",
+                                        "meta": {"index": 1},
+                                    }
+                                ],
+                                "request_body": payload,
+                                "png_info": {
+                                    "images": [
+                                        {
+                                            "path": str(core_image),
+                                            **png_info_extra,
+                                        }
+                                    ]
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+
+                    record = build_acceptance_record(
+                        case_id=case_id,
+                        legacy_source=legacy,
+                        core_source=core,
+                        generation_result=generation_result,
+                    )
+
+                    evidence = record["generation_result_evidence"]
+                    self.assertEqual(record["result"], "fail")
+                    self.assertEqual(evidence["result"], "fail")
+                    self.assertIn(expected_error, evidence["errors"])
+
     def test_build_acceptance_record_fails_generation_result_request_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
