@@ -163,7 +163,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json --ou
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 ```
 
-`GenerationJsonApi.agent_task()` 和 `GenerationJsonApi.compose_agent()` 是 agent 拼接的本地 JSON 边界。前者只生成稳定任务 JSON，不调用模型；后者接收外部 agent result，落成 `PromptBundle` 并写入缓存。`api-compose` 在请求里带 `"composer": "agent"`、`agent.result` 或 `agent` 对象时，也会走同一条 agent composer 路径。
+`GenerationJsonApi.agent_task()` 和 `GenerationJsonApi.compose_agent()` 是 agent 拼接的本地 JSON 边界。前者只生成稳定任务 JSON，不调用模型；后者接收外部 agent result，落成 `PromptBundle` 并写入缓存。`api-compose` 在请求里带 `"composer": "agent"`、`agent.result` 或 `agent` 对象时，也会走同一条 agent composer 路径。`api-compose-render-plan` 的 `compose` 段也可以直接使用 agent 请求体和缓存配置，用于一步生成 agent `PromptBundle` 与对应的 `RenderRequest`。
 
 `GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_render_request()`，并关闭实验后端，只支持 NovelAI，符合 v1 正式范围。
 

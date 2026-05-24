@@ -481,6 +481,91 @@ class JsonApiTest(unittest.TestCase):
                 _without_runtime_fields({**second, "cache": {**second["cache"], "cache_hit": False}}),
             )
 
+    def test_agent_compose_render_plan_json_api_builds_bundle_and_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            api = GenerationJsonApi()
+            request = {
+                "compose": {
+                    "nodes": {
+                        "character": str(character),
+                        "action": str(action),
+                    },
+                    "style": str(style),
+                    "extra_prompt": "soles toward viewer",
+                    "negative": "face focus",
+                    "character_scope": "foot_detail",
+                    "agent": {
+                        "instructions": ["局部特写只保留脚部相关角色细节"],
+                        "result": {
+                            "positive": "akemi homura, bare soles, foot focus, soles toward viewer",
+                            "negative": "extra toes, face focus",
+                            "character_scope": "foot_detail",
+                            "included_character_sections": ["character", "feet"],
+                            "suppressed_character_sections": ["eyes", "upper_clothes"],
+                        },
+                    },
+                    "cache": {
+                        "cache_dir": str(cache_dir),
+                    },
+                },
+                "render": {
+                    "backend": "novelai",
+                    "style": str(style),
+                    "seed": 2468,
+                    "width": 832,
+                    "height": 1216,
+                    "params": {
+                        "n_samples": 2,
+                        "scale": 6.0,
+                    },
+                },
+            }
+
+            first = api.compose_render_plan(request)
+            second_request = {
+                **request,
+                "compose": {
+                    **request["compose"],
+                    "agent": {
+                        "instructions": ["局部特写只保留脚部相关角色细节"],
+                    },
+                },
+            }
+            second = api.compose_render_plan(second_request)
+
+            first_bundle = first["prompt_bundle"]
+            first_render = first["render_request"]
+            second_bundle = second["prompt_bundle"]
+            second_render = second["render_request"]
+
+            self.assertEqual(first["schema"], "tags-machine-core.compose-render-plan-result/v1")
+            self.assertEqual(first_bundle["meta"]["composer_type"], "agent")
+            self.assertEqual(first_bundle["meta"]["style_ref"], "api_style")
+            self.assertEqual(first_bundle["meta"]["composition"]["character_scope"], "foot_detail")
+            self.assertEqual(first_bundle["meta"]["composition"]["suppressed_character_sections"], ["eyes", "upper_clothes"])
+            self.assertEqual(first_bundle["prompt"]["positive"], "akemi homura, bare soles, foot focus, soles toward viewer")
+            self.assertFalse(first_bundle["cache"]["cache_hit"])
+            self.assertTrue(second_bundle["cache"]["cache_hit"])
+            self.assertEqual(first_render["backend"], "novelai")
+            self.assertEqual(first_render["seed"], 2468)
+            self.assertEqual(first_render["size"], {"width": 832, "height": 1216})
+            self.assertEqual(first_render["params"]["n_samples"], 2)
+            self.assertEqual(first_render["params"]["scale"], 6.0)
+            self.assertEqual(first_render["meta"]["composer_type"], "agent")
+            self.assertEqual(first_render["meta"]["prompt_cache_key"], first_bundle["cache"]["cache_key"])
+            self.assertIn("style prefix", first_render["prompt"])
+            self.assertIn("akemi homura, bare soles, foot focus, soles toward viewer", first_render["prompt"])
+            self.assertIn("style suffix", first_render["prompt"])
+            self.assertIn("bad anatomy", first_render["negative_prompt"])
+            self.assertEqual(
+                _without_runtime_fields(first_bundle),
+                _without_runtime_fields({**second_bundle, "cache": {**second_bundle["cache"], "cache_hit": False}}),
+            )
+            self.assertEqual(first_render, second_render)
+
     def test_cli_api_agent_entries_read_json_request_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -197,7 +197,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json `
   --output api_response.json
 ```
 
-`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。`api-compose` 也可以通过 `"composer": "agent"` 或 `agent.result` 走 agent composer 路径，效果等价于 `api-compose-agent`。已有 `RenderRequest` 可以通过本地 JSON API 执行：
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。它的 `compose` 段可以直接包含 `agent.instructions`、`agent.result` 和 `cache.cache_dir`，用于一步完成 agent prompt 落库和 NovelAI render plan 预览。`api-compose` 也可以通过 `"composer": "agent"` 或 `agent.result` 走 agent composer 路径，效果等价于 `api-compose-agent`。已有 `RenderRequest` 可以通过本地 JSON API 执行：
 
 ```json
 {
