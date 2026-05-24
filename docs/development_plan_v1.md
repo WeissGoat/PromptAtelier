@@ -34,9 +34,11 @@ flowchart LR
   D --> E["生图适配层"]
   E --> E1["NovelAI adapter<br/>画风词 / vibe / V4 参数"]
   E --> E2["未来 adapter<br/>ComfyUI / SD 等待规范"]
-  E1 --> F["后端 client"]
+  E1 --> F["RenderRequest"]
   E2 --> F
-  F --> G["GenerationResult<br/>图片路径 + 请求体 + 元信息"]
+  F --> G["执行层 execution.py<br/>执行边界 / 保存图片 / PNG 参数"]
+  G --> H["后端 client<br/>NovelAIClient 等"]
+  H --> I["GenerationResult<br/>图片路径 + 请求体 + 元信息"]
 ```
 
 核心原则：`PromptBundle` 是提示词生成层和生图层之间的分界线。它保存完整提示词、输入节点引用、composer 的关键选择结果和缓存信息，但不直接携带某个后端专属的工作流细节。
@@ -62,6 +64,7 @@ YAML / tags.txt
 -> NodeDocument
 -> PromptBundle
 -> RenderRequest
+-> execution.py
 -> GenerationResult
 ```
 
@@ -112,16 +115,21 @@ NovelAIAdapter.build_request(prompt_bundle)
 - worker 队列
 - 复现某次生成
 
-### Client 输出
+### Execution 输出
 
-client 接收 `RenderRequest`，调用真实后端，输出 `GenerationResult`。
+execution 层接收 `RenderRequest`，选择真实后端执行器，调用底层 client，保存图片并输出 `GenerationResult`。
 
 ```text
-NovelAIClient.generate(render_request)
+execute_novelai_generation(config, render_request, output_dir, image_format)
+-> NovelAIClient.build_payload / generate_images
+-> save_generated_images
+-> collect_png_info
 -> GenerationResult
 ```
 
-`GenerationResult` 记录图片路径、请求体摘要、图片参数、缓存命中等信息。它同样可以序列化成 JSON，方便 UI 和批量任务读取。
+当前正式执行入口是 `src/tags_machine_core/execution.py` 里的 `execute_novelai_generation()`。CLI、JSON API 和未来 worker 都通过这一层执行 NovelAI；`NovelAIClient` 只负责把 `RenderRequest` 转成 NovelAI 请求并调用服务，不负责 CLI 边界、归档、图片保存和 PNG 参数收集。
+
+`GenerationResult` 记录图片路径、最终 request body、PNG 参数读取结果、缓存命中等信息。它同样可以序列化成 JSON，方便 UI、批量任务和验收资料包读取。
 
 ### 前端/服务通信
 
@@ -147,7 +155,7 @@ uv run python -m tags_machine_core api-compose-render-plan api_request.json --ou
 uv run python -m tags_machine_core api-generate api_generate.json --config configs\local.example.yaml --output api_generate_response.json
 ```
 
-`GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 的执行器只支持 NovelAI，符合 v1 正式范围。
+`GenerationJsonApi.generate()` 只负责把 `RenderRequest` JSON 校验成稳定契约，再调用注入的 `generation_executor`，最后把 `GenerationResult` 校验并序列化返回。这样 HTTP 服务、worker 队列和本地 CLI 可以复用同一个 JSON 边界；真正联网生图仍由执行器决定。当前 `api-generate` CLI 注入的执行器复用 `execute_novelai_generation()`，只支持 NovelAI，符合 v1 正式范围。
 
 UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参数。
 
@@ -380,7 +388,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - 保持旧项目稳定。
 - 新 core 支持读取旧画风 `tags.txt`。
 - 新 core 能生成 NovelAI render plan。
-- 新 core 能用现代 NovelAI client 真实出图。
+- 新 core 能通过 execution 层调用现代 NovelAI client 真实出图。
 
 第二阶段：结构化节点
 
@@ -397,14 +405,14 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 第四阶段：NovelAI 验收闭环
 
-- 完成 NovelAI adapter/client 的旧项目对照。
+- 完成 NovelAI adapter / execution / client 的旧项目对照。
 - 覆盖 reference image / vibe / V4 payload / 默认参数归一化。
 - 统一生成结果和图片参数读取。
 
 第五阶段：未来多后端
 
-- ComfyUI adapter/client 根据新规范进入正式验收。
-- SD WebUI / Forge adapter/client 根据新规范进入正式验收。
+- ComfyUI adapter / execution / client 根据新规范进入正式验收。
+- SD WebUI / Forge adapter / execution / client 根据新规范进入正式验收。
 
 第六阶段：前端 UI
 

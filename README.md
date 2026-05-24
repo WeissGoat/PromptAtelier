@@ -16,12 +16,15 @@
 完整主体提示词 + style_ref
 -> PromptBundle
 -> RenderRequest
--> NovelAI 保存图片
+-> NovelAI execution
+-> GenerationResult
 ```
 
 默认不 import 旧项目里的运行时代码。
 
 当前确定接入和验收主线只按 NovelAI 推进。ComfyUI / SD WebUI / Forge 相关代码只作为预研和未来扩展保留，等后续规范明确后再进入正式接入范围。
+
+真实生图统一通过 `execution.py`：CLI、JSON API 和未来 worker 先拿到 `RenderRequest`，再调用 `execute_novelai_generation()`。execution 层负责创建 `NovelAIClient`、保存图片、收集 PNG 内嵌参数、记录最终 request body，并返回 `GenerationResult`。
 
 ## CLI
 
