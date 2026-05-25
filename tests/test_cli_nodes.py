@@ -501,6 +501,8 @@ renderers:
                 style=reader.read(style),
             )
             legacy = root / "legacy_request.json"
+            legacy_image = root / "legacy.png"
+            core_image = root / "generated.png"
             legacy.write_text(
                 json.dumps(
                     {
@@ -512,20 +514,39 @@ renderers:
                 ),
                 encoding="utf-8",
             )
+            legacy_image.write_bytes(
+                _png_bytes_with_text({"Comment": json.dumps(request.params)})
+            )
+            core_image.write_bytes(
+                _png_bytes_with_text({"Comment": json.dumps(request.params)})
+            )
             generation_result = root / "generation_result.json"
             generation_result.write_text(
                 json.dumps(
                     {
                         "schema": "tags-machine-core.generation-result/v1",
                         "backend": "novelai",
-                        "images": [],
+                        "images": [
+                            {
+                                "path": str(core_image),
+                                "filename": "generated.png",
+                                "meta": {"index": 0},
+                            }
+                        ],
                         "request_body": {
                             "input": request.prompt,
                             "model": request.model,
                             "action": "generate",
                             "parameters": request.params,
                         },
-                        "png_info": {"images": []},
+                        "png_info": {
+                            "images": [
+                                {
+                                    "path": str(core_image),
+                                    "parameters": request.params,
+                                }
+                            ]
+                        },
                         "cache_hit": False,
                     },
                     ensure_ascii=False,
@@ -545,6 +566,8 @@ renderers:
                         str(root / "acceptance"),
                         "--legacy-source",
                         str(legacy),
+                        "--legacy-image",
+                        str(legacy_image),
                         "--character",
                         str(character),
                         "--action",
@@ -573,6 +596,8 @@ renderers:
             self.assertTrue(render_request_path.exists())
             self.assertTrue(prompt_bundle_path.exists())
             self.assertTrue((case_dir / "legacy" / "source.json").exists())
+            self.assertTrue((case_dir / "legacy" / "image.png").exists())
+            self.assertTrue((case_dir / "core" / "image.png").exists())
             generated_request = json.loads(render_request_path.read_text(encoding="utf-8"))
             generated_bundle = json.loads(prompt_bundle_path.read_text(encoding="utf-8"))
             generated_result = json.loads(
@@ -598,6 +623,9 @@ renderers:
                 archive["record"]["core"]["generation_result_path"],
                 "core/generation_result.json",
             )
+            self.assertEqual(archive["record"]["core"]["image_path"], "core/image.png")
+            self.assertEqual(generated_result["images"][0]["path"], "image.png")
+            self.assertEqual(generated_result["png_info"]["images"][0]["path"], "image.png")
             self.assertEqual(
                 archive["record"]["generation_result_evidence"]["request_body"]["diff"][
                     "diff_count"
@@ -621,6 +649,14 @@ renderers:
             suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
+            legacy_image.unlink()
+            core_image.unlink()
+            strict_suite = verify_acceptance_suite(
+                root / "acceptance" / "suite.yaml",
+                require_legacy_evidence=True,
+            )
+            self.assertTrue(strict_suite["match"])
+            self.assertEqual(strict_suite["legacy_oracle_evidence_fail_count"], 0)
 
     def test_archive_novelai_acceptance_nodes_matches_cli_prompt_and_render_plan(self):
         with tempfile.TemporaryDirectory() as tmp:

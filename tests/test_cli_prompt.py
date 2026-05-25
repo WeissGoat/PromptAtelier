@@ -1,7 +1,9 @@
 import io
 import json
+import struct
 import tempfile
 import unittest
+import zlib
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +14,22 @@ from tags_machine_core.contracts import GenerationResult
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import verify_acceptance_suite
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    crc = zlib.crc32(chunk_type)
+    crc = zlib.crc32(data, crc) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
+
+
+def _png_bytes_with_text(chunks: dict[str, str]) -> bytes:
+    png = bytearray(b"\x89PNG\r\n\x1a\n")
+    png.extend(_png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)))
+    for key, value in chunks.items():
+        png.extend(_png_chunk(b"tEXt", key.encode("latin-1") + b"\x00" + value.encode("utf-8")))
+    png.extend(_png_chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00\x00")))
+    png.extend(_png_chunk(b"IEND", b""))
+    return bytes(png)
 
 
 def _write_style_node(root: Path) -> Path:
@@ -340,6 +358,8 @@ novelai:
                 params={"n_samples": 2},
             )
             legacy = root / "legacy_request.json"
+            legacy_image = root / "legacy.png"
+            core_image = root / "generated.png"
             legacy.write_text(
                 json.dumps(
                     {
@@ -351,20 +371,39 @@ novelai:
                 ),
                 encoding="utf-8",
             )
+            legacy_image.write_bytes(
+                _png_bytes_with_text({"Comment": json.dumps(request.params)})
+            )
+            core_image.write_bytes(
+                _png_bytes_with_text({"Comment": json.dumps(request.params)})
+            )
             generation_result = root / "generation_result.json"
             generation_result.write_text(
                 json.dumps(
                     {
                         "schema": "tags-machine-core.generation-result/v1",
                         "backend": "novelai",
-                        "images": [],
+                        "images": [
+                            {
+                                "path": str(core_image),
+                                "filename": "generated.png",
+                                "meta": {"index": 0},
+                            }
+                        ],
                         "request_body": {
                             "input": request.prompt,
                             "model": request.model,
                             "action": "generate",
                             "parameters": request.params,
                         },
-                        "png_info": {"images": []},
+                        "png_info": {
+                            "images": [
+                                {
+                                    "path": str(core_image),
+                                    "parameters": request.params,
+                                }
+                            ]
+                        },
                         "cache_hit": False,
                     },
                     ensure_ascii=False,
@@ -384,6 +423,8 @@ novelai:
                         str(root / "acceptance"),
                         "--legacy-source",
                         str(legacy),
+                        "--legacy-image",
+                        str(legacy_image),
                         "--prompt",
                         prompt,
                         "--style-node",
@@ -437,6 +478,9 @@ novelai:
                 archive["record"]["core"]["generation_result_path"],
                 "core/generation_result.json",
             )
+            self.assertEqual(archive["record"]["core"]["image_path"], "core/image.png")
+            self.assertEqual(generated_result["images"][0]["path"], "image.png")
+            self.assertEqual(generated_result["png_info"]["images"][0]["path"], "image.png")
             self.assertEqual(
                 archive["record"]["generation_result_evidence"]["request_body"]["diff"][
                     "diff_count"
@@ -460,6 +504,14 @@ novelai:
             suite = verify_acceptance_suite(root / "acceptance" / "suite.yaml")
             self.assertTrue(suite["match"])
             self.assertEqual(suite["missing_required_cases"], [])
+            legacy_image.unlink()
+            core_image.unlink()
+            strict_suite = verify_acceptance_suite(
+                root / "acceptance" / "suite.yaml",
+                require_legacy_evidence=True,
+            )
+            self.assertTrue(strict_suite["match"])
+            self.assertEqual(strict_suite["legacy_oracle_evidence_fail_count"], 0)
 
     def test_run_prompt_and_acceptance_prompt_archive_build_identical_core_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
