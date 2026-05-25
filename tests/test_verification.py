@@ -1359,6 +1359,93 @@ class VerificationTest(unittest.TestCase):
         self.assertFalse(legacy_required["match"])
         self.assertIn("No legacy_oracle acceptance records found", legacy_required["errors"])
 
+    def test_verify_acceptance_suite_requires_minimum_cases_from_legacy_oracles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_record(
+                case_id: str,
+                *,
+                composition: dict | None = None,
+                oracle_kind: str = "fixture",
+            ) -> None:
+                legacy = root / f"{case_id}_legacy.json"
+                core = root / f"{case_id}_core.json"
+                bundle = root / f"{case_id}_bundle.json"
+                record_path = root / f"{case_id}.json"
+                payload = {"parameters": _minimum_case_parameters(case_id)}
+                legacy.write_text(json.dumps(payload), encoding="utf-8")
+                core.write_text(json.dumps(payload), encoding="utf-8")
+                prompt_bundle = None
+                if composition is not None:
+                    bundle.write_text(
+                        json.dumps(_prompt_bundle_fixture(composition)),
+                        encoding="utf-8",
+                    )
+                    prompt_bundle = bundle
+                record = build_acceptance_record(
+                    case_id=case_id,
+                    legacy_source=legacy,
+                    core_source=core,
+                    prompt_bundle=prompt_bundle,
+                    oracle_kind=oracle_kind,
+                )
+                record_path.write_text(json.dumps(record), encoding="utf-8")
+
+            write_record("default_action_001")
+            write_record(
+                "foot_detail_001",
+                composition={
+                    "character_scope": "foot_detail",
+                    "included_character_sections": ["character", "feet"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes"],
+                },
+            )
+            write_record(
+                "hand_detail_001",
+                composition={
+                    "character_scope": "hand_detail",
+                    "included_character_sections": ["character", "hands"],
+                    "suppressed_character_sections": ["hair", "eyes", "upper_clothes", "feet"],
+                },
+            )
+            write_record(
+                "complex_character_001",
+                composition={
+                    "character_scope": "default",
+                    "included_character_sections": ["character", "hair", "eyes", "upper_clothes"],
+                    "suppressed_character_sections": [],
+                },
+            )
+            write_record("reference_style_001")
+            write_record("unrelated_legacy_001", oracle_kind="legacy_oracle")
+
+            result = verify_acceptance_suite(
+                root,
+                require_minimum_set=True,
+                require_legacy_oracle=True,
+            )
+
+            self.assertFalse(result["match"])
+            self.assertEqual(result["missing_required_cases"], [])
+            self.assertEqual(result["case_check_fail_count"], 0)
+            self.assertEqual(result["oracle_kind_counts"], {"fixture": 5, "legacy_oracle": 1})
+            self.assertEqual(
+                result["legacy_missing_required_cases"],
+                [
+                    "default_action",
+                    "foot_detail",
+                    "hand_detail",
+                    "complex_character",
+                    "reference_style",
+                ],
+            )
+            self.assertIn(
+                "Missing legacy_oracle required cases: default_action, foot_detail, "
+                "hand_detail, complex_character, reference_style",
+                result["errors"],
+            )
+
     def test_verify_acceptance_suite_fails_bad_minimum_case_semantics(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

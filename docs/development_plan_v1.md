@@ -554,7 +554,7 @@ v1 冻结验收补充：
 - 对结构化节点样例，优先使用 `archive-novelai-acceptance-nodes` 生成 core 侧 `PromptBundle` / `RenderRequest` 并归档，减少手工保存中间文件造成的漏项。
 - 验收记录必须显式或默认带有 `oracle_kind`：真实旧项目对照资料包默认是 `legacy_oracle`；仓库内置或人工合成的机制样例必须标成 `fixture`。
 - 仓库内置 `examples/acceptance/` 只作为验收机制 fixture：它覆盖 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类 minimum case，并包含静态 PNG 参数证据，但其中 legacy 侧不是旧项目真实运行产物。
-- 判断“真实旧项目 oracle 已归档”时，必须使用 `verify-acceptance-suite --require-legacy-oracle`；只跑内置 `examples/acceptance/` 只能证明验收机制通过。需要排查资料包不完整时，使用 `--require-legacy-evidence` 查看 `legacy_oracle_evidence_checks[].messages`，其中会包含缺失证据、PNG 参数、PromptBundle 字段和 GenerationResult 请求 diff 的具体路径。
+- 判断“真实旧项目 oracle 已归档”时，必须使用 `verify-acceptance-suite --require-legacy-oracle`；只跑内置 `examples/acceptance/` 只能证明验收机制通过。若同时传入 `--require-minimum-set` 或 `--required-case`，这些样例也必须由 `legacy_oracle` 记录覆盖，fixture 只能验证机制，不能替代真实旧项目样例凑齐覆盖。需要排查资料包不完整时，使用 `--require-legacy-evidence` 查看 `legacy_oracle_evidence_checks[].messages`，其中会包含缺失证据、PNG 参数、PromptBundle 字段和 GenerationResult 请求 diff 的具体路径。
 - oracle 资料包可以由旧项目脚本提前生成，但 core 的回放、测试和验收只能读取这些静态产物。
 - 若旧项目自身输出存在已知问题，例如局部镜头混入头发、眼睛、上衣等不相关 tags，core 可以修复；修复差异必须进入 `intentional_differences`，并标明对应 composer 规则。
 - 未归档 oracle 的新能力只能算开发完成，不能算旧项目对照验收完成。

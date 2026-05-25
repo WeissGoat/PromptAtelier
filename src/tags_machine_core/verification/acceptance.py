@@ -456,6 +456,30 @@ def verify_acceptance_suite(
     ]
     case_checks = _minimum_case_checks(results) if require_minimum_set else []
     case_check_fail_count = sum(1 for item in case_checks if item.get("result") != "pass")
+    require_legacy_cases = bool(required and (require_legacy_oracle or require_legacy_evidence))
+    legacy_results = [
+        item for item in results if item.get("oracle_kind") == "legacy_oracle"
+    ]
+    legacy_case_ids = [
+        str(item.get("case_id")) for item in legacy_results if item.get("case_id")
+    ]
+    legacy_missing_required_cases = (
+        [
+            required_case
+            for required_case in required
+            if not _case_requirement_satisfied(required_case, legacy_case_ids)
+        ]
+        if require_legacy_cases
+        else []
+    )
+    legacy_case_checks = (
+        _minimum_case_checks(legacy_results)
+        if require_minimum_set and (require_legacy_oracle or require_legacy_evidence)
+        else []
+    )
+    legacy_case_check_fail_count = sum(
+        1 for item in legacy_case_checks if item.get("result") != "pass"
+    )
     legacy_oracle_evidence_checks = (
         _legacy_oracle_evidence_checks(results) if require_legacy_evidence else []
     )
@@ -471,6 +495,11 @@ def verify_acceptance_suite(
         "legacy_oracle"
     ):
         errors.append("No legacy_oracle acceptance records found")
+    if legacy_missing_required_cases:
+        joined = ", ".join(legacy_missing_required_cases)
+        errors.append(f"Missing legacy_oracle required cases: {joined}")
+    if legacy_case_check_fail_count:
+        errors.append("Legacy oracle minimum case checks failed")
     if legacy_oracle_evidence_fail_count:
         errors.append("Legacy oracle evidence incomplete")
     match = (
@@ -478,6 +507,8 @@ def verify_acceptance_suite(
         and fail_count == 0
         and not missing_required_cases
         and case_check_fail_count == 0
+        and not legacy_missing_required_cases
+        and legacy_case_check_fail_count == 0
         and legacy_oracle_evidence_fail_count == 0
     )
     return {
@@ -487,11 +518,14 @@ def verify_acceptance_suite(
         "pass_count": len(results) - fail_count,
         "fail_count": fail_count,
         "case_check_fail_count": case_check_fail_count,
+        "legacy_case_check_fail_count": legacy_case_check_fail_count,
         "legacy_oracle_evidence_fail_count": legacy_oracle_evidence_fail_count,
         "oracle_kind_counts": oracle_kind_counts,
         "required_cases": required,
         "missing_required_cases": missing_required_cases,
+        "legacy_missing_required_cases": legacy_missing_required_cases,
         "case_checks": case_checks,
+        "legacy_case_checks": legacy_case_checks,
         "legacy_oracle_evidence_checks": legacy_oracle_evidence_checks,
         "errors": errors,
         "match": match,
