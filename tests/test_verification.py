@@ -2383,6 +2383,63 @@ class VerificationTest(unittest.TestCase):
                     self.assertIn(expected_error, evidence["errors"])
                     self.assertIn(expected_error, evidence["contract_errors"] + evidence["errors"])
 
+    def test_build_acceptance_record_fails_generation_result_backend_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "comfyui",
+                        "images": [],
+                        "request_body": payload,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="generation_result_backend_mismatch",
+                legacy_source=legacy,
+                core_source=core,
+                generation_result=generation_result,
+            )
+
+            evidence = record["generation_result_evidence"]
+            self.assertEqual(record["result"], "fail")
+            self.assertEqual(evidence["result"], "fail")
+            self.assertEqual(evidence["backend_check"]["expected"], "novelai")
+            self.assertEqual(evidence["backend_check"]["actual"], "comfyui")
+            self.assertIn(
+                "GenerationResult backend differs from core RenderRequest backend: "
+                "expected novelai, got comfyui",
+                evidence["errors"],
+            )
+
     def test_build_acceptance_record_fails_generation_result_image_item_shape_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

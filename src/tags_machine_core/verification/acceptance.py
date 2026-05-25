@@ -807,6 +807,7 @@ def _generation_result_evidence(
     contract_errors = _generation_result_contract_errors(data)
     evidence["contract_errors"] = contract_errors
     errors.extend(contract_errors)
+    _append_generation_result_backend_check(evidence, errors, data, core_data)
 
     images = data.get("images")
     evidence["image_count"] = len(images) if isinstance(images, list) else 0
@@ -847,6 +848,32 @@ def _generation_result_evidence(
 
     evidence["result"] = "pass" if not errors else "fail"
     return evidence
+
+
+def _append_generation_result_backend_check(
+    evidence: dict[str, Any],
+    errors: list[str],
+    data: dict[str, Any],
+    core_data: dict[str, Any],
+) -> None:
+    expected_backend = core_data.get("backend")
+    actual_backend = data.get("backend")
+    if not isinstance(expected_backend, str) or not expected_backend.strip():
+        return
+    if not isinstance(actual_backend, str) or not actual_backend.strip():
+        return
+
+    backend_check = {
+        "expected": expected_backend,
+        "actual": actual_backend,
+        "result": "pass" if actual_backend == expected_backend else "fail",
+    }
+    evidence["backend_check"] = backend_check
+    if backend_check["result"] != "pass":
+        errors.append(
+            "GenerationResult backend differs from core RenderRequest backend: "
+            f"expected {expected_backend}, got {actual_backend}"
+        )
 
 
 def _generation_result_contract_errors(data: dict[str, Any]) -> list[str]:
