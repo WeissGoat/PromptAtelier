@@ -2036,6 +2036,119 @@ class VerificationTest(unittest.TestCase):
             self.assertTrue(replayed_suite["match"])
             self.assertEqual(replayed_suite["records"][0]["generation_result_evidence"]["result"], "pass")
 
+    def test_archive_acceptance_case_archives_generation_result_images_without_core_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "source"
+            source_dir.mkdir()
+            legacy = source_dir / "legacy_request.json"
+            core = source_dir / "core_render_request.json"
+            legacy_image = source_dir / "legacy.png"
+            core_image = source_dir / "generated.png"
+            second_core_image = source_dir / "generated_second.png"
+            prompt_bundle = source_dir / "prompt_bundle.json"
+            generation_result = source_dir / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_png_with_text(legacy_image, {"Comment": json.dumps(_sample_parameters())})
+            _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
+            _write_png_with_text(second_core_image, {"Comment": json.dumps(_sample_parameters())})
+            prompt_bundle.write_text(json.dumps(_prompt_bundle_fixture()), encoding="utf-8")
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [
+                            {"path": str(core_image), "filename": "generated.png"},
+                            {
+                                "path": str(second_core_image),
+                                "filename": "generated_second.png",
+                            },
+                        ],
+                        "request_body": payload,
+                        "png_info": {
+                            "images": [
+                                {
+                                    "path": str(core_image),
+                                    "parameters": _sample_parameters(),
+                                },
+                                {
+                                    "path": str(second_core_image),
+                                    "parameters": _sample_parameters(),
+                                },
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            archive = archive_acceptance_case(
+                case_id="generation_result_images_only_001",
+                output_dir=root / "acceptance",
+                legacy_source=legacy,
+                core_source=core,
+                legacy_image=legacy_image,
+                prompt_bundle=prompt_bundle,
+                generation_result=generation_result,
+            )
+
+            case_dir = Path(archive["case_dir"])
+            record = archive["record"]
+            self.assertEqual(archive["result"], "pass")
+            self.assertTrue((case_dir / "core" / "image.png").exists())
+            self.assertTrue((case_dir / "core" / "image_1.png").exists())
+            self.assertEqual(record["core"]["image_path"], "core/image.png")
+            self.assertEqual(record["archive"]["artifacts"]["core_image"], "core/image.png")
+            self.assertEqual(record["generation_result_evidence"]["image_count"], 2)
+            self.assertEqual(
+                record["generation_result_evidence"]["images"][0]["resolved_path"],
+                "core/image.png",
+            )
+            self.assertEqual(
+                record["generation_result_evidence"]["images"][1]["resolved_path"],
+                "core/image_1.png",
+            )
+            archived_generation = json.loads(
+                (case_dir / "core" / "generation_result.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                [item["path"] for item in archived_generation["images"]],
+                ["image.png", "image_1.png"],
+            )
+            self.assertEqual(
+                [item["path"] for item in archived_generation["png_info"]["images"]],
+                ["image.png", "image_1.png"],
+            )
+
+            shutil.rmtree(source_dir)
+            strict_suite = verify_acceptance_suite(
+                root / "acceptance" / "suite.yaml",
+                require_legacy_evidence=True,
+            )
+            self.assertTrue(strict_suite["match"])
+            self.assertEqual(strict_suite["legacy_oracle_evidence_fail_count"], 0)
+
     def test_build_acceptance_record_fails_generation_result_missing_image(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

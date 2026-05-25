@@ -295,11 +295,13 @@ def archive_acceptance_case(
         _artifact_filename("generation_result", generation_result) if generation_result else None,
         overwrite=overwrite,
     )
-    _rewrite_generation_result_image_paths(
+    core_image_copy = _archive_generation_result_images(
         generation_result_copy,
         source_generation_result=Path(generation_result) if generation_result else None,
         source_core_image=_generation_result_source_core_image(core_image, core_source),
         archived_core_image=core_image_copy,
+        core_dir=core_dir,
+        overwrite=overwrite,
     )
 
     record = build_acceptance_record(
@@ -1024,46 +1026,143 @@ def _resolve_generation_result_image_path(value: Any, base_dir: Path) -> Path | 
     return path if path.is_absolute() else base_dir / path
 
 
-def _rewrite_generation_result_image_paths(
+def _archive_generation_result_images(
     path: Path | None,
     *,
     source_generation_result: Path | None,
     source_core_image: Path | None,
     archived_core_image: Path | None,
-) -> None:
-    if path is None or archived_core_image is None or not path.is_file():
-        return
+    core_dir: Path,
+    overwrite: bool,
+) -> Path | None:
+    if path is None or not path.is_file():
+        return archived_core_image
 
     try:
         data = _load_json_mapping(path)
     except Exception:
-        return
+        return archived_core_image
 
     source_base = source_generation_result.parent if source_generation_result else path.parent
-    relative_archived_image = _relative_path_string(str(archived_core_image), path.parent)
+    archived_by_source: dict[str, Path] = {}
+    used_names: set[str] = set()
+    if archived_core_image is not None:
+        used_names.add(archived_core_image.name)
+    first_archived_image = archived_core_image
     changed = False
 
     images = data.get("images")
     if isinstance(images, list):
-        for item in images:
+        for index, item in enumerate(images):
             if not isinstance(item, dict):
                 continue
-            if _generation_result_image_matches(item, source_base, source_core_image):
-                item["path"] = relative_archived_image
-                item["filename"] = item.get("filename") or archived_core_image.name
-                changed = True
+            source_image = _resolve_generation_result_image_path(item.get("path"), source_base)
+            archived_image = _archive_generation_result_image(
+                source_image,
+                core_dir=core_dir,
+                index=index,
+                archived_by_source=archived_by_source,
+                used_names=used_names,
+                source_core_image=source_core_image,
+                archived_core_image=archived_core_image,
+                overwrite=overwrite,
+            )
+            if archived_image is None:
+                continue
+            first_archived_image = first_archived_image or archived_image
+            item["path"] = _relative_path_string(str(archived_image), path.parent)
+            item["filename"] = item.get("filename") or archived_image.name
+            changed = True
 
     png_info = data.get("png_info")
     if isinstance(png_info, dict) and isinstance(png_info.get("images"), list):
         for item in png_info["images"]:
             if not isinstance(item, dict):
                 continue
-            if _generation_result_image_matches(item, source_base, source_core_image):
-                item["path"] = relative_archived_image
+            source_image = _resolve_generation_result_image_path(item.get("path"), source_base)
+            archived_image = _archived_generation_result_image_for_source(
+                source_image,
+                archived_by_source,
+            )
+            if archived_image is not None:
+                item["path"] = _relative_path_string(str(archived_image), path.parent)
                 changed = True
 
     if changed:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return first_archived_image
+
+
+def _archive_generation_result_image(
+    source_image: Path | None,
+    *,
+    core_dir: Path,
+    index: int,
+    archived_by_source: dict[str, Path],
+    used_names: set[str],
+    source_core_image: Path | None,
+    archived_core_image: Path | None,
+    overwrite: bool,
+) -> Path | None:
+    if source_image is None or not source_image.is_file():
+        return None
+    source_key = _resolved_path_key(source_image)
+    if source_key in archived_by_source:
+        return archived_by_source[source_key]
+    if (
+        source_core_image is not None
+        and archived_core_image is not None
+        and _same_path(source_image, source_core_image)
+    ):
+        archived_by_source[source_key] = archived_core_image
+        return archived_core_image
+
+    filename = _generation_result_archive_image_filename(
+        source_image,
+        index=index,
+        used_names=used_names,
+    )
+    archived_image = _copy_acceptance_artifact(
+        source_image,
+        core_dir,
+        filename,
+        overwrite=overwrite,
+    )
+    archived_by_source[source_key] = archived_image
+    return archived_image
+
+
+def _generation_result_archive_image_filename(
+    source_image: Path,
+    *,
+    index: int,
+    used_names: set[str],
+) -> str:
+    suffix = source_image.suffix or ".png"
+    stem = "image" if index == 0 else f"image_{index}"
+    filename = f"{stem}{suffix}"
+    counter = 1
+    while filename in used_names:
+        filename = f"{stem}_{counter}{suffix}"
+        counter += 1
+    used_names.add(filename)
+    return filename
+
+
+def _archived_generation_result_image_for_source(
+    source_image: Path | None,
+    archived_by_source: dict[str, Path],
+) -> Path | None:
+    if source_image is None:
+        return None
+    return archived_by_source.get(_resolved_path_key(source_image))
+
+
+def _resolved_path_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
 
 
 def _generation_result_source_core_image(
@@ -1074,24 +1173,6 @@ def _generation_result_source_core_image(
         return Path(core_image)
     core_source_path = Path(core_source)
     return core_source_path if _is_png_path(core_source_path) else None
-
-
-def _generation_result_image_matches(
-    item: dict[str, Any],
-    source_base: Path,
-    source_core_image: Path | None,
-) -> bool:
-    if source_core_image is None:
-        return False
-    raw_path = item.get("path")
-    if raw_path is None:
-        return False
-    path = Path(str(raw_path))
-    resolved = path if path.is_absolute() else source_base / path
-    try:
-        return resolved.resolve() == source_core_image.resolve()
-    except OSError:
-        return False
 
 
 def _generation_result_evidence_pass(record: dict[str, Any]) -> bool:

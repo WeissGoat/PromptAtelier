@@ -550,7 +550,7 @@ v1 冻结验收补充：
 旧项目 oracle 资料包：
 
 - 每个样例至少归档旧项目最终请求体、旧图、旧图 PNG 参数、新 `PromptBundle`、新 `RenderRequest`、新图或 dry-run 结果、验收记录。
-- `archive-acceptance-case` 是 v1 默认的资料包生成入口；它只复制静态产物，不运行或 import 旧项目代码。归档 `GenerationResult` 时，它会把其中指向新图的路径改写为 `core/` 目录内的相对路径，让资料包离开源目录后仍可回放。
+- `archive-acceptance-case` 是 v1 默认的资料包生成入口；它只复制静态产物，不运行或 import 旧项目代码。归档 `GenerationResult` 时，它会把其中指向新图的路径改写为 `core/` 目录内的相对路径；如果没有显式传 `--core-image`，也会从 `GenerationResult.images` 复制本地图到资料包，避免资料包离开源目录后无法回放。
 - 对结构化节点样例，优先使用 `archive-novelai-acceptance-nodes` 生成 core 侧 `PromptBundle` / `RenderRequest` 并归档，减少手工保存中间文件造成的漏项。
 - 验收记录必须显式或默认带有 `oracle_kind`：真实旧项目对照资料包默认是 `legacy_oracle`；仓库内置或人工合成的机制样例必须标成 `fixture`。
 - 仓库内置 `examples/acceptance/` 只作为验收机制 fixture：它覆盖 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类 minimum case，并包含静态 PNG 参数证据，但其中 legacy 侧不是旧项目真实运行产物。
