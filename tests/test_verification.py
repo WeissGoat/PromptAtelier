@@ -17,8 +17,10 @@ from tags_machine_core.cli import main
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_acceptance_record,
+    build_image_comparison_report,
     compare_render_parameters,
     normalize_render_parameters,
+    read_png_dimensions,
     read_image_parameters,
     run_core_verification,
     verify_acceptance_record,
@@ -216,6 +218,13 @@ class VerificationTest(unittest.TestCase):
             self.assertEqual(data["parameters"]["reference_image_multiple"], ["base64-reference"])
             self.assertEqual(data["png_text"]["Source"], "NovelAI V4.5")
 
+    def test_read_png_dimensions_reads_ihdr_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.png"
+            _write_png_with_text(path, {"Comment": json.dumps(_sample_parameters())})
+
+            self.assertEqual(read_png_dimensions(path), {"width": 1, "height": 1})
+
     def test_normalize_render_parameters_summarizes_reference_images(self):
         normalized = normalize_render_parameters(
             {
@@ -251,6 +260,23 @@ class VerificationTest(unittest.TestCase):
         }
 
         self.assertEqual(compare_render_parameters(render_request, raw_payload), [])
+
+    def test_compare_render_parameters_accepts_generation_result_request_body(self):
+        raw_payload = {
+            "input": "akemi homura, foot focus",
+            "model": "nai-diffusion-4-5-full",
+            "action": "generate",
+            "parameters": _sample_parameters(),
+        }
+        generation_result = {
+            "schema": "tags-machine-core.generation-result/v1",
+            "backend": "novelai",
+            "images": [],
+            "request_body": raw_payload,
+            "cache_hit": False,
+        }
+
+        self.assertEqual(compare_render_parameters(raw_payload, generation_result), [])
 
     def test_compare_render_parameters_accepts_png_comment_without_action(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -317,6 +343,168 @@ class VerificationTest(unittest.TestCase):
             data = json.loads(stdout.getvalue())
             self.assertTrue(data["match"])
             self.assertEqual(data["diff_count"], 0)
+
+    def test_cli_compare_render_params_accepts_generation_result_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_image = root / "legacy.png"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            _write_png_with_text(legacy_image, {"Comment": json.dumps(_sample_parameters())})
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [],
+                        "request_body": payload,
+                        "cache_hit": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "compare-render-params",
+                        str(legacy_image),
+                        str(generation_result),
+                        "--show-normalized",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertTrue(data["match"])
+            self.assertEqual(data["diff_count"], 0)
+            self.assertIn("reference_image_multiple", data["left_normalized"]["parameters"])
+
+    def test_build_image_comparison_report_compares_png_and_generation_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_image = root / "legacy.png"
+            core_image = root / "core.png"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            _write_png_with_text(legacy_image, {"Comment": json.dumps(_sample_parameters())})
+            _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [
+                            {
+                                "path": "core.png",
+                                "filename": "core.png",
+                                "meta": {"index": 0},
+                            }
+                        ],
+                        "request_body": payload,
+                        "png_info": {
+                            "images": [
+                                {
+                                    "path": "core.png",
+                                    "parameters": _sample_parameters(),
+                                }
+                            ]
+                        },
+                        "cache_hit": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_image_comparison_report(
+                legacy_image,
+                generation_result,
+                visual_result="pass",
+                visual_notes=["subject/action/camera/style checked"],
+            )
+
+            self.assertTrue(report["match"])
+            self.assertTrue(report["acceptance_ready"])
+            self.assertEqual(report["parameter_diff"]["diff_count"], 0)
+            self.assertEqual(report["core_request_vs_png"]["diff_count"], 0)
+            self.assertEqual(report["legacy_image"]["dimensions"], {"width": 1, "height": 1})
+            self.assertEqual(report["core_image"]["dimensions"], {"width": 1, "height": 1})
+            self.assertEqual(
+                report["legacy_image"]["sha256"],
+                hashlib.sha256(legacy_image.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(report["generation_result"]["selected_core_image"], str(core_image))
+            self.assertEqual(report["visual_check"]["result"], "pass")
+            self.assertEqual(
+                report["parameter_diff"]["left_normalized"]["parameters"][
+                    "reference_image_multiple"
+                ][0]["chars"],
+                len("base64-reference"),
+            )
+
+    def test_cli_compare_image_result_writes_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_image = root / "legacy.png"
+            core_image = root / "core.png"
+            generation_result = root / "generation_result.json"
+            report_path = root / "report.yaml"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            _write_png_with_text(legacy_image, {"Comment": json.dumps(_sample_parameters())})
+            _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [{"path": str(core_image), "filename": "core.png"}],
+                        "request_body": payload,
+                        "cache_hit": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "compare-image-result",
+                        "--legacy-image",
+                        str(legacy_image),
+                        "--core-generation-result",
+                        str(generation_result),
+                        "--visual-result",
+                        "pending",
+                        "--visual-note",
+                        "waiting for manual visual check",
+                        "--output",
+                        str(report_path),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads(stdout.getvalue())
+            self.assertTrue(data["match"])
+            self.assertFalse(data["acceptance_ready"])
+            self.assertEqual(data["visual_check"]["result"], "pending")
+            self.assertTrue(report_path.exists())
 
     def test_cli_inspect_image_params_normalized(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2103,6 +2291,7 @@ class VerificationTest(unittest.TestCase):
                 (case_dir / "core" / "generation_result.json").read_text(encoding="utf-8")
             )
             self.assertEqual(archived_generation["images"][0]["path"], "image.png")
+            self.assertEqual(archived_generation["images"][0]["filename"], "image.png")
             self.assertEqual(archived_generation["png_info"]["images"][0]["path"], "image.png")
             self.assertEqual(record["archive"]["artifacts"]["legacy_image"], "legacy/image.png")
             self.assertEqual(record["composition"]["character_scope"], "foot_detail")
@@ -2221,6 +2410,10 @@ class VerificationTest(unittest.TestCase):
             )
             self.assertEqual(
                 [item["path"] for item in archived_generation["images"]],
+                ["image.png", "image_1.png"],
+            )
+            self.assertEqual(
+                [item["filename"] for item in archived_generation["images"]],
                 ["image.png", "image_1.png"],
             )
             self.assertEqual(

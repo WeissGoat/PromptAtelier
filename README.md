@@ -47,11 +47,12 @@
 - `migrate-action-tags`：把旧动作 `tags.txt` 转成结构化 action `meta.yaml`
 - `migrate-background-tags`：把旧背景 `tags.txt` 转成结构化 background `meta.yaml`
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
-- `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest`
+- `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest` / `GenerationResult`
+- `compare-image-result`：生成旧图与 core `GenerationResult` 的单 case 对比报告，覆盖图片 hash、尺寸、PNG 参数和人工视觉检查字段
 - `create-acceptance-record`：生成旧项目对照验收记录
-- `archive-acceptance-case`：把旧项目 oracle 和 core 产物复制成可回放资料包
-- `archive-novelai-acceptance-nodes`：从结构化节点生成 NovelAI core 产物并归档旧项目对照资料包
-- `archive-novelai-acceptance-prompt`：从完整 prompt 生成 NovelAI core 产物并归档旧项目对照资料包
+- `archive-acceptance-case`：把旧项目基准结果和 core 产物复制成可回放对比集
+- `archive-novelai-acceptance-nodes`：从结构化节点生成 NovelAI core 产物并归档旧项目对比集
+- `archive-novelai-acceptance-prompt`：从完整 prompt 生成 NovelAI core 产物并归档旧项目对比集
 - `verify-acceptance-record`：重算验收记录并检查未批准差异
 - `verify-acceptance-suite`：批量重算验收记录，并检查必需样例是否齐全
 - `verify-core`：运行当前无联网核心门禁，覆盖 compileall、unittest、示例节点校验、fixture 验收和 `git diff --check`
@@ -173,7 +174,7 @@ uv run python -m tags_machine_core api-backend-support examples\requests\backend
   --output backend_support.json
 ```
 
-`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收资料包，不会联网生图。`api-resolve-compose-render-plan` 是状态入口，可返回 `ready` 或 `requires_agent`。`api-backend-support` 返回同一份后端支持矩阵，供前端和 worker 决定默认执行和实验后端入口。已有 `RenderRequest` 可以通过本地 JSON API 执行：
+`api-compose-render-plan` 会输出同一份 `PromptBundle` 和 `RenderRequest`，用于前端预览、worker 队列和验收对比集，不会联网生图。`api-resolve-compose-render-plan` 是状态入口，可返回 `ready` 或 `requires_agent`。`api-backend-support` 返回同一份后端支持矩阵，供前端和 worker 决定默认执行和实验后端入口。已有 `RenderRequest` 可以通过本地 JSON API 执行：
 
 ```powershell
 uv run python -m tags_machine_core api-generate api_generate.json `
@@ -242,7 +243,12 @@ uv run python -m tags_machine_core migrate-background-tags `
 
 ```powershell
 uv run python -m tags_machine_core inspect-image-params old.png --normalized
-uv run python -m tags_machine_core compare-render-params old.png core_render_request.json --show-normalized
+uv run python -m tags_machine_core compare-render-params old.png core_generation_result.json --show-normalized
+uv run python -m tags_machine_core compare-image-result `
+  --legacy-image old.png `
+  --core-generation-result core_generation_result.json `
+  --visual-result pending `
+  --output acceptance\foot_detail_homura_001\comparison_report.yaml
 uv run python -m tags_machine_core create-acceptance-record `
   --case-id foot_detail_homura_001 `
   --legacy-source old.png `
@@ -284,11 +290,13 @@ uv run python -m tags_machine_core verify-core
 
 `compare-render-params` 会完整比较 NovelAI 请求关键字段，包括 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等。图片/base64 字段会用长度和 sha256 摘要比较，避免把大段 base64 打进终端。
 
-`create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异、`PromptBundle.meta.composition` 和可选 `GenerationResult` 归档成 JSON/YAML；如果提供 `--prompt-bundle`，会记录 `prompt_bundle_contract_evidence`，检查完整 v1 `PromptBundle` 基础形状，包括 `schema`、`prompt.positive` / `prompt.negative`、`meta.composer_type`、`meta.composer_version` 和 `meta.composition` 列表字段，同时继续检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`，并递归拦截 `backend`、`params`、`style_payload`、`v4_prompt`、`reference_image_multiple`、`workflow_json` 等后端专属字段；如果提供 `--generation-result`，会验证其中的 `schema`、`backend`、`images`、`cache_hit` 等 v1 基础形状，确认 `backend` 与 core `RenderRequest.backend` 一致，确认 `request_body` 与 core `RenderRequest` 归一化后一致，并检查 `GenerationResult.images` 指向的图片文件存在、大小和 sha256。`archive-acceptance-case` 会进一步把这些证据复制到独立样例目录；如果没有显式传 `--core-image`，也会从 `GenerationResult.images` 复制本地图到资料包的 `core/` 目录，并把 `generation_result.json` 里的 `images` / `png_info.images` 路径改写为资料包内相对路径，方便后续不运行旧项目也能回放。`archive-novelai-acceptance-nodes` 会先从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再复用同一套归档逻辑，适合批量补结构化节点 oracle 样例。`archive-novelai-acceptance-prompt` 面向完整 prompt / agent prompt 样例，只叠加 NovelAI 画风后归档，用来验证它和旧 `run_action` 或旧 `run-prompt` oracle 的 render plan 等价。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异、非法 `PromptBundle` 契约字段、非法 `GenerationResult` 契约字段或丢失的生成图片证据时返回非 0。`verify-acceptance-suite` 可以验证单个 record、record 目录或 manifest；`--require-minimum-set` 会要求 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例都存在，并输出 `case_checks` 检查局部镜头 composition 和 reference/vibe 数组是否真的覆盖到。
+`compare-image-result` 面向真实出图对比集：它读取旧图 PNG 参数、core 图 PNG 参数和 core `GenerationResult.request_body`，输出旧图路径、core 图路径、图片 sha256、PNG 尺寸、参数 diff、`request_body` vs core PNG 参数 diff，以及待人工填写的视觉结论字段。`visual_result: pending` 不会让命令失败；自动返回码只看参数 diff 是否一致。
 
-`examples/acceptance/` 提供仓库内置的静态 dry-run 最小资料包，覆盖上述五类 case，并包含 `PromptBundle`、NovelAI `RenderRequest`、`GenerationResult`、PNG 参数证据和 suite manifest。它用于测试验收格式、参数归一化、图片证据读取和 `--require-minimum-set` 语义检查是否稳定；它不是旧 `tags_machine` 的真实 oracle，不能通过 `--require-legacy-oracle` 或 `--require-legacy-evidence`。真实旧项目对照仍需要用 `archive-acceptance-case` / `archive-novelai-acceptance-*` 归档旧项目产物后补充；当 `--require-legacy-oracle` 或 `--require-legacy-evidence` 与 `--require-minimum-set` / `--required-case` 一起使用时，所需 case 也必须由 `legacy_oracle` 记录覆盖，fixture 不能凑数。严格旧项目证据失败时，`legacy_oracle_evidence_checks[].messages` 会展开具体的 `PromptBundle` 契约错误、后端字段路径和 `GenerationResult.request_body` diff 路径，便于批量 oracle 归档后定位问题。
+`create-acceptance-record` 会把旧图/旧请求、新 `RenderRequest`、归一化 diff、白名单差异、`PromptBundle.meta.composition` 和可选 `GenerationResult` 归档成 JSON/YAML；如果提供 `--prompt-bundle`，会记录 `prompt_bundle_contract_evidence`，检查完整 v1 `PromptBundle` 基础形状，包括 `schema`、`prompt.positive` / `prompt.negative`、`meta.composer_type`、`meta.composer_version` 和 `meta.composition` 列表字段，同时继续检查 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`，并递归拦截 `backend`、`params`、`style_payload`、`v4_prompt`、`reference_image_multiple`、`workflow_json` 等后端专属字段；如果提供 `--generation-result`，会验证其中的 `schema`、`backend`、`images`、`cache_hit` 等 v1 基础形状，确认 `backend` 与 core `RenderRequest.backend` 一致，确认 `request_body` 与 core `RenderRequest` 归一化后一致，并检查 `GenerationResult.images` 指向的图片文件存在、大小和 sha256。`archive-acceptance-case` 会进一步把这些证据复制到独立样例目录；如果没有显式传 `--core-image`，也会从 `GenerationResult.images` 复制本地图到对比集的 `core/` 目录，并把 `generation_result.json` 里的 `images` / `png_info.images` 路径改写为对比集内相对路径，同时同步 `images[].filename`，方便后续不运行旧项目也能回放。`archive-novelai-acceptance-nodes` 会先从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再复用同一套归档逻辑，适合批量补结构化节点旧项目基准样例。`archive-novelai-acceptance-prompt` 面向完整 prompt / agent prompt 样例，只叠加 NovelAI 画风后归档，用来验证它和旧 `run_action` 或旧 `run-prompt` 基准结果的 render plan 等价。`verify-acceptance-record` 会重新读取记录里的源文件并重算 diff，存在未批准差异、非法 `PromptBundle` 契约字段、非法 `GenerationResult` 契约字段或丢失的生成图片证据时返回非 0。`verify-acceptance-suite` 可以验证单个 record、record 目录或 manifest；`--require-minimum-set` 会要求 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例都存在，并输出 `case_checks` 检查局部镜头 composition 和 reference/vibe 数组是否真的覆盖到。
 
-`verify-core` 是当前仓库内的无联网门禁快捷入口，适合每个开发切片提交前运行。它不会证明真实旧项目 oracle 已归档；真实 oracle 仍需要对 acceptance 目录单独运行 `verify-acceptance-suite --require-legacy-oracle --require-legacy-evidence`。
+`examples/acceptance/` 提供仓库内置的静态 dry-run 最小对比集 fixture，覆盖上述五类 case，并包含 `PromptBundle`、NovelAI `RenderRequest`、`GenerationResult`、PNG 参数证据和 suite manifest。它用于测试验收格式、参数归一化、图片证据读取和 `--require-minimum-set` 语义检查是否稳定；它不是旧 `tags_machine` 的真实基准结果，不能通过 `--require-legacy-oracle` 或 `--require-legacy-evidence`。真实旧项目对照仍需要用 `archive-acceptance-case` / `archive-novelai-acceptance-*` 归档旧项目产物后补充；当 `--require-legacy-oracle` 或 `--require-legacy-evidence` 与 `--require-minimum-set` / `--required-case` 一起使用时，所需 case 也必须由 `legacy_oracle` 记录覆盖，fixture 不能凑数。严格旧项目证据失败时，`legacy_oracle_evidence_checks[].messages` 会展开具体的 `PromptBundle` 契约错误、后端字段路径和 `GenerationResult.request_body` diff 路径，便于批量旧项目基准结果归档后定位问题。
+
+`verify-core` 是当前仓库内的无联网门禁快捷入口，适合每个开发切片提交前运行。它不会证明真实旧项目基准结果已归档；真实旧项目对照仍需要对 acceptance 目录单独运行 `verify-acceptance-suite --require-legacy-oracle --require-legacy-evidence`。
 
 `--require-minimum-set` 不只是检查样例名字：
 

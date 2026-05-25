@@ -1183,7 +1183,7 @@ def _archive_generation_result_images(
                 continue
             first_archived_image = first_archived_image or archived_image
             item["path"] = _relative_path_string(str(archived_image), path.parent)
-            item["filename"] = item.get("filename") or archived_image.name
+            item["filename"] = archived_image.name
             changed = True
 
     png_info = data.get("png_info")

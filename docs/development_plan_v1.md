@@ -18,7 +18,7 @@
 - 不在旧 `tags_machine` 里继续追加新架构代码。
 - 不从 core import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。
 - 旧 `design/` 只作为数据源读取，通过配置里的 `legacy.design_root` 指向。
-- 旧脚本可以作为验收 oracle，但不是运行时依赖。
+- 旧脚本可以提供旧项目基准结果，但不是运行时依赖。
 - `参考项目/` 只作为本地技术参考，不进入当前仓库版本管理。
 
 ## 总体架构
@@ -133,7 +133,7 @@ execute_render_request(config, render_request, ...)
 
 ComfyUI / SD 的真实执行函数也放在 execution 层，便于后续接入时复用同一边界；但它们仍属于预研能力，必须通过显式实验开关触发，不进入 v1 正式验收范围。
 
-`GenerationResult` 记录图片路径、最终 request body、PNG 参数读取结果、缓存命中等信息。它同样可以序列化成 JSON，方便 UI、批量任务和验收资料包读取。
+`GenerationResult` 记录图片路径、最终 request body、PNG 参数读取结果、缓存命中等信息。它同样可以序列化成 JSON，方便 UI、批量任务和验收对比集读取。
 
 ### 前端/服务通信
 
@@ -214,7 +214,7 @@ UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参
 
 `GenerationResult` 是真实生图后的结果：
 
-- `images`：本地图片路径、文件名和图片级 meta。进入验收资料包时，图片路径必须改写为资料包内相对路径，避免回放依赖生成时的临时目录。
+- `images`：本地图片路径、文件名和图片级 meta。进入验收对比集时，图片路径必须改写为对比集内相对路径，避免回放依赖生成时的临时目录。
 - `request_body`：发送给后端的请求体，默认展示时会截断图片 base64。
 - `png_info`：生成后自动尝试读取保存图片里的 PNG 文本参数。`png_info.images` 必须和 `images` 一一对应；每个条目要么包含读取到的 `parameters`，要么包含读取失败的 `error`，不能同时存在。若存在 `parameters`，验收会再读取对应图片里的 PNG 参数并做归一化对比；若存在 `error`，验收会确认对应图片确实无法读取 PNG 参数，防止结果 JSON 和图片证据脱节。如果图片不是 PNG 或没有可读参数，会保留读取错误，方便验收记录判断。
 - `cache_hit`：是否命中缓存。
@@ -372,6 +372,7 @@ uv run python -m tags_machine_core backend-support
 uv run python -m tags_machine_core execute-render-request core_render_request.json --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core create-acceptance-record --case-id foot_detail_homura_001 --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --output acceptance\foot_detail_homura_001.yaml
 uv run python -m tags_machine_core verify-acceptance-record acceptance\foot_detail_homura_001.yaml
+uv run python -m tags_machine_core compare-image-result --legacy-image old.png --core-generation-result core_generation_result.json --visual-result pending --output acceptance\foot_detail_homura_001\comparison_report.yaml
 uv run python -m tags_machine_core archive-acceptance-case --case-id foot_detail_homura_001 --output-dir acceptance --legacy-source old.png --core-source core_render_request.json --prompt-bundle core_prompt_bundle.json --required-case foot_detail
 uv run python -m tags_machine_core archive-novelai-acceptance-nodes --case-id foot_detail_homura_001 --output-dir acceptance --legacy-source old.png --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123 --required-case foot_detail --overwrite
 uv run python -m tags_machine_core archive-novelai-acceptance-prompt --case-id default_action_prompt_001 --output-dir acceptance --legacy-source old_request.json --prompt-file agent_prompt.txt --style-node examples\nodes\styles\anime_comfy --seed 123 --nt 3 --required-case default_action --overwrite
@@ -399,13 +400,14 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `create-acceptance-record` / `verify-acceptance-record` 用于归档和重算单条旧项目对照验收记录；如果记录包含 `PromptBundle`，回放时会检查完整 v1 `PromptBundle` 基础形状，包括 `schema`、`prompt.positive` / `prompt.negative`、`meta.composer_type`、`meta.composer_version` 和 `meta.composition` 列表字段，同时确认 `PromptBundle.meta` 没有重新引入 `shot` / `constraints`。
 - `create-acceptance-record` 支持 `--whitelist` 记录字段兼容或归一化差异，也支持 `--intentional-difference` 记录 core 有意修复旧项目割裂问题导致的差异。
 - 提供 `--generation-result` 时，验收记录会生成 `generation_result_evidence`，并检查 `GenerationResult.request_body` 与 core `RenderRequest` 归一化后一致，包括 reference/vibe 数组和 `director_reference_images`。
-- `archive-acceptance-case` 会把旧项目 oracle 和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
-- `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；它不运行旧项目代码，也不联网生图。
-- `archive-novelai-acceptance-prompt` 会从完整 prompt 生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目 oracle；适合验证 agent prompt、人工完整 prompt 或旧 `run-prompt` 输出和旧 `run_action` 基准是否等价。
+- `compare-image-result` 用于真实出图后的单 case 对比报告：读取旧图、core `GenerationResult` 和可选 core 图，输出图片 sha256、尺寸、PNG 参数 diff、`GenerationResult.request_body` 与 core PNG 参数 diff，以及待人工填写的视觉结论字段。
+- `archive-acceptance-case` 会把旧项目基准结果和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
+- `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目对比集；它不运行旧项目代码，也不联网生图。
+- `archive-novelai-acceptance-prompt` 会从完整 prompt 生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目对比集；适合验证 agent prompt、人工完整 prompt 或旧 `run-prompt` 输出和旧 `run_action` 基准是否等价。
 - `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全，并输出 `case_checks` 验证关键样例语义：默认动作必须保留 NovelAI 核心默认参数和 V4 payload，局部镜头必须验证 character section 裁剪且最终 prompt 不能残留被抑制 section 的典型词，复杂角色必须验证默认 scope 不误过滤 hair / eyes / upper_clothes，参考图画风必须验证 reference 数组和 director reference 图语义。
-- 验收记录使用 `oracle_kind` 区分来源：`legacy_oracle` 表示真实旧项目 oracle 产物，`fixture` 表示静态机制样例。`verify-acceptance-suite` 会输出 `oracle_kind_counts`；需要证明已经归档真实旧项目 oracle 时，必须加 `--require-legacy-oracle`。需要进一步证明每条真实 oracle 都带有旧图、新图、可读 PNG 参数、`GenerationResult` 和 `PromptBundle` 合约证据时，再加 `--require-legacy-evidence`；这个参数也会要求 suite 至少包含一条 `legacy_oracle`，输出会包含 `legacy_oracle_evidence_checks`。严格证据失败时，`messages` 必须展开具体的 `PromptBundle` 契约错误、后端字段路径和 `GenerationResult.request_body` diff 路径，避免批量归档时只能看到笼统失败。
-- `examples/acceptance/` 是仓库内置的静态 dry-run 最小资料包，记录均标记为 `oracle_kind: fixture`，用于固定验收记录格式、参数归一化、PNG 参数读取、`GenerationResult` 图片证据和五类 minimum case 语义检查；它不等价于真实旧项目 oracle 验收，也不能通过 `--require-legacy-oracle` 或 `--require-legacy-evidence`。
-- `verify-core` 是当前无联网核心门禁快捷入口，会依次运行 compileall、unittest、`validate-node-tree examples/nodes`、fixture acceptance suite 和 `git diff --check`；它不替代真实旧项目 oracle 验收。
+- 验收记录使用 `oracle_kind` 区分来源：`legacy_oracle` 表示真实旧项目基准结果，`fixture` 表示静态机制样例。`verify-acceptance-suite` 会输出 `oracle_kind_counts`；需要证明已经归档真实旧项目基准结果时，必须加 `--require-legacy-oracle`。需要进一步证明每条真实旧项目基准记录都带有旧图、新图、可读 PNG 参数、`GenerationResult` 和 `PromptBundle` 合约证据时，再加 `--require-legacy-evidence`；这个参数也会要求 suite 至少包含一条 `legacy_oracle`，输出会包含 `legacy_oracle_evidence_checks`。严格证据失败时，`messages` 必须展开具体的 `PromptBundle` 契约错误、后端字段路径和 `GenerationResult.request_body` diff 路径，避免批量归档时只能看到笼统失败。
+- `examples/acceptance/` 是仓库内置的静态 dry-run 最小对比集 fixture，记录均标记为 `oracle_kind: fixture`，用于固定验收记录格式、参数归一化、PNG 参数读取、`GenerationResult` 图片证据和五类 minimum case 语义检查；它不等价于真实旧项目基准验收，也不能通过 `--require-legacy-oracle` 或 `--require-legacy-evidence`。
+- `verify-core` 是当前无联网核心门禁快捷入口，会依次运行 compileall、unittest、`validate-node-tree examples/nodes`、fixture acceptance suite 和 `git diff --check`；它不替代真实旧项目基准验收。
 - 默认输出会截断 `reference_image_multiple`、`director_reference_images`、`image`、`mask`。
 - 使用 `--full` 可以打印完整 JSON。
 
@@ -492,7 +494,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 旧项目对照验收：
 
-- 旧 `tags_machine` 作为行为 oracle，但不是运行时依赖；core 只读取素材文件和对照产物，不 import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。这个边界由 `test_project_boundaries.py` 持续验证。
+- 旧 `tags_machine` 作为行为基准来源，但不是运行时依赖；core 只读取素材文件和对照产物，不 import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。这个边界由 `test_project_boundaries.py` 持续验证。
 - 固定一组最小回归样例，至少覆盖：普通半身/全身动作、脚部局部特写、手部局部特写、角色服装复杂样例、带 `reference_image_multiple` 的画风样例。
 - 每个样例使用同一组输入：character/action/style 引用、seed、尺寸、模型、sampler、steps、scale、negative prompt、参考图/vibe 参数。
 - 旧项目用现有 `run_action` 或等价脚本生成基准图；core 用新链路生成对照图。两边生成参数需要从图片内嵌参数和请求体中读取，而不是只看 CLI 输出。
@@ -506,11 +508,11 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 v1 冻结验收补充：
 
-- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来；验收资料包会用 `prompt_bundle_contract_evidence` 回放检查这一点，同时检查 v1 基础字段是否完整。
+- `PromptBundle` 正式字段里不出现 `meta.shot` 和 `meta.constraints`。局部镜头、半身、全身等裁剪视角必须从 `meta.action_ref -> action.meta.yaml.character_scope -> meta.composition` 解释出来；对比集会用 `prompt_bundle_contract_evidence` 回放检查这一点，同时检查 v1 基础字段是否完整。
 - `PromptBundle` 不得携带后端专属字段，例如 `backend`、`params`、`style_payload`、`v4_prompt`、`reference_image_multiple`、`workflow_json`、`checkpoint` 等。`prompt_bundle_contract_evidence` 会递归检查这类字段，防止 NovelAI / ComfyUI / SD 细节反向污染提示词生成层。
 - `meta.composition` 必须记录 composer 的实际选择，而不是重复 action 原始字段；验收时检查 `character_scope`、`included_character_sections`、`suppressed_character_sections` 是否和本次最终 prompt 一致。
 - 如果 core 为了修复旧项目割裂问题而有意过滤某些旧 prompt 片段，例如 `foot_detail` 过滤 `hair`、`eyes`、`upper_clothes`，这类差异不能简单算失败，但必须写进验收记录的 `intentional_differences`，并说明来自哪条统一 composer 规则。
-- 旧项目基准只负责提供 oracle：旧 `run_action` 的最终 prompt、请求体、PNG 内嵌参数和基准图。core 侧验收不得在测试或运行时 import 旧项目代码。
+- 旧项目基准只负责提供静态对照产物：旧 `run_action` 的最终 prompt、请求体、PNG 内嵌参数和基准图。core 侧验收不得在测试或运行时 import 旧项目代码。
 - `run-prompt`、脚本 composer、agent composer 三种入口只要目标是同一个样例，最终都必须能落到可比较的 `PromptBundle` 和 `RenderRequest`；验收通过线看归一化 diff，而不是看入口名称。
 - 新增任何节点格式字段时，必须能回答它被哪个模块消费；没有消费方的字段先放入 `meta.extra` 或节点 `extra`，不得提升为 v1 契约字段。
 
@@ -518,9 +520,9 @@ v1 冻结验收补充：
 
 - `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。验收还会检查 `PromptBundle` 满足 v1 基础形状，并且没有混入 `RenderRequest` 或后端 adapter 字段。
 - `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；ComfyUI / SD 暂不作为本阶段验收范围。
-- `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会先检查 `GenerationResult` 的 v1 基础形状，包括固定 `schema`、合法 `backend`、`images` 数组、图片条目的非空 `path` / `filename`、对象型 `meta`、布尔型 `cache_hit` 和字符串型 `created_at`。随后会检查 `GenerationResult.backend` 与 core `RenderRequest.backend` 一致，避免把某个后端的计划误归档成另一个后端的真实结果；也会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。若 `png_info.images` 条目包含 `parameters`，这些参数还必须和对应图片实际内嵌 PNG 参数归一化后一致；若条目包含 `error`，对应图片也必须确实不可读。真实旧项目 oracle 的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
+- `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会先检查 `GenerationResult` 的 v1 基础形状，包括固定 `schema`、合法 `backend`、`images` 数组、图片条目的非空 `path` / `filename`、对象型 `meta`、布尔型 `cache_hit` 和字符串型 `created_at`。随后会检查 `GenerationResult.backend` 与 core `RenderRequest.backend` 一致，避免把某个后端的计划误归档成另一个后端的真实结果；也会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。若 `png_info.images` 条目包含 `parameters`，这些参数还必须和对应图片实际内嵌 PNG 参数归一化后一致；若条目包含 `error`，对应图片也必须确实不可读。真实旧项目基准的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
 - 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本、显式输入参数和 agent 模型版本，避免旧素材更新或 agent 模型升级后误用旧结果。
-- 回放验收：任意一条验收记录都应该能在不运行旧项目代码的情况下重算 core 侧 diff；旧项目只负责提前产出 oracle 文件或基准图片。
+- 回放验收：任意一条验收记录都应该能在不运行旧项目代码的情况下重算 core 侧 diff；旧项目只负责提前产出基准请求文件或基准图片。
 
 旧项目对照的通过线：
 
@@ -529,9 +531,9 @@ v1 冻结验收补充：
 - 第一优先级是参数等价：归一化后 `prompt`、`negative_prompt`、模型参数、随机种子、参考图数组和 V4 payload 必须一致或有明确白名单差异。
 - 第二优先级是节点裁剪等价：局部动作必须验证 character section 的纳入和抑制结果，不能只看最终字符串里有没有某几个词。
 - 第三优先级才是图片视觉：图片可以作为人工抽检材料，但不能替代参数 diff；如果参数不同，先修参数，如果参数相同但像素不同，记录原因。
-- 验收脚本不能依赖旧项目运行时代码。旧项目可以生成 oracle 文件，core 的测试只读取 oracle JSON、PNG 参数或素材文件。
+- 验收脚本不能依赖旧项目运行时代码。旧项目可以生成基准请求文件，core 的测试只读取基准 JSON、PNG 参数或素材文件。
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
-- 若归档真实生图结果，`GenerationResult.request_body` 必须能和 core `RenderRequest` 对齐；`GenerationResult` 本身必须满足 v1 基础契约，避免半成品 JSON 混入 oracle 资料包；`GenerationResult.images` 中声明的图片也必须在资料包内可访问并能计算 hash，`png_info.images` 也必须指向同一批图片，并且每张图必须有可读参数或读取错误。若 `png_info.images` 记录了参数但和图片内嵌 PNG 参数不一致，或记录了错误但图片实际可读，也必须失败。不一致、图片丢失、非法基础字段或 `png_info.images` 只有空路径时验收失败，避免图片证据和请求参数脱节。
+- 若归档真实生图结果，`GenerationResult.request_body` 必须能和 core `RenderRequest` 对齐；`GenerationResult` 本身必须满足 v1 基础契约，避免半成品 JSON 混入对比集；`GenerationResult.images` 中声明的图片也必须在对比集内可访问并能计算 hash，`png_info.images` 也必须指向同一批图片，并且每张图必须有可读参数或读取错误。若 `png_info.images` 记录了参数但和图片内嵌 PNG 参数不一致，或记录了错误但图片实际可读，也必须失败。不一致、图片丢失、非法基础字段或 `png_info.images` 只有空路径时验收失败，避免图片证据和请求参数脱节。
 - 回归样例集需要能用 `verify-acceptance-suite` 一次性回放；空目录、未批准差异、缺少必需样例都必须返回非 0。
 - 使用 `--require-minimum-set` 时，suite 不只检查 case id：
   - `default_action` 必须验证 `prompt`、`negative_prompt`、`seed`、`width`、`height`、`sampler`、`steps`、`scale`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt` 等 NovelAI 核心参数仍在，并验证 `reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 作为默认空数组稳定输出。
@@ -547,17 +549,17 @@ v1 冻结验收补充：
 - 新增节点 YAML 字段时，必须能映射回旧素材或说明消费方；如果只是给未来使用，先放在 `extra`，不得进入 v1 必填契约。
 - 新增 service / API / 前端通信格式时，必须用旧项目样例完成一次 JSON 往返：node refs -> `PromptBundle` -> `RenderRequest` -> `GenerationResult` / acceptance record。往返后关键字段不得丢失。
 
-旧项目 oracle 资料包：
+旧项目对比集：
 
-- 每个样例至少归档旧项目最终请求体、旧图、旧图 PNG 参数、新 `PromptBundle`、新 `RenderRequest`、新图或 dry-run 结果、验收记录。
-- `archive-acceptance-case` 是 v1 默认的资料包生成入口；它只复制静态产物，不运行或 import 旧项目代码。归档 `GenerationResult` 时，它会把其中指向新图的路径改写为 `core/` 目录内的相对路径；如果没有显式传 `--core-image`，也会从 `GenerationResult.images` 复制本地图到资料包，避免资料包离开源目录后无法回放。
+- 每个样例至少归档旧项目最终请求体、旧图、旧图 PNG 参数、新 `PromptBundle`、新 `RenderRequest`、新图或 dry-run 结果、验收记录和可选 `compare-image-result` 报告。
+- `archive-acceptance-case` 是 v1 默认的对比集生成入口；它只复制静态产物，不运行或 import 旧项目代码。归档 `GenerationResult` 时，它会把其中指向新图的路径改写为 `core/` 目录内的相对路径，并同步 `images[].filename`；如果没有显式传 `--core-image`，也会从 `GenerationResult.images` 复制本地图到对比集，避免对比集离开源目录后无法回放。
 - 对结构化节点样例，优先使用 `archive-novelai-acceptance-nodes` 生成 core 侧 `PromptBundle` / `RenderRequest` 并归档，减少手工保存中间文件造成的漏项。
-- 验收记录必须显式或默认带有 `oracle_kind`：真实旧项目对照资料包默认是 `legacy_oracle`；仓库内置或人工合成的机制样例必须标成 `fixture`。
+- 验收记录必须显式或默认带有 `oracle_kind`：真实旧项目对比集默认是 `legacy_oracle`；仓库内置或人工合成的机制样例必须标成 `fixture`。
 - 仓库内置 `examples/acceptance/` 只作为验收机制 fixture：它覆盖 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类 minimum case，并包含静态 PNG 参数证据，但其中 legacy 侧不是旧项目真实运行产物。
-- 判断“真实旧项目 oracle 已归档”时，必须使用 `verify-acceptance-suite --require-legacy-oracle`；只跑内置 `examples/acceptance/` 只能证明验收机制通过。若同时传入 `--require-minimum-set` 或 `--required-case`，这些样例也必须由 `legacy_oracle` 记录覆盖，fixture 只能验证机制，不能替代真实旧项目样例凑齐覆盖。需要排查资料包不完整时，使用 `--require-legacy-evidence` 查看 `legacy_oracle_evidence_checks[].messages`，其中会包含缺失证据、PNG 参数、PromptBundle 字段和 GenerationResult 请求 diff 的具体路径。
-- oracle 资料包可以由旧项目脚本提前生成，但 core 的回放、测试和验收只能读取这些静态产物。
+- 判断“真实旧项目基准结果已归档”时，必须使用 `verify-acceptance-suite --require-legacy-oracle`；只跑内置 `examples/acceptance/` 只能证明验收机制通过。若同时传入 `--require-minimum-set` 或 `--required-case`，这些样例也必须由 `legacy_oracle` 记录覆盖，fixture 只能验证机制，不能替代真实旧项目样例凑齐覆盖。需要排查对比集不完整时，使用 `--require-legacy-evidence` 查看 `legacy_oracle_evidence_checks[].messages`，其中会包含缺失证据、PNG 参数、PromptBundle 字段和 GenerationResult 请求 diff 的具体路径。
+- 对比集可以由旧项目脚本提前生成，但 core 的回放、测试和验收只能读取这些静态产物。
 - 若旧项目自身输出存在已知问题，例如局部镜头混入头发、眼睛、上衣等不相关 tags，core 可以修复；修复差异必须进入 `intentional_differences`，并标明对应 composer 规则。
-- 未归档 oracle 的新能力只能算开发完成，不能算旧项目对照验收完成。
+- 未归档旧项目基准结果的新能力只能算开发完成，不能算旧项目对照验收完成。
 
 旧项目基准验收矩阵：
 

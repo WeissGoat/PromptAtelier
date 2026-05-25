@@ -79,6 +79,12 @@ def compare_render_parameters(
 
 
 def _as_novelai_payload(source: dict[str, Any]) -> dict[str, Any]:
+    if (
+        source.get("schema") == "tags-machine-core.generation-result/v1"
+        and isinstance(source.get("request_body"), dict)
+    ):
+        return _as_novelai_payload(source["request_body"])
+
     if "png_text" in source:
         return _as_novelai_payload(source.get("png_text") or {})
 

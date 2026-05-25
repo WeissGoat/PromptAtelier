@@ -33,6 +33,7 @@ from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationJsonApi, GenerationService
 from tags_machine_core.verification import (
     archive_acceptance_case,
+    build_image_comparison_report,
     build_acceptance_record,
     compare_render_parameters,
     load_render_parameter_source,
@@ -267,6 +268,20 @@ def cmd_compare_render_params(args) -> int:
         result["right_normalized"] = normalize_render_parameters(right)
     print_json(result, full=args.full)
     return 0 if not diffs else 2
+
+
+def cmd_compare_image_result(args) -> int:
+    report = build_image_comparison_report(
+        args.legacy_image,
+        args.core_generation_result,
+        core_image=args.core_image,
+        visual_result=args.visual_result,
+        visual_notes=args.visual_note or [],
+    )
+    if args.output:
+        _write_structured_output(report, Path(args.output), output_format=args.format)
+    print_json(report, full=args.full)
+    return 0 if report["match"] else 2
 
 
 def cmd_create_acceptance_record(args) -> int:
@@ -1066,6 +1081,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include both normalized parameter trees in the output",
     )
     compare_render_params.set_defaults(func=cmd_compare_render_params)
+
+    compare_image_result = subparsers.add_parser(
+        "compare-image-result",
+        parents=[output_parent],
+        help="Build a legacy image vs core GenerationResult comparison report",
+    )
+    compare_image_result.add_argument("--legacy-image", required=True)
+    compare_image_result.add_argument("--core-generation-result", required=True)
+    compare_image_result.add_argument(
+        "--core-image",
+        help="Override the core image path; defaults to GenerationResult.images[0].path",
+    )
+    compare_image_result.add_argument(
+        "--visual-result",
+        default="pending",
+        choices=("pending", "pass", "fail", "review"),
+        help="Manual visual check result stored in the report",
+    )
+    compare_image_result.add_argument(
+        "--visual-note",
+        action="append",
+        help="Manual visual check note; can be repeated",
+    )
+    compare_image_result.add_argument("--output", help="Write the report to JSON/YAML")
+    compare_image_result.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output report file format when --output is used",
+    )
+    compare_image_result.set_defaults(func=cmd_compare_image_result)
 
     create_acceptance_record = subparsers.add_parser(
         "create-acceptance-record",

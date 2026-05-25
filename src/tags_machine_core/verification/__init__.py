@@ -7,8 +7,9 @@ from .acceptance import (
     verify_acceptance_record,
     verify_acceptance_suite,
 )
+from .compare_report import build_image_comparison_report
 from .core import run_core_verification
-from .image_params import read_png_text_chunks, read_image_parameters
+from .image_params import read_png_dimensions, read_png_text_chunks, read_image_parameters
 from .render_params import (
     RenderParamDiff,
     compare_render_parameters,
@@ -20,6 +21,7 @@ __all__ = [
     "RenderParamDiff",
     "archive_acceptance_case",
     "build_acceptance_record",
+    "build_image_comparison_report",
     "compare_render_parameters",
     "load_acceptance_record",
     "load_render_parameter_source",
@@ -27,6 +29,7 @@ __all__ = [
     "parse_intentional_difference_args",
     "parse_whitelist_args",
     "read_image_parameters",
+    "read_png_dimensions",
     "read_png_text_chunks",
     "run_core_verification",
     "verify_acceptance_record",

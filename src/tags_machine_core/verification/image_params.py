@@ -50,6 +50,29 @@ def read_image_parameters(path: str | Path) -> dict[str, Any]:
     }
 
 
+def read_png_dimensions(path: str | Path) -> dict[str, int]:
+    """读取 PNG 画布尺寸，只解析 IHDR，不引入图像库依赖。"""
+    data = Path(path).read_bytes()
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError(f"Not a PNG file: {path}")
+
+    offset = len(PNG_SIGNATURE)
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        chunk_type = data[offset + 4 : offset + 8]
+        chunk_data = data[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+        if chunk_type == b"IHDR":
+            if length < 8:
+                raise ValueError(f"Invalid PNG IHDR chunk: {path}")
+            width, height = struct.unpack(">II", chunk_data[:8])
+            return {"width": width, "height": height}
+        if chunk_type == b"IEND":
+            break
+
+    raise ValueError(f"PNG IHDR chunk not found: {path}")
+
+
 def _split_keyword_text(chunk_data: bytes) -> tuple[str, str]:
     if b"\x00" not in chunk_data:
         raise ValueError("Invalid PNG tEXt chunk without keyword separator")
