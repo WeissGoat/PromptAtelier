@@ -23,6 +23,8 @@ ACCEPTANCE_ARCHIVE_SCHEMA = "tags-machine-core.acceptance-archive/v1"
 ACCEPTANCE_SUITE_MANIFEST_SCHEMA = "tags-machine-core.acceptance-suite/v1"
 ACCEPTANCE_SUITE_SCHEMA = "tags-machine-core.acceptance-suite-verification/v1"
 PROMPT_BUNDLE_SCHEMA = "tags-machine-core.prompt-bundle/v1"
+GENERATION_RESULT_SCHEMA = "tags-machine-core.generation-result/v1"
+GENERATION_RESULT_BACKENDS = {"novelai", "comfyui", "sd"}
 ACCEPTANCE_ORACLE_KINDS = ("legacy_oracle", "fixture")
 DEFAULT_ACCEPTANCE_ORACLE_KIND = "legacy_oracle"
 MINIMUM_ACCEPTANCE_CASES = (
@@ -768,6 +770,10 @@ def _generation_result_evidence(
     evidence["schema"] = data.get("schema")
     evidence["backend"] = data.get("backend")
     evidence["cache_hit"] = data.get("cache_hit")
+    contract_errors = _generation_result_contract_errors(data)
+    evidence["contract_errors"] = contract_errors
+    errors.extend(contract_errors)
+
     images = data.get("images")
     evidence["image_count"] = len(images) if isinstance(images, list) else 0
     image_summaries, image_errors = _generation_result_image_summaries(
@@ -809,6 +815,26 @@ def _generation_result_evidence(
     return evidence
 
 
+def _generation_result_contract_errors(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if data.get("schema") != GENERATION_RESULT_SCHEMA:
+        errors.append(f"$.schema must be {GENERATION_RESULT_SCHEMA}")
+
+    backend = data.get("backend")
+    if backend not in GENERATION_RESULT_BACKENDS:
+        expected = ", ".join(sorted(GENERATION_RESULT_BACKENDS))
+        errors.append(f"$.backend must be one of: {expected}")
+
+    if not isinstance(data.get("images"), list):
+        errors.append("$.images must be a list")
+
+    if "cache_hit" in data and not isinstance(data.get("cache_hit"), bool):
+        errors.append("$.cache_hit must be a boolean")
+    if "created_at" in data and not isinstance(data.get("created_at"), str):
+        errors.append("$.created_at must be a string")
+    return errors
+
+
 def _generation_result_image_summaries(
     value: Any,
     *,
@@ -825,12 +851,28 @@ def _generation_result_image_summaries(
             errors.append(f"GenerationResult image[{index}] must be an object")
             continue
         raw_path = item.get("path")
-        path = _resolve_generation_result_image_path(raw_path, base_dir)
         summary: dict[str, Any] = {
             "path": raw_path,
             "filename": item.get("filename"),
             "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
         }
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            summary["exists"] = False
+            errors.append(
+                f"GenerationResult image[{index}].path must be a non-empty string"
+            )
+            summaries.append(summary)
+            continue
+
+        filename = item.get("filename")
+        if not isinstance(filename, str) or not filename.strip():
+            errors.append(
+                f"GenerationResult image[{index}].filename must be a non-empty string"
+            )
+        if "meta" in item and not isinstance(item.get("meta"), dict):
+            errors.append(f"GenerationResult image[{index}].meta must be an object")
+
+        path = _resolve_generation_result_image_path(raw_path, base_dir)
         if path is None:
             summary["exists"] = False
             errors.append(f"GenerationResult image[{index}] missing path")
@@ -860,6 +902,8 @@ def _generation_result_png_info_summary(
     if not isinstance(value, dict):
         if image_summaries:
             return None, ["GenerationResult missing png_info.images"]
+        if value is not None:
+            return None, ["GenerationResult png_info must be an object"]
         return None, []
 
     summary: dict[str, Any] = {
@@ -899,7 +943,6 @@ def _generation_result_png_info_image_summaries(
             errors.append(f"GenerationResult png_info image[{index}] must be an object")
             continue
         raw_path = item.get("path")
-        path = _resolve_generation_result_image_path(raw_path, base_dir)
         item_parameters = item.get("parameters")
         item_error = item.get("error")
         summary: dict[str, Any] = {
@@ -907,6 +950,14 @@ def _generation_result_png_info_image_summaries(
             "has_parameters": bool(item_parameters),
             "has_error": bool(item_error),
         }
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            errors.append(
+                f"GenerationResult png_info image[{index}].path must be a non-empty string"
+            )
+            summaries.append(summary)
+            continue
+
+        path = _resolve_generation_result_image_path(raw_path, base_dir)
         if item_parameters is not None and not isinstance(item_parameters, dict):
             errors.append(
                 f"GenerationResult png_info image[{index}] parameters must be an object"

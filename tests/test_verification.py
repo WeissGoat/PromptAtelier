@@ -2207,6 +2207,185 @@ class VerificationTest(unittest.TestCase):
             self.assertFalse(evidence["images"][0]["exists"])
             self.assertIn("GenerationResult image[0] does not exist", evidence["errors"][0])
 
+    def test_build_acceptance_record_fails_generation_result_contract_shape_errors(self):
+        cases = [
+            (
+                "generation_result_bad_schema",
+                {"schema": "bad-generation-result"},
+                "$.schema must be tags-machine-core.generation-result/v1",
+            ),
+            (
+                "generation_result_bad_backend",
+                {"backend": "unknown"},
+                "$.backend must be one of: comfyui, novelai, sd",
+            ),
+            (
+                "generation_result_bad_images",
+                {"images": "not a list"},
+                "$.images must be a list",
+            ),
+            (
+                "generation_result_bad_cache_hit",
+                {"cache_hit": "false"},
+                "$.cache_hit must be a boolean",
+            ),
+            (
+                "generation_result_bad_created_at",
+                {"created_at": 123},
+                "$.created_at must be a string",
+            ),
+            (
+                "generation_result_bad_png_info",
+                {"png_info": "not an object"},
+                "GenerationResult png_info must be an object",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for case_id, override, expected_error in cases:
+                with self.subTest(case_id=case_id):
+                    case_dir = root / case_id
+                    case_dir.mkdir()
+                    legacy = case_dir / "legacy.json"
+                    core = case_dir / "core.json"
+                    generation_result = case_dir / "generation_result.json"
+                    payload = {
+                        "input": "akemi homura, foot focus",
+                        "model": "nai-diffusion-4-5-full",
+                        "action": "generate",
+                        "parameters": _sample_parameters(),
+                    }
+                    legacy.write_text(json.dumps(payload), encoding="utf-8")
+                    core.write_text(
+                        json.dumps(
+                            {
+                                "schema": "tags-machine-core.render-request/v1",
+                                "backend": "novelai",
+                                "prompt": "akemi homura, foot focus",
+                                "negative_prompt": "bad feet",
+                                "model": "nai-diffusion-4-5-full",
+                                "params": _sample_parameters(),
+                                "meta": {"action": "generate"},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    generation_result.write_text(
+                        json.dumps(
+                            {
+                                "schema": "tags-machine-core.generation-result/v1",
+                                "backend": "novelai",
+                                "images": [],
+                                "request_body": payload,
+                                **override,
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+
+                    record = build_acceptance_record(
+                        case_id=case_id,
+                        legacy_source=legacy,
+                        core_source=core,
+                        generation_result=generation_result,
+                    )
+
+                    evidence = record["generation_result_evidence"]
+                    self.assertEqual(record["result"], "fail")
+                    self.assertEqual(evidence["result"], "fail")
+                    self.assertIn(expected_error, evidence["errors"])
+                    self.assertIn(expected_error, evidence["contract_errors"] + evidence["errors"])
+
+    def test_build_acceptance_record_fails_generation_result_image_item_shape_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "legacy.json"
+            core = root / "core.json"
+            core_image = root / "core.png"
+            generation_result = root / "generation_result.json"
+            payload = {
+                "input": "akemi homura, foot focus",
+                "model": "nai-diffusion-4-5-full",
+                "action": "generate",
+                "parameters": _sample_parameters(),
+            }
+            legacy.write_text(json.dumps(payload), encoding="utf-8")
+            core.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.render-request/v1",
+                        "backend": "novelai",
+                        "prompt": "akemi homura, foot focus",
+                        "negative_prompt": "bad feet",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": _sample_parameters(),
+                        "meta": {"action": "generate"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_png_with_text(core_image, {"Comment": json.dumps(_sample_parameters())})
+            generation_result.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.generation-result/v1",
+                        "backend": "novelai",
+                        "images": [
+                            {
+                                "path": str(core_image),
+                                "filename": "",
+                                "meta": "not an object",
+                            },
+                            {
+                                "path": 123,
+                                "filename": "bad.png",
+                            },
+                        ],
+                        "request_body": payload,
+                        "png_info": {
+                            "images": [
+                                {
+                                    "path": str(core_image),
+                                    "parameters": _sample_parameters(),
+                                },
+                                {
+                                    "path": "",
+                                    "parameters": _sample_parameters(),
+                                },
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            record = build_acceptance_record(
+                case_id="generation_result_bad_image_items",
+                legacy_source=legacy,
+                core_source=core,
+                generation_result=generation_result,
+            )
+
+            evidence = record["generation_result_evidence"]
+            self.assertEqual(record["result"], "fail")
+            self.assertEqual(evidence["result"], "fail")
+            self.assertIn(
+                "GenerationResult image[0].filename must be a non-empty string",
+                evidence["errors"],
+            )
+            self.assertIn(
+                "GenerationResult image[0].meta must be an object",
+                evidence["errors"],
+            )
+            self.assertIn(
+                "GenerationResult image[1].path must be a non-empty string",
+                evidence["errors"],
+            )
+            self.assertIn(
+                "GenerationResult png_info image[1].path must be a non-empty string",
+                evidence["errors"],
+            )
+
     def test_build_acceptance_record_fails_generation_result_png_info_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

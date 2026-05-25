@@ -97,11 +97,11 @@ agent 缓存目录推荐使用 `cache.cache_dir`；同时兼容顶层 `cache_dir
 稳定字段：
 
 - `schema`：固定为 `tags-machine-core.generation-result/v1`。
-- `backend`：实际执行后端。
-- `images`：保存后的本地图片路径、文件名和图片级 meta。
+- `backend`：实际执行后端；v1 正式验收主线是 `novelai`，实验执行结果也必须使用已知后端名。
+- `images`：保存后的本地图片路径、文件名和图片级 meta；验收资料包要求它是数组，且每个条目有非空 `path` / `filename` 和对象型 `meta`。
 - `request_body`：发送给后端的最终请求体。
-- `png_info`：保存后读取的 PNG 内嵌参数或读取错误。
-- `cache_hit`：是否命中生成侧缓存；当前主要预留。
+- `png_info`：保存后读取的 PNG 内嵌参数或读取错误；如果存在图片证据，`png_info.images` 必须能和 `images` 一一对应。
+- `cache_hit`：是否命中生成侧缓存；当前主要预留，必须是布尔值。
 
 ## 请求入口
 
