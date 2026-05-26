@@ -97,6 +97,47 @@ novelai:
         )
         return config
 
+    def _write_agent_nodes(self, root: Path) -> tuple[Path, Path]:
+        character = root / "homura"
+        character.mkdir()
+        (character / "meta.yaml").write_text(
+            """
+schema: tags-machine.character/v1
+kind: character
+id: homura
+tags:
+  identity:
+    - akemi homura
+  hair:
+    - long black hair
+  eyes:
+    - purple eyes
+  feet:
+    - bare soles
+negative_prompt:
+  - extra toes
+""".strip(),
+            encoding="utf-8",
+        )
+        action = root / "foot_detail"
+        action.mkdir()
+        (action / "meta.yaml").write_text(
+            """
+schema: tags-machine.action/v1
+kind: action
+id: foot_detail
+character_scope: foot_detail
+tags:
+  action:
+    - foot focus
+    - soles close-up
+negative_prompt:
+  - face focus
+""".strip(),
+            encoding="utf-8",
+        )
+        return character, action
+
     def test_run_prompt_dry_run_builds_prompt_bundle_and_novelai_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -187,6 +228,228 @@ novelai:
             self.assertEqual(data["prompt_bundle"]["prompt"]["positive"], "akemi homura, hand focus")
             self.assertEqual(data["prompt_bundle"]["meta"]["style_ref"], "artist_alias")
             self.assertEqual(data["render_request"]["meta"]["style_ref"], "artist_alias")
+
+    def test_run_prompt_agent_cache_miss_returns_agent_task_without_render_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_agent_nodes(root)
+            style = _write_style_node(root)
+            cache_dir = root / "cache"
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--composer",
+                        "agent",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--character-scope",
+                        "foot_detail",
+                        "--style-node",
+                        str(style),
+                        "--instruction",
+                        "组合角色和动作，避免带入脸部细节",
+                        "--agent-model",
+                        "agent-model-v1",
+                        "--cache-dir",
+                        str(cache_dir),
+                    ]
+                )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["schema"], "tags-machine-core.run-prompt-result/v1")
+            self.assertEqual(data["status"], "requires_agent")
+            self.assertTrue(data["dry_run"])
+            self.assertIn("agent_task", data)
+            self.assertNotIn("prompt_bundle", data)
+            self.assertNotIn("render_request", data)
+            self.assertEqual(data["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertEqual(data["agent_task"]["style_ref"], "prompt_style")
+            self.assertFalse(any(cache_dir.glob("*.json")))
+
+    def test_run_prompt_agent_prompt_writes_cache_and_cache_hit_reuses_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_agent_nodes(root)
+            style = _write_style_node(root)
+            cache_dir = root / "cache"
+
+            first_stdout = io.StringIO()
+            with redirect_stdout(first_stdout):
+                first_exit_code = main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--full",
+                        "--composer",
+                        "agent",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--character-scope",
+                        "foot_detail",
+                        "--style-node",
+                        str(style),
+                        "--instruction",
+                        "组合角色和动作，避免带入脸部细节",
+                        "--agent-model",
+                        "agent-model-v1",
+                        "--cache-dir",
+                        str(cache_dir),
+                        "--prompt",
+                        "akemi homura, bare soles, foot focus",
+                        "--negative",
+                        "extra toes, face focus",
+                        "--seed",
+                        "321",
+                        "--nt",
+                        "2",
+                    ]
+                )
+            first = json.loads(first_stdout.getvalue())
+
+            second_stdout = io.StringIO()
+            with redirect_stdout(second_stdout):
+                second_exit_code = main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--full",
+                        "--composer",
+                        "agent",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--character-scope",
+                        "foot_detail",
+                        "--style-node",
+                        str(style),
+                        "--instruction",
+                        "组合角色和动作，避免带入脸部细节",
+                        "--agent-model",
+                        "agent-model-v1",
+                        "--cache-dir",
+                        str(cache_dir),
+                        "--seed",
+                        "321",
+                        "--nt",
+                        "2",
+                    ]
+                )
+            second = json.loads(second_stdout.getvalue())
+
+            self.assertEqual(first_exit_code, 0)
+            self.assertEqual(second_exit_code, 0)
+            self.assertEqual(first["status"], "ready")
+            self.assertEqual(second["status"], "ready")
+            self.assertFalse(first["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertTrue(second["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(
+                first["prompt_bundle"]["cache"]["cache_key"],
+                second["prompt_bundle"]["cache"]["cache_key"],
+            )
+            self.assertEqual(
+                second["prompt_bundle"]["prompt"]["positive"],
+                "akemi homura, bare soles, foot focus",
+            )
+            self.assertEqual(second["prompt_bundle"]["meta"]["composer_type"], "agent")
+            self.assertEqual(second["render_request"]["seed"], 321)
+            self.assertEqual(second["render_request"]["params"]["n_samples"], 2)
+            self.assertIn("style prefix", second["render_request"]["prompt"])
+            self.assertIn("akemi homura, bare soles, foot focus", second["render_request"]["prompt"])
+            self.assertTrue(any(cache_dir.glob("*.json")))
+
+    def test_run_prompt_agent_cache_hit_executes_novelai(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_agent_nodes(root)
+            style = _write_style_node(root)
+            config = self._write_config(root)
+            cache_dir = root / "cache"
+            output_dir = root / "outputs"
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--composer",
+                        "agent",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--agent-model",
+                        "agent-model-v1",
+                        "--cache-dir",
+                        str(cache_dir),
+                        "--prompt",
+                        "akemi homura, bare soles, foot focus",
+                    ]
+                )
+
+            with (
+                patch.dict("os.environ", {"NAI_ACCESS_TOKEN": "token"}),
+                patch("tags_machine_core.execution.NovelAIClient") as client_cls,
+            ):
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="nai_result.png", content=_png_bytes_with_text({}))
+                ]
+                client.build_payload.return_value = {
+                    "input": "style prefix, akemi homura, bare soles, foot focus",
+                    "parameters": {"seed": 222, "n_samples": 1},
+                }
+
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "run-prompt",
+                            "--composer",
+                            "agent",
+                            "--character",
+                            str(character),
+                            "--action",
+                            str(action),
+                            "--style-node",
+                            str(style),
+                            "--agent-model",
+                            "agent-model-v1",
+                            "--cache-dir",
+                            str(cache_dir),
+                            "--config",
+                            str(config),
+                            "--output-dir",
+                            str(output_dir),
+                            "--seed",
+                            "222",
+                            "--nt",
+                            "1",
+                        ]
+                    )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["status"], "ready")
+            self.assertFalse(data["dry_run"])
+            self.assertTrue(data["prompt_bundle"]["cache"]["cache_hit"])
+            self.assertEqual(data["generation_result"]["backend"], "novelai")
+            self.assertEqual(len(data["generation_result"]["images"]), 1)
+            self.assertEqual(
+                data["render_request"]["meta"]["prompt_cache_key"],
+                data["prompt_bundle"]["cache"]["cache_key"],
+            )
 
     def test_run_prompt_executes_novelai_and_records_generation_result(self):
         with tempfile.TemporaryDirectory() as tmp:

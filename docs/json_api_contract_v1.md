@@ -138,6 +138,8 @@ agent 缓存目录推荐使用 `cache.cache_dir`；同时兼容顶层 `cache_dir
 
 如果请求包含 `"composer": "agent"`、`agent` 或 `agent_result`，`api-compose` 会走 agent composer 路径，效果等价于 `api-compose-agent`。
 
+CLI 的 `run-prompt --composer agent` 是 agent prompt 进入真实 NovelAI 生图的业务入口；JSON API 中对应的无联网状态入口仍是 `api-resolve-compose-render-plan`。二者必须共用同一套 `AgentComposer` cache key 语义：节点内容、style_ref、instructions、agent_model、scope、extra_prompt 等显式任务输入进入 cache key；agent 输出的完整 prompt 不进入 cache key。CLI 中带完整 prompt 回填 cache 时，随 prompt 传入的 negative 也作为 agent 输出保存，而不是作为下一次读取缓存必须重复输入的 task negative。
+
 ### api-agent-task
 
 输入：节点引用、agent 指令、可选 `agent.model` 和可选缓存配置。
@@ -404,3 +406,19 @@ compose.prompt 已经包含完整角色 + 动作
 - 涉及 agent composer 的请求必须覆盖 `ready` 和 `requires_agent` 两类状态。
 - 涉及 NovelAI adapter 的请求必须能生成包含 V4/V4.5 字段和 reference/vibe 参数的 `RenderRequest`。
 - 真实生图后必须保留 `GenerationResult.request_body` 和图片证据，供旧项目 oracle 对照验收。
+
+## 批量与 UI 边界
+
+批量任务只编排现有 JSON 契约，不直接拼后端 payload，也不直接调用 agent：
+
+- BatchItem input：node refs 或 full prompt、composer mode、style ref、render params、output policy。
+- BatchItem output：`PromptBundle`、`RenderRequest`、`GenerationResult`、acceptance/evaluation report path。
+- agent 缺失时记录 `status: requires_agent`，由外部 worker 补 prompt 后重试。
+
+未来 UI 只依赖 JSON API：
+
+- 节点浏览和选择读取 node refs。
+- prompt 预览读取 `PromptBundle`。
+- 参数预览读取 `RenderRequest`。
+- 结果页读取 `GenerationResult` 和 acceptance/evaluation report。
+- UI 不直接拼 prompt，不直接修改 NovelAI V4 payload。

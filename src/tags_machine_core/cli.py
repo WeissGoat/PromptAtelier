@@ -12,7 +12,7 @@ from tags_machine_core.backends import (
     backend_support_report,
     ensure_backend_can_execute,
 )
-from tags_machine_core.composers import load_agent_result
+from tags_machine_core.composers import AgentCompositionRequired, load_agent_result
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
@@ -146,9 +146,20 @@ def cmd_render_plan_nodes(args) -> int:
 
 def cmd_run_prompt(args) -> int:
     service = GenerationService()
-    bundle, request = _build_novelai_prompt_artifacts(service, args)
+    try:
+        bundle, request = _build_novelai_prompt_artifacts(service, args)
+    except AgentCompositionRequired as exc:
+        result = {
+            "schema": "tags-machine-core.run-prompt-result/v1",
+            "status": "requires_agent",
+            "dry_run": True,
+            "agent_task": exc.task,
+        }
+        print_json(result, full=args.full)
+        return 0
     result: dict[str, Any] = {
         "schema": "tags-machine-core.run-prompt-result/v1",
+        "status": "ready",
         "dry_run": args.dry_run,
         "prompt_bundle": bundle,
         "render_request": request,
@@ -691,11 +702,57 @@ def _build_bundle_from_nodes(
 
 
 def _build_novelai_prompt_artifacts(service: GenerationService, args):
+    if getattr(args, "composer", "full") == "agent":
+        return _build_novelai_agent_prompt_artifacts(service, args)
+    prompt = _read_prompt_value(args)
+    if not prompt:
+        raise ValueError("run-prompt requires --prompt or --prompt-file unless --composer agent is used")
     style_ref, style = _load_novelai_style_for_prompt(args)
     bundle = service.compose_full_prompt(
-        prompt=_read_prompt_value(args),
+        prompt=prompt,
         negative=args.negative or "",
         style_ref=style_ref,
+    )
+    params = _load_json_arg(args.params_json)
+    params["n_samples"] = args.nt
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=params,
+    )
+    return bundle, request
+
+
+def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
+    style_ref, style = _load_novelai_style_for_prompt(args)
+    character, action, background = _read_node_inputs(args)
+    cache = PromptCache(args.cache_dir) if args.cache_dir else None
+    result = load_agent_result(args.agent_result) if args.agent_result else None
+    prompt = _read_prompt_value(args)
+    task_negative = args.negative or ""
+    if prompt and result is None:
+        result = {
+            "positive": prompt,
+            "negative": args.negative or "",
+            "character_scope": args.character_scope or args.body_scope,
+        }
+        task_negative = ""
+    bundle = service.compose_nodes_with_agent(
+        character=character,
+        action=action,
+        background=background,
+        extra_prompt=args.extra_prompt or "",
+        negative=task_negative,
+        style_ref=style_ref,
+        character_scope=args.character_scope or args.body_scope,
+        instructions=args.instruction or [],
+        agent_model=args.agent_model,
+        result=result,
+        cache=cache,
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -875,7 +932,12 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[output_parent],
         help="Run or plan a full character+action prompt with NovelAI style only",
     )
-    _add_prompt_run_arguments(run_prompt, output_options=True)
+    _add_prompt_run_arguments(
+        run_prompt,
+        output_options=True,
+        prompt_required=False,
+        agent_options=True,
+    )
     run_prompt.add_argument(
         "--dry-run",
         action="store_true",
@@ -1622,10 +1684,37 @@ def _add_prompt_run_arguments(
     parser: argparse.ArgumentParser,
     *,
     output_options: bool,
+    prompt_required: bool = True,
+    agent_options: bool = False,
 ) -> None:
-    prompt_group = parser.add_mutually_exclusive_group(required=True)
+    if agent_options:
+        parser.add_argument(
+            "--composer",
+            default="full",
+            choices=("full", "agent"),
+            help="Prompt composition mode; agent mode reads nodes and prompt cache",
+        )
+    prompt_group = parser.add_mutually_exclusive_group(required=prompt_required)
     prompt_group.add_argument("--prompt", help="Full character + action prompt / tags string")
     prompt_group.add_argument("--prompt-file", help="Read prompt from a UTF-8 text file")
+    if agent_options:
+        parser.add_argument("--character", help="Path to a character node when --composer agent")
+        parser.add_argument("--action", help="Path to an action node when --composer agent")
+        parser.add_argument("--background", help="Path to a background node when --composer agent")
+        parser.add_argument("--extra-prompt", help="Additional positive prompt text for agent task")
+        parser.add_argument("--character-scope", help="Override character_scope for agent composition")
+        parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
+        parser.add_argument(
+            "--instruction",
+            action="append",
+            help="Instruction passed through to the external agent; can be repeated",
+        )
+        parser.add_argument(
+            "--agent-model",
+            help="External agent model/version identifier included in the prompt cache key",
+        )
+        parser.add_argument("--agent-result", help="Path to agent result JSON")
+        parser.add_argument("--cache-dir", help="PromptBundle cache directory")
     parser.add_argument("--negative")
     parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
     parser.add_argument("--artist", help="Compatibility alias for --style-ref")

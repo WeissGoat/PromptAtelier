@@ -364,6 +364,8 @@ uv run python -m tags_machine_core render-plan --config configs\local.example.ya
 uv run python -m tags_machine_core render-plan-nodes --backend novelai --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --seed 123
 uv run python -m tags_machine_core run-prompt --dry-run --prompt "akemi homura, bare soles, foot focus" --style-node examples\nodes\styles\anime_comfy --seed 123 --nt 3
 uv run python -m tags_machine_core run-prompt --prompt-file agent_prompt.txt --style-ref 20260412_2 --config configs\local.example.yaml --output-dir outputs --seed 123 --nt 3
+uv run python -m tags_machine_core run-prompt --dry-run --composer agent --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-node examples\nodes\styles\anime_comfy --agent-model agent-model-v1 --instruction "组合角色和动作，局部镜头不要带入无关角色外观" --cache-dir cache\prompt
+uv run python -m tags_machine_core run-prompt --composer agent --character examples\nodes\characters\homura --action examples\nodes\actions\foot_closeup --style-ref 20260412_2 --agent-model agent-model-v1 --cache-dir cache\prompt --prompt-file agent_prompt.txt --config configs\local.example.yaml --output-dir outputs
 uv run python -m tags_machine_core api-compose-render-plan examples\requests\compose_render_plan_novelai.json --output api_response.json
 uv run python -m tags_machine_core api-resolve-compose-render-plan examples\requests\agent_compose_render_plan_requires_agent.json --output api_resolution.json
 uv run python -m tags_machine_core api-backend-support examples\requests\backend_support.json --output backend_support.json
@@ -388,6 +390,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网；当前正式验收只要求 NovelAI 链路稳定。
 - `run-prompt` 面向完整角色+动作混合 prompt。它不读取 character/action 节点，也不做 `character_scope` 裁剪，只把完整 prompt 落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--dry-run` 输出 `PromptBundle + RenderRequest`，去掉 `--dry-run` 后需要 `NAI_ACCESS_TOKEN` 并真实生图；`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
+- `run-prompt --composer agent` 是 agent 拼接进入真实生图的业务入口。它读取 character/action/background 节点，并使用节点内容 hash、style_ref、instructions、agent_model、scope 等生成 cache key。带 `--prompt` / `--prompt-file` 时，core 认为这是 agent 已完成的完整 prompt，会写入 `PromptBundle` cache 并继续生成；此时随 prompt 传入的 `--negative` 视为 agent 输出的一部分，不参与 task cache key。不带完整 prompt 时，只读取 cache，命中则继续生成，未命中则返回 `status: requires_agent` 和 `agent_task`，不会调用 NovelAI。
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-backend-support` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest`、后端支持矩阵和 `GenerationResult` 契约；请求样例在 `examples/requests/`，响应形状 golden 在 `examples/responses/json_api_response_shapes.json`。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
@@ -403,7 +406,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `compare-image-result` 用于真实出图后的单 case 对比报告：读取旧图、core `GenerationResult` 和可选 core 图，输出图片 sha256、尺寸、PNG 参数 diff、`GenerationResult.request_body` 与 core PNG 参数 diff，以及待人工填写的视觉结论字段。
 - `archive-acceptance-case` 会把旧项目基准结果和 core 侧产物复制到独立样例目录，生成可回放 record，并更新 suite manifest。
 - `archive-novelai-acceptance-nodes` 会从结构化节点生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目对比集；它不运行旧项目代码，也不联网生图。
-- `archive-novelai-acceptance-prompt` 会从完整 prompt 生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目对比集；适合验证 agent prompt、人工完整 prompt 或旧 `run-prompt` 输出和旧 `run_action` 基准是否等价。
+- `archive-novelai-acceptance-prompt` 会从完整 prompt 生成 core 侧 `PromptBundle` 和 NovelAI `RenderRequest`，再归档旧项目对比集；适合验证 agent prompt、人工完整 prompt、旧 `run-prompt` 输出或旧 `run_action` 最终 prompt 是否能进入同一套 NovelAI 兼容链路。旧 `run_action` 的最终 prompt 可以作为兼容输入，但不要求新 composer 逐字复刻旧 `formula`。
 - `verify-acceptance-suite` 用于批量重算 record 目录或 manifest；`--require-minimum-set` 会检查 `default_action`、`foot_detail`、`hand_detail`、`complex_character`、`reference_style` 五类样例是否齐全，并输出 `case_checks` 验证关键样例语义：默认动作必须保留 NovelAI 核心默认参数和 V4 payload，局部镜头必须验证 character section 裁剪且最终 prompt 不能残留被抑制 section 的典型词，复杂角色必须验证默认 scope 不误过滤 hair / eyes / upper_clothes，参考图画风必须验证 reference 数组和 director reference 图语义。
 - 验收记录使用 `oracle_kind` 区分来源：`legacy_oracle` 表示真实旧项目基准结果，`fixture` 表示静态机制样例。`verify-acceptance-suite` 会输出 `oracle_kind_counts`；需要证明已经归档真实旧项目基准结果时，必须加 `--require-legacy-oracle`。需要进一步证明每条真实旧项目基准记录都带有旧图、新图、可读 PNG 参数、`GenerationResult` 和 `PromptBundle` 合约证据时，再加 `--require-legacy-evidence`；这个参数也会要求 suite 至少包含一条 `legacy_oracle`，输出会包含 `legacy_oracle_evidence_checks`。严格证据失败时，`messages` 必须展开具体的 `PromptBundle` 契约错误、后端字段路径和 `GenerationResult.request_body` diff 路径，避免批量归档时只能看到笼统失败。
 - `examples/acceptance/` 是仓库内置的静态 dry-run 最小对比集 fixture，记录均标记为 `oracle_kind: fixture`，用于固定验收记录格式、参数归一化、PNG 参数读取、`GenerationResult` 图片证据和五类 minimum case 语义检查；它不等价于真实旧项目基准验收，也不能通过 `--require-legacy-oracle` 或 `--require-legacy-evidence`。
@@ -442,44 +445,83 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 ## 迁移路线
 
-第一阶段：旁路核心可用
+第一阶段：边界与兼容层冻结
 
 - 保持旧项目稳定。
-- 新 core 支持读取旧画风 `tags.txt`。
-- 新 core 能生成 NovelAI render plan。
-- 新 core 能通过 execution 层调用现代 NovelAI client 真实出图。
+- core 不 import 旧项目运行时代码。
+- 明确 `PromptBundle`、`RenderRequest`、`GenerationResult` 三个模块边界。
+- 旧项目只提供设计素材、最终 prompt、PNG 参数和基准图。
+- NovelAI adapter 可以做旧 style / 旧参数兼容；composer 不为了旧 `formula` 逐字等价引入 hardcode。
 
-第二阶段：结构化节点
+第二阶段：`run-prompt` 主链路与 AgentComposer
 
-- 确认角色 `meta.yaml` 轻量事实库格式。
-- 设计并落地 action / style / background 的结构化规范。
-- 给动作、画风节点补结构化字段。
-- 编写旧 `tags.txt` 辅助迁移脚本。当前已支持旧画风 `tags.txt` 到 style `node.yaml`、旧角色 `tags.txt` 到 character `meta.yaml`、旧动作 `tags.txt` 到 action `meta.yaml`、旧背景 `tags.txt` 到 background `meta.yaml` 的迁移；迁移结果仍需要人工复核 tags 分组。
+- `run-prompt` 成为完整 prompt 生图主入口。
+- `run-prompt --composer agent` 支持节点输入、agent prompt 回填、PromptBundle cache 复用。
+- 带完整 prompt 时认为 agent 已经拼接完成，写入 cache 后继续生成。
+- 不带完整 prompt 时先读 cache；miss 时返回 `requires_agent` 状态，不调用后端。
+- `legacy-final` 只作为旧 PNG / 旧 `run_action` 最终 prompt 的兼容模式。
 
-第三阶段：composer 拆分
+第三阶段：新节点 composer 评估
 
-- 脚本 composer 支持角色 + 动作 + 镜头规则。
-- Agent composer 支持语义组合和冲突修复。
-- 引入 prompt cache。
+- 实现 core 版 character + action + style composer 链路。
+- 局部镜头通过统一 policy 过滤 character sections。
+- 和旧 `run_action` 做评估对比，但不要求逐字等价。
+- 阶段 3 的 `run-action` 是新 composer 入口，不以旧 `formula` 逐字一致为目标。
+- 输入包括 character `meta.yaml`、action `meta.yaml`、style ref / style node、可选 background、seed / size / params。
+- 输出包括 `PromptBundle`、`RenderRequest`、可选 `GenerationResult` 和 composer evaluation report。
+- character 只描述角色事实；action 只描述动作事实和 `character_scope`。
+- scope 到 character section 的过滤规则由 composer policy 统一维护，不写进每个 character/action YAML。
+- 与旧 `run_action` 的差异必须记录，但差异本身不代表失败。
+
+后续实现任务：
+
+1. 新增 `run-action` CLI，复用 `compose_nodes -> build_novelai_request -> execute_render_request`。
+2. 新增 composer evaluation report，记录 included/suppressed sections、旧 prompt 差异和 intentional differences。
+3. 至少用普通动作、脚部局部特写、reference style 三个真实 case 评估。
 
 第四阶段：NovelAI 验收闭环
 
-- 完成 NovelAI adapter / execution / client 的旧项目对照。
-- 覆盖 reference image / vibe / V4 payload / 默认参数归一化。
-- 统一生成结果和图片参数读取。
+- 兼容链路做参数级 diff。
+- 新 composer 链路做语义、裁剪和视觉评估。
+- 每个真实 case 输出 `GenerationResult`、PNG 参数、参数 diff、视觉结论和有意差异。
+- 验收分三类：
+  - 兼容验收：输入旧项目最终 prompt / negative，目标是 NovelAI 参数归一化 diff 为 0 或只有白名单差异，用来证明 adapter 和 execution 没退化。
+  - Composer 评估：输入 character/action/style，目标是语义正确、scope 裁剪合理、差异可解释，不要求和旧 `formula` 逐字一致。
+  - 视觉验收：记录旧图、core 图、参数 diff、图片 sha256、尺寸和人工结论；参数一致但像素不同，优先记录后端非确定性或服务端差异。
 
-第五阶段：未来多后端
+Composer evaluation case record 目标格式：
 
-- ComfyUI adapter / execution / client 根据新规范进入正式验收。
-- SD WebUI / Forge adapter / execution / client 根据新规范进入正式验收。
+```yaml
+case_id: foot_detail_homura_001
+acceptance_kind: composer_evaluation
+legacy:
+  image: legacy/old.png
+  params: legacy/old_params.json
+core:
+  image: core/new.png
+  prompt_bundle: core/prompt_bundle.json
+  render_request: core/render_request.json
+  generation_result: core/generation_result.json
+diff:
+  params_diff_count: 0
+  whitelisted_differences: []
+visual:
+  result: pending
+  notes: ""
+intentional_differences:
+  - scope: foot_detail
+    reason: "过滤 hair/eyes/upper_clothes，避免局部脚部镜头割裂"
+```
 
-第六阶段：前端 UI
+第五阶段：批量任务与 UI 边界
 
-- 节点浏览和编辑。
-- PromptBundle 预览。
-- RenderRequest diff。
-- 批量任务队列。
-- 生成结果回看和参数复用。
+- 批量任务复用 `PromptBundle -> RenderRequest -> GenerationResult`。
+- 前端只读 JSON API，不直接拼 NovelAI 参数。
+- ComfyUI / SD 等后端等规范明确后再进入正式验收。
+- 批量任务只编排现有契约，不直接拼 NovelAI payload，也不直接调用 agent。
+- 批量任务输入包括 node refs 或 full prompt、composer mode、style ref、render params、output policy。
+- 批量任务输出包括 `PromptBundle`、`RenderRequest`、`GenerationResult`、acceptance/evaluation report path。
+- agent 缺失时批量层只记录 `requires_agent` 状态，由外部 worker 补 prompt 后重试。
 
 ## 验收标准
 
@@ -495,16 +537,17 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 旧项目对照验收：
 
 - 旧 `tags_machine` 作为行为基准来源，但不是运行时依赖；core 只读取素材文件和对照产物，不 import 旧项目的 `formula.py`、`tags_machine.py`、`blackboard.py`。这个边界由 `test_project_boundaries.py` 持续验证。
+- core 的目标是可迭代的新内核，不是还原旧 `formula` 的所有历史耦合。旧项目对照分为两类：NovelAI 兼容层需要尽量复用旧参数和旧画风行为；提示词 composer 只做效果评估、语义覆盖和差异记录，不为了逐字一致引入新的硬编码。
 - 固定一组最小回归样例，至少覆盖：普通半身/全身动作、脚部局部特写、手部局部特写、角色服装复杂样例、带 `reference_image_multiple` 的画风样例。
 - 每个样例使用同一组输入：character/action/style 引用、seed、尺寸、模型、sampler、steps、scale、negative prompt、参考图/vibe 参数。
 - 旧项目用现有 `run_action` 或等价脚本生成基准图；core 用新链路生成对照图。两边生成参数需要从图片内嵌参数和请求体中读取，而不是只看 CLI 输出。
-- 模块通信格式也必须参照旧项目验证：`PromptBundle` 要能解释旧 `run_action` 最终 prompt 的来源，`RenderRequest` 要能还原旧请求体的关键字段，`GenerationResult` 要能归档旧图和新图的内嵌参数差异。
+- 模块通信格式也必须参照旧项目验证：`PromptBundle` 要能解释最终 prompt 的来源、composer 选择和有意差异，`RenderRequest` 要能在兼容场景还原旧请求体的关键字段，`GenerationResult` 要能归档旧图和新图的内嵌参数差异。
 - 参数对比要覆盖完整 NovelAI 请求关键字段，包括 `prompt`、`negative_prompt`、`model`、`width`、`height`、`scale`、`sampler`、`steps`、`seed`、`cfg_rescale`、`noise_schedule`、`v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等。
 - 对 base64 图片字段不做文本展开对比，但要比较数组长度、是否为空、图片 hash 或文件 hash、strength/information_extracted 等配套字段是否一一对应。
 - 对旧项目和新 adapter 的字段命名差异允许做归一化，例如 `ddim` 到 `ddim_v3`、默认参数补齐、布尔默认值补齐；归一化规则必须写入测试或对照脚本，不能靠人工记忆。
 - 如果两边图片像素不一致，优先检查请求体差异；若请求体完全一致但像素仍不同，需要记录后端非确定性、模型版本或 NovelAI 服务端策略变化，不把它当成 prompt composer 的失败。
 - 局部镜头样例需要额外检查 `PromptBundle.meta.composition`：例如 `foot_detail` 必须包含脚部相关 section，并抑制 `hair`、`eyes`、`upper_clothes` 等不应进入脚底特写的角色 section。
-- 新增 `run-prompt` / agent composer 入口时，必须能和旧 `run_action` 在同一基准样例上产出等价的 render plan；若 prompt 表达不完全相同，需要给出差异说明和可接受范围。
+- 新增 `run-prompt` / agent composer 入口时，必须能在同一基准样例上产出可比较的 `PromptBundle` 和 `RenderRequest`。`legacy-final` 这类兼容输入应追求参数级对齐；新 composer 输出允许和旧 `run_action` 不同，但要记录语义差异、节点裁剪结果和是否属于有意改进。
 
 v1 冻结验收补充：
 
@@ -518,18 +561,18 @@ v1 冻结验收补充：
 
 模块通信格式的通过线：
 
-- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的关键 tag、质量词、默认 negative、角色/动作顺序和 `meta.composition` 裁剪结果必须可解释；允许 agent 改写连接方式，但必须保留旧项目关键 tag 或在记录里标成有意差异。验收还会检查 `PromptBundle` 满足 v1 基础形状，并且没有混入 `RenderRequest` 或后端 adapter 字段。
-- `RenderRequest` 验收：由同一个 `PromptBundle` 生成的 NovelAI 请求，归一化后必须和旧项目请求体一致；ComfyUI / SD 暂不作为本阶段验收范围。
+- `PromptBundle` 验收：同一旧项目样例下，最终 positive / negative prompt 的核心语义、质量词策略、默认 negative 策略、角色/动作组织方式和 `meta.composition` 裁剪结果必须可解释；允许脚本 composer 或 agent composer 改写旧项目的连接方式和 tag 组织，但差异需要在记录里标明是兼容差异、策略差异还是有意修复。验收还会检查 `PromptBundle` 满足 v1 基础形状，并且没有混入 `RenderRequest` 或后端 adapter 字段。
+- `RenderRequest` 验收：对于旧 `run-prompt` 或旧 `run_action` 最终 prompt 作为输入的兼容链路，由同一个 `PromptBundle` 生成的 NovelAI 请求归一化后应和旧项目请求体一致，或只有明确白名单差异；对于新 composer 链路，`RenderRequest` 必须字段完整、参数可解释，并把和旧请求体的差异写入评估记录。ComfyUI / SD 暂不作为本阶段验收范围。
 - `GenerationResult` 验收：真实生图后必须保存图片路径、请求体摘要、PNG 内嵌参数、参考图摘要和归一化 diff；验收记录会先检查 `GenerationResult` 的 v1 基础形状，包括固定 `schema`、合法 `backend`、`images` 数组、图片条目的非空 `path` / `filename`、对象型 `meta`、布尔型 `cache_hit` 和字符串型 `created_at`。随后会检查 `GenerationResult.backend` 与 core `RenderRequest.backend` 一致，避免把某个后端的计划误归档成另一个后端的真实结果；也会检查 `GenerationResult.images` 指向的图片文件是否存在，并记录大小和 sha256，同时检查 `GenerationResult.png_info.images` 与图片列表一一对应。若 `png_info.images` 条目包含 `parameters`，这些参数还必须和对应图片实际内嵌 PNG 参数归一化后一致；若条目包含 `error`，对应图片也必须确实不可读。真实旧项目基准的严格验收还要求每个 `png_info.images` 条目明确记录 `parameters` 或 `error`，不能只有路径。图片像素只作为人工视觉抽检，不替代参数 diff。
 - 缓存验收：agent composer 命中缓存时，除 `cache.cache_hit` 这类运行时命中标记外，重新输出的 `PromptBundle` payload 必须和首次生成结果字节级稳定；缓存 key 需要包含节点内容 hash、composer 版本、显式输入参数和 agent 模型版本，避免旧素材更新或 agent 模型升级后误用旧结果。
 - 回放验收：任意一条验收记录都应该能在不运行旧项目代码的情况下重算 core 侧 diff；旧项目只负责提前产出基准请求文件或基准图片。
 
 旧项目对照的通过线：
 
-- 每次新增 composer、adapter 或节点解析规则时，都至少选一个旧 `tags_machine` 可跑通的样例做回归对照。
+- 每次新增 composer、adapter 或节点解析规则时，都至少选一个旧 `tags_machine` 可跑通的样例做回归对照；对照目标是防止关键语义和后端参数退化，不是把旧 `formula` 的历史耦合搬进 core。
 - 对照流程分三步：旧项目生成基准请求/基准图，core 生成候选 `RenderRequest`/候选图，最后用归一化参数 diff 判断是否通过。
-- 第一优先级是参数等价：归一化后 `prompt`、`negative_prompt`、模型参数、随机种子、参考图数组和 V4 payload 必须一致或有明确白名单差异。
-- 第二优先级是节点裁剪等价：局部动作必须验证 character section 的纳入和抑制结果，不能只看最终字符串里有没有某几个词。
+- 第一优先级是兼容链路参数对齐：当输入使用旧项目最终 prompt / negative 时，归一化后 `prompt`、`negative_prompt`、模型参数、随机种子、参考图数组和 V4 payload 应一致或有明确白名单差异。
+- 第二优先级是新 composer 评估：局部动作必须验证 character section 的纳入和抑制结果，并记录新输出和旧输出的语义差异，不能只看最终字符串里有没有某几个词。
 - 第三优先级才是图片视觉：图片可以作为人工抽检材料，但不能替代参数 diff；如果参数不同，先修参数，如果参数相同但像素不同，记录原因。
 - 验收脚本不能依赖旧项目运行时代码。旧项目可以生成基准请求文件，core 的测试只读取基准 JSON、PNG 参数或素材文件。
 - 通过记录需要保留最小证据：旧图路径、新图路径、旧请求参数、新 `RenderRequest`、归一化 diff 结果、是否存在白名单差异。
@@ -543,7 +586,7 @@ v1 冻结验收补充：
 
 变更门禁：
 
-- 新增或修改 composer 时，至少选择一个旧 `run_action` 样例对照最终 positive / negative prompt、质量词、默认 negative、角色/动作拼接顺序和 `meta.composition`。局部镜头必须额外验证 section 纳入/抑制结果。
+- 新增或修改 composer 时，至少选择一个旧 `run_action` 样例评估最终 positive / negative prompt、质量词策略、默认 negative 策略、角色/动作组织方式和 `meta.composition`。局部镜头必须额外验证 section 纳入/抑制结果。评估结果可以不同于旧项目，但必须说明差异是否来自统一规则、agent 改写或有意修复。
 - 新增或修改 NovelAI adapter 时，必须和旧项目请求体做归一化 diff；参考图相关字段必须覆盖数组长度、图片摘要、strength、information_extracted，不能只比较 prompt 字符串。
 - 新增 ComfyUI / SD adapter 能力前，必须先补对应规范；进入正式范围后，至少要证明同一个 `PromptBundle` 能生成完整 dry-run plan，并说明它和旧 NovelAI 请求字段的映射关系。
 - 新增节点 YAML 字段时，必须能映射回旧素材或说明消费方；如果只是给未来使用，先放在 `extra`，不得进入 v1 必填契约。
@@ -563,12 +606,12 @@ v1 冻结验收补充：
 
 旧项目基准验收矩阵：
 
-| 层级 | 参照对象 | 必须一致的内容 | 允许差异 |
+| 层级 | 参照对象 | 通过重点 | 允许差异 |
 | --- | --- | --- | --- |
 | 节点读取 | 旧 `design` / `character` / `action` 素材目录 | 同一个节点引用能解析到同一批核心 tags、negative tags、参考图配置 | 新 YAML 的字段名、分组名可以不同，但要能映射回旧素材含义 |
-| 提示词生成 | 旧 `formula` / `run_action` 的最终 prompt 结果 | 正向 prompt、负向 prompt、质量词、默认负向词、角色/动作组合顺序 | agent composer 可以改写自然语言连接方式，但不能丢失旧项目关键 tag；差异必须写入对照记录 |
+| 提示词生成 | 旧 `formula` / `run_action` 的最终 prompt 结果 | 正向 prompt、负向 prompt、质量词策略、默认负向词策略、角色/动作组织方式都可解释，并能标明和旧输出的差异 | 新 composer 可以改写连接方式、tag 顺序和局部取舍；差异必须写入对照记录，不要求逐字等价 |
 | 局部镜头裁剪 | 旧项目实际生成的局部动作样例 | `foot_detail`、`hand_detail` 等 scope 下应保留的角色部位 tags 与应过滤的 hair/eyes/upper_clothes 等 section | 如果旧项目本身存在割裂组合，新 core 可以修正，但要在验收记录里标记为“有意修复” |
-| 生图参数 | 旧项目请求体和 PNG 内嵌参数 | seed、尺寸、模型、sampler、steps、scale、cfg_rescale、noise_schedule、V4 prompt、参考图数组、vibe 参数 | 字段命名和默认值补齐可以归一化；归一化规则必须进脚本 |
+| 生图参数 | 旧项目请求体和 PNG 内嵌参数 | 兼容链路下 seed、尺寸、模型、sampler、steps、scale、cfg_rescale、noise_schedule、V4 prompt、参考图数组、vibe 参数对齐 | 字段命名和默认值补齐可以归一化；新 composer 导致的 prompt 差异作为评估项记录，不要求强行修到旧输出 |
 | 生成结果 | 旧项目基准图 | 参数一致时，新图应作为人工视觉抽检材料，确认主体、动作、镜头和画风没有明显偏离 | NovelAI 服务端非确定性、模型版本变动、相同参数下像素不一致，需要记录原因，不直接判 composer 失败 |
 
 最小回归样例集：
