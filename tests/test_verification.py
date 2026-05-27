@@ -472,6 +472,8 @@ class VerificationTest(unittest.TestCase):
             )
             self.assertEqual(report["generation_result"]["selected_core_image"], str(core_image))
             self.assertEqual(report["visual_check"]["result"], "pass")
+            self.assertEqual(report["visual"]["result"], "pass")
+            self.assertEqual(report["visual"]["notes"], ["subject/action/camera/style checked"])
             self.assertEqual(
                 report["parameter_diff"]["left_normalized"]["parameters"][
                     "reference_image_multiple"
@@ -530,6 +532,7 @@ class VerificationTest(unittest.TestCase):
             self.assertTrue(data["match"])
             self.assertFalse(data["acceptance_ready"])
             self.assertEqual(data["visual_check"]["result"], "pending")
+            self.assertEqual(data["visual"]["result"], "pending")
             self.assertTrue(report_path.exists())
 
     def test_cli_inspect_image_params_normalized(self):

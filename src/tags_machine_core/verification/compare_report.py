@@ -54,6 +54,7 @@ def build_image_comparison_report(
     )
 
     parameter_match = bool(parameter_diff["match"] and core_request_vs_png["match"])
+    visual = _visual_check(visual_result, visual_notes or [])
     return {
         "schema": IMAGE_COMPARISON_REPORT_SCHEMA,
         "result": "pass" if parameter_match else "fail",
@@ -68,7 +69,8 @@ def build_image_comparison_report(
         "core_image": core_summary,
         "parameter_diff": parameter_diff,
         "core_request_vs_png": core_request_vs_png,
-        "visual_check": _visual_check(visual_result, visual_notes or []),
+        "visual": visual,
+        "visual_check": visual,
     }
 
 
