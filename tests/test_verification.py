@@ -14,9 +14,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from tags_machine_core.cli import main
+from tags_machine_core.contracts import PromptBundle
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_acceptance_record,
+    build_composer_evaluation_report,
     build_image_comparison_report,
     compare_render_parameters,
     normalize_render_parameters,
@@ -140,6 +142,30 @@ def _prompt_bundle_fixture(
 
 
 class VerificationTest(unittest.TestCase):
+    def test_build_composer_evaluation_report_records_scope_sections(self):
+        bundle = PromptBundle.model_validate(_prompt_bundle_fixture())
+
+        report = build_composer_evaluation_report(
+            case_id="foot_detail_homura_001",
+            prompt_bundle=bundle,
+            legacy_prompt=(
+                "akemi homura, long black hair, purple eyes, "
+                "school uniform, bare soles, foot focus"
+            ),
+        )
+
+        self.assertEqual(report["schema"], "tags-machine-core.composer-evaluation/v1")
+        self.assertEqual(report["case_id"], "foot_detail_homura_001")
+        self.assertEqual(report["composition"]["character_scope"], "foot_detail")
+        self.assertIn("eyes", report["composition"]["suppressed_character_sections"])
+        self.assertIn("upper_clothes", report["composition"]["suppressed_character_sections"])
+        self.assertEqual(report["visual"]["result"], "pending")
+        self.assertTrue(report["intentional_differences"])
+        self.assertEqual(
+            report["intentional_differences"][0]["reason"],
+            "局部镜头按统一 composer policy 过滤无关角色 section",
+        )
+
     def test_run_core_verification_dry_run_lists_no_network_gate(self):
         result = run_core_verification(cwd=PROJECT_ROOT, dry_run=True)
 

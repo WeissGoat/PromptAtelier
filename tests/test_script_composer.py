@@ -82,6 +82,49 @@ class ScriptComposerTest(unittest.TestCase):
         self.assertIn("purple eyes", bundle.prompt.positive)
         self.assertNotIn("bare soles", bundle.prompt.positive)
 
+    def test_hand_detail_suppresses_feet_and_lower_body_sections(self):
+        character = NodeDocument.model_validate(
+            {
+                "schema": "tags-machine.character/v1",
+                "kind": "character",
+                "id": "homura",
+                "tags": {
+                    "character": ["akemi homura"],
+                    "hair": ["long black hair"],
+                    "eyes": ["purple eyes"],
+                    "hands": ["slender hands"],
+                    "handwear": ["black gloves"],
+                    "feet": ["bare soles"],
+                    "footwear": ["shoes"],
+                    "lower_clothes": ["black skirt"],
+                },
+            }
+        )
+        action = NodeDocument.model_validate(
+            {
+                "schema": "tags-machine.action/v1",
+                "kind": "action",
+                "id": "hand_closeup",
+                "character_scope": "hand_detail",
+                "tags": {"action": ["hand focus", "reaching toward viewer"]},
+            }
+        )
+
+        bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+        self.assertEqual(bundle.meta.composition.character_scope, "hand_detail")
+        self.assertIn("slender hands", bundle.prompt.positive)
+        self.assertIn("black gloves", bundle.prompt.positive)
+        self.assertIn("hand focus", bundle.prompt.positive)
+        self.assertNotIn("bare soles", bundle.prompt.positive)
+        self.assertNotIn("shoes", bundle.prompt.positive)
+        self.assertNotIn("black skirt", bundle.prompt.positive)
+        self.assertIn("hands", bundle.meta.composition.included_character_sections)
+        self.assertIn("handwear", bundle.meta.composition.included_character_sections)
+        self.assertIn("feet", bundle.meta.composition.suppressed_character_sections)
+        self.assertIn("footwear", bundle.meta.composition.suppressed_character_sections)
+        self.assertIn("lower_clothes", bundle.meta.composition.suppressed_character_sections)
+
     def test_legacy_scoped_prompt_fragments_remain_supported(self):
         character = NodeDocument.model_validate(
             {

@@ -104,9 +104,13 @@ class NovelAIRenderAdapter:
             style_payload=style_payload,
             meta={
                 "action": action,
+                "character_ref": bundle.meta.character_ref,
+                "action_ref": bundle.meta.action_ref,
+                "background_ref": bundle.meta.background_ref,
                 "style_ref": bundle.meta.style_ref,
                 "composer_type": bundle.meta.composer_type,
                 "composer_version": bundle.meta.composer_version,
+                "character_scope": bundle.meta.composition.character_scope,
                 "prompt_cache_key": bundle.cache.cache_key,
             },
         )

@@ -18,6 +18,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "upper_body": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "hair",
@@ -41,6 +42,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "lower_body": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "body",
@@ -56,6 +58,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "portrait": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "hair",
@@ -71,6 +74,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "face_detail": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "hair",
@@ -84,6 +88,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "hand_detail": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "body",
@@ -98,6 +103,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "foot_detail": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "body",
@@ -110,6 +116,7 @@ CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
     "object_focus": {
         "include": [
             "character",
+            "identity",
             "copyright",
             "role",
             "accessories",

@@ -391,6 +391,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网；当前正式验收只要求 NovelAI 链路稳定。
 - `run-prompt` 面向完整角色+动作混合 prompt。它不读取 character/action 节点，也不做 `character_scope` 裁剪，只把完整 prompt 落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--dry-run` 输出 `PromptBundle + RenderRequest`，去掉 `--dry-run` 后需要 `NAI_ACCESS_TOKEN` 并真实生图；`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
 - `run-prompt --composer agent` 是 agent 拼接进入真实生图的业务入口。它读取 character/action/background 节点，并使用节点内容 hash、style_ref、instructions、agent_model、scope 等生成 cache key。带 `--prompt` / `--prompt-file` 时，core 认为这是 agent 已完成的完整 prompt，会写入 `PromptBundle` cache 并继续生成；此时随 prompt 传入的 `--negative` 视为 agent 输出的一部分，不参与 task cache key。不带完整 prompt 时，只读取 cache，命中则继续生成，未命中则返回 `status: requires_agent` 和 `agent_task`，不会调用 NovelAI。
+- `run-action` 是 core 新节点 composer 的真实入口。它读取 character/action/background 节点，先用脚本 composer 生成 `PromptBundle`，再通过 NovelAI adapter 生成 `RenderRequest`，非 `--dry-run` 时进入统一 execution。它不复刻旧 `formula/run_action` 的逐字拼接；局部镜头由 action 的 `character_scope` 驱动 composer policy，`PromptBundle.meta.composition` 会记录纳入和抑制的角色 section。
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-backend-support` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest`、后端支持矩阵和 `GenerationResult` 契约；请求样例在 `examples/requests/`，响应形状 golden 在 `examples/responses/json_api_response_shapes.json`。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
 - `api-generate` 和 `execute-render-request` 都读取已有 `RenderRequest` 后联网执行；默认只执行 NovelAI。ComfyUI / SD 真实执行必须显式传 `--allow-experimental-backend`，仍属于预研能力，不进入 v1 正式验收。
@@ -473,11 +474,11 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 - scope 到 character section 的过滤规则由 composer policy 统一维护，不写进每个 character/action YAML。
 - 与旧 `run_action` 的差异必须记录，但差异本身不代表失败。
 
-后续实现任务：
+当前阶段三已落地的能力：
 
-1. 新增 `run-action` CLI，复用 `compose_nodes -> build_novelai_request -> execute_render_request`。
-2. 新增 composer evaluation report，记录 included/suppressed sections、旧 prompt 差异和 intentional differences。
-3. 至少用普通动作、脚部局部特写、reference style 三个真实 case 评估。
+1. `run-action` CLI 复用 `compose_nodes -> build_novelai_request -> execute_render_request`，输出 `PromptBundle + RenderRequest`，可选真实 NovelAI 生图。
+2. composer policy 已覆盖 `foot_detail` / `hand_detail` 等局部镜头，保留 `identity` 等核心身份 section，抑制不相关角色 section。
+3. composer evaluation report 会记录 included/suppressed sections、旧 prompt 和 intentional differences，真实 case 评估仍归入阶段四对比集。
 
 第四阶段：NovelAI 验收闭环
 

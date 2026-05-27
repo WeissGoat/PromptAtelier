@@ -7,6 +7,7 @@ from .acceptance import (
     verify_acceptance_record,
     verify_acceptance_suite,
 )
+from .composer_eval import build_composer_evaluation_report
 from .compare_report import build_image_comparison_report
 from .core import run_core_verification
 from .image_params import read_png_dimensions, read_png_text_chunks, read_image_parameters
@@ -21,6 +22,7 @@ __all__ = [
     "RenderParamDiff",
     "archive_acceptance_case",
     "build_acceptance_record",
+    "build_composer_evaluation_report",
     "build_image_comparison_report",
     "compare_render_parameters",
     "load_acceptance_record",

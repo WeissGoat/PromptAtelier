@@ -179,6 +179,31 @@ def cmd_run_prompt(args) -> int:
     return 0
 
 
+def cmd_run_action(args) -> int:
+    service = GenerationService()
+    bundle, request = _build_novelai_action_artifacts(service, args)
+    result: dict[str, Any] = {
+        "schema": "tags-machine-core.run-action-result/v1",
+        "status": "ready",
+        "dry_run": args.dry_run,
+        "prompt_bundle": bundle,
+        "render_request": request,
+    }
+    if not args.dry_run:
+        if not args.config:
+            raise ValueError("run-action without --dry-run requires --config")
+        config = load_config(Path(args.config))
+        result["generation_result"] = _execute_render_request(
+            config,
+            request,
+            output_dir=args.output_dir,
+            image_format=args.format,
+            allow_experimental_backend=False,
+        )
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_generate(args) -> int:
     config = load_config(Path(args.config))
     service = GenerationService()
@@ -768,6 +793,32 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
     return bundle, request
 
 
+def _build_novelai_action_artifacts(service: GenerationService, args):
+    style_ref, style = _load_novelai_style_for_nodes(args)
+    character, action, background = _read_node_inputs(args)
+    bundle = service.compose_nodes(
+        character=character,
+        action=action,
+        background=background,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        style_ref=style_ref,
+        character_scope=args.character_scope or args.body_scope,
+    )
+    params = _load_json_arg(args.params_json)
+    params["n_samples"] = args.nt
+    request = service.build_novelai_request(
+        bundle,
+        seed=args.seed,
+        style=style,
+        width=args.width,
+        height=args.height,
+        model=args.model,
+        params=params,
+    )
+    return bundle, request
+
+
 def _read_node_inputs(args):
     reader = NodeReader()
     character = reader.read(args.character) if args.character else None
@@ -794,9 +845,9 @@ def _load_render_style(args):
 def _load_novelai_style_for_nodes(args):
     if args.style_node:
         node = NodeReader().read(args.style_node)
-        return args.style_ref or node.id, node
+        return args.style_ref or getattr(args, "artist", None) or node.id, node
 
-    style_ref = args.style_ref
+    style_ref = args.style_ref or getattr(args, "artist", None)
     if args.config:
         config = load_config(Path(args.config))
         style_ref = style_ref or config.defaults.style_ref
@@ -945,6 +996,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_prompt.add_argument("--config", help="Load runtime config and legacy style refs")
     run_prompt.set_defaults(func=cmd_run_prompt)
+
+    run_action = subparsers.add_parser(
+        "run-action",
+        parents=[output_parent],
+        help="Compose character/action nodes and run NovelAI",
+    )
+    _add_node_compose_arguments(run_action)
+    _add_novelai_render_arguments(run_action)
+    run_action.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only print PromptBundle and RenderRequest; do not call NovelAI",
+    )
+    run_action.add_argument("--config", help="Load runtime config and legacy style refs")
+    run_action.set_defaults(func=cmd_run_action)
 
     api_compose = subparsers.add_parser(
         "api-compose",
@@ -1733,6 +1799,24 @@ def _add_prompt_run_arguments(
             choices=("png", "jpg", "webp"),
             help="Output image format when NovelAI returns files without an extension",
         )
+
+
+def _add_novelai_render_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
+    parser.add_argument("--artist", help="Compatibility alias for --style-ref")
+    parser.add_argument("--style-node", help="Path to a structured style node")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--width", type=int, default=1024)
+    parser.add_argument("--height", type=int, default=1024)
+    parser.add_argument("--model", default="nai-diffusion-4-5-full")
+    parser.add_argument("--params-json", help="Extra NovelAI renderer params as a JSON object")
+    parser.add_argument("--output-dir", help="Override output directory")
+    parser.add_argument(
+        "--format",
+        default="png",
+        choices=("png", "jpg", "webp"),
+        help="Output image format when NovelAI returns files without an extension",
+    )
 
 
 def _add_api_request_arguments(parser: argparse.ArgumentParser) -> None:

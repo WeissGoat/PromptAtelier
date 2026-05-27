@@ -563,6 +563,62 @@ negative_prompt:
             self.assertEqual(executor.call_args.kwargs["image_format"], "webp")
             self.assertIs(executor.call_args.kwargs["allow_experimental_backend"], False)
 
+    def test_run_action_dry_run_builds_prompt_bundle_and_render_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_agent_nodes(root)
+            style = _write_style_node(root)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "run-action",
+                        "--dry-run",
+                        "--full",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--style-node",
+                        str(style),
+                        "--seed",
+                        "456",
+                        "--width",
+                        "832",
+                        "--height",
+                        "1216",
+                        "--nt",
+                        "2",
+                        "--params-json",
+                        '{"scale": 6.0}',
+                    ]
+                )
+
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(data["schema"], "tags-machine-core.run-action-result/v1")
+            self.assertEqual(data["status"], "ready")
+            self.assertTrue(data["dry_run"])
+            self.assertEqual(data["prompt_bundle"]["meta"]["composer_type"], "script")
+            self.assertEqual(data["prompt_bundle"]["meta"]["character_ref"], "homura")
+            self.assertEqual(data["prompt_bundle"]["meta"]["action_ref"], "foot_detail")
+            self.assertEqual(
+                data["prompt_bundle"]["meta"]["composition"]["character_scope"],
+                "foot_detail",
+            )
+            self.assertIn("akemi homura", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertIn("bare soles", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertIn("foot focus", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertNotIn("long black hair", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertEqual(data["render_request"]["backend"], "novelai")
+            self.assertEqual(data["render_request"]["seed"], 456)
+            self.assertEqual(data["render_request"]["size"], {"width": 832, "height": 1216})
+            self.assertEqual(data["render_request"]["params"]["n_samples"], 2)
+            self.assertEqual(data["render_request"]["params"]["scale"], 6.0)
+            self.assertEqual(data["render_request"]["meta"]["character_ref"], "homura")
+            self.assertEqual(data["render_request"]["meta"]["action_ref"], "foot_detail")
+
     def test_generate_uses_unified_execution_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

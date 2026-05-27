@@ -88,7 +88,7 @@ agent 缓存目录推荐使用 `cache.cache_dir`；同时兼容顶层 `cache_dir
 - `size.width` / `size.height`：图片尺寸。
 - `params`：后端参数；NovelAI 会包含 `v4_prompt`、`v4_negative_prompt`、`reference_image_multiple`、`reference_strength_multiple`、`reference_information_extracted_multiple`、`director_reference_images` 等关键字段。
 - `style_payload`：style node 解析结果，便于调试和验收。
-- `meta`：composer、action、style 等链路信息。
+- `meta`：composer、action、style 等链路信息。NovelAI v1 至少透传 `character_ref`、`action_ref`、`background_ref`、`style_ref`、`composer_type`、`composer_version`、`character_scope` 和 `prompt_cache_key`，供 UI、批量任务和对比集追溯来源。
 
 ### GenerationResult
 
