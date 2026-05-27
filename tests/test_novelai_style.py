@@ -111,10 +111,10 @@ gen_json, {"sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 
 
             self.assertEqual(request.model, "nai-diffusion-4-5-full")
             self.assertIn("style prefix", request.prompt)
-            self.assertIn("akemi homura, foot focus", request.prompt)
-            self.assertIn("style suffix, best quality", request.prompt)
+            self.assertIn("akemi homura,foot focus", request.prompt)
+            self.assertIn("style suffix,best quality", request.prompt)
             self.assertIn("bad feet", request.negative_prompt)
-            self.assertIn("lowres, bad anatomy", request.negative_prompt)
+            self.assertIn("lowres,bad anatomy", request.negative_prompt)
             self.assertEqual(request.params["seed"], 123)
             self.assertEqual(request.params["extra_noise_seed"], 123)
             self.assertEqual(request.params["reference_image_multiple"], ["abc"])
@@ -166,6 +166,7 @@ not_quality_prompts
             )
 
             self.assertEqual(migrated_node.renderers["novelai"]["include_common_tags"], False)
+            self.assertEqual(migrated_node.renderers["novelai"]["legacy_compat"], True)
             self.assertEqual(migrated_request.prompt, legacy_request.prompt)
             self.assertEqual(migrated_request.negative_prompt, legacy_request.negative_prompt)
             self.assertEqual(migrated_request.model, legacy_request.model)

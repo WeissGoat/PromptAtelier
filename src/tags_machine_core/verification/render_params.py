@@ -45,7 +45,7 @@ def load_render_parameter_source(path: str | Path) -> dict[str, Any]:
     path = Path(path)
     if path.suffix.lower() == ".png":
         return read_image_parameters(path)
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object: {path}")
     return data
@@ -81,9 +81,12 @@ def compare_render_parameters(
 def _as_novelai_payload(source: dict[str, Any]) -> dict[str, Any]:
     if (
         source.get("schema") == "tags-machine-core.generation-result/v1"
-        and isinstance(source.get("request_body"), dict)
     ):
-        return _as_novelai_payload(source["request_body"])
+        png_payload = _generation_result_png_payload(source)
+        if png_payload is not None:
+            return png_payload
+        if isinstance(source.get("request_body"), dict):
+            return _as_novelai_payload(source["request_body"])
 
     if "png_text" in source:
         return _as_novelai_payload(source.get("png_text") or {})
@@ -122,6 +125,22 @@ def _as_novelai_payload(source: dict[str, Any]) -> dict[str, Any]:
         }
 
     return _payload_from_parameters(source)
+
+
+def _generation_result_png_payload(source: dict[str, Any]) -> dict[str, Any] | None:
+    png_info = source.get("png_info")
+    if not isinstance(png_info, dict):
+        return None
+    images = png_info.get("images")
+    if not isinstance(images, list) or not images:
+        return None
+    first = images[0]
+    if not isinstance(first, dict):
+        return None
+    try:
+        return _as_novelai_payload(first)
+    except ValueError:
+        return None
 
 
 def _payload_from_parameters(parameters: dict[str, Any], model: str | None = None) -> dict[str, Any]:

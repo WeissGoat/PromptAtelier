@@ -13,6 +13,64 @@ from tags_machine_core.json_tools import sanitize_json_for_display
 
 
 IMAGE_BASE_URL = "https://image.novelai.net"
+NOVELAI_WEB_HEADERS = {
+    "Content-Type": "application/json",
+    "Origin": "https://novelai.net",
+    "Referer": "https://novelai.net",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+}
+
+EMPTY_OPTIONAL_PARAMETER_KEYS = {
+    "reference_image_multiple",
+    "reference_information_extracted_multiple",
+    "reference_strength_multiple",
+    "director_reference_images",
+    "director_references",
+}
+
+REQUEST_PARAMETER_KEYS = {
+    "add_original_image",
+    "cfg_rescale",
+    "controlnet_condition",
+    "controlnet_model",
+    "controlnet_strength",
+    "deliberate_euler_ancestral_bug",
+    "dynamic_thresholding",
+    "extra_noise_seed",
+    "height",
+    "image",
+    "legacy",
+    "legacy_v3_extend",
+    "mask",
+    "n_samples",
+    "negative_prompt",
+    "noise",
+    "noise_schedule",
+    "params_version",
+    "prefer_brownian",
+    "qualityToggle",
+    "reference_image_multiple",
+    "reference_information_extracted_multiple",
+    "reference_strength_multiple",
+    "sampler",
+    "scale",
+    "seed",
+    "skip_cfg_above_sigma",
+    "sm",
+    "sm_dyn",
+    "steps",
+    "strength",
+    "ucPreset",
+    "uncond_scale",
+    "use_coords",
+    "v4_negative_prompt",
+    "v4_prompt",
+    "width",
+}
 
 
 class NovelAIClientError(RuntimeError):
@@ -44,7 +102,7 @@ class NovelAIClient:
             "input": request.prompt,
             "model": request.model,
             "action": request.meta.get("action", "generate"),
-            "parameters": request.params,
+            "parameters": self._request_parameters(request),
         }
 
     def generate_image_zip(self, request: RenderRequest) -> bytes:
@@ -53,7 +111,10 @@ class NovelAIClient:
         response = session.post(
             f"{self.base_url}/ai/generate-image",
             json=payload,
-            headers={"Authorization": f"Bearer {self.access_token}"},
+            headers={
+                **NOVELAI_WEB_HEADERS,
+                "Authorization": f"Bearer {self.access_token}",
+            },
             timeout=self.timeout,
         )
         if response.status_code >= 400:
@@ -93,3 +154,17 @@ class NovelAIClient:
         session = requests.Session()
         session.mount("https://", HTTPAdapter(max_retries=retries))
         return session
+
+    def _request_parameters(self, request: RenderRequest) -> dict[str, Any]:
+        parameters: dict[str, Any] = {}
+        for key, value in request.params.items():
+            # 旧 tags_machine 通过 Metadata.model_dump(exclude_none=True) 发请求；
+            # PNG 里的调试/响应字段不能原样发给 NovelAI。
+            if key not in REQUEST_PARAMETER_KEYS:
+                continue
+            if value is None:
+                continue
+            if key in EMPTY_OPTIONAL_PARAMETER_KEYS and value == []:
+                continue
+            parameters[key] = value
+        return parameters

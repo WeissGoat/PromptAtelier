@@ -47,11 +47,10 @@ def build_image_comparison_report(
         core_params,
         missing_message="Unable to compare legacy/core PNG parameters",
     )
-    request_body = generation_result.get("request_body")
     core_request_vs_png = _parameter_diff_summary(
-        request_body if isinstance(request_body, dict) else None,
+        generation_result,
         core_params,
-        missing_message="Unable to compare GenerationResult.request_body/core PNG parameters",
+        missing_message="Unable to compare GenerationResult PNG info/core PNG parameters",
     )
 
     parameter_match = bool(parameter_diff["match"] and core_request_vs_png["match"])
@@ -74,7 +73,7 @@ def build_image_comparison_report(
 
 
 def _load_generation_result(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected GenerationResult JSON object: {path}")
     return data

@@ -14,6 +14,20 @@ from tags_machine_core.renderers.novelai_style import NovelAIStyle
 
 NovelAIStyleInput = NovelAIStyle | NodeDocument | dict[str, Any] | None
 
+LEGACY_NAI4_QUALITY_PROMPT = ",::,very aesthetic, masterpiece, no text"
+LEGACY_DEFAULT_NEGATIVE_PROMPT = (
+    "lowres, {bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, "
+    "bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, "
+    "extra digits, artistic error, username, scan, [abstract], lowres, {bad}, error, "
+    "fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, "
+    "unfinished, displeasing, chromatic aberration, signature, extra digits, "
+    "artistic error, username, scan, [abstract], bad anatomy, body writing, bad hands, "
+    "worst quality, low quality, normal quality, mutation, mutated, extra limb, "
+    "poorly drawn hands, missing limb, floating limbs, disconnected limbs, malformed hands, "
+    "long neck, long body, extra fingers, mosaic, bad faces, bad face, bad eyes, "
+    "bad feet, extra toes,censored"
+)
+
 
 def _join_prompt_parts(*parts: str | list[str] | None) -> str:
     items: list[str] = []
@@ -27,6 +41,25 @@ def _join_prompt_parts(*parts: str | list[str] | None) -> str:
             if text:
                 items.append(text)
     return ", ".join(items)
+
+
+def _join_legacy_prompt_parts(*parts: str | list[str] | None) -> str:
+    items: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if isinstance(part, list):
+            items.extend(_legacy_prompt_tags(",".join(str(item) for item in part)))
+            continue
+        text = str(part).strip()
+        if text in {"", ","}:
+            continue
+        items.extend(_legacy_prompt_tags(text.strip(",").strip()))
+    return f"{','.join(items)}," if items else ""
+
+
+def _legacy_prompt_tags(text: str) -> list[str]:
+    return [item.strip() for item in text.split(",") if item.strip()]
 
 
 class NovelAIRenderAdapter:
@@ -89,18 +122,42 @@ class NovelAIRenderAdapter:
         params: dict[str, Any],
     ) -> dict[str, Any]:
         style_prompt = self._style_prompt_parts(style, style_payload)
-        positive = _join_prompt_parts(
-            style_prompt["prompt_prefix"],
-            bundle.prompt.positive,
-            style_prompt["prompt_suffix"],
-        )
-        negative = _join_prompt_parts(
-            bundle.prompt.negative,
-            style_prompt["negative_prompt"],
-            style_prompt["after_negative_prompt"],
-        )
+        prompt_mode = str(params.get("prompt_mode", "compose"))
+        legacy_style = isinstance(style, NovelAIStyle) or bool(style_payload.get("legacy_compat"))
+        if prompt_mode == "legacy-final":
+            # 旧 run_action 对比时，PNG 里已经有最终 prompt；这里不能再叠加画风和质量词。
+            positive = bundle.prompt.positive.strip()
+            negative = (
+                bundle.prompt.negative.strip()
+                if bundle.prompt.negative
+                else self._legacy_negative_prompt(
+                    bundle=bundle,
+                    style_prompt=style_prompt,
+                )
+            )
+        elif legacy_style:
+            positive = self._legacy_positive_prompt(
+                bundle=bundle,
+                style_payload=style_payload,
+                style_prompt=style_prompt,
+            )
+            negative = self._legacy_negative_prompt(
+                bundle=bundle,
+                style_prompt=style_prompt,
+            )
+        else:
+            positive = _join_prompt_parts(
+                style_prompt["prompt_prefix"],
+                bundle.prompt.positive,
+                style_prompt["prompt_suffix"],
+            )
+            negative = _join_prompt_parts(
+                bundle.prompt.negative,
+                style_prompt["negative_prompt"],
+                style_prompt["after_negative_prompt"],
+            )
 
-        sampler = params.get("sampler", "k_euler")
+        sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_style else "k_euler")
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
         if sampler == "ddim":
             sampler = "ddim_v3"
@@ -110,19 +167,19 @@ class NovelAIRenderAdapter:
             "params_version": 1,
             "width": width,
             "height": height,
-            "scale": params.get("scale", 5.0),
+            "scale": params.get("scale", 6.0 if legacy_style else 5.0),
             "sampler": sampler,
             "steps": params.get("steps", 28),
             "seed": seed or params.get("seed") or 0,
             "n_samples": params.get("n_samples", 1),
             "ucPreset": 3,
             "qualityToggle": False,
-            "sm": params.get("sm", False) and sampler != "ddim_v3",
+            "sm": params.get("sm", True if legacy_style else False) and sampler != "ddim_v3",
             "sm_dyn": params.get("sm_dyn", False) and sampler != "ddim_v3",
             "dynamic_thresholding": params.get("dynamic_thresholding", False),
             "controlnet_strength": params.get("controlnet_strength", 1.0),
             "legacy": params.get("legacy", False),
-            "add_original_image": params.get("add_original_image", False),
+            "add_original_image": params.get("add_original_image", True if legacy_style else False),
             "cfg_rescale": params.get("cfg_rescale", 0.0),
             "noise_schedule": scheduler,
             "legacy_v3_extend": params.get("legacy_v3_extend", False),
@@ -138,7 +195,7 @@ class NovelAIRenderAdapter:
             "extra_noise_seed": params.get("extra_noise_seed", seed or params.get("seed") or 0),
             "v4_prompt": {
                 "use_coords": False,
-                "use_order": False,
+                "use_order": params.get("use_order", True if legacy_style else False),
                 "caption": {"base_caption": positive, "char_captions": []},
             },
             "v4_negative_prompt": {
@@ -148,12 +205,56 @@ class NovelAIRenderAdapter:
             },
         }
         final_params.update(self._preserve_supported_extras(params))
+        for key in ("prefer_brownian", "deliberate_euler_ancestral_bug"):
+            if key in params:
+                final_params[key] = params[key]
 
         if sampler == "k_euler_ancestral" and scheduler != "native":
             final_params["deliberate_euler_ancestral_bug"] = False
             final_params["prefer_brownian"] = True
 
         return final_params
+
+    def _legacy_positive_prompt(
+        self,
+        *,
+        bundle: PromptBundle,
+        style_payload: dict[str, Any],
+        style_prompt: dict[str, list[str]],
+    ) -> str:
+        flags = set(style_payload.get("flags") or [])
+        quality_prompt = (
+            ""
+            if flags.intersection({"not_quailty_prompts", "not_quality_prompts"})
+            else LEGACY_NAI4_QUALITY_PROMPT
+        )
+        return _join_legacy_prompt_parts(
+            style_prompt["prompt_prefix"],
+            bundle.prompt.positive,
+            style_prompt["prompt_suffix"],
+            quality_prompt,
+        )
+
+    def _legacy_negative_prompt(
+        self,
+        *,
+        bundle: PromptBundle,
+        style_prompt: dict[str, list[str]],
+    ) -> str:
+        if not style_prompt["negative_prompt"]:
+            extra = _join_legacy_prompt_parts(
+                style_prompt["after_negative_prompt"],
+                bundle.prompt.negative,
+            ).strip(",")
+            if extra:
+                return f"{LEGACY_DEFAULT_NEGATIVE_PROMPT},{extra},"
+            return f"{LEGACY_DEFAULT_NEGATIVE_PROMPT},"
+        base_negative = style_prompt["negative_prompt"]
+        return _join_legacy_prompt_parts(
+            base_negative,
+            style_prompt["after_negative_prompt"],
+            bundle.prompt.negative,
+        )
 
     def _style_payload(self, style: NovelAIStyleInput) -> dict[str, Any]:
         if style is None:
@@ -228,5 +329,6 @@ class NovelAIRenderAdapter:
             "v4_negative_prompt",
             "deliberate_euler_ancestral_bug",
             "prefer_brownian",
+            "prompt_mode",
         }
         return {key: value for key, value in params.items() if key not in reserved}

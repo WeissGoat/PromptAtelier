@@ -234,6 +234,7 @@ def migrate_legacy_style_tags(
     prompt_suffix = cleaned_prompt_lines[1:]
 
     novelai: dict[str, Any] = {
+        "legacy_compat": True,
         "include_common_tags": False,
         "prompt_prefix": prompt_prefix,
         "prompt_suffix": prompt_suffix,
