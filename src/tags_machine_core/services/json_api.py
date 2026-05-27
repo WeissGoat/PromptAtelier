@@ -14,6 +14,8 @@ from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api_models import (
     AgentComposeResolution,
+    BatchItemRequest,
+    BatchItemResult,
     ComposeRenderPlanResolution,
     ComposeRenderPlanResult,
 )
@@ -188,6 +190,33 @@ class GenerationJsonApi:
                 status="ready",
                 prompt_bundle=PromptBundle.model_validate(result["prompt_bundle"]),
                 render_request=RenderRequest.model_validate(result["render_request"]),
+            )
+        )
+
+    def resolve_batch_item(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        item = BatchItemRequest.model_validate(_mapping(request, "batch item request"))
+        resolution = self.resolve_compose_render_plan(
+            {
+                "compose": item.compose,
+                "render": item.render,
+            }
+        )
+        if resolution["status"] == "requires_agent":
+            return _response_model_to_jsonable(
+                BatchItemResult(
+                    id=item.id,
+                    status="requires_agent",
+                    output=item.output,
+                    agent_task=resolution["agent_task"],
+                )
+            )
+        return _response_model_to_jsonable(
+            BatchItemResult(
+                id=item.id,
+                status="ready",
+                output=item.output,
+                prompt_bundle=PromptBundle.model_validate(resolution["prompt_bundle"]),
+                render_request=RenderRequest.model_validate(resolution["render_request"]),
             )
         )
 

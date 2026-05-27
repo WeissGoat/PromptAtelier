@@ -635,6 +635,14 @@ def cmd_api_resolve_compose_render_plan(args) -> int:
     return 0
 
 
+def cmd_api_resolve_batch_item(args) -> int:
+    result = GenerationJsonApi().resolve_batch_item(_load_json_mapping_file(args.request))
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+    return 0
+
+
 def cmd_api_backend_support(args) -> int:
     result = GenerationJsonApi().backend_support(_load_json_mapping_file(args.request))
     if args.output:
@@ -1069,6 +1077,14 @@ def build_parser() -> argparse.ArgumentParser:
     api_resolve_compose_render_plan.set_defaults(
         func=cmd_api_resolve_compose_render_plan
     )
+
+    api_resolve_batch_item = subparsers.add_parser(
+        "api-resolve-batch-item",
+        parents=[output_parent],
+        help="Resolve one batch item to ready PromptBundle+RenderRequest or AgentCompositionTask",
+    )
+    _add_api_request_arguments(api_resolve_batch_item)
+    api_resolve_batch_item.set_defaults(func=cmd_api_resolve_batch_item)
 
     api_backend_support = subparsers.add_parser(
         "api-backend-support",

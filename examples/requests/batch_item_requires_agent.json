@@ -1,0 +1,35 @@
+{
+  "id": "foot_detail_001",
+  "compose": {
+    "composer": "agent",
+    "nodes": {
+      "character": "examples/nodes/characters/homura",
+      "action": "examples/nodes/actions/foot_closeup"
+    },
+    "style": "examples/nodes/styles/anime_comfy",
+    "extra_prompt": "low angle close-up",
+    "negative": "face focus",
+    "character_scope": "foot_detail",
+    "agent": {
+      "model": "agent-model-v1",
+      "instructions": [
+        "组合角色和动作，局部特写不要带入头发、眼睛和上半身服装。"
+      ]
+    }
+  },
+  "render": {
+    "backend": "novelai",
+    "style": "examples/nodes/styles/anime_comfy",
+    "seed": 123,
+    "width": 832,
+    "height": 1216,
+    "params": {
+      "n_samples": 1,
+      "cfg_rescale": 0.15
+    }
+  },
+  "output": {
+    "dir": "outputs/foot_detail_001",
+    "archive_acceptance": false
+  }
+}

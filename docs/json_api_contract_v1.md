@@ -10,7 +10,7 @@
 
 - JSON API 是本地服务契约，不绑定 HTTP 框架；未来 HTTP 只需要薄封装 `GenerationJsonApi`。
 - 输入文件路径按调用进程的当前工作目录解析；仓库示例默认从仓库根目录运行。
-- `api-compose`、`api-agent-task`、`api-compose-agent`、`api-resolve-agent`、`api-render-plan`、`api-compose-render-plan`、`api-resolve-compose-render-plan`、`api-backend-support` 都不联网。
+- `api-compose`、`api-agent-task`、`api-compose-agent`、`api-resolve-agent`、`api-render-plan`、`api-compose-render-plan`、`api-resolve-compose-render-plan`、`api-resolve-batch-item`、`api-backend-support` 都不联网。
 - `api-generate` 会进入真实执行层，v1 默认只允许 NovelAI。
 - Agent 拼接采用外部 agent 契约：core 只生成 agent task JSON，接收 agent result JSON，不直接绑定某个 LLM SDK。
 - `PromptBundle.meta` 不包含 `shot` / `constraints`。动作镜头裁剪由 action `character_scope` 和最终 `meta.composition` 解释。
@@ -271,6 +271,39 @@ CLI 的 `run-prompt --composer agent` 是 agent prompt 进入真实 NovelAI 生�
 - `examples/requests/agent_compose_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_requires_agent.json`
 
+### api-resolve-batch-item
+
+输入：单个 batch item，包含 `id`、`compose`、`render` 和 `output`。
+
+用途：给批量 worker 和未来 UI 使用的单项状态入口。它只解析当前 item 是否已经可以生成 `PromptBundle + RenderRequest`，不会调用 agent，也不会联网生图。
+
+需要外部 agent 时返回：
+
+```json
+{
+  "schema": "tags-machine-core.batch-item-result/v1",
+  "id": "foot_detail_001",
+  "status": "requires_agent",
+  "output": {"dir": "outputs/foot_detail_001"},
+  "agent_task": {}
+}
+```
+
+可生成计划时返回：
+
+```json
+{
+  "schema": "tags-machine-core.batch-item-result/v1",
+  "id": "prompt_001",
+  "status": "ready",
+  "output": {"dir": "outputs/prompt_001"},
+  "prompt_bundle": {},
+  "render_request": {}
+}
+```
+
+示例请求：`examples/requests/batch_item_requires_agent.json`
+
 ### api-generate
 
 输入：已有 `RenderRequest`。
@@ -370,6 +403,7 @@ compose.prompt 已经包含完整角色 + 动作
 - `examples/requests/full_prompt_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_novelai.json`
 - `examples/requests/agent_compose_render_plan_requires_agent.json`
+- `examples/requests/batch_item_requires_agent.json`
 - `examples/requests/generate_novelai_mock.json`
 - `examples/requests/backend_support.json`
 
@@ -396,6 +430,7 @@ compose.prompt 已经包含完整角色 + 动作
 | `api-render-plan` | `POST /render-plan` | `RenderRequest` |
 | `api-compose-render-plan` | `POST /compose-render-plan` | `PromptBundle + RenderRequest` |
 | `api-resolve-compose-render-plan` | `POST /resolve-compose-render-plan` | 预览状态响应 |
+| `api-resolve-batch-item` | `POST /resolve-batch-item` | 单个批量任务状态响应 |
 | `api-backend-support` | `POST /backend-support` | 后端支持矩阵 |
 | `api-generate` | `POST /generate` | `GenerationResult` |
 
@@ -412,7 +447,7 @@ compose.prompt 已经包含完整角色 + 动作
 批量任务只编排现有 JSON 契约，不直接拼后端 payload，也不直接调用 agent：
 
 - BatchItem input：node refs 或 full prompt、composer mode、style ref、render params、output policy。
-- BatchItem output：`PromptBundle`、`RenderRequest`、`GenerationResult`、acceptance/evaluation report path。
+- BatchItem output：`status`、`PromptBundle`、`RenderRequest`、可选 `GenerationResult`、acceptance/evaluation report path。
 - agent 缺失时记录 `status: requires_agent`，由外部 worker 补 prompt 后重试。
 
 未来 UI 只依赖 JSON API：

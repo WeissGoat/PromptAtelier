@@ -12,6 +12,7 @@ from unittest.mock import patch
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.cli import main
 from tags_machine_core.services import GenerationJsonApi
+from tags_machine_core.services.json_api_models import BatchItemRequest
 from tags_machine_core.verification import build_acceptance_record
 
 
@@ -129,6 +130,29 @@ novelai:
 
 
 class JsonApiTest(unittest.TestCase):
+    def test_batch_item_model_accepts_full_prompt_input(self):
+        item = BatchItemRequest.model_validate(
+            {
+                "id": "case_001",
+                "compose": {
+                    "composer": "full",
+                    "prompt": "akemi homura, foot focus",
+                    "negative": "bad anatomy",
+                },
+                "render": {
+                    "backend": "novelai",
+                    "style": "examples/nodes/styles/anime_comfy",
+                    "seed": 123,
+                },
+                "output": {"dir": "outputs/case_001"},
+            }
+        )
+
+        self.assertEqual(item.id, "case_001")
+        self.assertEqual(item.compose["composer"], "full")
+        self.assertEqual(item.render["backend"], "novelai")
+        self.assertEqual(item.output.dir, "outputs/case_001")
+
     def test_compose_render_plan_json_api_roundtrip_from_node_refs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1005,6 +1029,75 @@ class JsonApiTest(unittest.TestCase):
             self.assertTrue(cached["prompt_bundle"]["cache"]["cache_hit"])
             self.assertEqual(ready["render_request"], cached["render_request"])
 
+    def test_resolve_batch_item_returns_requires_agent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            response = GenerationJsonApi().resolve_batch_item(
+                {
+                    "id": "foot_detail_001",
+                    "compose": {
+                        "composer": "agent",
+                        "nodes": {
+                            "character": str(character),
+                            "action": str(action),
+                        },
+                        "style": str(style),
+                        "character_scope": "foot_detail",
+                        "agent": {"model": "agent-model-v1"},
+                        "cache": {"cache_dir": str(root / "cache" / "missing")},
+                    },
+                    "render": {
+                        "backend": "novelai",
+                        "style": str(style),
+                        "seed": 123,
+                    },
+                    "output": {"dir": str(root / "outputs" / "foot_detail_001")},
+                }
+            )
+
+            self.assertEqual(response["schema"], "tags-machine-core.batch-item-result/v1")
+            self.assertEqual(response["id"], "foot_detail_001")
+            self.assertEqual(response["status"], "requires_agent")
+            self.assertEqual(
+                response["agent_task"]["schema"],
+                "tags-machine-core.agent-composition-task/v1",
+            )
+            self.assertNotIn("prompt_bundle", response)
+            self.assertNotIn("render_request", response)
+
+    def test_resolve_batch_item_returns_ready_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, _, style = _write_sample_nodes(root)
+            response = GenerationJsonApi().resolve_batch_item(
+                {
+                    "id": "prompt_001",
+                    "compose": {
+                        "composer": "full",
+                        "prompt": "akemi homura, foot focus",
+                        "negative": "bad anatomy",
+                    },
+                    "render": {
+                        "backend": "novelai",
+                        "style": str(style),
+                        "seed": 123,
+                        "width": 832,
+                        "height": 1216,
+                    },
+                    "output": {"dir": str(root / "outputs" / "prompt_001")},
+                }
+            )
+
+            self.assertEqual(response["schema"], "tags-machine-core.batch-item-result/v1")
+            self.assertEqual(response["id"], "prompt_001")
+            self.assertEqual(response["status"], "ready")
+            self.assertEqual(response["prompt_bundle"]["prompt"]["positive"], "akemi homura, foot focus")
+            self.assertEqual(response["render_request"]["backend"], "novelai")
+            self.assertEqual(response["render_request"]["seed"], 123)
+            self.assertEqual(response["output"]["dir"], str(root / "outputs" / "prompt_001"))
+            self.assertNotIn("agent_task", response)
+
     def test_cli_api_agent_entries_read_json_request_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1259,6 +1352,60 @@ class JsonApiTest(unittest.TestCase):
             self.assertEqual(written["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
             self.assertNotIn("render_request", written)
             self.assertFalse(any(cache_dir.glob("*.json")))
+
+    def test_cli_api_resolve_batch_item_returns_task_without_agent_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            request_path = root / "batch_item.json"
+            output = root / "batch_result.json"
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "id": "foot_detail_001",
+                        "compose": {
+                            "composer": "agent",
+                            "nodes": {
+                                "character": str(character),
+                                "action": str(action),
+                            },
+                            "style": str(style),
+                            "character_scope": "foot_detail",
+                            "agent": {"model": "agent-model-v1"},
+                            "cache": {"cache_dir": str(root / "cache" / "prompt")},
+                        },
+                        "render": {
+                            "backend": "novelai",
+                            "style": str(style),
+                            "seed": 123,
+                        },
+                        "output": {"dir": str(root / "outputs" / "foot_detail_001")},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "api-resolve-batch-item",
+                        str(request_path),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            printed = json.loads(stdout.getvalue())
+            written = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(printed["status"], "requires_agent")
+            self.assertEqual(written["schema"], "tags-machine-core.batch-item-result/v1")
+            self.assertEqual(written["id"], "foot_detail_001")
+            self.assertEqual(written["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
+            self.assertNotIn("render_request", written)
 
     def test_example_request_files_are_valid_json_api_inputs(self):
         api = GenerationJsonApi()

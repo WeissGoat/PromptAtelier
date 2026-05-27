@@ -243,6 +243,37 @@
       }
     },
     {
+      "id": "resolve_batch_item_requires_agent",
+      "entry": "resolve_batch_item",
+      "request": "examples/requests/batch_item_requires_agent.json",
+      "expect": {
+        "equals": {
+          "$.schema": "tags-machine-core.batch-item-result/v1",
+          "$.id": "foot_detail_001",
+          "$.status": "requires_agent",
+          "$.output.dir": "outputs/foot_detail_001",
+          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
+          "$.agent_task.nodes.character.id": "homura",
+          "$.agent_task.nodes.action.id": "foot_closeup",
+          "$.agent_task.style_ref": "anime_comfy",
+          "$.agent_task.agent_model": "agent-model-v1"
+        },
+        "contains": {
+          "$.agent_task.instructions[0]": "局部特写"
+        },
+        "required": [
+          "$.agent_task.cache_key",
+          "$.agent_task.nodes.character.content_hash",
+          "$.agent_task.nodes.action.content_hash"
+        ],
+        "absent": [
+          "$.prompt_bundle",
+          "$.render_request",
+          "$.generation_result"
+        ]
+      }
+    },
+    {
       "id": "backend_support",
       "entry": "backend_support",
       "request": "examples/requests/backend_support.json",
