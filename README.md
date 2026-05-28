@@ -88,7 +88,7 @@ Agent composer 示例：
 uv run python -m tags_machine_core agent-task-nodes `
   --character examples\nodes\characters\homura `
   --action examples\nodes\actions\foot_closeup `
-  --instruction "组合角色和动作，局部特写不要带入无关角色细节"
+  --agent-instruction "组合角色和动作，局部特写不要带入无关角色细节"
 
 uv run python -m tags_machine_core compose-agent-nodes `
   --character examples\nodes\characters\homura `
@@ -97,7 +97,7 @@ uv run python -m tags_machine_core compose-agent-nodes `
   --cache-dir cache\prompt
 ```
 
-`agent-task-nodes` 不调用模型，只输出稳定任务 JSON。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
+`agent-task-nodes` 不调用模型，只输出稳定任务 JSON。`character_scope` 默认来自 action 节点；`--character-scope` 只用于临时覆盖。`--agent-instruction` 是可选补充说明，会进入 task 和 cache key，不承载通用裁剪规则。外部 agent 返回 `positive`、`negative`、`character_scope` 和 section 裁剪结果后，`compose-agent-nodes` 会生成 `PromptBundle` 并写入缓存；同一输入后续可不传 `--agent-result`，直接从缓存复用。
 
 等价的 JSON API 文件入口适合前端和 worker 使用。完整请求/响应契约见 [JSON API 契约](docs/json_api_contract_v1.md)，README 只保留常用命令：
 

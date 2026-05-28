@@ -248,11 +248,9 @@ negative_prompt:
                         str(character),
                         "--action",
                         str(action),
-                        "--character-scope",
-                        "foot_detail",
                         "--style-node",
                         str(style),
-                        "--instruction",
+                        "--agent-instruction",
                         "组合角色和动作，避免带入脸部细节",
                         "--agent-model",
                         "agent-model-v1",
@@ -271,6 +269,7 @@ negative_prompt:
             self.assertNotIn("render_request", data)
             self.assertEqual(data["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v1")
             self.assertEqual(data["agent_task"]["style_ref"], "prompt_style")
+            self.assertEqual(data["agent_task"]["character_scope"], "foot_detail")
             self.assertFalse(any(cache_dir.glob("*.json")))
 
     def test_run_prompt_agent_prompt_writes_cache_and_cache_hit_reuses_bundle(self):

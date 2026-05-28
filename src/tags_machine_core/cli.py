@@ -47,6 +47,12 @@ from tags_machine_core.verification import (
 )
 
 
+def _agent_instructions(args) -> list[str]:
+    return (getattr(args, "agent_instruction", None) or []) + (
+        getattr(args, "instruction", None) or []
+    )
+
+
 def print_json(value, *, full: bool = False) -> None:
     data = sanitize_json_for_display(value, full=full)
     print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -77,7 +83,7 @@ def cmd_agent_task_nodes(args) -> int:
         negative=args.negative or "",
         style_ref=args.style_ref,
         character_scope=args.character_scope or args.body_scope,
-        instructions=args.instruction or [],
+        instructions=_agent_instructions(args),
         agent_model=args.agent_model,
     )
     print_json(task, full=args.full)
@@ -97,7 +103,7 @@ def cmd_compose_agent_nodes(args) -> int:
         negative=args.negative or "",
         style_ref=args.style_ref,
         character_scope=args.character_scope or args.body_scope,
-        instructions=args.instruction or [],
+        instructions=_agent_instructions(args),
         agent_model=args.agent_model,
         result=result,
         cache=cache,
@@ -782,7 +788,7 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
         negative=task_negative,
         style_ref=style_ref,
         character_scope=args.character_scope or args.body_scope,
-        instructions=args.instruction or [],
+        instructions=_agent_instructions(args),
         agent_model=args.agent_model,
         result=result,
         cache=cache,
@@ -1787,9 +1793,15 @@ def _add_prompt_run_arguments(
         parser.add_argument("--character-scope", help="Override character_scope for agent composition")
         parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
         parser.add_argument(
+            "--agent-instruction",
+            dest="agent_instruction",
+            action="append",
+            help="Additional instruction for the external agent task; can be repeated",
+        )
+        parser.add_argument(
             "--instruction",
             action="append",
-            help="Instruction passed through to the external agent; can be repeated",
+            help="Deprecated alias for --agent-instruction; can be repeated",
         )
         parser.add_argument(
             "--agent-model",
@@ -1848,9 +1860,15 @@ def _add_api_request_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> None:
     parser.add_argument(
+        "--agent-instruction",
+        dest="agent_instruction",
+        action="append",
+        help="Additional instruction for the external agent task; can be repeated",
+    )
+    parser.add_argument(
         "--instruction",
         action="append",
-        help="Instruction passed through to the external agent; can be repeated",
+        help="Deprecated alias for --agent-instruction; can be repeated",
     )
     parser.add_argument(
         "--agent-model",

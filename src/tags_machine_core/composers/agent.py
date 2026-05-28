@@ -111,6 +111,11 @@ class AgentComposer:
         instructions: list[str] | None = None,
         agent_model: str | None = None,
     ) -> AgentCompositionTask:
+        resolved_scope = (
+            character_scope
+            or (action.character_scope if action else None)
+            or (character.character_scope if character else None)
+        )
         nodes = {
             role: snapshot
             for role, snapshot in {
@@ -129,7 +134,7 @@ class AgentComposer:
             "extra_prompt": extra_prompt.strip(),
             "negative": negative.strip(),
             "style_ref": style_ref,
-            "character_scope": character_scope,
+            "character_scope": resolved_scope,
             "instructions": instructions or [],
             "agent_model": _optional_text(agent_model),
         }

@@ -62,6 +62,24 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(task.instructions, ["避免把眼睛和上衣放进脚部特写"])
         self.assertEqual(task.agent_model, "agent-model-v1")
 
+    def test_build_task_defaults_character_scope_from_action(self):
+        task = AgentComposer().build_task(
+            character=_character("characters/homura"),
+            action=_action("actions/foot_closeup"),
+            style_ref="20260412_2",
+        )
+
+        self.assertEqual(task.character_scope, "foot_detail")
+
+    def test_explicit_character_scope_overrides_action_scope(self):
+        task = AgentComposer().build_task(
+            character=_character("characters/homura"),
+            action=_action("actions/foot_closeup"),
+            character_scope="upper_body",
+        )
+
+        self.assertEqual(task.character_scope, "upper_body")
+
     def test_task_cache_key_ignores_source_paths(self):
         composer = AgentComposer()
 
