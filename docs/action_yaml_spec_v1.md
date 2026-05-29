@@ -45,11 +45,11 @@ nodes/
 schema: tags-machine.action/v1
 kind: action
 id: foot_closeup
+description: "脚部局部特写动作。"
 
 tags:
-  action:
-    - "foot focus"
-    - "soles toward viewer"
+  action: >-
+    foot focus, soles toward viewer
 
 negative_prompt: []
 
@@ -69,20 +69,14 @@ character_scope: foot_detail
 schema: tags-machine.action/v1
 kind: action
 id: foot_closeup
-name: Foot close-up
 description: "脚部局部特写动作。"
 
 tags:
-  action:
-    - "foot focus"
-    - "soles toward viewer"
-    - "toes spread"
-    - "(detailed feet:1.2)"
+  action: >-
+    foot focus, soles toward viewer, toes spread, (detailed feet:1.2)
 
-negative_prompt:
-  - "face focus"
-  - "full body"
-  - "extra toes"
+negative_prompt: >-
+  face focus, full body, extra toes
 
 character_scope: foot_detail
 
@@ -107,10 +101,10 @@ legacy:
 | `schema` | 是 | string | 固定为 `tags-machine.action/v1`。 |
 | `kind` | 是 | string | 固定为 `action`。 |
 | `id` | 是 | string | 动作节点 id，推荐使用目录名。 |
-| `name` | 否 | string | 人类可读名称。 |
-| `description` | 否 | string | 给人和外部 agent 看的动作说明，不参与规则判断。 |
-| `tags.action` | 是 | list[string] | 正向动作素材。v1 正式正向素材只放这里。 |
-| `negative_prompt` | 否 | list[string] | 动作级负向素材；缺省等价于空数组。 |
+| `description` | 否 | string | 给人和外部 agent 看的动作摘要，不参与规则判断；手写 action 时优先使用它。 |
+| `name` | 否 | string | 兼容/显示字段。通常可省略，UI 可从 `id` 派生名称；不要同时把 `name` 和 `description` 写成重复内容。 |
+| `tags.action` | 是 | string 或 list[string] | 正向动作素材。长动作 prompt 推荐用单个字符串；短标签或迁移产物可以用 list。 |
+| `negative_prompt` | 否 | string 或 list[string] | 动作级负向素材；缺省等价于空数组。长负向 prompt 推荐用单个字符串。 |
 | `character_scope` | 是 | string | 角色素材裁剪视角；脚本 composer 用它执行 section 选择，agent composer 用它作为任务语义、缓存和 meta。 |
 | `agent` | 否 | object | 外部 agent 可读的摘要、标签等辅助信息；不是规则。 |
 | `legacy` | 否 | object | 迁移审计信息；只记录旧来源，不参与 composer 决策。 |
@@ -119,7 +113,16 @@ legacy:
 
 `tags.action` 是 action v1 唯一正式的正向动作素材 section。
 
-推荐：
+动作 prompt 往往是一段较长、已经调过权重和顺序的文本。手写 action v1 时，推荐把它保存为单个字符串：
+
+```yaml
+tags:
+  action: >-
+    sitting, foot focus, soles toward viewer, low angle close-up,
+    (detailed feet:1.2)
+```
+
+短动作或迁移产物也允许使用 list：
 
 ```yaml
 tags:
@@ -129,7 +132,12 @@ tags:
     - "soles toward viewer"
 ```
 
-不推荐：
+两种写法都会被 reader 归一化成动作素材列表。区别只在维护体验：
+
+- 长字符串更适合保留动作 prompt 的原始顺序、逗号结构和权重组合。
+- list 更适合少量短 tag，或迁移工具从旧 `tags.txt` 拆出来后人工复核。
+
+不推荐把动作拆成多个结构字段：
 
 ```yaml
 pose:
@@ -150,7 +158,14 @@ focus:
 
 它不是最终完整 negative prompt。composer 会把它和 character / background / 显式 negative 等素材合并进 `PromptBundle.prompt.negative`，后续 adapter 再叠加 style 和后端相关 negative。
 
-推荐：
+长负向 prompt 推荐使用字符串：
+
+```yaml
+negative_prompt: >-
+  bad feet, extra toes, face focus
+```
+
+短负向 tag 或迁移产物可以使用 list：
 
 ```yaml
 negative_prompt:
@@ -308,7 +323,16 @@ character_scope: foot_detail
 
 NovelAI / Danbooru 风格提示词里经常出现 `()`、`{}`、`[]`、`:`、`#`、`,` 等字符。
 
-建议 action 中所有 tag 字符串都加双引号，尤其是包含权重、冒号、方括号或花括号时。
+长 prompt 推荐用 YAML folded block `>-`。它会把换行折叠成空格，适合保存很长的逗号分隔提示词：
+
+```yaml
+tags:
+  action: >-
+    foot focus, soles toward viewer, (detailed feet:1.2),
+    [[toes]], {best foot detail}
+```
+
+如果使用 list，建议每个 tag 字符串都加双引号，尤其是包含权重、冒号、方括号或花括号时。
 
 推荐：
 
@@ -354,7 +378,8 @@ uv run python -m tags_machine_core migrate-action-tags `
 
 迁移策略：
 
-- 正向 prompt 按顶层逗号拆成 `tags.action`。
+- 迁移工具为了便于人工复核，可能把正向 prompt 按顶层逗号拆成 `tags.action` list。
+- 正式整理 action 节点时，可以把长动作 list 合并成一个 `tags.action` 字符串，减少 YAML 噪音并保留整体 prompt 语义。
 - 括号、方括号、花括号内部的逗号不会被拆开，避免破坏 `(soles detailed:1.2,toenails)` 这类组合。
 - `origin_uc`、`uc`、`negative_prompt`、`after_uc`、`after_negative_prompt` 提升为动作级 `negative_prompt`。
 - `node_background`、`node_artist`、`gen_json` 等旧扩展只保留在 `legacy.raw_sections`。
@@ -371,19 +396,14 @@ uv run python -m tags_machine_core migrate-action-tags `
 schema: tags-machine.action/v1
 kind: action
 id: foot_closeup
-name: Foot close-up
 description: "脚底特写。"
 
 tags:
-  action:
-    - "foot focus"
-    - "soles toward viewer"
-    - "toes spread"
+  action: >-
+    foot focus, soles toward viewer, toes spread
 
-negative_prompt:
-  - "face focus"
-  - "full body"
-  - "extra toes"
+negative_prompt: >-
+  face focus, full body, extra toes
 
 character_scope: foot_detail
 ```
@@ -394,13 +414,11 @@ character_scope: foot_detail
 schema: tags-machine.action/v1
 kind: action
 id: upper_body_standing
-name: Upper body standing
+description: "上半身站立动作。"
 
 tags:
-  action:
-    - "standing"
-    - "upper body"
-    - "looking at viewer"
+  action: >-
+    standing, upper body, looking at viewer
 
 negative_prompt: []
 
@@ -413,11 +431,10 @@ character_scope: upper_body
 schema: tags-machine.action/v1
 kind: action
 id: simple_sitting
+description: "普通坐姿。"
 
 tags:
-  action:
-    - "sitting"
-    - "relaxed pose"
+  action: "sitting, relaxed pose"
 
 negative_prompt: []
 
@@ -470,8 +487,9 @@ action v1 校验重点：
 ## v1 冻结点
 
 - action 使用 `meta.yaml`。
-- action 使用 `tags.action` 存正向动作素材。
-- action 使用 `negative_prompt` 存动作级负向素材。
+- action 使用 `tags.action` 存正向动作素材；长动作 prompt 推荐写成字符串，list 作为短 tag 或迁移兼容形式。
+- action 使用 `negative_prompt` 存动作级负向素材；长负向 prompt 推荐写成字符串，list 作为短 tag 或迁移兼容形式。
+- `description` 是推荐的人类/agent 摘要字段；`name` 只作为兼容/显示字段，通常可省略。
 - action 必须声明 `character_scope`。
 - `character_scope` 的通用过滤规则只在 composer policy 维护。
 - action 不拆 `pose` / `camera` / `focus`。

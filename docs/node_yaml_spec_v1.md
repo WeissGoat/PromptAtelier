@@ -126,8 +126,9 @@ action v1 已确认：
 
 - 使用 `meta.yaml`
 - 使用 `schema: tags-machine.action/v1`
-- 使用 `tags.action` 存正向动作素材
-- 使用 `negative_prompt` 存动作级负向素材
+- 使用 `tags.action` 存正向动作素材；长动作 prompt 推荐写成字符串，短 tag 或迁移产物可以用 list
+- 使用 `negative_prompt` 存动作级负向素材；长负向 prompt 推荐写成字符串，短 tag 或迁移产物可以用 list
+- 使用 `description` 作为人类/agent 摘要；`name` 通常可由 `id` 派生，不作为推荐必写字段
 - 使用 `character_scope` 表示角色素材裁剪视角
 - 不写角色 section include/suppress 规则
 - 不提前拆 `pose` / `camera` / `focus`
@@ -141,17 +142,14 @@ action 节点不应该关心某个角色有哪些 section。它只声明这个�
 schema: tags-machine.action/v1
 kind: action
 id: foot_closeup
+description: "脚底特写。"
 
 tags:
-  action:
-    - foot_focus
-    - soles
-    - toes
-    - soles_toward_viewer
+  action: >-
+    foot focus, soles toward viewer, toes spread
 
-negative_prompt:
-  - extra_toes
-  - bad_feet
+negative_prompt: >-
+  extra toes, bad feet
 
 character_scope: foot_detail
 ```
