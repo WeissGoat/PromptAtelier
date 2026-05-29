@@ -1,160 +1,292 @@
-# Action YAML 规范 v1
+# Action meta.yaml 规范 v1
 
-本文档确认动作节点的轻量 YAML 结构。当前结论是：`action` 节点也使用 `meta.yaml`，只描述动作提示词素材和它对角色素材选择的影响，不承载复杂镜头拆解。
+本文档正式定义 `action` 节点的 `meta.yaml` 结构。
 
-## 结论
+当前结论：action 只描述“动作提示词素材”和“这个动作应采用的角色素材裁剪视角”。它不保存通用过滤规则，不拆 `pose` / `camera` / `focus`，也不携带任何 NovelAI / ComfyUI / SD 生图参数。
 
-action v1 先服务当前最重要的需求：
+## 设计边界
 
-> composer 需要知道这个 action 应该按哪种角色裁剪视角选择 character tags。
-
-因此 action v1 使用：
-
-- 文件名：`meta.yaml`
-- schema：`tags-machine.action/v1`
-- 正向动作素材：`tags`
-- 负向动作素材：`negative_prompt`
-- 角色裁剪视角：`character_scope`
-- 不拆 `pose`
-- 不拆 `camera`
-- 不拆 `focus`
-- 不写每个角色 section 的 include/suppress 规则
-
-换句话说，action 不需要知道 `hair / eyes / upper_clothes` 具体怎么过滤。它只需要声明：
-
-```yaml
-character_scope: foot_detail
-```
-
-然后 composer 统一知道 `foot_detail` 应该如何选择 character section。
-
-## 最小结构
-
-```yaml
-schema: tags-machine.action/v1
-kind: action
-id: sitting_feet_closeup
-name: Sitting Feet Closeup
-
-tags:
-  action:
-    - sitting
-    - foot_focus
-    - soles
-    - toes
-    - soles_toward_viewer
-
-negative_prompt:
-  - bad_feet
-  - extra_toes
-
-character_scope: foot_detail
-```
-
-## 字段说明
-
-### `schema`
-
-固定为：
-
-```yaml
-schema: tags-machine.action/v1
-```
-
-### `kind`
-
-固定为：
-
-```yaml
-kind: action
-```
-
-### `id`
-
-具体动作节点 id，通常使用动作节点文件夹名。
-
-### `name`
-
-可选的人类可读名称。
-
-### `tags`
-
-动作正向提示词素材。
-
-当前 v1 推荐只使用一个 section：
-
-```yaml
-tags:
-  action:
-    - foot_focus
-    - soles
-```
-
-原因是当前 composer 不需要知道这些词到底是 pose、camera 还是 composition。拆太细会增加维护成本，但不会提高当前规则质量。
-
-如果某些动作已有历史分组，也可以被 reader 兼容读取，但 v1 主推 `tags.action`。
-
-### `negative_prompt`
-
-动作自带负向提示词素材，会被 composer 合并到最终 `PromptBundle.prompt.negative`。
-
-示例：
-
-```yaml
-negative_prompt:
-  - bad_feet
-  - extra_toes
-```
-
-### `character_scope`
-
-动作对角色素材的裁剪视角。
-
-这是 action v1 最重要的结构化字段。它不是提示词，而是给 composer 的策略输入。
-
-示例：
-
-```yaml
-character_scope: foot_detail
-```
-
-含义：
+action v1 解决一个明确问题：
 
 ```text
-这个动作是脚部局部镜头。
-composer 应按 foot_detail 策略选择 character tags。
+composer 需要知道：
+这个动作本身有哪些正向/负向素材；
+以及它应该按哪种 character_scope 选择 character tags。
 ```
 
-## 推荐 `character_scope` 枚举
+因此 action 节点只声明：
 
-第一版建议只保留少量够用的 scope：
+```yaml
+character_scope: foot_detail
+```
 
-- `default`：默认角色展示，不做特殊裁剪。
-- `full_body`：全身可见。
-- `upper_body`：上半身为主。
-- `lower_body`：下半身为主。
-- `portrait`：脸部/头像/半身偏头部。
-- `face_detail`：脸部局部特写。
-- `hand_detail`：手部局部特写。
-- `foot_detail`：脚部局部特写。
-- `object_focus`：道具或非角色主体为主，角色信息应弱化。
+`foot_detail` 具体要保留 `feet / footwear / legwear`，并过滤 `hair / eyes / upper_clothes`，这是 composer policy 的职责，不写进每个 action `meta.yaml`。
 
-不确定时用 `default`，不要临时发明太多 scope。
+## 文件约定
 
-## Composer 策略示例
+- 文件名固定为 `meta.yaml`。
+- schema 固定为 `tags-machine.action/v1`。
+- `kind` 固定为 `action`。
+- 节点目录名通常和 `id` 一致。
+- `validate-node-tree` 会把 action 使用 `node.yaml` 视为 v1 契约错误。
 
-下面这类规则属于 composer 策略，不写进 action `meta.yaml`：
+推荐目录：
+
+```text
+nodes/
+  actions/
+    foot_closeup/
+      meta.yaml
+```
+
+## 最小合法结构
+
+```yaml
+schema: tags-machine.action/v1
+kind: action
+id: foot_closeup
+
+tags:
+  action:
+    - "foot focus"
+    - "soles toward viewer"
+
+negative_prompt: []
+
+character_scope: foot_detail
+```
+
+最小结构必须满足：
+
+- `schema`、`kind`、`id` 存在且匹配 v1。
+- `tags` 是 mapping。
+- `tags.action` 非空。
+- `character_scope` 非空；不需要特殊裁剪时写 `default`。
+
+## 推荐完整结构
+
+```yaml
+schema: tags-machine.action/v1
+kind: action
+id: foot_closeup
+name: Foot close-up
+description: "脚部局部特写动作。"
+
+tags:
+  action:
+    - "foot focus"
+    - "soles toward viewer"
+    - "toes spread"
+    - "(detailed feet:1.2)"
+
+negative_prompt:
+  - "face focus"
+  - "full body"
+  - "extra toes"
+
+character_scope: foot_detail
+
+agent:
+  summary: "脚部近景动作。外部 agent 组合完整 prompt 时应优先表达脚部、脚底、脚趾和近景镜头。"
+  labels:
+    - action
+    - foot_detail
+
+legacy:
+  source_file: "F:/my_project/new/tags_machine/design/动作改2/..."
+  raw_lines: []
+  raw_sections: {}
+```
+
+`agent` 和 `legacy` 都是可选元数据。它们不能承载通用过滤规则，也不能改变 composer 的结构化行为。
+
+## 字段表
+
+| 字段 | 必填 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `schema` | 是 | string | 固定为 `tags-machine.action/v1`。 |
+| `kind` | 是 | string | 固定为 `action`。 |
+| `id` | 是 | string | 动作节点 id，推荐使用目录名。 |
+| `name` | 否 | string | 人类可读名称。 |
+| `description` | 否 | string | 给人和外部 agent 看的动作说明，不参与规则判断。 |
+| `tags.action` | 是 | list[string] | 正向动作素材。v1 正式正向素材只放这里。 |
+| `negative_prompt` | 否 | list[string] | 动作级负向素材；缺省等价于空数组。 |
+| `character_scope` | 是 | string | 角色素材裁剪视角；脚本 composer 用它执行 section 选择，agent composer 用它作为任务语义、缓存和 meta。 |
+| `agent` | 否 | object | 外部 agent 可读的摘要、标签等辅助信息；不是规则。 |
+| `legacy` | 否 | object | 迁移审计信息；只记录旧来源，不参与 composer 决策。 |
+
+## tags.action
+
+`tags.action` 是 action v1 唯一正式的正向动作素材 section。
+
+推荐：
+
+```yaml
+tags:
+  action:
+    - "sitting"
+    - "foot focus"
+    - "soles toward viewer"
+```
+
+不推荐：
+
+```yaml
+pose:
+  - "sitting"
+camera:
+  - "low angle"
+focus:
+  - "foot focus"
+```
+
+原因是当前 composer 不消费 `pose`、`camera`、`focus` 这些细分结构。提前拆分只会增加维护成本，并且容易让规则分散到节点里。
+
+如果旧素材迁移时保留了历史分组，`NodeReader` 可以兼容读取，但 v1 正式节点应收敛到 `tags.action`。需要新增正式 section 时，必须先说明消费方，再进入 action v2。
+
+## negative_prompt
+
+`negative_prompt` 表示动作自带的负向素材。
+
+它不是最终完整 negative prompt。composer 会把它和 character / background / 显式 negative 等素材合并进 `PromptBundle.prompt.negative`，后续 adapter 再叠加 style 和后端相关 negative。
+
+推荐：
+
+```yaml
+negative_prompt:
+  - "bad feet"
+  - "extra toes"
+```
+
+没有动作级负向素材时写：
+
+```yaml
+negative_prompt: []
+```
+
+## character_scope
+
+`character_scope` 是 action v1 最重要的结构化字段。
+
+它不是 prompt tag，而是 composer 的裁剪视角标识：
+
+```yaml
+character_scope: foot_detail
+```
+
+推荐枚举：
+
+| scope | 含义 |
+| --- | --- |
+| `default` | 默认角色展示，不做特殊裁剪。 |
+| `full_body` | 全身可见。 |
+| `upper_body` | 上半身为主。 |
+| `lower_body` | 下半身为主。 |
+| `portrait` | 头像、脸部或偏头部半身。 |
+| `face_detail` | 脸部局部特写。 |
+| `hand_detail` | 手部局部特写。 |
+| `foot_detail` | 脚部局部特写。 |
+| `object_focus` | 道具或非角色主体为主，角色信息应弱化。 |
+
+不确定时使用 `default`，不要临时发明 scope。新增 scope 必须同时更新 composer policy、验收样例和文档。
+
+### 消费语义
+
+- 脚本 composer / `run-action`：默认使用 `action.character_scope` 执行 character section include/suppress。
+- AgentComposer：默认从 `action.character_scope` 推导任务 scope，用于 agent task 语义、cache key 和 `PromptBundle.meta.composition`。AgentComposer 本身不执行 character tag 过滤。
+- 完整 prompt 的 `run-prompt`：输入已经是完整角色 + 动作 prompt，不读取 action 节点，因此不使用 `character_scope`。
+- `--character-scope`：只作为临时覆盖/调试参数，优先级高于 action；正常素材库应以 action `meta.yaml` 为准。
+
+## agent
+
+`agent` 是可选辅助元数据，用于让外部 agent 更容易理解动作节点。
+
+允许内容：
+
+```yaml
+agent:
+  summary: "脚底极近景动作，强调脚底、脚趾和近景镜头。"
+  labels:
+    - action
+    - foot_detail
+```
+
+禁止把通用规则写进 `agent`，例如：
+
+```yaml
+agent:
+  suppress_character_sections:
+    - hair
+    - eyes
+```
+
+这类规则属于 composer policy。否则同一个 scope 会在多个 action 里重复，后续很难维护。
+
+## legacy
+
+`legacy` 只用于迁移和审计。
+
+允许内容：
+
+```yaml
+legacy:
+  source_file: "F:/my_project/new/tags_machine/design/动作改2/..."
+  raw_lines:
+    - "原始 tags.txt 行"
+  raw_sections:
+    gen_json:
+      - "{\"steps\": 28}"
+```
+
+`legacy.raw_sections` 可以保留旧 `gen_json`、`node_artist`、`node_background` 等信息，但这些信息不会提升为 action v1 字段。后端参数应该进入 style / adapter / render request，不进入 action。
+
+## 不允许的字段
+
+action v1 不允许把规则、镜头拆解或后端参数写进节点。
+
+明确禁止：
+
+- `rules`
+- `profiles`
+- `include_scopes`
+- `exclude_scopes`
+- `shot`
+- `constraints`
+- `pose`
+- `camera`
+- `focus`
+- `visible_parts`
+- `character_sections`
+- `include_character_sections`
+- `suppress_character_sections`
+- `renderers`
+- `generation`
+- `backend`
+- `params`
+- `style`
+- `artist`
+- `quality`
+- `prompt`
+
+其中 `prompt` 不用于 action v1，是因为 action 节点保存的是“动作素材”，不是最终可直接喂模型的完整 prompt。完整 prompt 应该由 composer 输出到 `PromptBundle.prompt`。
+
+## Composer policy 示例
+
+下面是 composer 层可以维护的策略示例，不属于 action `meta.yaml`：
 
 ```yaml
 character_scope_policy:
   foot_detail:
     include_character_sections:
       - character
+      - identity
       - copyright
+      - role
       - body
       - feet
       - legwear
       - footwear
+      - extra
     suppress_character_sections:
       - hair
       - eyes
@@ -164,33 +296,54 @@ character_scope_policy:
       - full_body_clothes
 ```
 
-action 只引用：
+action 节点只写：
 
 ```yaml
 character_scope: foot_detail
 ```
 
-这样每个 action 不需要重复一份 section 规则。
+这样可以避免每个脚部特写 action 重复一份 `hair / eyes / upper_clothes` 过滤规则。
 
-## 不写进 action 的内容
+## YAML 引号规则
 
-以下内容不建议放进 action v1：
+NovelAI / Danbooru 风格提示词里经常出现 `()`、`{}`、`[]`、`:`、`#`、`,` 等字符。
 
-- `pose` 独立字段。
-- `camera` 独立字段。
-- `focus` 独立字段。
-- `visible_parts`。
-- `character_sections.include`。
-- `character_sections.suppress`。
-- 每个角色 section 的过滤规则。
-- 后端生图参数。
-- 画风、artist、quality tags。
+建议 action 中所有 tag 字符串都加双引号，尤其是包含权重、冒号、方括号或花括号时。
 
-这些字段以后如果确实被 composer 用到了，可以进入 action v2。v1 不提前结构化暂时不用的信息。
+推荐：
 
-## 旧 `tags.txt` 迁移
+```yaml
+tags:
+  action:
+    - "(detailed feet:1.2)"
+    - "{best foot detail}"
+    - "[[soles]]"
+    - "soles, toes"
+```
 
-旧项目的动作 `tags.txt` 常见形态是一整行逗号分隔 prompt，并在 `=` 后追加 `origin_uc`、`node_background`、`gen_json` 等扩展行。v1 提供保守迁移命令：
+避免：
+
+```yaml
+tags:
+  action:
+    - {best foot detail}
+    - [soles]
+    - foot detail:1.2
+```
+
+原因：
+
+- `{}` 在 YAML 中可能被解析成 flow mapping。
+- `[]` 可能被解析成 flow sequence。
+- 未加引号的 `:` 可能被当作 key/value 分隔。
+- `#` 后面的内容可能被当作注释。
+- `()` 本身通常安全，但为了权重 tag 的一致性也建议统一加引号。
+
+## 旧 tags.txt 迁移
+
+旧项目动作 `tags.txt` 常见形态是一整行逗号分隔 prompt，并在 `=` 后追加 `origin_uc`、`node_background`、`gen_json` 等扩展行。
+
+迁移命令：
 
 ```powershell
 uv run python -m tags_machine_core migrate-action-tags `
@@ -201,15 +354,16 @@ uv run python -m tags_machine_core migrate-action-tags `
 
 迁移策略：
 
-- 只生成 `schema`、`kind`、`id`、`name`、`tags.action`、`negative_prompt`、`character_scope`、`legacy` 和 `agent`。
-- 正向 prompt 会按顶层逗号拆成 `tags.action`；括号、方括号、花括号内部的逗号不会被拆开，避免破坏 `(soles detailed:1.2,toenails)` 这类权重组合。
-- `origin_uc`、`uc`、`negative_prompt`、`after_uc`、`after_negative_prompt` 会提升为动作级 `negative_prompt`。
-- `node_background`、`node_artist`、`gen_json` 等旧扩展只保留在 `legacy.raw_sections`，不提升为 action v1 字段。
-- `character_scope` 可以通过 `--character-scope` 显式指定；没有指定时，迁移工具会根据有限关键词推断，例如 `toes focus` / `soles` 推断为 `foot_detail`，`pov hands` 推断为 `hand_detail`。推断结果必须人工复核。
+- 正向 prompt 按顶层逗号拆成 `tags.action`。
+- 括号、方括号、花括号内部的逗号不会被拆开，避免破坏 `(soles detailed:1.2,toenails)` 这类组合。
+- `origin_uc`、`uc`、`negative_prompt`、`after_uc`、`after_negative_prompt` 提升为动作级 `negative_prompt`。
+- `node_background`、`node_artist`、`gen_json` 等旧扩展只保留在 `legacy.raw_sections`。
+- `character_scope` 优先通过 `--character-scope` 显式指定。
+- 未显式指定时，迁移工具只做有限关键词推断，例如 `toes focus` / `soles` -> `foot_detail`，`pov hands` -> `hand_detail`；推断结果必须人工复核。
 
-迁移工具不会修改旧项目目录；只有传入 `--output` 时才写出新 YAML。
+迁移工具不会修改旧 `tags_machine` 目录。只有传入 `--output` 时才写出新 YAML。
 
-## 例子
+## 示例
 
 ### 脚底特写
 
@@ -217,18 +371,19 @@ uv run python -m tags_machine_core migrate-action-tags `
 schema: tags-machine.action/v1
 kind: action
 id: foot_closeup
-name: Foot Closeup
+name: Foot close-up
+description: "脚底特写。"
 
 tags:
   action:
-    - foot_focus
-    - soles
-    - toes
-    - soles_toward_viewer
+    - "foot focus"
+    - "soles toward viewer"
+    - "toes spread"
 
 negative_prompt:
-  - extra_toes
-  - bad_feet
+  - "face focus"
+  - "full body"
+  - "extra toes"
 
 character_scope: foot_detail
 ```
@@ -239,13 +394,13 @@ character_scope: foot_detail
 schema: tags-machine.action/v1
 kind: action
 id: upper_body_standing
-name: Upper Body Standing
+name: Upper body standing
 
 tags:
   action:
-    - standing
-    - upper_body
-    - looking_at_viewer
+    - "standing"
+    - "upper body"
+    - "looking at viewer"
 
 negative_prompt: []
 
@@ -261,24 +416,23 @@ id: simple_sitting
 
 tags:
   action:
-    - sitting
-    - relaxed
+    - "sitting"
+    - "relaxed pose"
 
 negative_prompt: []
 
 character_scope: default
 ```
 
-## 与 character 的关系
-
-组合链路：
+## 与 character / PromptBundle 的关系
 
 ```text
 character.meta.yaml
-  tags.character / tags.hair / tags.eyes / tags.upper_clothes ...
+  tags.character / tags.hair / tags.eyes / tags.upper_clothes / tags.feet ...
 
 action.meta.yaml
   tags.action
+  negative_prompt
   character_scope
 
 composer policy
@@ -287,17 +441,40 @@ composer policy
 PromptBundle
   prompt.positive
   prompt.negative
+  meta.action_ref
+  meta.composition.character_scope
+  meta.composition.included_character_sections
+  meta.composition.suppressed_character_sections
 ```
 
-action 和 character 都只描述素材事实。真正的选择策略由 composer 统一维护。
+action 和 character 都只保存素材事实。真正的选择结果记录在 `PromptBundle.meta.composition`，用于调试、缓存、回放和验收。
 
-## 当前冻结点
+## 校验门禁
 
-action v1 暂时冻结以下决策：
+结构化动作节点应通过：
 
-- 使用 `meta.yaml`。
-- 使用 `tags.action` 表示正向动作素材。
-- 使用 `negative_prompt` 表示动作级负向素材。
-- 使用 `character_scope` 作为角色素材裁剪视角。
-- 不在 action YAML 中写角色 section 过滤规则。
-- 不提前拆 `pose/camera/focus` 等当前未使用字段。
+```powershell
+uv run python -m tags_machine_core validate-node-tree migrated\nodes --output migrated_node_validation.yaml
+```
+
+action v1 校验重点：
+
+- 文件必须是 `meta.yaml`。
+- `schema` 必须是 `tags-machine.action/v1`。
+- `kind` 必须是 `action`。
+- `tags` 必须是 mapping。
+- `tags.action` 必须存在且非空。
+- `character_scope` 必须存在且非空。
+- 禁止 `rules`、`profiles`、`shot`、`constraints`、`pose`、`camera`、`focus`、`include_scopes`、`exclude_scopes` 等规则字段。
+
+## v1 冻结点
+
+- action 使用 `meta.yaml`。
+- action 使用 `tags.action` 存正向动作素材。
+- action 使用 `negative_prompt` 存动作级负向素材。
+- action 必须声明 `character_scope`。
+- `character_scope` 的通用过滤规则只在 composer policy 维护。
+- action 不拆 `pose` / `camera` / `focus`。
+- action 不写 `meta.shot` / `constraints`。
+- action 不写 style、quality、artist、generation、renderer、backend 参数。
+- PromptBundle 才保存最终 prompt 和本次 composer 的实际选择结果。

@@ -750,6 +750,74 @@ character_scope: foot_detail
             action_codes = {issue["code"] for issue in items_by_id["flat_tags"]["issues"]}
             self.assertEqual(action_codes, {"invalid_tags_mapping"})
 
+    def test_validate_node_tree_rejects_action_v1_rule_and_backend_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            action_dir = root / "actions" / "overstructured"
+            action_dir.mkdir(parents=True)
+            (action_dir / "meta.yaml").write_text(
+                """
+schema: tags-machine.action/v1
+kind: action
+id: overstructured
+tags:
+  action:
+    - foot focus
+character_scope: foot_detail
+visible_parts:
+  - feet
+character_sections:
+  include:
+    - feet
+include_character_sections:
+  - feet
+suppress_character_sections:
+  - eyes
+renderers:
+  novelai: {}
+generation:
+  steps: 28
+backend: novelai
+params:
+  scale: 5
+style: anime
+artist: sample_artist
+quality:
+  - best quality
+prompt:
+  positive:
+    - foot focus
+""".strip(),
+                encoding="utf-8",
+            )
+
+            result = validate_node_tree(root)
+
+            self.assertFalse(result["valid"])
+            self.assertEqual(result["summary"]["issue_counts"]["forbidden_v1_field"], 12)
+            fields = {
+                issue["details"]["field"]
+                for issue in result["items"][0]["issues"]
+                if issue["code"] == "forbidden_v1_field"
+            }
+            self.assertEqual(
+                fields,
+                {
+                    "$.visible_parts",
+                    "$.character_sections",
+                    "$.include_character_sections",
+                    "$.suppress_character_sections",
+                    "$.renderers",
+                    "$.generation",
+                    "$.backend",
+                    "$.params",
+                    "$.style",
+                    "$.artist",
+                    "$.quality",
+                    "$.prompt",
+                },
+            )
+
     def test_example_nodes_follow_v1_yaml_scope_contract(self):
         examples_root = PROJECT_ROOT / "examples" / "nodes"
         forbidden_keys_by_kind = {
@@ -771,6 +839,18 @@ character_scope: foot_detail
                 "pose",
                 "camera",
                 "focus",
+                "visible_parts",
+                "character_sections",
+                "include_character_sections",
+                "suppress_character_sections",
+                "renderers",
+                "generation",
+                "backend",
+                "params",
+                "style",
+                "artist",
+                "quality",
+                "prompt",
             },
             "background": {
                 "rules",
