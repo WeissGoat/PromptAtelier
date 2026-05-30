@@ -126,6 +126,104 @@ gen_json, {"sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 
             )
             self.assertTrue(request.params["prefer_brownian"])
 
+    def test_legacy_style_type_line_is_flag_not_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            style_dir = design_root / "\u753b\u98ce" / "typed_style"
+            style_dir.mkdir(parents=True)
+            (style_dir / "tags.txt").write_text(
+                """
+style prefix,
+style suffix,
+type, not_quailty_prompts, character_2_after_artist_1
+=
+origin_uc, lowres
+""".strip(),
+                encoding="utf-8",
+            )
+
+            style = NovelAIStyleRepository(design_root).load("typed_style")
+
+            self.assertEqual(style.prompt_prefix, ["style prefix"])
+            self.assertEqual(style.prompt_suffix, ["style suffix"])
+            self.assertIn("not_quailty_prompts", style.flags)
+            self.assertIn("character_2_after_artist_1", style.flags)
+            self.assertNotIn("type", style.prompt_suffix)
+
+            bundle = ScriptComposer().compose_full_prompt(
+                prompt="akemi homura, foot focus",
+                style_ref="typed_style",
+            )
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+
+            self.assertEqual(
+                request.prompt,
+                "style prefix,akemi homura,foot focus,style suffix,",
+            )
+            self.assertNotIn("type", request.prompt)
+            self.assertNotIn("very aesthetic", request.prompt)
+
+    def test_legacy_style_comma_first_line_keeps_prompt_before_style_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            style_dir = design_root / "\u753b\u98ce" / "suffix_style"
+            style_dir.mkdir(parents=True)
+            (style_dir / "tags.txt").write_text(
+                """
+,
+style suffix,
+=
+origin_uc, lowres
+""".strip(),
+                encoding="utf-8",
+            )
+
+            style = NovelAIStyleRepository(design_root).load("suffix_style")
+
+            self.assertEqual(style.prompt_prefix, [])
+            self.assertEqual(style.prompt_suffix, ["style suffix"])
+
+            bundle = ScriptComposer().compose_full_prompt(
+                prompt="akemi homura, foot focus",
+                style_ref="suffix_style",
+            )
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+
+            self.assertEqual(
+                request.prompt,
+                "akemi homura,foot focus,style suffix,::,very aesthetic,masterpiece,no text,",
+            )
+
+    def test_legacy_movie_style_cleans_selected_artist_tokens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            style_dir = design_root / "\u753b\u98ce" / "\u52a8\u753b_\u7535\u5f71\u611f_\u65392"
+            style_dir.mkdir(parents=True)
+            (style_dir / "tags.txt").write_text(
+                """
+wlop,artist:morikura_en,artist:ogipote, artist:ciloranko, anime style, High_contrast / Perfect_lighting / etc
+dramatic lighting on characters
+=
+alias_name, \u9ed8\u8ba4
+""".strip(),
+                encoding="utf-8",
+            )
+            style = NovelAIStyleRepository(design_root).load("\u52a8\u753b_\u7535\u5f71\u611f_\u65392")
+            bundle = ScriptComposer().compose_full_prompt(
+                prompt="1girl, akemi homura, standing",
+                style_ref="\u52a8\u753b_\u7535\u5f71\u611f_\u65392",
+            )
+
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+
+            self.assertEqual(
+                request.prompt,
+                "wlop,artist:,artist:ogipote,artist:ciloranko,anime style,"
+                "High_contrast / Perfect_lighting / etc,1girl,akemi homura,"
+                "standing,dramatic lighting on characters,::,very aesthetic,"
+                "masterpiece,no text,",
+            )
+
     def test_migrated_legacy_style_node_matches_tags_txt_novelai_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             design_root = Path(tmp) / "design"

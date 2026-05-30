@@ -228,10 +228,10 @@ def migrate_legacy_style_tags(
     tags_path = _resolve_tags_path(source)
     style_dir = tags_path.parent
     prompt_lines, ext_lines = _split_legacy_style_lines(tags_path)
+    prompt_lines, type_flags = _extract_legacy_type_flags(prompt_lines)
     cleaned_prompt_lines = [line.strip(" ,") for line in prompt_lines]
     cleaned_prompt_lines = [line for line in cleaned_prompt_lines if line]
-    prompt_prefix = cleaned_prompt_lines[:1]
-    prompt_suffix = cleaned_prompt_lines[1:]
+    prompt_prefix, prompt_suffix = _legacy_formula_prompt_parts(prompt_lines)
 
     novelai: dict[str, Any] = {
         "legacy_compat": True,
@@ -240,7 +240,7 @@ def migrate_legacy_style_tags(
         "prompt_suffix": prompt_suffix,
         "params": {},
     }
-    flags: list[str] = []
+    flags: list[str] = list(type_flags)
     legacy_extensions: dict[str, str] = {}
 
     for line in ext_lines:
@@ -785,6 +785,25 @@ def _split_legacy_style_lines(path: Path) -> tuple[list[str], list[str]]:
         else:
             prompt_lines.append(line)
     return prompt_lines, ext_lines
+
+
+def _extract_legacy_type_flags(prompt_lines: list[str]) -> tuple[list[str], list[str]]:
+    cleaned_lines: list[str] = []
+    flags: list[str] = []
+    for line in prompt_lines:
+        if line[:4] == "type":
+            flags.extend(part.strip() for part in line.split(",")[1:] if part.strip())
+        else:
+            cleaned_lines.append(line)
+    return cleaned_lines, flags
+
+
+def _legacy_formula_prompt_parts(prompt_lines: list[str]) -> tuple[list[str], list[str]]:
+    if not prompt_lines:
+        return [], []
+    first = prompt_lines[0].strip(" ,")
+    rest = [line.strip(" ,") for line in prompt_lines[1:]]
+    return ([first] if first else []), [line for line in rest if line]
 
 
 def _split_ext_line(line: str) -> tuple[str, str]:

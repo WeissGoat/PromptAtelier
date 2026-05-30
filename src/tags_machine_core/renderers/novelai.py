@@ -161,6 +161,13 @@ class NovelAIRenderAdapter:
                 style_prompt["after_negative_prompt"],
             )
 
+        if legacy_style:
+            positive = self._legacy_runtime_clean_positive(
+                positive,
+                style_payload=style_payload,
+            )
+            negative = self._legacy_runtime_clean_negative(negative)
+
         sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_style else "k_euler")
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
         if sampler == "ddim":
@@ -232,12 +239,17 @@ class NovelAIRenderAdapter:
             if flags.intersection({"not_quailty_prompts", "not_quality_prompts"})
             else LEGACY_NAI4_QUALITY_PROMPT
         )
-        return _join_legacy_prompt_parts(
-            style_prompt["prompt_prefix"],
-            bundle.prompt.positive,
-            style_prompt["prompt_suffix"],
-            quality_prompt,
+        parts: list[str | list[str] | None] = []
+        if style_prompt["prompt_prefix"]:
+            parts.append(style_prompt["prompt_prefix"])
+        parts.extend(
+            [
+                bundle.prompt.positive,
+                style_prompt["prompt_suffix"],
+                quality_prompt,
+            ]
         )
+        return _join_legacy_prompt_parts(*parts)
 
     def _legacy_negative_prompt(
         self,
@@ -259,6 +271,126 @@ class NovelAIRenderAdapter:
             style_prompt["after_negative_prompt"],
             bundle.prompt.negative,
         )
+
+    def _legacy_runtime_clean_positive(
+        self,
+        text: str,
+        *,
+        style_payload: dict[str, Any],
+    ) -> str:
+        # 旧 tags_machine 在 NAi.generate_image 发请求前还会清理 prompt；
+        # 这里仅在 legacy 兼容路径复刻，避免污染新架构默认行为。
+        text = text.replace("\xa0", " ").replace("@ @", "@_@")
+        if self._legacy_should_clean_movie_style_artists(style_payload):
+            text = self._legacy_clean_movie_style_artists(text)
+        text = self._legacy_loop_replace(text, "bruises", "scratches")
+        for _ in range(5):
+            text = self._legacy_loop_replace(text, ",,", ",")
+            text = self._legacy_loop_replace(text, "  ", " ")
+            text = self._legacy_loop_replace(text, ",}", "}")
+            text = self._legacy_loop_replace(text, "{,", "{")
+            text = self._legacy_loop_replace(text, "[,", "[")
+            text = self._legacy_loop_replace(text, ",]", "]")
+            text = self._legacy_loop_replace(text, "{}")
+            text = self._legacy_loop_replace(text, "[]")
+        text = self._legacy_loop_replace(text, "toe ring", "toes")
+        text = self._legacy_loop_replace(text, "puffy nipples", "nipples")
+        return self._legacy_loop_replace(text, "randoseru")
+
+    def _legacy_should_clean_movie_style_artists(self, style_payload: dict[str, Any]) -> bool:
+        style_ref = str(style_payload.get("style_ref") or "")
+        style_path = str(style_payload.get("path") or "")
+        marker = "\u52a8\u753b_\u7535\u5f71\u611f"
+        return marker in style_ref or marker in style_path
+
+    def _legacy_clean_movie_style_artists(self, text: str) -> str:
+        clear_tokens = [
+            "Jonpei",
+            "huwari_(dnwls3010)",
+            "piromizu",
+            "yuzutei",
+            "asahina_hikage",
+            "atahuta",
+            "elleciel.eud",
+            "thanabis",
+            "fumihiko (fu_mihi_ko)",
+            "shisantian",
+            "artist:mignon",
+            "jp06",
+            "Ixy",
+            "shiro9jira",
+            "barbarian_tk",
+            "rokita",
+            "hyocorou",
+            "artist:deadflow",
+            "onono_imoko",
+            "yukiu_con",
+            "maturiuta sorata",
+            "asou(asabu202)",
+            "ame (uten cancel)",
+            "asou_(asabu202)",
+            "nakkar",
+            "rryiup",
+            "cha_goma",
+            "hiro (dismaless)",
+            "armpit stubble",
+        ]
+        clear_words = (
+            "oshinoko,isshi_pyuma,dsmile,raika9,papi (papiron100),"
+            "mattaku mousuke,dikko,tianliang_duohe_fangdongye,curss,"
+            "mamerakkkkko,misaka12003,lasto,fuya (tempupupu),yuran,"
+            "akeyama kitsune,almic,artist:hiten,artist:ao+beni,"
+            "artist:marumoru,hews,hiro_(dismaless),Kyokucho,hitomaru,"
+            "onono_imoko,piromizu,torino_aqua,kanzaki_hiro,asahina_hikage,"
+            "oniilus,superpig,kantoku,ipuu_(el-ane_koubou),fundoshi,"
+            "xinzoruo,ishikei,artist:ningen_mame,artist:sho_(sho_lwlw),"
+            "artist:mignon,artist:kedama milk,artist:ask_(askzy),"
+            "artist:wanke,fujiyama,whoosaku,sameda_koban,konpeto,"
+            "terasu_mc,hotate-chan,b-ginga,akai sashimi,akamoku,"
+            "miyase mahiro,[shnva],simao (x x36131422),senro,kuzuvine,"
+            "kuroduki (pieat),jima,hiten_(hitenkei),ask_(askzy),"
+            "hanabi_(ocha),AS109,hitenkei,maccha (mochancc),gishu,"
+            "kedama milk,akino komichi,morikura_en"
+        )
+        clear_tokens.extend(
+            token.strip() for token in clear_words.split(",") if token.strip()
+        )
+        for token in clear_tokens:
+            text = text.replace(token, ",")
+            text = text.replace(token.lower(), ",")
+        text = text.replace("oiled", "oiled skin")
+        text = text.replace("oil,", "oiled skin")
+        text = text.replace("fat,", ",")
+        text = text.replace("ugly,", ",")
+        text = text.replace("old,", ",")
+        text = text.replace("skin skin", "skin")
+        text = text.replace("oiled skin", ",")
+        text = self._legacy_loop_replace(text, "{{{{", "{", "{{")
+        return self._legacy_loop_replace(text, "}}}}", "}", "}}")
+
+    def _legacy_runtime_clean_negative(self, text: str) -> str:
+        # 旧入口对 UC 至少会清掉空权重括号；这会影响 NovelAI 实际出图。
+        text = text.replace("\xa0", " ")
+        for _ in range(5):
+            text = text.replace("  ", " ")
+            text = text.replace("{}", "")
+            text = text.replace("[]", "")
+        return text
+
+    def _legacy_loop_replace(
+        self,
+        text: str,
+        needle: str,
+        replacement: str = "",
+        replace_content: str | None = None,
+    ) -> str:
+        source = replace_content or needle
+        while needle in text:
+            updated = text.replace(source, replacement)
+            if updated == text:
+                break
+            text = updated
+        return text
 
     def _style_payload(self, style: NovelAIStyleInput) -> dict[str, Any]:
         if style is None:

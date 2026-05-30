@@ -59,6 +59,7 @@ class NovelAIStyleRepository:
 
         prompt_lines: list[str] = []
         ext_lines: list[str] = []
+        flags: set[str] = set()
         in_ext = False
         for line in lines:
             if line == "=":
@@ -66,19 +67,19 @@ class NovelAIStyleRepository:
                 continue
             if in_ext:
                 ext_lines.append(line)
+            elif self._is_type_line(line):
+                flags.update(self._split_type_flags(line))
             else:
                 prompt_lines.append(line)
 
-        cleaned_prompt_lines = [line.strip(" ,") for line in prompt_lines]
-        cleaned_prompt_lines = [line for line in cleaned_prompt_lines if line]
-        prompt_prefix = cleaned_prompt_lines[:1]
-        prompt_suffix = cleaned_prompt_lines[1:]
+        prompt_prefix, prompt_suffix = self._legacy_formula_prompt_parts(prompt_lines)
 
         style = NovelAIStyle(
             style_ref=style_ref,
             path=style_path,
             prompt_prefix=prompt_prefix,
             prompt_suffix=prompt_suffix,
+            flags=flags,
         )
 
         for line in ext_lines:
@@ -97,6 +98,22 @@ class NovelAIStyleRepository:
                 style.flags.add(key)
 
         return style
+
+    def _is_type_line(self, line: str) -> bool:
+        return line[:4] == "type"
+
+    def _split_type_flags(self, line: str) -> set[str]:
+        parts = [part.strip() for part in line.split(",") if part.strip()]
+        return set(parts[1:])
+
+    def _legacy_formula_prompt_parts(self, prompt_lines: list[str]) -> tuple[list[str], list[str]]:
+        # 旧 run-prompt formula 使用 artist_lines[0] 作为前缀；如果第一行只有逗号，
+        # join_prompt_parts 会把它清掉，所以完整 prompt 会排在画风正文前。
+        if not prompt_lines:
+            return [], []
+        first = prompt_lines[0].strip(" ,")
+        rest = [line.strip(" ,") for line in prompt_lines[1:]]
+        return ([first] if first else []), [line for line in rest if line]
 
     def _split_ext_line(self, line: str) -> tuple[str, str]:
         if "," not in line:
