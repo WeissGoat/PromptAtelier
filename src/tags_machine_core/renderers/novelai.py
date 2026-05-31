@@ -314,6 +314,8 @@ class NovelAIRenderAdapter:
         negative_char_captions: list[dict[str, Any]] = []
         removed_positive_tags: list[str] = []
         removed_negative_tags: list[str] = []
+        matched_positive_tag_set: set[str] = set()
+        matched_negative_tag_set: set[str] = set()
         default_caption_prefix = str(config.get("default_caption_prefix", "girl")).strip()
         max_characters = _bounded_int(config.get("max_characters"), default=6, minimum=1, maximum=6)
 
@@ -332,14 +334,14 @@ class NovelAIRenderAdapter:
             matched_negative_tags: list[str] = []
             for tag in candidate_positive_tags:
                 if tag in base_tags:
-                    base_tags.remove(tag)
                     matched_positive_tags.append(tag)
                     removed_positive_tags.append(tag)
+                    matched_positive_tag_set.add(tag)
             for tag in candidate_negative_tags:
                 if tag in negative_tags:
-                    negative_tags.remove(tag)
                     matched_negative_tags.append(tag)
                     removed_negative_tags.append(tag)
+                    matched_negative_tag_set.add(tag)
 
             if matched_positive_tags:
                 caption_parts = (
@@ -360,6 +362,9 @@ class NovelAIRenderAdapter:
                         "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
                     }
                 )
+
+        base_tags = [tag for tag in base_tags if tag not in matched_positive_tag_set]
+        negative_tags = [tag for tag in negative_tags if tag not in matched_negative_tag_set]
 
         return (
             _rejoin_prompt_tags(base_tags, legacy_style=legacy_style),

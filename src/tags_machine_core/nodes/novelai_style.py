@@ -133,13 +133,13 @@ class NovelAIStyleRepository:
         return set(parts[1:])
 
     def _legacy_formula_prompt_parts(self, prompt_lines: list[str]) -> tuple[list[str], list[str]]:
-        # 旧 run-prompt formula 使用 artist_lines[0] 作为前缀；如果第一行只有逗号，
-        # join_prompt_parts 会把它清掉，因此完整 prompt 会排在画风正文前。
+        # 旧 formula 约等于 line A + character + line B + action + line C。
+        # 新 run-prompt 的角色和动作已经合成完整 prompt，因此把前两段画风放到 prompt 前。
         if not prompt_lines:
             return [], []
-        first = prompt_lines[0].strip(" ,")
-        rest = [line.strip(" ,") for line in prompt_lines[1:]]
-        return ([first] if first else []), [line for line in rest if line]
+        prefix = [line.strip(" ,") for line in prompt_lines[:2]]
+        suffix = [line.strip(" ,") for line in prompt_lines[2:]]
+        return [line for line in prefix if line], [line for line in suffix if line]
 
     def _split_ext_line(self, line: str) -> tuple[str, str]:
         if "," not in line:

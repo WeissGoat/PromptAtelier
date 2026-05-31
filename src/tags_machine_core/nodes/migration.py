@@ -801,9 +801,9 @@ def _extract_legacy_type_flags(prompt_lines: list[str]) -> tuple[list[str], list
 def _legacy_formula_prompt_parts(prompt_lines: list[str]) -> tuple[list[str], list[str]]:
     if not prompt_lines:
         return [], []
-    first = prompt_lines[0].strip(" ,")
-    rest = [line.strip(" ,") for line in prompt_lines[1:]]
-    return ([first] if first else []), [line for line in rest if line]
+    prefix = [line.strip(" ,") for line in prompt_lines[:2]]
+    suffix = [line.strip(" ,") for line in prompt_lines[2:]]
+    return [line for line in prefix if line], [line for line in suffix if line]
 
 
 def _split_ext_line(line: str) -> tuple[str, str]:

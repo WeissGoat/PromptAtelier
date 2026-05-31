@@ -58,6 +58,46 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         self.assertEqual(request.prompt, "2girls, standing side by side")
         self.assertEqual(request.meta["character_prompts"]["mode"], "auto")
 
+    def test_shared_character_tags_are_copied_to_each_matching_character_prompt(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"], "clothes": ["white dress"]},
+        )
+        madoka = NodeDocument(
+            kind="character",
+            id="madoka",
+            tags={"character": ["kaname madoka"], "clothes": ["white dress"]},
+        )
+        resolved = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="character", ref="madoka", index=1, node=madoka),
+            ]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, kaname madoka, 2girls, white dress, standing side by side",
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        char_captions = [item["char_caption"] for item in caption["char_captions"]]
+        self.assertEqual(
+            char_captions,
+            [
+                "girl, akemi homura, white dress",
+                "girl, kaname madoka, white dress",
+            ],
+        )
+        self.assertEqual(caption["base_caption"], "2girls, standing side by side")
+        self.assertNotIn("white dress", caption["base_caption"])
+
     def test_character_prompts_stay_disabled_without_explicit_mode(self):
         character = NodeDocument(
             kind="character",

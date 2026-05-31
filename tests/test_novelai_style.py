@@ -34,8 +34,8 @@ not_quality_prompts
             novelai = node.renderers["novelai"]
             self.assertTrue(novelai["legacy_compat"])
             self.assertFalse(novelai["include_common_tags"])
-            self.assertEqual(novelai["prompt_prefix"], ["style prefix"])
-            self.assertEqual(novelai["prompt_suffix"], ["style suffix, best quality"])
+            self.assertEqual(novelai["prompt_prefix"], ["style prefix", "style suffix, best quality"])
+            self.assertEqual(novelai["prompt_suffix"], [])
             self.assertEqual(novelai["negative_prompt"], ["lowres, bad anatomy"])
             self.assertEqual(novelai["after_negative_prompt"], ["extra fingers"])
             self.assertEqual(novelai["params"]["reference_image_multiple"], ["abc"])
@@ -129,8 +129,8 @@ gen_json, {"sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 
             )
 
             style = NovelAIStyleRepository(design_root).load("sample_style")
-            self.assertEqual(style.prompt_prefix, ["style prefix"])
-            self.assertEqual(style.prompt_suffix, ["style suffix, best quality"])
+            self.assertEqual(style.prompt_prefix, ["style prefix", "style suffix, best quality"])
+            self.assertEqual(style.prompt_suffix, [])
             self.assertEqual(style.params["reference_image_multiple"], ["abc"])
 
             bundle = ScriptComposer().compose_full_prompt(
@@ -175,8 +175,8 @@ origin_uc, lowres
 
             style = NovelAIStyleRepository(design_root).load("typed_style")
 
-            self.assertEqual(style.prompt_prefix, ["style prefix"])
-            self.assertEqual(style.prompt_suffix, ["style suffix"])
+            self.assertEqual(style.prompt_prefix, ["style prefix", "style suffix"])
+            self.assertEqual(style.prompt_suffix, [])
             self.assertIn("not_quailty_prompts", style.flags)
             self.assertIn("character_2_after_artist_1", style.flags)
             self.assertNotIn("type", style.prompt_suffix)
@@ -189,12 +189,12 @@ origin_uc, lowres
 
             self.assertEqual(
                 request.prompt,
-                "style prefix,akemi homura,foot focus,style suffix,",
+                "style prefix,style suffix,akemi homura,foot focus,",
             )
             self.assertNotIn("type", request.prompt)
             self.assertNotIn("very aesthetic", request.prompt)
 
-    def test_legacy_style_comma_first_line_keeps_prompt_before_style_suffix(self):
+    def test_legacy_style_empty_first_line_keeps_second_line_as_prefix(self):
         with tempfile.TemporaryDirectory() as tmp:
             design_root = Path(tmp) / "design"
             style_dir = design_root / "\u753b\u98ce" / "suffix_style"
@@ -211,8 +211,8 @@ origin_uc, lowres
 
             style = NovelAIStyleRepository(design_root).load("suffix_style")
 
-            self.assertEqual(style.prompt_prefix, [])
-            self.assertEqual(style.prompt_suffix, ["style suffix"])
+            self.assertEqual(style.prompt_prefix, ["style suffix"])
+            self.assertEqual(style.prompt_suffix, [])
 
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="akemi homura, foot focus",
@@ -222,7 +222,39 @@ origin_uc, lowres
 
             self.assertEqual(
                 request.prompt,
-                "akemi homura,foot focus,style suffix,::,very aesthetic,masterpiece,no text,",
+                "style suffix,akemi homura,foot focus,::,very aesthetic,masterpiece,no text,",
+            )
+
+    def test_legacy_style_first_two_prompt_lines_are_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            style_dir = design_root / "\u753b\u98ce" / "three_line_style"
+            style_dir.mkdir(parents=True)
+            (style_dir / "tags.txt").write_text(
+                """
+line A,
+line B,
+line C,
+=
+origin_uc, lowres
+""".strip(),
+                encoding="utf-8",
+            )
+
+            style = NovelAIStyleRepository(design_root).load("three_line_style")
+
+            self.assertEqual(style.prompt_prefix, ["line A", "line B"])
+            self.assertEqual(style.prompt_suffix, ["line C"])
+
+            bundle = ScriptComposer().compose_full_prompt(
+                prompt="character and action",
+                style_ref="three_line_style",
+            )
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+
+            self.assertEqual(
+                request.prompt,
+                "line A,line B,character and action,line C,::,very aesthetic,masterpiece,no text,",
             )
 
     def test_legacy_movie_style_cleans_selected_artist_tokens(self):
@@ -250,8 +282,8 @@ alias_name, \u9ed8\u8ba4
             self.assertEqual(
                 request.prompt,
                 "wlop,artist:,artist:ogipote,artist:ciloranko,anime style,"
-                "High_contrast / Perfect_lighting / etc,1girl,akemi homura,"
-                "standing,dramatic lighting on characters,::,very aesthetic,"
+                "High_contrast / Perfect_lighting / etc,dramatic lighting on characters,"
+                "1girl,akemi homura,standing,::,very aesthetic,"
                 "masterpiece,no text,",
             )
 
