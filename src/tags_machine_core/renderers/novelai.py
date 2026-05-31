@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import random
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
@@ -14,6 +15,8 @@ from tags_machine_core.renderers.common import (
 
 
 NovelAIStyleInput = NovelAIStyle | NodeDocument | dict[str, Any] | None
+
+_SEED_RANDOM = random.SystemRandom()
 
 LEGACY_NAI4_QUALITY_PROMPT = ",::,very aesthetic, masterpiece, no text"
 LEGACY_DEFAULT_NEGATIVE_PROMPT = (
@@ -211,6 +214,7 @@ class NovelAIRenderAdapter:
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
         if sampler == "ddim":
             sampler = "ddim_v3"
+        resolved_seed = _resolve_seed(seed, params.get("seed"))
 
         # 这些默认值参考 ComfyUI_NAIDGenerator 的 V4/V4.5 请求结构。
         final_params: dict[str, Any] = {
@@ -220,7 +224,7 @@ class NovelAIRenderAdapter:
             "scale": params.get("scale", 6.0 if legacy_style else 5.0),
             "sampler": sampler,
             "steps": params.get("steps", 28),
-            "seed": seed or params.get("seed") or 0,
+            "seed": resolved_seed,
             "n_samples": params.get("n_samples", 1),
             "ucPreset": 3,
             "qualityToggle": False,
@@ -242,7 +246,7 @@ class NovelAIRenderAdapter:
             ),
             "reference_strength_multiple": params.get("reference_strength_multiple", []),
             "director_reference_images": params.get("director_reference_images", []),
-            "extra_noise_seed": params.get("extra_noise_seed", seed or params.get("seed") or 0),
+            "extra_noise_seed": params.get("extra_noise_seed", resolved_seed),
             "v4_prompt": {
                 "use_coords": False,
                 "use_order": params.get("use_order", True if legacy_style else False),
@@ -682,6 +686,13 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _resolve_seed(explicit_seed: int | None, params_seed: Any) -> int:
+    for value in (explicit_seed, params_seed):
+        if value is not None:
+            return int(value)
+    return _SEED_RANDOM.randint(0, 4294967295)
 
 
 def _raw_character_material(

@@ -212,7 +212,7 @@ class AgentComposer:
             instructions=instructions,
             agent_model=agent_model,
         )
-        if cache:
+        if cache and result is None:
             cached = cache.get(task.cache_key)
             if cached:
                 return cached
@@ -245,7 +245,7 @@ class AgentComposer:
             instructions=instructions,
             agent_model=agent_model,
         )
-        if cache:
+        if cache and result is None:
             cached = cache.get(task.cache_key)
             if cached:
                 return cached

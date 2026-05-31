@@ -93,6 +93,21 @@ not_quality_prompts
         self.assertNotIn("prefer_brownian", params)
         self.assertNotIn("deliberate_euler_ancestral_bug", params)
 
+    def test_novelai_adapter_generates_random_seed_when_seed_is_omitted(self):
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, foot focus",
+            negative="bad feet",
+        )
+
+        first = NovelAIRenderAdapter().build_request(bundle)
+        second = NovelAIRenderAdapter().build_request(bundle)
+
+        self.assertIsInstance(first.params["seed"], int)
+        self.assertIsInstance(second.params["seed"], int)
+        self.assertEqual(first.params["extra_noise_seed"], first.params["seed"])
+        self.assertEqual(second.params["extra_noise_seed"], second.params["seed"])
+        self.assertNotEqual(first.params["seed"], second.params["seed"])
+
     def test_novelai_adapter_normalizes_ddim_sampler_for_v45(self):
         bundle = ScriptComposer().compose_full_prompt(
             prompt="akemi homura, foot focus",

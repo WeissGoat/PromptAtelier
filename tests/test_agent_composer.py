@@ -228,6 +228,38 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(second.meta.extra["agent"]["agent_model"], "agent-model-v1")
         self.assertEqual(second.meta.extra["agent"]["notes"], ["agent 合并了角色和动作"])
 
+    def test_compose_nodes_with_new_result_does_not_read_stale_cache_first(self):
+        composer = AgentComposer()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = PromptCache(Path(tmp) / "prompt")
+            first = composer.compose_nodes(
+                character=_character(),
+                action=_action(),
+                character_scope="foot_detail",
+                result={"positive": "cached prompt", "negative": ""},
+                cache=cache,
+            )
+            second = composer.compose_nodes(
+                character=_character(),
+                action=_action(),
+                character_scope="foot_detail",
+                result={"positive": "fresh prompt", "negative": ""},
+                cache=cache,
+            )
+            third = composer.compose_nodes(
+                character=_character(),
+                action=_action(),
+                character_scope="foot_detail",
+                cache=cache,
+            )
+
+        self.assertEqual(first.prompt.positive, "cached prompt")
+        self.assertEqual(second.prompt.positive, "fresh prompt")
+        self.assertFalse(second.cache.cache_hit)
+        self.assertTrue(third.cache.cache_hit)
+        self.assertEqual(third.prompt.positive, "fresh prompt")
+
     def test_compose_nodes_does_not_reuse_cache_for_different_agent_model(self):
         composer = AgentComposer()
         result = {
