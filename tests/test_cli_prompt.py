@@ -201,6 +201,126 @@ negative_prompt:
             self.assertIn("lowres", request["negative_prompt"])
             self.assertIn("bad anatomy", request["negative_prompt"])
 
+    def test_run_prompt_node_inputs_build_novelai_character_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            homura = root / "homura"
+            homura.mkdir()
+            (homura / "meta.yaml").write_text(
+                """
+schema: tags-machine.character/v1
+kind: character
+id: homura
+tags:
+  character:
+    - akemi homura
+  hair:
+    - black hair
+""".strip(),
+                encoding="utf-8",
+            )
+            madoka = root / "madoka"
+            madoka.mkdir()
+            (madoka / "meta.yaml").write_text(
+                """
+schema: tags-machine.character/v1
+kind: character
+id: madoka
+tags:
+  character:
+    - kaname madoka
+  hair:
+    - pink hair
+""".strip(),
+                encoding="utf-8",
+            )
+            action = root / "duo"
+            action.mkdir()
+            (action / "meta.yaml").write_text(
+                """
+schema: tags-machine.action/v1
+kind: action
+id: duo
+tags:
+  action:
+    - 2girls, standing side by side
+""".strip(),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "run-action",
+                        "--dry-run",
+                        "--full",
+                        "--node",
+                        f"character:{homura}",
+                        "--node",
+                        f"character:{madoka}",
+                        "--node",
+                        f"action:{action}",
+                        "--params-json",
+                        '{"character_prompts":{"mode":"auto"}}',
+                    ]
+                )
+
+            data = json.loads(stdout.getvalue())
+            caption = data["render_request"]["params"]["v4_prompt"]["caption"]
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(caption["base_caption"], "2girls, standing side by side")
+            self.assertEqual(len(caption["char_captions"]), 2)
+            self.assertEqual(
+                caption["char_captions"][0]["char_caption"],
+                "girl, akemi homura, black hair",
+            )
+            self.assertEqual(
+                data["prompt_bundle"]["meta"]["extra"]["node_refs"][1]["id"],
+                "madoka",
+            )
+
+    def test_run_prompt_full_prompt_uses_nodes_for_character_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_agent_nodes(root)
+            style = _write_style_node(root)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "run-prompt",
+                        "--dry-run",
+                        "--full",
+                        "--prompt",
+                        "akemi homura, bare soles, foot focus, soles close-up",
+                        "--style-node",
+                        str(style),
+                        "--node",
+                        f"character:{character}",
+                        "--node",
+                        f"action:{action}",
+                        "--params-json",
+                        '{"character_prompts":{"mode":"auto"}}',
+                    ]
+                )
+
+            data = json.loads(stdout.getvalue())
+            caption = data["render_request"]["params"]["v4_prompt"]["caption"]
+            char_caption = caption["char_captions"][0]["char_caption"]
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                data["prompt_bundle"]["prompt"]["positive"],
+                "akemi homura, bare soles, foot focus, soles close-up",
+            )
+            self.assertIn("akemi homura", char_caption)
+            self.assertIn("bare soles", char_caption)
+            self.assertNotIn("long black hair", char_caption)
+            self.assertNotIn("purple eyes", char_caption)
+            self.assertIn("foot focus", caption["base_caption"])
+            self.assertNotIn("akemi homura", caption["base_caption"])
+
     def test_run_prompt_reads_prompt_file_and_style_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

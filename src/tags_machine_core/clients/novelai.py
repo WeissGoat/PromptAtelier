@@ -39,6 +39,7 @@ REQUEST_PARAMETER_KEYS = {
     "controlnet_model",
     "controlnet_strength",
     "deliberate_euler_ancestral_bug",
+    "director_reference_images",
     "dynamic_thresholding",
     "extra_noise_seed",
     "height",

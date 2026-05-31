@@ -6,6 +6,7 @@ from pathlib import Path
 from tags_machine_core.composers import AgentComposer, AgentCompositionRequired
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 
 
 def _stable_bundle_json(bundle) -> str:
@@ -40,6 +41,21 @@ def _action(path: str | None = None) -> NodeDocument:
             "path": path,
             "tags": {"action": ["foot focus"]},
             "character_scope": "foot_detail",
+        }
+    )
+
+
+def _second_character(path: str | None = None) -> NodeDocument:
+    return NodeDocument.model_validate(
+        {
+            "schema": "tags-machine.character/v1",
+            "kind": "character",
+            "id": "madoka",
+            "path": path,
+            "tags": {
+                "character": ["kaname madoka"],
+                "hair": ["pink hair"],
+            },
         }
     )
 
@@ -243,6 +259,62 @@ class AgentComposerTest(unittest.TestCase):
 
         self.assertNotEqual(first.cache.cache_key, raised.exception.task.cache_key)
         self.assertEqual(raised.exception.task.agent_model, "agent-model-v2")
+
+    def test_compose_resolved_nodes_supports_multiple_characters(self):
+        composer = AgentComposer()
+        resolved = ResolvedNodeSet(
+            [
+                ResolvedNode(
+                    role="character",
+                    ref="characters/homura",
+                    index=0,
+                    node=_character("characters/homura"),
+                ),
+                ResolvedNode(
+                    role="character",
+                    ref="characters/madoka",
+                    index=1,
+                    node=_second_character("characters/madoka"),
+                ),
+                ResolvedNode(
+                    role="action",
+                    ref="actions/foot_closeup",
+                    index=0,
+                    node=_action("actions/foot_closeup"),
+                ),
+            ]
+        )
+        result = {
+            "positive": "akemi homura, kaname madoka, bare soles, foot focus",
+            "negative": "extra toes",
+            "character_scope": "foot_detail",
+        }
+
+        bundle = composer.compose_resolved_nodes(
+            resolved,
+            style_ref="20260412_2",
+            result=result,
+        )
+
+        self.assertIsNone(bundle.meta.character_ref)
+        self.assertEqual(bundle.meta.action_ref, "foot_closeup")
+        self.assertEqual(bundle.meta.extra["node_refs"][1]["id"], "madoka")
+        self.assertEqual(
+            bundle.meta.extra["character_materials"][0]["positive_tags"],
+            ["akemi homura", "bare soles"],
+        )
+        self.assertEqual(
+            bundle.meta.extra["character_materials"][0]["suppressed_sections"],
+            ["eyes"],
+        )
+        self.assertEqual(
+            bundle.meta.extra["character_materials"][1]["positive_tags"],
+            ["kaname madoka"],
+        )
+        self.assertEqual(
+            bundle.meta.extra["character_materials"][1]["suppressed_sections"],
+            ["hair"],
+        )
 
     def test_prompt_cache_rejects_file_with_mismatched_internal_cache_key(self):
         composer = AgentComposer()

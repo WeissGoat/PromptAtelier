@@ -9,123 +9,16 @@ from tags_machine_core.contracts import (
     PromptMeta,
     PromptText,
 )
+from tags_machine_core.nodes.character_scope import (
+    character_material,
+    character_positive,
+    dedupe,
+    node_negative,
+    node_positive,
+    resolve_character_scope,
+)
 from tags_machine_core.nodes.models import NodeDocument
-
-
-CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
-    "default": {"include": None},
-    "full_body": {"include": None},
-    "upper_body": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "hair",
-            "eyes",
-            "face",
-            "head_accessories",
-            "ears",
-            "upper_clothes",
-            "full_body_clothes",
-            "handwear",
-            "body",
-            "hands",
-            "accessories",
-            "weapons",
-            "props",
-            "wings",
-            "tail",
-            "extra",
-        ],
-    },
-    "lower_body": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "body",
-            "lower_clothes",
-            "full_body_clothes",
-            "legwear",
-            "footwear",
-            "feet",
-            "tail",
-            "extra",
-        ],
-    },
-    "portrait": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "hair",
-            "eyes",
-            "face",
-            "head_accessories",
-            "ears",
-            "upper_clothes",
-            "accessories",
-            "extra",
-        ],
-    },
-    "face_detail": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "hair",
-            "eyes",
-            "face",
-            "head_accessories",
-            "ears",
-            "extra",
-        ],
-    },
-    "hand_detail": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "body",
-            "hands",
-            "handwear",
-            "accessories",
-            "props",
-            "weapons",
-            "extra",
-        ],
-    },
-    "foot_detail": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "body",
-            "feet",
-            "legwear",
-            "footwear",
-            "extra",
-        ],
-    },
-    "object_focus": {
-        "include": [
-            "character",
-            "identity",
-            "copyright",
-            "role",
-            "accessories",
-            "weapons",
-            "props",
-            "extra",
-        ],
-    },
-}
+from tags_machine_core.nodes.resolved import ResolvedNodeSet
 
 
 def _join_prompt_parts(*parts: str | list[str] | None) -> str:
@@ -188,26 +81,26 @@ class ScriptComposer:
         character_scope: str | None = None,
         body_scope: str | None = None,
     ) -> PromptBundle:
-        scope = self._resolve_character_scope(
+        scope = resolve_character_scope(
             action=action,
             character=character,
             character_scope=character_scope or body_scope,
         )
-        character_positive, included_sections, suppressed_sections = self._character_positive(
+        character_positive_tags, included_sections, suppressed_sections = character_positive(
             character,
             scope,
         )
         positive = _join_prompt_parts(
-            character_positive,
-            self._node_positive(action, scope),
-            self._node_positive(background, scope),
+            character_positive_tags,
+            node_positive(action, scope),
+            node_positive(background, scope),
             extra_prompt,
         )
         negative_prompt = _join_prompt_parts(
             negative,
-            self._node_negative(character, scope),
-            self._node_negative(action, scope),
-            self._node_negative(background, scope),
+            node_negative(character, scope),
+            node_negative(action, scope),
+            node_negative(background, scope),
         )
         source_nodes = [
             node.source_ref()
@@ -242,90 +135,95 @@ class ScriptComposer:
             cache=CacheMeta(cacheable=True, cache_key=cache_key),
         )
 
-    def _character_positive(
+    def compose_resolved_nodes(
         self,
-        node: NodeDocument | None,
-        character_scope: str | None,
-    ) -> tuple[list[str], list[str], list[str]]:
-        if node is None:
-            return [], [], []
-        if node.prompt.positive:
-            included_roles: list[str] = []
-            suppressed_roles: list[str] = []
-            texts: list[str] = []
-            for fragment in node.prompt.positive:
-                role = fragment.role or "prompt"
-                if fragment.applies_to(character_scope):
-                    texts.append(fragment.text)
-                    included_roles.append(role)
-                else:
-                    suppressed_roles.append(role)
-            return texts, self._dedupe(included_roles), self._dedupe(suppressed_roles)
-
-        sections = list(node.tags.keys())
-        include_sections = self._included_character_sections(sections, character_scope)
-        include_set = set(include_sections)
-        suppressed_sections = [section for section in sections if section not in include_set]
-        texts: list[str] = []
-        for section in include_sections:
-            texts.extend(node.tags.get(section, []))
-        return texts, include_sections, suppressed_sections
-
-    def _node_positive(self, node: NodeDocument | None, character_scope: str | None) -> list[str]:
-        if node is None:
-            return []
-        if node.kind == "character":
-            return self._character_positive(node, character_scope)[0]
-        if node.prompt.positive:
-            return node.positive_texts(character_scope)
-        return node.all_tags()
-
-    def _node_negative(self, node: NodeDocument | None, character_scope: str | None) -> list[str]:
-        if node is None:
-            return []
-        items: list[str] = []
-        items.extend(node.negative_prompt)
-        items.extend(node.negative_texts(character_scope))
-        return items
-
-    def _resolve_character_scope(
-        self,
+        resolved_nodes: ResolvedNodeSet,
         *,
-        action: NodeDocument | None,
-        character: NodeDocument | None,
-        character_scope: str | None,
-    ) -> str:
-        return (
-            character_scope
-            or (action.character_scope if action else None)
-            or (character.character_scope if character else None)
-            or "default"
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        body_scope: str | None = None,
+    ) -> PromptBundle:
+        characters = resolved_nodes.characters()
+        actions = resolved_nodes.actions()
+        backgrounds = resolved_nodes.backgrounds()
+        primary_character = characters[0].node if characters else None
+        primary_action = actions[0].node if actions else None
+        scope = resolve_character_scope(
+            action=primary_action,
+            character=primary_character,
+            character_scope=character_scope or body_scope,
         )
 
-    def _included_character_sections(
-        self,
-        sections: list[str],
-        character_scope: str | None,
-    ) -> list[str]:
-        policy = CHARACTER_SCOPE_POLICY.get(
-            character_scope or "default",
-            CHARACTER_SCOPE_POLICY["default"],
-        )
-        include = policy.get("include")
-        if include is None:
-            return sections
-        include_set = set(include)
-        return [section for section in sections if section in include_set]
+        positive_parts: list[str | list[str] | None] = []
+        negative_parts: list[str | list[str] | None] = [negative]
+        character_materials: list[dict[str, object]] = []
+        included_sections: list[str] = []
+        suppressed_sections: list[str] = []
 
-    def _dedupe(self, items: list[str]) -> list[str]:
-        seen: set[str] = set()
-        result: list[str] = []
-        for item in items:
-            if item in seen:
-                continue
-            seen.add(item)
-            result.append(item)
-        return result
+        for item in characters:
+            character_positive_tags, included, suppressed = character_positive(
+                item.node,
+                scope,
+            )
+            character_negative = node_negative(item.node, scope)
+            positive_parts.append(character_positive_tags)
+            negative_parts.append(character_negative)
+            included_sections.extend(included)
+            suppressed_sections.extend(suppressed)
+            character_materials.append(
+                character_material(
+                    node=item.node,
+                    ref=item.ref,
+                    index=item.index,
+                    character_scope=scope,
+                )
+            )
+
+        for item in actions:
+            positive_parts.append(node_positive(item.node, scope))
+            negative_parts.append(node_negative(item.node, scope))
+        for item in backgrounds:
+            positive_parts.append(node_positive(item.node, scope))
+            negative_parts.append(node_negative(item.node, scope))
+        positive_parts.append(extra_prompt)
+
+        positive = _join_prompt_parts(*positive_parts)
+        negative_prompt = _join_prompt_parts(*negative_parts)
+        prompt_nodes = [
+            item
+            for item in resolved_nodes
+            if item.role not in {"artist", "style"}
+        ]
+        cache_key = self._cache_key(
+            prompt=positive,
+            negative=negative_prompt,
+            style_ref=style_ref,
+            character_scope=scope,
+        )
+        return PromptBundle(
+            prompt=PromptText(positive=positive, negative=negative_prompt),
+            meta=PromptMeta(
+                character_ref=primary_character.id if len(characters) == 1 else None,
+                action_ref=primary_action.id if primary_action else None,
+                background_ref=backgrounds[0].node.id if len(backgrounds) == 1 else None,
+                style_ref=style_ref,
+                composer_type="script",
+                composer_version=self.composer_version,
+                composition=PromptCompositionMeta(
+                    character_scope=scope,
+                    included_character_sections=dedupe(included_sections),
+                    suppressed_character_sections=dedupe(suppressed_sections),
+                ),
+                source_nodes=[item.node.source_ref() for item in prompt_nodes],
+                extra={
+                    "node_refs": [item.as_ref() for item in prompt_nodes],
+                    "character_materials": character_materials,
+                },
+            ),
+            cache=CacheMeta(cacheable=True, cache_key=cache_key),
+        )
 
     def _cache_key(self, **parts: str | None) -> str:
         normalized = "\n".join(f"{key}={parts.get(key) or ''}" for key in sorted(parts))

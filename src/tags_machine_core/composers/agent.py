@@ -15,7 +15,12 @@ from tags_machine_core.contracts import (
     PromptMeta,
     PromptText,
 )
+from tags_machine_core.nodes.character_scope import (
+    character_material,
+    resolve_character_scope,
+)
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 
 
 AGENT_COMPOSER_VERSION = "v1"
@@ -34,6 +39,7 @@ class AgentNodeSnapshot(BaseModel):
 
     role: str
     ref: str
+    index: int = 0
     kind: str
     id: str
     content_hash: str
@@ -111,10 +117,10 @@ class AgentComposer:
         instructions: list[str] | None = None,
         agent_model: str | None = None,
     ) -> AgentCompositionTask:
-        resolved_scope = (
-            character_scope
-            or (action.character_scope if action else None)
-            or (character.character_scope if character else None)
+        resolved_scope = resolve_character_scope(
+            action=action,
+            character=character,
+            character_scope=character_scope,
         )
         nodes = {
             role: snapshot
@@ -130,6 +136,45 @@ class AgentComposer:
             "nodes": {
                 role: snapshot.model_dump(mode="json", by_alias=True)
                 for role, snapshot in nodes.items()
+            },
+            "extra_prompt": extra_prompt.strip(),
+            "negative": negative.strip(),
+            "style_ref": style_ref,
+            "character_scope": resolved_scope,
+            "instructions": instructions or [],
+            "agent_model": _optional_text(agent_model),
+        }
+        cache_key = self._cache_key(self._task_cache_payload(payload))
+        return AgentCompositionTask(cache_key=cache_key, **payload)
+
+    def build_task_resolved_nodes(
+        self,
+        resolved_nodes: ResolvedNodeSet,
+        *,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        instructions: list[str] | None = None,
+        agent_model: str | None = None,
+    ) -> AgentCompositionTask:
+        characters = resolved_nodes.characters()
+        actions = resolved_nodes.actions()
+        primary_character = characters[0].node if characters else None
+        primary_action = actions[0].node if actions else None
+        resolved_scope = resolve_character_scope(
+            action=primary_action,
+            character=primary_character,
+            character_scope=character_scope,
+        )
+        nodes = self._snapshot_resolved_nodes(resolved_nodes)
+        if not nodes:
+            raise ValueError("agent composition requires at least one non-style node")
+        payload = {
+            "composer_version": self.composer_version,
+            "nodes": {
+                key: snapshot.model_dump(mode="json", by_alias=True)
+                for key, snapshot in nodes.items()
             },
             "extra_prompt": extra_prompt.strip(),
             "negative": negative.strip(),
@@ -178,6 +223,39 @@ class AgentComposer:
             cache.put(bundle)
         return bundle
 
+    def compose_resolved_nodes(
+        self,
+        resolved_nodes: ResolvedNodeSet,
+        *,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        instructions: list[str] | None = None,
+        agent_model: str | None = None,
+        result: AgentCompositionResult | dict[str, Any] | None = None,
+        cache: PromptCache | None = None,
+    ) -> PromptBundle:
+        task = self.build_task_resolved_nodes(
+            resolved_nodes,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            character_scope=character_scope,
+            instructions=instructions,
+            agent_model=agent_model,
+        )
+        if cache:
+            cached = cache.get(task.cache_key)
+            if cached:
+                return cached
+        if result is None:
+            raise AgentCompositionRequired(task)
+        bundle = self.compose_from_result(task, result)
+        if cache:
+            cache.put(bundle)
+        return bundle
+
     def compose_from_result(
         self,
         task: AgentCompositionTask,
@@ -188,9 +266,12 @@ class AgentComposer:
             if isinstance(result, AgentCompositionResult)
             else AgentCompositionResult.model_validate(result)
         )
-        character = task.nodes.get("character")
-        action = task.nodes.get("action")
-        background = task.nodes.get("background")
+        characters = _snapshots_by_role(task, "character")
+        actions = _snapshots_by_role(task, "action")
+        backgrounds = _snapshots_by_role(task, "background")
+        character = characters[0] if len(characters) == 1 else None
+        action = actions[0] if actions else None
+        background = backgrounds[0] if len(backgrounds) == 1 else None
         source_nodes = [node.ref for node in task.nodes.values()]
         return PromptBundle(
             prompt=PromptText(
@@ -211,6 +292,19 @@ class AgentComposer:
                 ),
                 source_nodes=source_nodes,
                 extra={
+                    "node_refs": [
+                        {
+                            "role": node.role,
+                            "ref": node.ref,
+                            "id": node.id,
+                            "index": node.index,
+                        }
+                        for node in task.nodes.values()
+                    ],
+                    "character_materials": _character_materials(
+                        characters,
+                        task.character_scope,
+                    ),
                     "agent": {
                         "task_schema": task.schema_id,
                         "instructions": task.instructions,
@@ -235,8 +329,41 @@ class AgentComposer:
         return AgentNodeSnapshot(
             role=role,
             ref=node.source_ref(),
+            index=0,
             kind=node.kind,
             id=node.id,
+            content_hash=self._cache_key(node_payload),
+            node=node_payload,
+        )
+
+    def _snapshot_resolved_nodes(
+        self,
+        resolved_nodes: ResolvedNodeSet,
+    ) -> dict[str, AgentNodeSnapshot]:
+        nodes: dict[str, AgentNodeSnapshot] = {}
+        role_seen: dict[str, int] = {}
+        for item in resolved_nodes:
+            if item.role in {"artist", "style"}:
+                continue
+            seen = role_seen.get(item.role, 0)
+            role_seen[item.role] = seen + 1
+            key = item.role if seen == 0 else f"{item.role}_{seen + 1}"
+            nodes[key] = self._snapshot_resolved_node(item)
+        return nodes
+
+    def _snapshot_resolved_node(self, item: ResolvedNode) -> AgentNodeSnapshot:
+        node_payload = item.node.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_none=True,
+            exclude={"path"},
+        )
+        return AgentNodeSnapshot(
+            role=item.role,
+            ref=item.ref,
+            index=item.index,
+            kind=item.node.kind,
+            id=item.node.id,
             content_hash=self._cache_key(node_payload),
             node=node_payload,
         )
@@ -261,6 +388,31 @@ def _optional_text(value: str | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _snapshots_by_role(
+    task: AgentCompositionTask,
+    role: str,
+) -> list[AgentNodeSnapshot]:
+    return [node for node in task.nodes.values() if node.role == role]
+
+
+def _character_materials(
+    characters: list[AgentNodeSnapshot],
+    character_scope: str | None,
+) -> list[dict[str, object]]:
+    materials: list[dict[str, object]] = []
+    for character in characters:
+        node = NodeDocument.model_validate(character.node)
+        materials.append(
+            character_material(
+                node=node,
+                ref=character.ref,
+                index=character.index,
+                character_scope=character_scope,
+            )
+        )
+    return materials
 
 
 def load_agent_result(path: str | Path) -> AgentCompositionResult:

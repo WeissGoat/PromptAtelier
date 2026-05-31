@@ -9,7 +9,7 @@ from tags_machine_core.composers import AgentCompositionRequired
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.json_tools import to_jsonable
-from tags_machine_core.nodes import NodeReader
+from tags_machine_core.nodes import NodeReader, ResolvedNode, ResolvedNodeSet
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api_models import (
@@ -50,8 +50,9 @@ class GenerationJsonApi:
         style_node = self._load_optional_node(data.get("style") or data.get("style_node"))
         style_ref = _optional_string(data.get("style_ref")) or (style_node.id if style_node else None)
 
-        has_node_input = bool(data.get("nodes") or data.get("character") or data.get("action") or data.get("background"))
-        if "prompt" in data and not has_node_input:
+        # `prompt` 表示调用方已经提供完整角色 + 动作提示词；即使同时带节点，
+        # 节点也只作为后续 renderer 的上下文，不在 compose 层二次拼接。
+        if "prompt" in data:
             bundle = self.service.compose_full_prompt(
                 prompt=str(data.get("prompt") or ""),
                 negative=str(data.get("negative") or ""),
@@ -59,17 +60,12 @@ class GenerationJsonApi:
             )
             return to_jsonable(bundle)
 
-        nodes = _mapping(data.get("nodes") or {}, "compose request nodes")
-        character = self._load_optional_node(nodes.get("character") or data.get("character"))
-        action = self._load_optional_node(nodes.get("action") or data.get("action"))
-        background = self._load_optional_node(nodes.get("background") or data.get("background"))
-        if character is None and action is None and background is None and "prompt" not in data:
+        resolved_nodes = self._load_resolved_nodes(data)
+        if not resolved_nodes and "prompt" not in data:
             raise ValueError("compose request must provide prompt or at least one node")
 
-        bundle = self.service.compose_nodes(
-            character=character,
-            action=action,
-            background=background,
+        bundle = self.service.compose_resolved_nodes(
+            resolved_nodes,
             extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
             negative=str(data.get("negative") or ""),
             style_ref=style_ref,
@@ -80,11 +76,9 @@ class GenerationJsonApi:
 
     def agent_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "agent-task request")
-        character, action, background, style_ref = self._load_agent_inputs(data)
-        task = self.service.build_agent_composition_task(
-            character=character,
-            action=action,
-            background=background,
+        resolved_nodes, style_ref = self._load_agent_resolved_inputs(data)
+        task = self.service.build_agent_composition_task_resolved_nodes(
+            resolved_nodes,
             extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
             negative=str(data.get("negative") or ""),
             style_ref=style_ref,
@@ -96,14 +90,12 @@ class GenerationJsonApi:
 
     def compose_agent(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "compose-agent request")
-        character, action, background, style_ref = self._load_agent_inputs(data)
+        resolved_nodes, style_ref = self._load_agent_resolved_inputs(data)
         result = _optional_mapping(_agent_value(data, "agent_result", "result"))
         cache_dir = _optional_string(_agent_value(data, "cache_dir", "cache_root"))
         cache = PromptCache(cache_dir) if cache_dir else None
-        bundle = self.service.compose_nodes_with_agent(
-            character=character,
-            action=action,
-            background=background,
+        bundle = self.service.compose_resolved_nodes_with_agent(
+            resolved_nodes,
             extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
             negative=str(data.get("negative") or ""),
             style_ref=style_ref,
@@ -141,11 +133,13 @@ class GenerationJsonApi:
         bundle = PromptBundle.model_validate(bundle_data)
         backend = str(data.get("backend") or "novelai")
         style = self._load_optional_node(data.get("style") or data.get("style_node"))
+        resolved_nodes = self._load_resolved_nodes(data)
         request_model = self.service.build_render_request(
             bundle,
             backend=backend,
             seed=_optional_int(data.get("seed")),
             style=style or _optional_mapping(data.get("style_payload")),
+            resolved_nodes=resolved_nodes,
             width=_int_or_default(data.get("width"), 1024),
             height=_int_or_default(data.get("height"), 1024),
             model=_optional_string(data.get("model")),
@@ -169,6 +163,7 @@ class GenerationJsonApi:
                 render_request["style_node"] = compose_request["style_node"]
         bundle = self.compose(compose_request)
         render_request["prompt_bundle"] = bundle
+        self._copy_render_context_nodes(compose_request, render_request)
         result = ComposeRenderPlanResult(
             prompt_bundle=PromptBundle.model_validate(bundle),
             render_request=RenderRequest.model_validate(self.render_plan(render_request)),
@@ -244,20 +239,76 @@ class GenerationJsonApi:
             return NodeDocument.model_validate(value)
         raise ValueError(f"Expected node path or node mapping, got: {type(value).__name__}")
 
-    def _load_agent_inputs(
+    def _load_resolved_nodes(self, data: Mapping[str, Any]) -> ResolvedNodeSet:
+        items: list[tuple[str, str, NodeDocument]] = []
+        nodes_value = data.get("nodes")
+        if isinstance(nodes_value, list):
+            for raw_item in nodes_value:
+                item = _mapping(raw_item, "node list item")
+                role = str(item.get("role") or "").strip()
+                ref = str(item.get("ref") or item.get("path") or "").strip()
+                if not role or not ref:
+                    raise ValueError("node list items require role and ref")
+                node = self._load_optional_node(item.get("node") or ref)
+                if node is None:
+                    raise ValueError("node list item resolved to empty node")
+                items.append((role, ref, node))
+        else:
+            nodes = _mapping(nodes_value or {}, "compose request nodes")
+            for role in ("character", "action", "background"):
+                value = nodes.get(role) or data.get(role)
+                for ref, node in self._load_node_values(value):
+                    items.append((role, ref, node))
+
+        role_counts: dict[str, int] = {}
+        resolved: list[ResolvedNode] = []
+        for role, ref, node in items:
+            index = role_counts.get(role, 0)
+            role_counts[role] = index + 1
+            resolved.append(ResolvedNode(role=role, ref=ref, index=index, node=node))
+        return ResolvedNodeSet(resolved)
+
+    def _load_node_values(self, value: Any) -> list[tuple[str, NodeDocument]]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            items: list[tuple[str, NodeDocument]] = []
+            for item in value:
+                items.extend(self._load_node_values(item))
+            return items
+        if isinstance(value, Mapping) and ("ref" in value or "path" in value or "node" in value):
+            ref = str(value.get("ref") or value.get("path") or "").strip()
+            node = self._load_optional_node(value.get("node") or ref or value)
+            if node is None:
+                return []
+            return [(ref or node.source_ref(), node)]
+        node = self._load_optional_node(value)
+        if node is None:
+            return []
+        return [(str(value), node)]
+
+    def _load_agent_resolved_inputs(
         self,
         data: Mapping[str, Any],
-    ) -> tuple[NodeDocument | None, NodeDocument | None, NodeDocument | None, str | None]:
-        nodes = _mapping(data.get("nodes") or {}, "agent request nodes")
-        character = self._load_optional_node(nodes.get("character") or data.get("character"))
-        action = self._load_optional_node(nodes.get("action") or data.get("action"))
-        background = self._load_optional_node(nodes.get("background") or data.get("background"))
-        if character is None and action is None and background is None:
-            raise ValueError("agent request must provide at least one node")
+    ) -> tuple[ResolvedNodeSet, str | None]:
+        resolved_nodes = self._load_resolved_nodes(data)
+        if not [item for item in resolved_nodes if item.role not in {"artist", "style"}]:
+            raise ValueError("agent request must provide at least one non-style node")
 
         style_node = self._load_optional_node(data.get("style") or data.get("style_node"))
         style_ref = _optional_string(data.get("style_ref")) or (style_node.id if style_node else None)
-        return character, action, background, style_ref
+        return resolved_nodes, style_ref
+
+    def _copy_render_context_nodes(
+        self,
+        compose_request: Mapping[str, Any],
+        render_request: dict[str, Any],
+    ) -> None:
+        if "nodes" not in render_request and "nodes" in compose_request:
+            render_request["nodes"] = compose_request["nodes"]
+        for key in ("character", "action", "background"):
+            if key not in render_request and key in compose_request:
+                render_request[key] = compose_request[key]
 
 
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:

@@ -136,6 +136,8 @@ agent 缓存目录推荐使用 `cache.cache_dir`；同时兼容顶层 `cache_dir
 }
 ```
 
+完整 prompt 模式可以同时携带 `nodes`。此时 `prompt` 仍视为已经拼好的完整角色 + 动作提示词；`nodes` 不参与 compose 层拼接，只会传递给 render 层作为业务上下文。例如 NovelAI V4+ `character_prompts.auto` 会从 character 节点取得候选 tags，再和 base prompt 精确匹配，把命中的角色 tags 移入角色 caption。
+
 如果请求包含 `"composer": "agent"`、`agent` 或 `agent_result`，`api-compose` 会走 agent composer 路径，效果等价于 `api-compose-agent`。
 
 CLI 的 `run-prompt --composer agent` 是 agent prompt 进入真实 NovelAI 生图的业务入口；JSON API 中对应的无联网状态入口仍是 `api-resolve-compose-render-plan`。二者必须共用同一套 `AgentComposer` cache key 语义：节点内容、style_ref、agent instructions、agent_model、解析后的 character_scope、extra_prompt 等显式任务输入进入 cache key；agent 输出的完整 prompt 不进入 cache key。CLI 中带完整 prompt 回填 cache 时，随 prompt 传入的 negative 也作为 agent 输出保存，而不是作为下一次读取缓存必须重复输入的 task negative。
@@ -392,6 +394,8 @@ compose.prompt 已经包含完整角色 + 动作
 ```
 
 适合人工或外部 agent 已经产出完整 prompt 的场景。这个入口不会读取 character/action 节点，也不会按 `character_scope` 做二次裁剪。
+
+如果 `compose.prompt` 与 `compose.nodes` 同时存在，节点会透传到 `render` 段作为 renderer context。它的主要用途是让 NovelAI renderer 在不重组完整 prompt 的前提下启用 `character_prompts.auto`，并在 `RenderRequest.meta.node_refs` / `character_materials` 中保留追踪信息。Renderer 不执行 `character_scope` 过滤；局部镜头的角色词裁剪应由 AgentComposer 在生成完整 prompt 时完成。
 
 ## 示例请求文件
 

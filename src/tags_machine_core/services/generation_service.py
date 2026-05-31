@@ -12,8 +12,9 @@ from tags_machine_core.composers import (
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import PromptBundle, RenderRequest
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.resolved import ResolvedNodeSet
+from tags_machine_core.nodes.novelai_style import NovelAIStyle
 from tags_machine_core.renderers import ComfyUIRenderAdapter, NovelAIRenderAdapter, SDRenderAdapter
-from tags_machine_core.renderers.novelai_style import NovelAIStyle
 
 
 class GenerationService:
@@ -66,6 +67,25 @@ class GenerationService:
             body_scope=body_scope,
         )
 
+    def compose_resolved_nodes(
+        self,
+        resolved_nodes: ResolvedNodeSet,
+        *,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        body_scope: str | None = None,
+    ) -> PromptBundle:
+        return self.composer.compose_resolved_nodes(
+            resolved_nodes,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            character_scope=character_scope,
+            body_scope=body_scope,
+        )
+
     def build_agent_composition_task(
         self,
         *,
@@ -83,6 +103,27 @@ class GenerationService:
             character=character,
             action=action,
             background=background,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            character_scope=character_scope,
+            instructions=instructions,
+            agent_model=agent_model,
+        )
+
+    def build_agent_composition_task_resolved_nodes(
+        self,
+        resolved_nodes: ResolvedNodeSet,
+        *,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        instructions: list[str] | None = None,
+        agent_model: str | None = None,
+    ) -> AgentCompositionTask:
+        return self.agent_composer.build_task_resolved_nodes(
+            resolved_nodes,
             extra_prompt=extra_prompt,
             negative=negative,
             style_ref=style_ref,
@@ -120,11 +161,37 @@ class GenerationService:
             cache=cache,
         )
 
+    def compose_resolved_nodes_with_agent(
+        self,
+        resolved_nodes: ResolvedNodeSet,
+        *,
+        extra_prompt: str = "",
+        negative: str = "",
+        style_ref: str | None = None,
+        character_scope: str | None = None,
+        instructions: list[str] | None = None,
+        agent_model: str | None = None,
+        result: AgentCompositionResult | dict[str, Any] | None = None,
+        cache: PromptCache | None = None,
+    ) -> PromptBundle:
+        return self.agent_composer.compose_resolved_nodes(
+            resolved_nodes,
+            extra_prompt=extra_prompt,
+            negative=negative,
+            style_ref=style_ref,
+            character_scope=character_scope,
+            instructions=instructions,
+            agent_model=agent_model,
+            result=result,
+            cache=cache,
+        )
+
     def build_novelai_request(
         self,
         bundle: PromptBundle,
         seed: int | None = None,
         style: NovelAIStyle | NodeDocument | dict[str, Any] | None = None,
+        resolved_nodes: ResolvedNodeSet | None = None,
         width: int = 1024,
         height: int = 1024,
         model: str = "nai-diffusion-4-5-full",
@@ -140,6 +207,7 @@ class GenerationService:
             action=action,
             params=params,
             style=style,
+            resolved_nodes=resolved_nodes,
         )
 
     def build_render_request(
@@ -149,6 +217,7 @@ class GenerationService:
         backend: str = "novelai",
         seed: int | None = None,
         style: NovelAIStyle | NodeDocument | dict[str, Any] | None = None,
+        resolved_nodes: ResolvedNodeSet | None = None,
         width: int = 1024,
         height: int = 1024,
         model: str | None = None,
@@ -169,6 +238,7 @@ class GenerationService:
                 action=action,
                 params=params,
                 style=style,
+                resolved_nodes=resolved_nodes,
             )
         if backend == "comfyui":
             return self.comfyui_adapter.build_request(

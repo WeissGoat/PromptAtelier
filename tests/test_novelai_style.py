@@ -9,6 +9,37 @@ from tags_machine_core.renderers import NovelAIRenderAdapter, NovelAIStyleReposi
 
 
 class NovelAIStyleTest(unittest.TestCase):
+    def test_legacy_style_repository_can_load_node_document(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            style_dir = design_root / "\u753b\u98ce" / "sample_style"
+            style_dir.mkdir(parents=True)
+            (style_dir / "tags.txt").write_text(
+                """
+style prefix,
+style suffix, best quality
+=
+origin_uc, lowres, bad anatomy
+after_uc, extra fingers
+gen_json, {"model": "nai-diffusion-4-5-full", "sampler": "k_euler_ancestral", "reference_image_multiple": ["abc"]}
+not_quality_prompts
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = NovelAIStyleRepository(design_root).load_node("sample_style")
+
+            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.id, "sample_style")
+            novelai = node.renderers["novelai"]
+            self.assertTrue(novelai["legacy_compat"])
+            self.assertFalse(novelai["include_common_tags"])
+            self.assertEqual(novelai["prompt_prefix"], ["style prefix"])
+            self.assertEqual(novelai["prompt_suffix"], ["style suffix, best quality"])
+            self.assertEqual(novelai["negative_prompt"], ["lowres, bad anatomy"])
+            self.assertEqual(novelai["after_negative_prompt"], ["extra fingers"])
+            self.assertEqual(novelai["params"]["reference_image_multiple"], ["abc"])
+
     def test_novelai_adapter_builds_complete_v45_default_params(self):
         bundle = ScriptComposer().compose_full_prompt(
             prompt="akemi homura, foot focus",

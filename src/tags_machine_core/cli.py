@@ -19,7 +19,11 @@ from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import (
+    NodeInput,
     NodeReader,
+    NovelAIStyleRepository,
+    ResolvedNode,
+    ResolvedNodeSet,
     apply_legacy_tags_migration,
     audit_legacy_tags,
     migrate_legacy_action_tags,
@@ -29,7 +33,6 @@ from tags_machine_core.nodes import (
     plan_legacy_tags_migration,
     validate_node_tree,
 )
-from tags_machine_core.renderers import NovelAIStyleRepository
 from tags_machine_core.services import GenerationJsonApi, GenerationService
 from tags_machine_core.verification import (
     archive_acceptance_case,
@@ -74,11 +77,9 @@ def cmd_compose_nodes(args) -> int:
 
 def cmd_agent_task_nodes(args) -> int:
     service = GenerationService()
-    character, action, background = _read_node_inputs(args)
-    task = service.build_agent_composition_task(
-        character=character,
-        action=action,
-        background=background,
+    resolved_nodes = _read_resolved_nodes(args)
+    task = service.build_agent_composition_task_resolved_nodes(
+        resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         style_ref=args.style_ref,
@@ -92,13 +93,11 @@ def cmd_agent_task_nodes(args) -> int:
 
 def cmd_compose_agent_nodes(args) -> int:
     service = GenerationService()
-    character, action, background = _read_node_inputs(args)
+    resolved_nodes = _read_resolved_nodes(args)
     cache = PromptCache(args.cache_dir) if args.cache_dir else None
     result = load_agent_result(args.agent_result) if args.agent_result else None
-    bundle = service.compose_nodes_with_agent(
-        character=character,
-        action=action,
-        background=background,
+    bundle = service.compose_resolved_nodes_with_agent(
+        resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         style_ref=args.style_ref,
@@ -134,12 +133,20 @@ def cmd_render_plan(args) -> int:
 def cmd_render_plan_nodes(args) -> int:
     service = GenerationService()
     style_ref, style = _load_render_style(args)
-    bundle = _build_bundle_from_nodes(service, args, style_ref=style_ref)
+    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style, include_style=False)
+    bundle = service.compose_resolved_nodes(
+        resolved_nodes,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        style_ref=style_ref,
+        character_scope=args.character_scope or args.body_scope,
+    )
     request = service.build_render_request(
         bundle,
         backend=args.backend,
         seed=args.seed,
         style=style,
+        resolved_nodes=resolved_nodes,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -216,7 +223,7 @@ def cmd_generate(args) -> int:
     style = None
     style_ref = args.style_ref or config.defaults.style_ref
     if style_ref:
-        style = NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+        style = NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
     bundle = _build_bundle(service, args, style_ref=style_ref)
     request = service.build_novelai_request(
         bundle,
@@ -258,7 +265,7 @@ def cmd_execute_render_request(args) -> int:
 
 def cmd_inspect_style(args) -> int:
     config = load_config(Path(args.config))
-    style = NovelAIStyleRepository(config.legacy.design_root).load(args.style_ref)
+    style = NovelAIStyleRepository(config.legacy.design_root).load_node(args.style_ref)
     print_json(style, full=args.full)
     return 0
 
@@ -373,11 +380,19 @@ def cmd_archive_acceptance_case(args) -> int:
 def cmd_archive_novelai_acceptance_nodes(args) -> int:
     service = GenerationService()
     style_ref, style = _load_novelai_style_for_nodes(args)
-    bundle = _build_bundle_from_nodes(service, args, style_ref=style_ref)
+    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style, include_style=False)
+    bundle = service.compose_resolved_nodes(
+        resolved_nodes,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        style_ref=style_ref,
+        character_scope=args.character_scope or args.body_scope,
+    )
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
         style=style,
+        resolved_nodes=resolved_nodes,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -727,6 +742,16 @@ def _build_bundle_from_nodes(
     *,
     style_ref: str | None = None,
 ):
+    resolved_nodes = _read_resolved_nodes(args)
+    if resolved_nodes:
+        return service.compose_resolved_nodes(
+            resolved_nodes,
+            extra_prompt=args.extra_prompt or "",
+            negative=args.negative or "",
+            style_ref=style_ref if style_ref is not None else args.style_ref,
+            character_scope=args.character_scope,
+            body_scope=args.body_scope,
+        )
     character, action, background = _read_node_inputs(args)
     return service.compose_nodes(
         character=character,
@@ -747,6 +772,7 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
     if not prompt:
         raise ValueError("run-prompt requires --prompt or --prompt-file unless --composer agent is used")
     style_ref, style = _load_novelai_style_for_prompt(args)
+    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style)
     bundle = service.compose_full_prompt(
         prompt=prompt,
         negative=args.negative or "",
@@ -762,13 +788,14 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
         height=args.height,
         model=args.model,
         params=params,
+        resolved_nodes=resolved_nodes,
     )
     return bundle, request
 
 
 def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
     style_ref, style = _load_novelai_style_for_prompt(args)
-    character, action, background = _read_node_inputs(args)
+    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style)
     cache = PromptCache(args.cache_dir) if args.cache_dir else None
     result = load_agent_result(args.agent_result) if args.agent_result else None
     prompt = _read_prompt_value(args)
@@ -780,10 +807,8 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
             "character_scope": args.character_scope or args.body_scope,
         }
         task_negative = ""
-    bundle = service.compose_nodes_with_agent(
-        character=character,
-        action=action,
-        background=background,
+    bundle = service.compose_resolved_nodes_with_agent(
+        resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=task_negative,
         style_ref=style_ref,
@@ -803,17 +828,16 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
         height=args.height,
         model=args.model,
         params=params,
+        resolved_nodes=resolved_nodes,
     )
     return bundle, request
 
 
 def _build_novelai_action_artifacts(service: GenerationService, args):
     style_ref, style = _load_novelai_style_for_nodes(args)
-    character, action, background = _read_node_inputs(args)
-    bundle = service.compose_nodes(
-        character=character,
-        action=action,
-        background=background,
+    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style)
+    bundle = service.compose_resolved_nodes(
+        resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         style_ref=style_ref,
@@ -829,6 +853,7 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
         height=args.height,
         model=args.model,
         params=params,
+        resolved_nodes=resolved_nodes,
     )
     return bundle, request
 
@@ -839,6 +864,41 @@ def _read_node_inputs(args):
     action = reader.read(args.action) if args.action else None
     background = reader.read(args.background) if args.background else None
     return character, action, background
+
+
+def _read_resolved_nodes(
+    args,
+    *,
+    style_ref: str | None = None,
+    style=None,
+    include_style: bool = True,
+) -> ResolvedNodeSet:
+    reader = NodeReader()
+    items: list[tuple[str, str, object]] = []
+    if include_style and style is not None and style_ref:
+        items.append(("artist", style_ref, style))
+    elif include_style and getattr(args, "style_node", None):
+        node = reader.read(args.style_node)
+        items.append(("artist", style_ref or node.id, node))
+    for role, attr in (
+        ("character", "character"),
+        ("action", "action"),
+        ("background", "background"),
+    ):
+        value = getattr(args, attr, None)
+        if value:
+            items.append((role, str(value), reader.read(value)))
+    for value in getattr(args, "node", None) or []:
+        node_input = NodeInput.parse(value)
+        items.append((node_input.role, node_input.ref, reader.read(node_input.ref)))
+
+    role_counts: dict[str, int] = {}
+    resolved: list[ResolvedNode] = []
+    for role, ref, node in items:
+        index = role_counts.get(role, 0)
+        role_counts[role] = index + 1
+        resolved.append(ResolvedNode(role=role, ref=ref, index=index, node=node))
+    return ResolvedNodeSet(resolved)
 
 
 def _load_render_style(args):
@@ -852,7 +912,7 @@ def _load_render_style(args):
         if args.backend == "novelai":
             style_ref = style_ref or config.defaults.style_ref
             if style_ref:
-                return style_ref, NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+                return style_ref, NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
     return style_ref, None
 
 
@@ -866,7 +926,7 @@ def _load_novelai_style_for_nodes(args):
         config = load_config(Path(args.config))
         style_ref = style_ref or config.defaults.style_ref
         if style_ref:
-            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
     return style_ref, None
 
 
@@ -880,7 +940,7 @@ def _load_novelai_style_for_prompt(args):
         config = load_config(Path(args.config))
         style_ref = style_ref or config.defaults.style_ref
         if style_ref:
-            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load(style_ref)
+            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
     return style_ref, None
 
 
@@ -1761,6 +1821,12 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--character", help="Path to a character node")
     parser.add_argument("--action", help="Path to an action node")
     parser.add_argument("--background", help="Path to a background node")
+    parser.add_argument(
+        "--node",
+        action="append",
+        default=[],
+        help="Generic node input as role:path; can be repeated",
+    )
     parser.add_argument("--extra-prompt", help="Additional positive prompt text")
     parser.add_argument("--negative")
     parser.add_argument("--style-ref")
@@ -1809,6 +1875,12 @@ def _add_prompt_run_arguments(
         )
         parser.add_argument("--agent-result", help="Path to agent result JSON")
         parser.add_argument("--cache-dir", help="PromptBundle cache directory")
+    parser.add_argument(
+        "--node",
+        action="append",
+        default=[],
+        help="Generic node input as role:path; can be repeated",
+    )
     parser.add_argument("--negative")
     parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
     parser.add_argument("--artist", help="Compatibility alias for --style-ref")

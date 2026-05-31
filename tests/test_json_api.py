@@ -195,6 +195,128 @@ class JsonApiTest(unittest.TestCase):
             self.assertIn("style suffix", request["prompt"])
             self.assertIn("bad anatomy", request["negative_prompt"])
 
+    def test_compose_render_plan_json_api_supports_node_list_character_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, _ = _write_sample_nodes(root)
+            second = root / "second_character"
+            second.mkdir()
+            (second / "meta.yaml").write_text(
+                """
+schema: tags-machine.character/v1
+kind: character
+id: madoka
+tags:
+  character:
+    - kaname madoka
+  hair:
+    - pink hair
+""".strip(),
+                encoding="utf-8",
+            )
+
+            result = GenerationJsonApi().compose_render_plan(
+                {
+                    "compose": {
+                        "nodes": [
+                            {"role": "character", "ref": str(character)},
+                            {"role": "character", "ref": str(second)},
+                            {"role": "action", "ref": str(action)},
+                        ],
+                    },
+                    "render": {
+                        "backend": "novelai",
+                        "model": "nai-diffusion-4-5-full",
+                        "params": {"character_prompts": {"mode": "auto"}},
+                    },
+                }
+            )
+
+            caption = result["render_request"]["params"]["v4_prompt"]["caption"]
+            self.assertEqual(len(caption["char_captions"]), 2)
+            self.assertIn("akemi homura", caption["char_captions"][0]["char_caption"])
+            self.assertIn("kaname madoka", caption["char_captions"][1]["char_caption"])
+            self.assertNotIn("akemi homura", caption["base_caption"])
+
+    def test_compose_render_plan_full_prompt_uses_nodes_only_as_render_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            prompt = "akemi homura, bare soles, foot focus, soles close-up"
+
+            result = GenerationJsonApi().compose_render_plan(
+                {
+                    "compose": {
+                        "prompt": prompt,
+                        "nodes": {
+                            "character": str(character),
+                            "action": str(action),
+                        },
+                        "style": str(style),
+                    },
+                    "render": {
+                        "backend": "novelai",
+                        "style": str(style),
+                        "model": "nai-diffusion-4-5-full",
+                        "params": {"character_prompts": {"mode": "auto"}},
+                    },
+                }
+            )
+
+            bundle = result["prompt_bundle"]
+            request = result["render_request"]
+            caption = request["params"]["v4_prompt"]["caption"]
+            char_caption = caption["char_captions"][0]["char_caption"]
+            self.assertEqual(bundle["prompt"]["positive"], prompt)
+            self.assertIsNone(bundle["meta"]["character_ref"])
+            self.assertIsNone(bundle["meta"]["action_ref"])
+            self.assertEqual(
+                bundle["meta"]["composition"]["included_character_sections"],
+                [],
+            )
+            self.assertNotIn("purple eyes", char_caption)
+            self.assertIn("akemi homura", char_caption)
+            self.assertIn("bare soles", char_caption)
+            self.assertIn("foot focus", caption["base_caption"])
+            self.assertNotIn("akemi homura", caption["base_caption"])
+            self.assertEqual(request["meta"]["node_refs"][0]["id"], "homura")
+            self.assertEqual(
+                request["meta"]["character_materials"][0]["used_sections"],
+                ["character", "eyes", "upper_clothes", "feet"],
+            )
+
+    def test_compose_json_api_supports_node_mapping_lists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, _ = _write_sample_nodes(root)
+            second = root / "second_character"
+            second.mkdir()
+            (second / "meta.yaml").write_text(
+                """
+schema: tags-machine.character/v1
+kind: character
+id: madoka
+tags:
+  character:
+    - kaname madoka
+""".strip(),
+                encoding="utf-8",
+            )
+
+            bundle = GenerationJsonApi().compose(
+                {
+                    "nodes": {
+                        "character": [str(character), {"ref": str(second)}],
+                        "action": str(action),
+                    }
+                }
+            )
+
+            self.assertIsNone(bundle["meta"]["character_ref"])
+            self.assertEqual(bundle["meta"]["extra"]["node_refs"][0]["id"], "homura")
+            self.assertEqual(bundle["meta"]["extra"]["node_refs"][1]["id"], "madoka")
+            self.assertIn("kaname madoka", bundle["prompt"]["positive"])
+
     def test_render_plan_json_api_accepts_existing_prompt_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

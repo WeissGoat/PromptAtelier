@@ -56,6 +56,7 @@ class NovelAIClientTest(unittest.TestCase):
             meta={"action": "generate"},
             params={
                 "reference_image_multiple": ["x" * 100],
+                "director_reference_images": ["director-x"],
                 "seed": 123,
             },
         )
@@ -64,6 +65,7 @@ class NovelAIClientTest(unittest.TestCase):
         self.assertEqual(payload["input"], "girl, standing")
         self.assertEqual(payload["model"], "nai-diffusion-4-5-full")
         self.assertEqual(payload["action"], "generate")
+        self.assertEqual(payload["parameters"]["director_reference_images"], ["director-x"])
 
         images = client.generate_images(request)
         self.assertEqual([image.filename for image in images], ["image_1.png", "image_2.png"])

@@ -2,9 +2,55 @@ import unittest
 
 from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 
 
 class ScriptComposerTest(unittest.TestCase):
+    def test_compose_resolved_nodes_supports_multiple_characters(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi homura"],
+                "hair": ["black hair"],
+                "feet": ["bare feet"],
+            },
+        )
+        madoka = NodeDocument(
+            kind="character",
+            id="madoka",
+            tags={
+                "character": ["kaname madoka"],
+                "hair": ["pink hair"],
+                "feet": ["bare feet"],
+            },
+        )
+        action = NodeDocument(
+            kind="action",
+            id="two_girls",
+            tags={"action": ["2girls, standing side by side"]},
+        )
+        nodes = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="character", ref="madoka", index=1, node=madoka),
+                ResolvedNode(role="action", ref="two_girls", index=0, node=action),
+            ]
+        )
+
+        bundle = ScriptComposer().compose_resolved_nodes(nodes, style_ref="20260412_2")
+
+        self.assertIn("akemi homura", bundle.prompt.positive)
+        self.assertIn("kaname madoka", bundle.prompt.positive)
+        self.assertIn("2girls, standing side by side", bundle.prompt.positive)
+        materials = bundle.meta.extra["character_materials"]
+        self.assertEqual([item["ref"] for item in materials], ["homura", "madoka"])
+        self.assertEqual(
+            materials[0]["positive_tags"],
+            ["akemi homura", "black hair", "bare feet"],
+        )
+        self.assertEqual(bundle.meta.extra["node_refs"][1]["ref"], "madoka")
+
     def test_compose_nodes_filters_character_sections_by_action_scope(self):
         character = NodeDocument.model_validate(
             {
