@@ -291,7 +291,13 @@ class NovelAIRenderAdapter:
         if not isinstance(config, dict) or config.get("mode") != "auto":
             return positive, negative, [], [], None
         if not self._supports_character_prompts(model):
-            raise ValueError("NovelAI character_prompts mode=auto requires a V4+ model")
+            return (
+                positive,
+                negative,
+                [],
+                [],
+                {"mode": "auto", "status": "unsupported_model"},
+            )
         materials = self._character_prompt_materials(bundle, resolved_nodes)
         if not materials:
             return (
