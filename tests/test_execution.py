@@ -17,6 +17,7 @@ from tags_machine_core.execution import (
     execute_sd_generation,
     save_generated_images,
 )
+from tags_machine_core.verification import read_png_text_chunks
 
 
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -129,6 +130,52 @@ class ExecutionTest(unittest.TestCase):
             self.assertEqual(info["images"][0]["parameters"]["seed"], 123)
             self.assertEqual(info["images"][0]["png_text"]["Source"], "NovelAI V4.5")
             self.assertIn("Not a PNG file", info["images"][1]["error"])
+
+    def test_save_generated_images_writes_core_png_text_without_touching_comment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image_bytes = _png_bytes_with_text(
+                {
+                    "Comment": json.dumps({"prompt": "akemi homura", "seed": 123}),
+                    "Source": "NovelAI V4.5",
+                }
+            )
+            request = RenderRequest(
+                backend="novelai",
+                prompt="akemi homura",
+                model="nai-diffusion-4-5-full",
+                seed=123,
+                artist_payload={"path": "design/画风/20260412"},
+                meta={
+                    "mode": "run-prompt",
+                    "composer_type": "agent",
+                    "composer_version": "v1",
+                    "prompt_cache_key": "sha256:abc",
+                    "node_refs": [
+                        {"role": "character", "id": "homura", "ref": "design/角色/homura"},
+                        {"role": "artist", "id": "20260412", "ref": "20260412"},
+                    ],
+                    "character_prompts": {"mode": "auto", "count": 1},
+                },
+            )
+
+            images = save_generated_images(
+                [SimpleNamespace(filename="nai.png", content=image_bytes)],
+                output_dir=root,
+                request=request,
+                default_format="png",
+            )
+            chunks = read_png_text_chunks(images[0].path)
+            core_info = json.loads(chunks["tags_machine_core"])
+
+            self.assertEqual(json.loads(chunks["Comment"])["seed"], 123)
+            self.assertEqual(chunks["mode"], "run-prompt")
+            self.assertEqual(chunks["artist"], "20260412")
+            self.assertEqual(chunks["artist_path"], "design/画风/20260412")
+            self.assertEqual(chunks["character"], "design/角色/homura")
+            self.assertEqual(core_info["schema"], "tags-machine-core.png-info/v1")
+            self.assertEqual(core_info["nodes"][1]["role"], "artist")
+            self.assertEqual(core_info["character_prompts"]["mode"], "auto")
 
     def test_execute_novelai_generation_uses_config_and_records_request_body(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -344,9 +391,10 @@ class ExecutionTest(unittest.TestCase):
             self.assertEqual(result.png_info["comfyui"]["history"], history)
             self.assertEqual(len(result.images), 1)
             self.assertEqual(result.images[0].path.parent, output_dir)
-            self.assertEqual(result.images[0].path.read_bytes(), image_bytes)
             self.assertEqual(result.images[0].meta["node_id"], "7")
             self.assertEqual(result.png_info["images"][0]["parameters"]["seed"], 222)
+            self.assertEqual(result.png_info["images"][0]["png_text"]["Source"], "ComfyUI")
+            self.assertIn("tags_machine_core", result.png_info["images"][0]["png_text"])
 
     def test_execute_sd_generation_saves_images_and_request_body(self):
         with tempfile.TemporaryDirectory() as tmp:

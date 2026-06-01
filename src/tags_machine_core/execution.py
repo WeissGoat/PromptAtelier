@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+import struct
 from typing import Any
 from uuid import uuid4
+import zlib
 
 from tags_machine_core.backends import ensure_backend_can_execute
 from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.verification import read_image_parameters
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+CORE_PNG_INFO_KEY = "tags_machine_core"
 
 
 def save_generated_images(
@@ -21,12 +28,15 @@ def save_generated_images(
 ) -> list[GeneratedImage]:
     output_dir.mkdir(parents=True, exist_ok=True)
     batch_id = uuid4().hex[:8]
+    png_text = build_core_png_text(request)
     generated_images: list[GeneratedImage] = []
     for index, image in enumerate(images, start=1):
         suffix = Path(image.filename).suffix or f".{default_format}"
         filename = f"{batch_id}_{request.seed or 0}_{index:02d}{suffix}"
         path = output_dir / filename
         path.write_bytes(image.content)
+        if path.suffix.lower() == ".png":
+            write_png_text_chunks(path, png_text)
         meta = {"source_filename": image.filename, "index": index}
         for attr in ("subfolder", "image_type", "node_id"):
             value = getattr(image, attr, None)
@@ -40,6 +50,45 @@ def save_generated_images(
             )
         )
     return generated_images
+
+
+def build_core_png_text(request: RenderRequest) -> dict[str, str]:
+    core_info = {
+        "schema": "tags-machine-core.png-info/v1",
+        "mode": request.meta.get("mode"),
+        "backend": request.backend,
+        "model": request.model,
+        "composer_type": request.meta.get("composer_type"),
+        "composer_version": request.meta.get("composer_version"),
+        "prompt_cache_key": request.meta.get("prompt_cache_key"),
+        "nodes": request.meta.get("node_refs") or [],
+        "source_nodes": request.meta.get("source_nodes") or [],
+        "character_prompts": request.meta.get("character_prompts"),
+    }
+    result = {
+        CORE_PNG_INFO_KEY: json.dumps(_drop_none(core_info), ensure_ascii=False),
+    }
+    result.update(_legacy_png_text(request))
+    return result
+
+
+def write_png_text_chunks(path: Path, text_chunks: dict[str, str]) -> None:
+    if not text_chunks:
+        return
+    data = path.read_bytes()
+    if not data.startswith(PNG_SIGNATURE):
+        return
+    insert_at = _png_iend_offset(data)
+    if insert_at is None:
+        return
+    encoded = b"".join(
+        _png_text_chunk(key, value)
+        for key, value in text_chunks.items()
+        if key and value is not None
+    )
+    if not encoded:
+        return
+    path.write_bytes(data[:insert_at] + encoded + data[insert_at:])
 
 
 def collect_png_info(images: list[GeneratedImage]) -> dict[str, Any]:
@@ -56,6 +105,81 @@ def collect_png_info(images: list[GeneratedImage]) -> dict[str, Any]:
             record["error"] = str(exc)
         records.append(record)
     return {"images": records}
+
+
+def _legacy_png_text(request: RenderRequest) -> dict[str, str]:
+    result: dict[str, str] = {}
+    mode = request.meta.get("mode")
+    if isinstance(mode, str) and mode:
+        result["mode"] = mode
+
+    artist_ref = _first_node_ref(request, "artist")
+    if artist_ref:
+        result["artist"] = artist_ref
+
+    artist_path = request.artist_payload.get("path")
+    if isinstance(artist_path, str) and artist_path:
+        result["artist_path"] = artist_path
+
+    for role in ("character", "action", "background"):
+        refs = _node_refs(request, role)
+        if refs:
+            result[role] = json.dumps(refs, ensure_ascii=False) if len(refs) > 1 else refs[0]
+    return result
+
+
+def _node_refs(request: RenderRequest, role: str) -> list[str]:
+    refs = request.meta.get("node_refs")
+    if not isinstance(refs, list):
+        return []
+    result: list[str] = []
+    for item in refs:
+        if not isinstance(item, dict) or item.get("role") != role:
+            continue
+        value = item.get("ref") or item.get("id")
+        if value:
+            result.append(str(value))
+    return result
+
+
+def _first_node_ref(request: RenderRequest, role: str) -> str | None:
+    refs = _node_refs(request, role)
+    return refs[0] if refs else None
+
+
+def _drop_none(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _drop_none(item)
+            for key, item in value.items()
+            if item is not None and item != [] and item != {}
+        }
+    if isinstance(value, list):
+        return [_drop_none(item) for item in value]
+    return value
+
+
+def _png_iend_offset(data: bytes) -> int | None:
+    offset = len(PNG_SIGNATURE)
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        chunk_type = data[offset + 4 : offset + 8]
+        next_offset = offset + 12 + length
+        if chunk_type == b"IEND":
+            return offset
+        offset = next_offset
+    return None
+
+
+def _png_text_chunk(key: str, value: str) -> bytes:
+    raw = key.encode("latin-1") + b"\x00" + str(value).encode("utf-8")
+    return _png_chunk(b"tEXt", raw)
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    checksum = zlib.crc32(chunk_type)
+    checksum = zlib.crc32(data, checksum) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", checksum)
 
 
 def execute_novelai_generation(
