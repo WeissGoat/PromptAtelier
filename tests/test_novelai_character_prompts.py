@@ -1,6 +1,7 @@
 import unittest
 
 from tags_machine_core.composers import ScriptComposer
+from tags_machine_core.clients import NovelAIClient
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 from tags_machine_core.renderers import NovelAIRenderAdapter
@@ -57,6 +58,31 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         )
         self.assertEqual(request.prompt, "2girls, standing side by side")
         self.assertEqual(request.meta["character_prompts"]["mode"], "auto")
+        self.assertEqual(
+            request.params["characterPrompts"],
+            [
+                {
+                    "prompt": "girl, akemi homura, black hair",
+                    "uc": "",
+                    "center": {"x": 0.5, "y": 0.5},
+                    "enabled": True,
+                },
+                {
+                    "prompt": "girl, kaname madoka, pink hair",
+                    "uc": "",
+                    "center": {"x": 0.5, "y": 0.5},
+                    "enabled": True,
+                },
+            ],
+        )
+        negative_caption = request.params["v4_negative_prompt"]["caption"]
+        self.assertEqual(
+            negative_caption["char_captions"],
+            [
+                {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]},
+                {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]},
+            ],
+        )
 
     def test_shared_character_tags_are_copied_to_each_matching_character_prompt(self):
         homura = NodeDocument(
@@ -97,6 +123,201 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         )
         self.assertEqual(caption["base_caption"], "2girls, standing side by side")
         self.assertNotIn("white dress", caption["base_caption"])
+
+    def test_male_prompt_adds_extra_boy_character_caption_by_default(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"], "hair": ["black hair"]},
+        )
+        madoka = NodeDocument(
+            kind="character",
+            id="madoka",
+            tags={"character": ["kaname madoka"], "hair": ["pink hair"]},
+        )
+        resolved = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="character", ref="madoka", index=1, node=madoka),
+            ]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt=(
+                "akemi homura, kaname madoka, black hair, pink hair, "
+                "2girls, 1boy, threesome"
+            ),
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        positive_caption = request.params["v4_prompt"]["caption"]
+        negative_caption = request.params["v4_negative_prompt"]["caption"]
+        self.assertEqual(
+            [item["char_caption"] for item in positive_caption["char_captions"]],
+            [
+                "girl, akemi homura, black hair",
+                "girl, kaname madoka, pink hair",
+                "boy, ",
+            ],
+        )
+        self.assertEqual(positive_caption["base_caption"], "2girls, 1boy, threesome")
+        self.assertEqual(len(negative_caption["char_captions"]), 3)
+        self.assertEqual(negative_caption["char_captions"][2]["char_caption"], "")
+        self.assertEqual(
+            request.params["characterPrompts"][2],
+            {
+                "prompt": "boy, ",
+                "uc": "",
+                "center": {"x": 0.5, "y": 0.5},
+                "enabled": True,
+            },
+        )
+        self.assertTrue(request.meta["character_prompts"]["male_caption_added"])
+
+    def test_male_caption_is_in_novelai_payload_parameters(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, 1boy, group scene",
+        )
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        payload = NovelAIClient(access_token="token", retry=1).build_payload(request)
+        parameters = payload["parameters"]
+
+        self.assertEqual(
+            parameters["v4_prompt"]["caption"]["char_captions"],
+            [
+                {
+                    "char_caption": "girl, akemi homura",
+                    "centers": [{"x": 0.5, "y": 0.5}],
+                },
+                {"char_caption": "boy, ", "centers": [{"x": 0.5, "y": 0.5}]},
+            ],
+        )
+        self.assertEqual(
+            parameters["v4_negative_prompt"]["caption"]["char_captions"],
+            [
+                {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]},
+                {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]},
+            ],
+        )
+        self.assertEqual(
+            parameters["characterPrompts"],
+            [
+                {
+                    "prompt": "girl, akemi homura",
+                    "uc": "",
+                    "center": {"x": 0.5, "y": 0.5},
+                    "enabled": True,
+                },
+                {
+                    "prompt": "boy, ",
+                    "uc": "",
+                    "center": {"x": 0.5, "y": 0.5},
+                    "enabled": True,
+                },
+            ],
+        )
+        self.assertNotIn("_character_prompt_meta", parameters)
+
+    def test_male_caption_can_be_disabled(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, 1boy, standing",
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto", "add_male_caption": False}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]],
+            ["girl, akemi homura"],
+        )
+        self.assertEqual(caption["base_caption"], "1boy, standing")
+        self.assertFalse(request.meta["character_prompts"]["male_caption_added"])
+
+    def test_penis_and_erection_do_not_add_male_caption_without_male_subject(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, penis, erection, interactive pose",
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]],
+            ["girl, akemi homura"],
+        )
+        self.assertEqual(caption["base_caption"], "penis, erection, interactive pose")
+        self.assertFalse(request.meta["character_prompts"]["male_caption_added"])
+
+    def test_existing_male_character_caption_is_not_duplicated(self):
+        male = NodeDocument(
+            kind="character",
+            id="male_extra",
+            tags={"character": ["boy"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="male_extra", index=0, node=male)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(prompt="boy, 1boy, standing")
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto", "default_caption_prefix": ""}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]],
+            ["boy"],
+        )
+        self.assertEqual(caption["base_caption"], "1boy, standing")
+        self.assertFalse(request.meta["character_prompts"]["male_caption_added"])
 
     def test_character_prompts_stay_disabled_without_explicit_mode(self):
         character = NodeDocument(
@@ -172,12 +393,13 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
             tags={"action": ["foot focus"]},
             character_scope="foot_detail",
         )
-        style = NodeDocument(
-            kind="style",
+        artist = NodeDocument(
+            kind="artist",
             id="legacy_artist",
             renderers={
                 "novelai": {
                     "legacy_compat": True,
+                    "model": "nai-diffusion-4-5-full",
                     "prompt_suffix": ["artist style"],
                 }
             },
@@ -190,12 +412,11 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         )
         bundle = ScriptComposer().compose_full_prompt(
             prompt="akemi homura, bare soles, foot focus",
-            style_ref="legacy_artist",
         )
 
         request = NovelAIRenderAdapter().build_request(
             bundle,
-            style=style,
+            artist=artist,
             model="nai-diffusion-4-5-full",
             params={"character_prompts": {"mode": "auto"}},
             resolved_nodes=resolved,

@@ -38,6 +38,7 @@ REQUEST_PARAMETER_KEYS = {
     "controlnet_condition",
     "controlnet_model",
     "controlnet_strength",
+    "characterPrompts",
     "deliberate_euler_ancestral_bug",
     "director_reference_images",
     "dynamic_thresholding",

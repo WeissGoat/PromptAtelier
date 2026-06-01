@@ -33,6 +33,7 @@ LEGACY_DEFAULT_NEGATIVE_PROMPT = (
     "bad feet, extra toes,censored"
 )
 DEFAULT_CHARACTER_CENTERS = [{"x": 0.5, "y": 0.5}]
+MALE_CHARACTER_CAPTION = "boy, "
 
 
 def _join_prompt_parts(*parts: str | list[str] | None) -> str:
@@ -266,6 +267,11 @@ class NovelAIRenderAdapter:
                 },
             },
         }
+        if char_captions:
+            final_params["characterPrompts"] = _character_prompts_parameter(
+                char_captions,
+                negative_char_captions,
+            )
         if character_prompt_meta is not None:
             final_params["_character_prompt_meta"] = character_prompt_meta
         final_params.update(self._preserve_supported_extras(params))
@@ -327,6 +333,7 @@ class NovelAIRenderAdapter:
         matched_negative_tag_set: set[str] = set()
         default_caption_prefix = str(config.get("default_caption_prefix", "girl")).strip()
         max_characters = _bounded_int(config.get("max_characters"), default=6, minimum=1, maximum=6)
+        male_caption_added = False
 
         for material in materials[:max_characters]:
             candidate_positive_tags = [
@@ -364,14 +371,37 @@ class NovelAIRenderAdapter:
                         "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
                     }
                 )
-            if matched_negative_tags:
                 negative_char_captions.append(
                     {
-                        "char_caption": _join_prompt_parts(matched_negative_tags),
+                        "char_caption": (
+                            _join_prompt_parts(matched_negative_tags)
+                            if matched_negative_tags
+                            else ""
+                        ),
                         "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
                     }
                 )
 
+        if (
+            char_captions
+            and _enabled_config(config.get("add_male_caption"), default=True)
+            and _contains_male_character(base_tags)
+            and not _contains_male_character(
+                [caption.get("char_caption") for caption in char_captions]
+            )
+        ):
+            char_captions.append(
+                {
+                    "char_caption": MALE_CHARACTER_CAPTION,
+                    "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                }
+            )
+            male_caption_added = True
+
+        negative_char_captions = _pad_negative_character_captions(
+            negative_char_captions,
+            target_count=len(char_captions),
+        )
         base_tags = [tag for tag in base_tags if tag not in matched_positive_tag_set]
         negative_tags = [tag for tag in negative_tags if tag not in matched_negative_tag_set]
 
@@ -385,6 +415,7 @@ class NovelAIRenderAdapter:
                 "count": len(char_captions),
                 "removed_positive_tags": removed_positive_tags,
                 "removed_negative_tags": removed_negative_tags,
+                "male_caption_added": male_caption_added,
             },
         )
 
@@ -744,6 +775,7 @@ class NovelAIRenderAdapter:
             "extra_noise_seed",
             "v4_prompt",
             "v4_negative_prompt",
+            "characterPrompts",
             "deliberate_euler_ancestral_bug",
             "prefer_brownian",
             "prompt_mode",
@@ -759,6 +791,76 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _enabled_config(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _contains_male_character(values: list[Any] | tuple[Any, ...]) -> bool:
+    return any(_is_male_character_tag(str(value)) for value in values if value is not None)
+
+
+def _is_male_character_tag(value: str) -> bool:
+    text = _normalize_character_prompt_tag(value)
+    if not text:
+        return False
+    if re.fullmatch(r"\d+\s*boys?", text):
+        return True
+    if re.search(r"\b(boy|boys|male|males|man|men)\b", text):
+        return True
+    return False
+
+
+def _normalize_character_prompt_tag(value: str) -> str:
+    text = value.strip().lower()
+    text = re.sub(r"^[\[\]{}()]+|[\[\]{}()]+$", "", text)
+    text = text.replace("_", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", text).strip(" ,")
+
+
+def _pad_negative_character_captions(
+    captions: list[dict[str, Any]],
+    *,
+    target_count: int,
+) -> list[dict[str, Any]]:
+    result = list(captions)
+    while len(result) < target_count:
+        result.append(
+            {
+                "char_caption": "",
+                "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+            }
+        )
+    return result
+
+
+def _character_prompts_parameter(
+    char_captions: list[dict[str, Any]],
+    negative_char_captions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for index, caption in enumerate(char_captions):
+        negative_caption = (
+            negative_char_captions[index] if index < len(negative_char_captions) else {}
+        )
+        centers = caption.get("centers")
+        center = centers[0] if isinstance(centers, list) and centers else {"x": 0.5, "y": 0.5}
+        items.append(
+            {
+                "prompt": str(caption.get("char_caption") or ""),
+                "uc": str(negative_caption.get("char_caption") or ""),
+                "center": copy.deepcopy(center),
+                "enabled": True,
+            }
+        )
+    return items
 
 
 def _optional_text(value: Any) -> str | None:
