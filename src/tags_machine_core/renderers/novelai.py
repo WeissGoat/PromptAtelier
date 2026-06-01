@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import copy
 import random
+import re
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.nodes.novelai_style import NovelAIStyle
+from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
 from tags_machine_core.renderers.common import (
-    renderer_style_payload,
-    renderer_style_prompt_parts,
+    renderer_artist_payload,
+    renderer_artist_prompt_parts,
 )
 
 
-NovelAIStyleInput = NovelAIStyle | NodeDocument | dict[str, Any] | None
+NovelAIArtistInput = NovelAIArtist | NodeDocument | dict[str, Any] | None
 
 _SEED_RANDOM = random.SystemRandom()
 
@@ -67,8 +68,8 @@ def _legacy_prompt_tags(text: str) -> list[str]:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
-def _rejoin_prompt_tags(tags: list[str], *, legacy_style: bool) -> str:
-    if legacy_style:
+def _rejoin_prompt_tags(tags: list[str], *, legacy_artist: bool) -> str:
+    if legacy_artist:
         return _join_legacy_prompt_parts(tags)
     return _join_prompt_parts(tags)
 
@@ -87,20 +88,28 @@ class NovelAIRenderAdapter:
         model: str = "nai-diffusion-4-5-full",
         action: str = "generate",
         params: dict[str, Any] | None = None,
-        style: NovelAIStyleInput = None,
+        artist: NovelAIArtistInput = None,
         resolved_nodes: ResolvedNodeSet | None = None,
     ) -> RenderRequest:
-        style_payload = self._style_payload(style)
-        style_params = self._style_params(style, style_payload)
-        model = style_params.pop("model", style_payload.get("model", model))
+        artist = self._resolve_artist(artist, resolved_nodes)
+        artist_payload = self._artist_payload(artist)
+        artist_params = self._artist_params(artist, artist_payload)
+        render_params = {**artist_params, **(params or {})}
+        model = self._resolve_model(
+            default_model=model,
+            artist_payload=artist_payload,
+            artist_params=artist_params,
+            params=render_params,
+        )
+        render_params.pop("model", None)
         final_params = self._build_parameters(
             bundle=bundle,
-            style=style,
-            style_payload=style_payload,
+            artist=artist,
+            artist_payload=artist_payload,
             seed=seed,
             width=width,
             height=height,
-            params={**style_params, **(params or {})},
+            params=render_params,
             model=model,
             resolved_nodes=resolved_nodes,
         )
@@ -112,10 +121,6 @@ class NovelAIRenderAdapter:
 
         meta = {
             "action": action,
-            "character_ref": bundle.meta.character_ref,
-            "action_ref": bundle.meta.action_ref,
-            "background_ref": bundle.meta.background_ref,
-            "style_ref": bundle.meta.style_ref,
             "composer_type": bundle.meta.composer_type,
             "composer_version": bundle.meta.composer_version,
             "character_scope": bundle.meta.composition.character_scope,
@@ -135,15 +140,15 @@ class NovelAIRenderAdapter:
             seed=seed,
             size=RenderSize(width=width, height=height),
             params=final_params,
-            style_payload=style_payload,
+            artist_payload=artist_payload,
             meta=meta,
         )
 
     def _build_parameters(
         self,
         bundle: PromptBundle,
-        style: NovelAIStyleInput,
-        style_payload: dict[str, Any],
+        artist: NovelAIArtistInput,
+        artist_payload: dict[str, Any],
         seed: int | None,
         width: int,
         height: int,
@@ -151,9 +156,9 @@ class NovelAIRenderAdapter:
         model: str | None = None,
         resolved_nodes: ResolvedNodeSet | None = None,
     ) -> dict[str, Any]:
-        style_prompt = self._style_prompt_parts(style, style_payload)
+        artist_prompt = self._artist_prompt_parts(artist, artist_payload)
         prompt_mode = str(params.get("prompt_mode", "compose"))
-        legacy_style = isinstance(style, NovelAIStyle) or bool(style_payload.get("legacy_compat"))
+        legacy_artist = isinstance(artist, NovelAIArtist) or bool(artist_payload.get("legacy_compat"))
         if prompt_mode == "legacy-final":
             # 旧 run_action 对比时，PNG 里已经有最终 prompt；这里不能再叠加画风和质量词。
             positive = bundle.prompt.positive.strip()
@@ -162,35 +167,35 @@ class NovelAIRenderAdapter:
                 if bundle.prompt.negative
                 else self._legacy_negative_prompt(
                     bundle=bundle,
-                    style_prompt=style_prompt,
+                    artist_prompt=artist_prompt,
                 )
             )
-        elif legacy_style:
+        elif legacy_artist:
             positive = self._legacy_positive_prompt(
                 bundle=bundle,
-                style_payload=style_payload,
-                style_prompt=style_prompt,
+                artist_payload=artist_payload,
+                artist_prompt=artist_prompt,
             )
             negative = self._legacy_negative_prompt(
                 bundle=bundle,
-                style_prompt=style_prompt,
+                artist_prompt=artist_prompt,
             )
         else:
             positive = _join_prompt_parts(
-                style_prompt["prompt_prefix"],
+                artist_prompt["prompt_prefix"],
                 bundle.prompt.positive,
-                style_prompt["prompt_suffix"],
+                artist_prompt["prompt_suffix"],
             )
             negative = _join_prompt_parts(
                 bundle.prompt.negative,
-                style_prompt["negative_prompt"],
-                style_prompt["after_negative_prompt"],
+                artist_prompt["negative_prompt"],
+                artist_prompt["after_negative_prompt"],
             )
 
-        if legacy_style:
+        if legacy_artist:
             positive = self._legacy_runtime_clean_positive(
                 positive,
-                style_payload=style_payload,
+                artist_payload=artist_payload,
             )
             negative = self._legacy_runtime_clean_negative(negative)
 
@@ -207,10 +212,10 @@ class NovelAIRenderAdapter:
             model=model,
             params=params,
             resolved_nodes=resolved_nodes,
-            legacy_style=legacy_style,
+            legacy_artist=legacy_artist,
         )
 
-        sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_style else "k_euler")
+        sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_artist else "k_euler")
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
         if sampler == "ddim":
             sampler = "ddim_v3"
@@ -221,19 +226,19 @@ class NovelAIRenderAdapter:
             "params_version": 1,
             "width": width,
             "height": height,
-            "scale": params.get("scale", 6.0 if legacy_style else 5.0),
+            "scale": params.get("scale", 6.0 if legacy_artist else 5.0),
             "sampler": sampler,
             "steps": params.get("steps", 28),
             "seed": resolved_seed,
             "n_samples": params.get("n_samples", 1),
             "ucPreset": 3,
             "qualityToggle": False,
-            "sm": params.get("sm", True if legacy_style else False) and sampler != "ddim_v3",
+            "sm": params.get("sm", True if legacy_artist else False) and sampler != "ddim_v3",
             "sm_dyn": params.get("sm_dyn", False) and sampler != "ddim_v3",
             "dynamic_thresholding": params.get("dynamic_thresholding", False),
             "controlnet_strength": params.get("controlnet_strength", 1.0),
             "legacy": params.get("legacy", False),
-            "add_original_image": params.get("add_original_image", True if legacy_style else False),
+            "add_original_image": params.get("add_original_image", True if legacy_artist else False),
             "cfg_rescale": params.get("cfg_rescale", 0.0),
             "noise_schedule": scheduler,
             "legacy_v3_extend": params.get("legacy_v3_extend", False),
@@ -249,7 +254,7 @@ class NovelAIRenderAdapter:
             "extra_noise_seed": params.get("extra_noise_seed", resolved_seed),
             "v4_prompt": {
                 "use_coords": False,
-                "use_order": params.get("use_order", True if legacy_style else False),
+                "use_order": params.get("use_order", True if legacy_artist else False),
                 "caption": {"base_caption": positive, "char_captions": char_captions},
             },
             "v4_negative_prompt": {
@@ -283,7 +288,7 @@ class NovelAIRenderAdapter:
         model: str | None,
         params: dict[str, Any],
         resolved_nodes: ResolvedNodeSet | None,
-        legacy_style: bool,
+        legacy_artist: bool,
     ) -> tuple[
         str,
         str,
@@ -371,8 +376,8 @@ class NovelAIRenderAdapter:
         negative_tags = [tag for tag in negative_tags if tag not in matched_negative_tag_set]
 
         return (
-            _rejoin_prompt_tags(base_tags, legacy_style=legacy_style),
-            _rejoin_prompt_tags(negative_tags, legacy_style=legacy_style),
+            _rejoin_prompt_tags(base_tags, legacy_artist=legacy_artist),
+            _rejoin_prompt_tags(negative_tags, legacy_artist=legacy_artist),
             char_captions,
             negative_char_captions,
             {
@@ -411,17 +416,14 @@ class NovelAIRenderAdapter:
         resolved_nodes: ResolvedNodeSet | None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {}
-        if bundle.meta.source_nodes:
-            result["source_nodes"] = list(bundle.meta.source_nodes)
-        node_refs = bundle.meta.extra.get("node_refs")
-        if isinstance(node_refs, list) and node_refs:
-            result["node_refs"] = node_refs
-        elif resolved_nodes:
-            prompt_nodes = [
-                item
-                for item in resolved_nodes
-                if item.role not in {"artist", "style"}
+        if bundle.meta.nodes:
+            result["node_refs"] = [
+                node.model_dump(mode="json", exclude_none=True)
+                for node in bundle.meta.nodes
             ]
+            result["source_nodes"] = [node.ref for node in bundle.meta.nodes]
+        elif resolved_nodes:
+            prompt_nodes = list(resolved_nodes)
             if prompt_nodes:
                 result["node_refs"] = [item.as_ref() for item in prompt_nodes]
                 result["source_nodes"] = [item.node.source_ref() for item in prompt_nodes]
@@ -439,22 +441,22 @@ class NovelAIRenderAdapter:
         self,
         *,
         bundle: PromptBundle,
-        style_payload: dict[str, Any],
-        style_prompt: dict[str, list[str]],
+        artist_payload: dict[str, Any],
+        artist_prompt: dict[str, list[str]],
     ) -> str:
-        flags = set(style_payload.get("flags") or [])
+        flags = set(artist_payload.get("flags") or [])
         quality_prompt = (
             ""
             if flags.intersection({"not_quailty_prompts", "not_quality_prompts"})
             else LEGACY_NAI4_QUALITY_PROMPT
         )
         parts: list[str | list[str] | None] = []
-        if style_prompt["prompt_prefix"]:
-            parts.append(style_prompt["prompt_prefix"])
+        if artist_prompt["prompt_prefix"]:
+            parts.append(artist_prompt["prompt_prefix"])
         parts.extend(
             [
                 bundle.prompt.positive,
-                style_prompt["prompt_suffix"],
+                artist_prompt["prompt_suffix"],
                 quality_prompt,
             ]
         )
@@ -464,20 +466,20 @@ class NovelAIRenderAdapter:
         self,
         *,
         bundle: PromptBundle,
-        style_prompt: dict[str, list[str]],
+        artist_prompt: dict[str, list[str]],
     ) -> str:
-        if not style_prompt["negative_prompt"]:
+        if not artist_prompt["negative_prompt"]:
             extra = _join_legacy_prompt_parts(
-                style_prompt["after_negative_prompt"],
+                artist_prompt["after_negative_prompt"],
                 bundle.prompt.negative,
             ).strip(",")
             if extra:
                 return f"{LEGACY_DEFAULT_NEGATIVE_PROMPT},{extra},"
             return f"{LEGACY_DEFAULT_NEGATIVE_PROMPT},"
-        base_negative = style_prompt["negative_prompt"]
+        base_negative = artist_prompt["negative_prompt"]
         return _join_legacy_prompt_parts(
             base_negative,
-            style_prompt["after_negative_prompt"],
+            artist_prompt["after_negative_prompt"],
             bundle.prompt.negative,
         )
 
@@ -485,12 +487,12 @@ class NovelAIRenderAdapter:
         self,
         text: str,
         *,
-        style_payload: dict[str, Any],
+        artist_payload: dict[str, Any],
     ) -> str:
         # 旧 tags_machine 在 NAi.generate_image 发请求前还会清理 prompt；
         # 这里仅在 legacy 兼容路径复刻，避免污染新架构默认行为。
         text = text.replace("\xa0", " ").replace("@ @", "@_@")
-        if self._legacy_should_clean_movie_style_artists(style_payload):
+        if self._legacy_should_clean_movie_style_artists(artist_payload):
             text = self._legacy_clean_movie_style_artists(text)
         text = self._legacy_loop_replace(text, "bruises", "scratches")
         for _ in range(5):
@@ -506,11 +508,11 @@ class NovelAIRenderAdapter:
         text = self._legacy_loop_replace(text, "puffy nipples", "nipples")
         return self._legacy_loop_replace(text, "randoseru")
 
-    def _legacy_should_clean_movie_style_artists(self, style_payload: dict[str, Any]) -> bool:
-        style_ref = str(style_payload.get("style_ref") or "")
-        style_path = str(style_payload.get("path") or "")
+    def _legacy_should_clean_movie_style_artists(self, artist_payload: dict[str, Any]) -> bool:
+        artist_ref = str(artist_payload.get("artist_ref") or "")
+        artist_path = str(artist_payload.get("path") or "")
         marker = "\u52a8\u753b_\u7535\u5f71\u611f"
-        return marker in style_ref or marker in style_path
+        return marker in artist_ref or marker in artist_path
 
     def _legacy_clean_movie_style_artists(self, text: str) -> str:
         clear_tokens = [
@@ -564,9 +566,7 @@ class NovelAIRenderAdapter:
         clear_tokens.extend(
             token.strip() for token in clear_words.split(",") if token.strip()
         )
-        for token in clear_tokens:
-            text = text.replace(token, ",")
-            text = text.replace(token.lower(), ",")
+        text = self._legacy_remove_prompt_tags(text, clear_tokens)
         text = text.replace("oiled", "oiled skin")
         text = text.replace("oil,", "oiled skin")
         text = text.replace("fat,", ",")
@@ -576,6 +576,31 @@ class NovelAIRenderAdapter:
         text = text.replace("oiled skin", ",")
         text = self._legacy_loop_replace(text, "{{{{", "{", "{{")
         return self._legacy_loop_replace(text, "}}}}", "}", "}}")
+
+    def _legacy_remove_prompt_tags(self, text: str, clear_tokens: list[str]) -> str:
+        normalized_clear_tokens = {
+            self._legacy_normalize_prompt_tag(token)
+            for token in clear_tokens
+            if self._legacy_normalize_prompt_tag(token)
+        }
+        kept_tags: list[str] = []
+        for tag in text.split(","):
+            if not tag.strip():
+                kept_tags.append(tag)
+                continue
+            normalized_tag = self._legacy_normalize_prompt_tag(tag)
+            if any(token in normalized_tag for token in normalized_clear_tokens):
+                continue
+            kept_tags.append(tag)
+        return ",".join(kept_tags)
+
+    def _legacy_normalize_prompt_tag(self, tag: str) -> str:
+        text = tag.strip().lower()
+        text = text.replace("artist:", "")
+        text = text.replace("artist：", "")
+        text = text.replace("_", " ")
+        text = re.sub(r"[\[\]{}()]+", "", text)
+        return re.sub(r"\s+", " ", text).strip()
 
     def _legacy_runtime_clean_negative(self, text: str) -> str:
         # 旧入口对 UC 至少会清掉空权重括号；这会影响 NovelAI 实际出图。
@@ -601,44 +626,91 @@ class NovelAIRenderAdapter:
             text = updated
         return text
 
-    def _style_payload(self, style: NovelAIStyleInput) -> dict[str, Any]:
-        if style is None:
+    def _resolve_artist(
+        self,
+        artist: NovelAIArtistInput,
+        resolved_nodes: ResolvedNodeSet | None,
+    ) -> NovelAIArtistInput:
+        if artist is not None:
+            return artist
+        if not resolved_nodes:
+            return None
+        first_artist = resolved_nodes.first("artist")
+        return first_artist.node if first_artist else None
+
+    def _artist_payload(self, artist: NovelAIArtistInput) -> dict[str, Any]:
+        if artist is None:
             return {}
-        if isinstance(style, NovelAIStyle):
-            return style.style_payload()
-        return renderer_style_payload(style, self.backend)
+        if isinstance(artist, NovelAIArtist):
+            return artist.artist_payload()
+        return renderer_artist_payload(artist, self.backend)
 
-    def _style_params(
+    def _artist_params(
         self,
-        style: NovelAIStyleInput,
-        style_payload: dict[str, Any],
+        artist: NovelAIArtistInput,
+        artist_payload: dict[str, Any],
     ) -> dict[str, Any]:
-        if isinstance(style, NovelAIStyle):
-            return copy.deepcopy(style.params)
-        return copy.deepcopy(style_payload.get("params", {}) or {})
+        if isinstance(artist, NovelAIArtist):
+            return copy.deepcopy(artist.params)
+        return copy.deepcopy(artist_payload.get("params", {}) or {})
 
-    def _style_prompt_parts(
+    def _resolve_model(
         self,
-        style: NovelAIStyleInput,
-        style_payload: dict[str, Any],
+        *,
+        default_model: str | None,
+        artist_payload: dict[str, Any],
+        artist_params: dict[str, Any],
+        params: dict[str, Any],
+    ) -> str | None:
+        explicit_model = (
+            _optional_text(params.get("model"))
+            or _optional_text(artist_payload.get("model"))
+            or _optional_text(artist_params.get("model"))
+        )
+        if explicit_model:
+            return explicit_model
+        if params.get("_legacy_run_prompt_compat"):
+            return "nai-diffusion-3"
+        if self._is_legacy_nai3_artist(
+            artist_payload=artist_payload,
+            artist_params=artist_params,
+        ):
+            return "nai-diffusion-3"
+        return default_model
+
+    def _is_legacy_nai3_artist(
+        self,
+        *,
+        artist_payload: dict[str, Any],
+        artist_params: dict[str, Any],
+    ) -> bool:
+        # 旧 tags.txt 没有 gen_json 时通常是 NAI3 画风，不能强行套 NAI4.5 请求。
+        if not artist_payload.get("legacy_compat"):
+            return False
+        return not artist_params
+
+    def _artist_prompt_parts(
+        self,
+        artist: NovelAIArtistInput,
+        artist_payload: dict[str, Any],
     ) -> dict[str, list[str]]:
-        if style is None:
+        if artist is None:
             return {
                 "prompt_prefix": [],
                 "prompt_suffix": [],
                 "negative_prompt": [],
                 "after_negative_prompt": [],
             }
-        if isinstance(style, NovelAIStyle):
+        if isinstance(artist, NovelAIArtist):
             return {
-                "prompt_prefix": style.prompt_prefix,
-                "prompt_suffix": style.prompt_suffix,
-                "negative_prompt": [style.negative_prompt] if style.negative_prompt else [],
+                "prompt_prefix": artist.prompt_prefix,
+                "prompt_suffix": artist.prompt_suffix,
+                "negative_prompt": [artist.negative_prompt] if artist.negative_prompt else [],
                 "after_negative_prompt": (
-                    [style.after_negative_prompt] if style.after_negative_prompt else []
+                    [artist.after_negative_prompt] if artist.after_negative_prompt else []
                 ),
             }
-        return renderer_style_prompt_parts(style, self.backend)
+        return renderer_artist_prompt_parts(artist, self.backend)
 
     def _preserve_supported_extras(self, params: dict[str, Any]) -> dict[str, Any]:
         # 这里只保留 adapter 没有显式标准化处理的扩展字段。
@@ -676,6 +748,7 @@ class NovelAIRenderAdapter:
             "prefer_brownian",
             "prompt_mode",
             "character_prompts",
+            "_legacy_run_prompt_compat",
         }
         return {key: value for key, value in params.items() if key not in reserved}
 
@@ -686,6 +759,11 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
 
 
 def _resolve_seed(explicit_seed: int | None, params_seed: Any) -> int:

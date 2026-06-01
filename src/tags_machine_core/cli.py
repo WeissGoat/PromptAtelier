@@ -21,15 +21,15 @@ from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.nodes import (
     NodeInput,
     NodeReader,
-    NovelAIStyleRepository,
+    NovelAIArtistRepository,
     ResolvedNode,
     ResolvedNodeSet,
     apply_legacy_tags_migration,
     audit_legacy_tags,
     migrate_legacy_action_tags,
+    migrate_legacy_artist_tags,
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
-    migrate_legacy_style_tags,
     plan_legacy_tags_migration,
     validate_node_tree,
 )
@@ -70,7 +70,7 @@ def cmd_compose(args) -> int:
 
 def cmd_compose_nodes(args) -> int:
     service = GenerationService()
-    bundle = _build_bundle_from_nodes(service, args, style_ref=args.style_ref)
+    bundle = _build_bundle_from_nodes(service, args)
     print_json(bundle, full=args.full)
     return 0
 
@@ -82,7 +82,6 @@ def cmd_agent_task_nodes(args) -> int:
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
-        style_ref=args.style_ref,
         character_scope=args.character_scope or args.body_scope,
         instructions=_agent_instructions(args),
         agent_model=args.agent_model,
@@ -100,7 +99,6 @@ def cmd_compose_agent_nodes(args) -> int:
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
-        style_ref=args.style_ref,
         character_scope=args.character_scope or args.body_scope,
         instructions=_agent_instructions(args),
         agent_model=args.agent_model,
@@ -113,13 +111,15 @@ def cmd_compose_agent_nodes(args) -> int:
 
 def cmd_render_plan(args) -> int:
     service = GenerationService()
-    style_ref, style = _load_render_style(args)
-    bundle = _build_bundle(service, args, style_ref=style_ref)
+    artist_ref, artist = _load_render_artist(args)
+    bundle = _build_bundle(service, args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     request = service.build_render_request(
         bundle,
         backend=args.backend,
         seed=args.seed,
-        style=style,
+        artist=artist,
+        resolved_nodes=resolved_nodes,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -132,20 +132,19 @@ def cmd_render_plan(args) -> int:
 
 def cmd_render_plan_nodes(args) -> int:
     service = GenerationService()
-    style_ref, style = _load_render_style(args)
-    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style, include_style=False)
+    artist_ref, artist = _load_render_artist(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     bundle = service.compose_resolved_nodes(
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
-        style_ref=style_ref,
         character_scope=args.character_scope or args.body_scope,
     )
     request = service.build_render_request(
         bundle,
         backend=args.backend,
         seed=args.seed,
-        style=style,
+        artist=artist,
         resolved_nodes=resolved_nodes,
         width=args.width,
         height=args.height,
@@ -220,15 +219,14 @@ def cmd_run_action(args) -> int:
 def cmd_generate(args) -> int:
     config = load_config(Path(args.config))
     service = GenerationService()
-    style = None
-    style_ref = args.style_ref or config.defaults.style_ref
-    if style_ref:
-        style = NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
-    bundle = _build_bundle(service, args, style_ref=style_ref)
+    artist_ref, artist = _load_render_artist(args)
+    bundle = _build_bundle(service, args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
-        style=style,
+        artist=artist,
+        resolved_nodes=resolved_nodes,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -263,10 +261,10 @@ def cmd_execute_render_request(args) -> int:
     return 0
 
 
-def cmd_inspect_style(args) -> int:
+def cmd_inspect_artist(args) -> int:
     config = load_config(Path(args.config))
-    style = NovelAIStyleRepository(config.legacy.design_root).load_node(args.style_ref)
-    print_json(style, full=args.full)
+    artist = NovelAIArtistRepository(config.legacy.design_root).load_node(args.artist)
+    print_json(artist, full=args.full)
     return 0
 
 
@@ -379,19 +377,18 @@ def cmd_archive_acceptance_case(args) -> int:
 
 def cmd_archive_novelai_acceptance_nodes(args) -> int:
     service = GenerationService()
-    style_ref, style = _load_novelai_style_for_nodes(args)
-    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style, include_style=False)
+    artist_ref, artist = _load_novelai_artist_for_nodes(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     bundle = service.compose_resolved_nodes(
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
-        style_ref=style_ref,
         character_scope=args.character_scope or args.body_scope,
     )
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
-        style=style,
+        artist=artist,
         resolved_nodes=resolved_nodes,
         width=args.width,
         height=args.height,
@@ -503,8 +500,8 @@ def cmd_verify_core(args) -> int:
     return 0 if result["match"] else 2
 
 
-def cmd_migrate_style_tags(args) -> int:
-    node = migrate_legacy_style_tags(
+def cmd_migrate_artist_tags(args) -> int:
+    node = migrate_legacy_artist_tags(
         args.source,
         node_id=args.id,
         name=args.name,
@@ -728,19 +725,16 @@ def _read_prompt_value(args) -> str:
     return str(args.prompt or "").strip()
 
 
-def _build_bundle(service: GenerationService, args, *, style_ref: str | None = None):
+def _build_bundle(service: GenerationService, args):
     return service.compose_full_prompt(
         prompt=args.prompt,
         negative=args.negative or "",
-        style_ref=style_ref if style_ref is not None else args.style_ref,
     )
 
 
 def _build_bundle_from_nodes(
     service: GenerationService,
     args,
-    *,
-    style_ref: str | None = None,
 ):
     resolved_nodes = _read_resolved_nodes(args)
     if resolved_nodes:
@@ -748,7 +742,6 @@ def _build_bundle_from_nodes(
             resolved_nodes,
             extra_prompt=args.extra_prompt or "",
             negative=args.negative or "",
-            style_ref=style_ref if style_ref is not None else args.style_ref,
             character_scope=args.character_scope,
             body_scope=args.body_scope,
         )
@@ -759,7 +752,6 @@ def _build_bundle_from_nodes(
         background=background,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
-        style_ref=style_ref if style_ref is not None else args.style_ref,
         character_scope=args.character_scope,
         body_scope=args.body_scope,
     )
@@ -771,19 +763,18 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
     prompt = _read_prompt_value(args)
     if not prompt:
         raise ValueError("run-prompt requires --prompt or --prompt-file unless --composer agent is used")
-    style_ref, style = _load_novelai_style_for_prompt(args)
-    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style)
+    artist_ref, artist = _load_novelai_artist_for_prompt(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     bundle = service.compose_full_prompt(
         prompt=prompt,
         negative=args.negative or "",
-        style_ref=style_ref,
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
-        style=style,
+        artist=artist,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -794,8 +785,8 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
 
 
 def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
-    style_ref, style = _load_novelai_style_for_prompt(args)
-    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style)
+    artist_ref, artist = _load_novelai_artist_for_prompt(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     cache = PromptCache(args.cache_dir) if args.cache_dir else None
     result = load_agent_result(args.agent_result) if args.agent_result else None
     prompt = _read_prompt_value(args)
@@ -811,7 +802,6 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=task_negative,
-        style_ref=style_ref,
         character_scope=args.character_scope or args.body_scope,
         instructions=_agent_instructions(args),
         agent_model=args.agent_model,
@@ -823,7 +813,7 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
-        style=style,
+        artist=artist,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -834,13 +824,12 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
 
 
 def _build_novelai_action_artifacts(service: GenerationService, args):
-    style_ref, style = _load_novelai_style_for_nodes(args)
-    resolved_nodes = _read_resolved_nodes(args, style_ref=style_ref, style=style)
+    artist_ref, artist = _load_novelai_artist_for_nodes(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     bundle = service.compose_resolved_nodes(
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
-        style_ref=style_ref,
         character_scope=args.character_scope or args.body_scope,
     )
     params = _load_json_arg(args.params_json)
@@ -848,7 +837,7 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
     request = service.build_novelai_request(
         bundle,
         seed=args.seed,
-        style=style,
+        artist=artist,
         width=args.width,
         height=args.height,
         model=args.model,
@@ -869,17 +858,16 @@ def _read_node_inputs(args):
 def _read_resolved_nodes(
     args,
     *,
-    style_ref: str | None = None,
-    style=None,
-    include_style: bool = True,
+    artist_ref: str | None = None,
+    artist=None,
 ) -> ResolvedNodeSet:
     reader = NodeReader()
     items: list[tuple[str, str, object]] = []
-    if include_style and style is not None and style_ref:
-        items.append(("artist", style_ref, style))
-    elif include_style and getattr(args, "style_node", None):
-        node = reader.read(args.style_node)
-        items.append(("artist", style_ref or node.id, node))
+    if artist is not None and artist_ref:
+        items.append(("artist", artist_ref, artist))
+    elif getattr(args, "artist_node", None):
+        node = reader.read(args.artist_node)
+        items.append(("artist", node.id, node))
     for role, attr in (
         ("character", "character"),
         ("action", "action"),
@@ -901,47 +889,23 @@ def _read_resolved_nodes(
     return ResolvedNodeSet(resolved)
 
 
-def _load_render_style(args):
-    if args.style_node:
-        node = NodeReader().read(args.style_node)
-        return args.style_ref or node.id, node
-
-    style_ref = args.style_ref
-    if args.config:
+def _load_render_artist(args):
+    if getattr(args, "artist_node", None):
+        node = NodeReader().read(args.artist_node)
+        return node.id, node
+    artist_ref = getattr(args, "artist", None)
+    if artist_ref and getattr(args, "config", None):
         config = load_config(Path(args.config))
-        if args.backend == "novelai":
-            style_ref = style_ref or config.defaults.style_ref
-            if style_ref:
-                return style_ref, NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
-    return style_ref, None
+        return artist_ref, NovelAIArtistRepository(config.legacy.design_root).load_node(artist_ref)
+    return artist_ref, None
 
 
-def _load_novelai_style_for_nodes(args):
-    if args.style_node:
-        node = NodeReader().read(args.style_node)
-        return args.style_ref or getattr(args, "artist", None) or node.id, node
-
-    style_ref = args.style_ref or getattr(args, "artist", None)
-    if args.config:
-        config = load_config(Path(args.config))
-        style_ref = style_ref or config.defaults.style_ref
-        if style_ref:
-            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
-    return style_ref, None
+def _load_novelai_artist_for_nodes(args):
+    return _load_render_artist(args)
 
 
-def _load_novelai_style_for_prompt(args):
-    if args.style_node:
-        node = NodeReader().read(args.style_node)
-        return args.style_ref or args.artist or node.id, node
-
-    style_ref = args.style_ref or args.artist
-    if getattr(args, "config", None):
-        config = load_config(Path(args.config))
-        style_ref = style_ref or config.defaults.style_ref
-        if style_ref:
-            return style_ref, NovelAIStyleRepository(config.legacy.design_root).load_node(style_ref)
-    return style_ref, None
+def _load_novelai_artist_for_prompt(args):
+    return _load_render_artist(args)
 
 
 def _render_action(backend: str) -> str:
@@ -989,7 +953,6 @@ def build_parser() -> argparse.ArgumentParser:
     compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
     compose.add_argument("--prompt", required=True)
     compose.add_argument("--negative")
-    compose.add_argument("--style-ref")
     compose.set_defaults(func=cmd_compose)
 
     compose_nodes = subparsers.add_parser(
@@ -1025,15 +988,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     render_plan.add_argument("--prompt", required=True)
     render_plan.add_argument("--negative")
-    render_plan.add_argument("--style-ref")
-    render_plan.add_argument("--style-node", help="Path to a structured style node")
+    render_plan.add_argument("--artist")
+    render_plan.add_argument("--artist-node", help="Path to a structured artist node")
     render_plan.add_argument("--backend", default="novelai", choices=RENDER_BACKENDS)
     render_plan.add_argument("--seed", type=int)
     render_plan.add_argument("--width", type=int, default=1024)
     render_plan.add_argument("--height", type=int, default=1024)
     render_plan.add_argument("--model")
     render_plan.add_argument("--params-json", help="Extra renderer params as a JSON object")
-    render_plan.add_argument("--config", help="Load style nodes through this config file")
+    render_plan.add_argument("--config", help="Load artist nodes through this config file")
     render_plan.set_defaults(func=cmd_render_plan)
 
     render_plan_nodes = subparsers.add_parser(
@@ -1042,20 +1005,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build a RenderRequest from structured nodes",
     )
     _add_node_compose_arguments(render_plan_nodes)
-    render_plan_nodes.add_argument("--style-node", help="Path to a structured style node")
+    render_plan_nodes.add_argument("--artist")
+    render_plan_nodes.add_argument("--artist-node", help="Path to a structured artist node")
     render_plan_nodes.add_argument("--backend", default="novelai", choices=RENDER_BACKENDS)
     render_plan_nodes.add_argument("--seed", type=int)
     render_plan_nodes.add_argument("--width", type=int, default=1024)
     render_plan_nodes.add_argument("--height", type=int, default=1024)
     render_plan_nodes.add_argument("--model")
     render_plan_nodes.add_argument("--params-json", help="Extra renderer params as a JSON object")
-    render_plan_nodes.add_argument("--config", help="Load style nodes through this config file")
+    render_plan_nodes.add_argument("--config", help="Load artist nodes through this config file")
     render_plan_nodes.set_defaults(func=cmd_render_plan_nodes)
 
     run_prompt = subparsers.add_parser(
         "run-prompt",
         parents=[output_parent],
-        help="Run or plan a full character+action prompt with NovelAI style only",
+        help="Run or plan a full character+action prompt with a NovelAI artist node",
     )
     _add_prompt_run_arguments(
         run_prompt,
@@ -1068,7 +1032,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only print PromptBundle and RenderRequest; do not call NovelAI",
     )
-    run_prompt.add_argument("--config", help="Load runtime config and legacy style refs")
+    run_prompt.add_argument("--config", help="Load runtime config and artist nodes")
     run_prompt.set_defaults(func=cmd_run_prompt)
 
     run_action = subparsers.add_parser(
@@ -1083,7 +1047,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only print PromptBundle and RenderRequest; do not call NovelAI",
     )
-    run_action.add_argument("--config", help="Load runtime config and legacy style refs")
+    run_action.add_argument("--config", help="Load runtime config and artist nodes")
     run_action.set_defaults(func=cmd_run_action)
 
     api_compose = subparsers.add_parser(
@@ -1177,7 +1141,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate.add_argument("--prompt", required=True)
     generate.add_argument("--negative")
-    generate.add_argument("--style-ref")
+    generate.add_argument("--artist")
+    generate.add_argument("--artist-node", help="Path to a structured artist node")
     generate.add_argument("--seed", type=int)
     generate.add_argument("--width", type=int, default=1024)
     generate.add_argument("--height", type=int, default=1024)
@@ -1245,14 +1210,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_node_tree_parser.set_defaults(func=cmd_validate_node_tree)
 
-    inspect_style = subparsers.add_parser(
-        "inspect-style",
+    inspect_artist = subparsers.add_parser(
+        "inspect-artist",
         parents=[output_parent],
-        help="Read a NovelAI style node",
+        help="Read a NovelAI artist node",
     )
-    inspect_style.add_argument("--config", required=True)
-    inspect_style.add_argument("--style-ref", required=True)
-    inspect_style.set_defaults(func=cmd_inspect_style)
+    inspect_artist.add_argument("--config", required=True)
+    inspect_artist.add_argument("--artist", required=True)
+    inspect_artist.set_defaults(func=cmd_inspect_artist)
 
     config = subparsers.add_parser("config", parents=[output_parent], help="Read an app config file")
     config.add_argument("path")
@@ -1450,8 +1415,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("legacy_oracle", "fixture"),
         help="Acceptance source kind; use fixture only for synthetic/static mechanism tests",
     )
-    archive_novelai_acceptance_nodes.add_argument("--style-node", help="Path to a structured style node")
-    archive_novelai_acceptance_nodes.add_argument("--config", help="Load legacy style refs through this config")
+    archive_novelai_acceptance_nodes.add_argument("--artist")
+    archive_novelai_acceptance_nodes.add_argument("--artist-node", help="Path to a structured artist node")
+    archive_novelai_acceptance_nodes.add_argument("--config", help="Load artist nodes through this config")
     archive_novelai_acceptance_nodes.add_argument("--seed", type=int)
     archive_novelai_acceptance_nodes.add_argument("--width", type=int, default=1024)
     archive_novelai_acceptance_nodes.add_argument("--height", type=int, default=1024)
@@ -1528,7 +1494,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     archive_novelai_acceptance_prompt.add_argument(
         "--config",
-        help="Load legacy style refs through this config",
+        help="Load artist nodes through this config",
     )
     archive_novelai_acceptance_prompt.add_argument(
         "--whitelist",
@@ -1635,27 +1601,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_core.set_defaults(func=cmd_verify_core)
 
-    migrate_style_tags = subparsers.add_parser(
-        "migrate-style-tags",
+    migrate_artist_tags = subparsers.add_parser(
+        "migrate-artist-tags",
         parents=[output_parent],
-        help="Convert a legacy style tags.txt into a structured style node",
+        help="Convert a legacy artist tags.txt into a structured artist node",
     )
-    migrate_style_tags.add_argument("source", help="Legacy style directory or tags.txt path")
-    migrate_style_tags.add_argument("--id", help="Override generated style node id")
-    migrate_style_tags.add_argument("--name", help="Override generated style node name")
-    migrate_style_tags.add_argument("--output", help="Write node.yaml to this path")
-    migrate_style_tags.add_argument(
+    migrate_artist_tags.add_argument("source", help="Legacy artist directory or tags.txt path")
+    migrate_artist_tags.add_argument("--id", help="Override generated artist node id")
+    migrate_artist_tags.add_argument("--name", help="Override generated artist node name")
+    migrate_artist_tags.add_argument("--output", help="Write node.yaml to this path")
+    migrate_artist_tags.add_argument(
         "--format",
         default="auto",
         choices=("auto", "json", "yaml"),
         help="Output file format when --output is used",
     )
-    migrate_style_tags.add_argument(
+    migrate_artist_tags.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace --output if it already exists",
     )
-    migrate_style_tags.set_defaults(func=cmd_migrate_style_tags)
+    migrate_artist_tags.set_defaults(func=cmd_migrate_artist_tags)
 
     migrate_action_tags = subparsers.add_parser(
         "migrate-action-tags",
@@ -1741,7 +1707,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_legacy_tags_parser.add_argument(
         "--kind",
         required=True,
-        choices=("style", "character", "action", "background"),
+        choices=("artist", "character", "action", "background"),
         help="Legacy node kind to audit",
     )
     audit_legacy_tags_parser.add_argument("--output", help="Write audit report JSON/YAML")
@@ -1765,7 +1731,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_legacy_tags_migration_parser.add_argument(
         "--kind",
         required=True,
-        choices=("style", "character", "action", "background"),
+        choices=("artist", "character", "action", "background"),
         help="Legacy node kind to plan",
     )
     plan_legacy_tags_migration_parser.add_argument(
@@ -1794,7 +1760,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_legacy_tags_migration_parser.add_argument(
         "--kind",
         required=True,
-        choices=("style", "character", "action", "background"),
+        choices=("artist", "character", "action", "background"),
         help="Legacy node kind to migrate",
     )
     apply_legacy_tags_migration_parser.add_argument(
@@ -1829,7 +1795,6 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--extra-prompt", help="Additional positive prompt text")
     parser.add_argument("--negative")
-    parser.add_argument("--style-ref")
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
 
@@ -1883,9 +1848,8 @@ def _add_prompt_run_arguments(
     )
     parser.add_argument("--negative")
     parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
-    parser.add_argument("--artist", help="Compatibility alias for --style-ref")
-    parser.add_argument("--style-ref")
-    parser.add_argument("--style-node", help="Path to a structured style node")
+    parser.add_argument("--artist", help="Artist preset/ref under design/画风")
+    parser.add_argument("--artist-node", help="Path to a structured artist node")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--height", type=int, default=1024)
@@ -1903,8 +1867,8 @@ def _add_prompt_run_arguments(
 
 def _add_novelai_render_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
-    parser.add_argument("--artist", help="Compatibility alias for --style-ref")
-    parser.add_argument("--style-node", help="Path to a structured style node")
+    parser.add_argument("--artist", help="Artist preset/ref under design/画风")
+    parser.add_argument("--artist-node", help="Path to a structured artist node")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--height", type=int, default=1024)

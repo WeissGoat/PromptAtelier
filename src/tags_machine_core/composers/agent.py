@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import (
     CacheMeta,
+    PromptAgentMeta,
     PromptBundle,
     PromptCompositionMeta,
     PromptMeta,
+    PromptNodeRef,
     PromptText,
 )
 from tags_machine_core.nodes.character_scope import (
@@ -49,12 +51,11 @@ class AgentNodeSnapshot(BaseModel):
 class AgentCompositionTask(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    schema_id: str = Field(default="tags-machine-core.agent-composition-task/v1", alias="schema")
+    schema_id: str = Field(default="tags-machine-core.agent-composition-task/v2", alias="schema")
     composer_version: str = AGENT_COMPOSER_VERSION
     nodes: dict[str, AgentNodeSnapshot] = Field(default_factory=dict)
     extra_prompt: str = ""
     negative: str = ""
-    style_ref: str | None = None
     character_scope: str | None = None
     instructions: list[str] = Field(default_factory=list)
     agent_model: str | None = None
@@ -110,9 +111,9 @@ class AgentComposer:
         character: NodeDocument | None = None,
         action: NodeDocument | None = None,
         background: NodeDocument | None = None,
+        artist: NodeDocument | None = None,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -128,6 +129,7 @@ class AgentComposer:
                 "character": self._snapshot_node("character", character),
                 "action": self._snapshot_node("action", action),
                 "background": self._snapshot_node("background", background),
+                "artist": self._snapshot_node("artist", artist),
             }.items()
             if snapshot is not None
         }
@@ -139,7 +141,6 @@ class AgentComposer:
             },
             "extra_prompt": extra_prompt.strip(),
             "negative": negative.strip(),
-            "style_ref": style_ref,
             "character_scope": resolved_scope,
             "instructions": instructions or [],
             "agent_model": _optional_text(agent_model),
@@ -153,7 +154,6 @@ class AgentComposer:
         *,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -169,7 +169,7 @@ class AgentComposer:
         )
         nodes = self._snapshot_resolved_nodes(resolved_nodes)
         if not nodes:
-            raise ValueError("agent composition requires at least one non-style node")
+            raise ValueError("agent composition requires at least one non-artist node")
         payload = {
             "composer_version": self.composer_version,
             "nodes": {
@@ -178,7 +178,6 @@ class AgentComposer:
             },
             "extra_prompt": extra_prompt.strip(),
             "negative": negative.strip(),
-            "style_ref": style_ref,
             "character_scope": resolved_scope,
             "instructions": instructions or [],
             "agent_model": _optional_text(agent_model),
@@ -192,9 +191,9 @@ class AgentComposer:
         character: NodeDocument | None = None,
         action: NodeDocument | None = None,
         background: NodeDocument | None = None,
+        artist: NodeDocument | None = None,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -205,9 +204,9 @@ class AgentComposer:
             character=character,
             action=action,
             background=background,
+            artist=artist,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
             agent_model=agent_model,
@@ -229,7 +228,6 @@ class AgentComposer:
         *,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -240,7 +238,6 @@ class AgentComposer:
             resolved_nodes,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
             agent_model=agent_model,
@@ -268,21 +265,12 @@ class AgentComposer:
         )
         characters = _snapshots_by_role(task, "character")
         actions = _snapshots_by_role(task, "action")
-        backgrounds = _snapshots_by_role(task, "background")
-        character = characters[0] if len(characters) == 1 else None
-        action = actions[0] if actions else None
-        background = backgrounds[0] if len(backgrounds) == 1 else None
-        source_nodes = [node.ref for node in task.nodes.values()]
         return PromptBundle(
             prompt=PromptText(
                 positive=agent_result.positive.strip(),
                 negative=(agent_result.negative or task.negative).strip(),
             ),
             meta=PromptMeta(
-                character_ref=character.id if character else None,
-                action_ref=action.id if action else None,
-                background_ref=background.id if background else None,
-                style_ref=task.style_ref,
                 composer_type="agent",
                 composer_version=self.composer_version,
                 composition=PromptCompositionMeta(
@@ -290,28 +278,29 @@ class AgentComposer:
                     included_character_sections=agent_result.included_character_sections,
                     suppressed_character_sections=agent_result.suppressed_character_sections,
                 ),
-                source_nodes=source_nodes,
+                nodes=[
+                    PromptNodeRef(
+                        role=node.role,
+                        ref=node.ref,
+                        id=node.id,
+                        kind=node.kind,
+                        index=node.index,
+                        content_hash=node.content_hash,
+                    )
+                    for node in task.nodes.values()
+                ],
+                agent=PromptAgentMeta(
+                    task_schema=task.schema_id,
+                    instructions=task.instructions,
+                    agent_model=task.agent_model,
+                    notes=agent_result.notes,
+                    extra=agent_result.extra,
+                ),
                 extra={
-                    "node_refs": [
-                        {
-                            "role": node.role,
-                            "ref": node.ref,
-                            "id": node.id,
-                            "index": node.index,
-                        }
-                        for node in task.nodes.values()
-                    ],
                     "character_materials": _character_materials(
                         characters,
                         task.character_scope,
                     ),
-                    "agent": {
-                        "task_schema": task.schema_id,
-                        "instructions": task.instructions,
-                        "agent_model": task.agent_model,
-                        "notes": agent_result.notes,
-                        "extra": agent_result.extra,
-                    }
                 },
             ),
             cache=CacheMeta(cacheable=True, cache_key=task.cache_key),
@@ -343,8 +332,6 @@ class AgentComposer:
         nodes: dict[str, AgentNodeSnapshot] = {}
         role_seen: dict[str, int] = {}
         for item in resolved_nodes:
-            if item.role in {"artist", "style"}:
-                continue
             seen = role_seen.get(item.role, 0)
             role_seen[item.role] = seen + 1
             key = item.role if seen == 0 else f"{item.role}_{seen + 1}"

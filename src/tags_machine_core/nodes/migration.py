@@ -19,14 +19,14 @@ LEGACY_PROMPT_DIRECTIVE_KEYS = {
 }
 
 MIGRATION_OUTPUT_DIRS = {
-    "style": "styles",
+    "artist": "artists",
     "character": "characters",
     "action": "actions",
     "background": "backgrounds",
 }
 
 MIGRATION_OUTPUT_FILES = {
-    "style": "node.yaml",
+    "artist": "node.yaml",
     "character": "meta.yaml",
     "action": "meta.yaml",
     "background": "meta.yaml",
@@ -36,7 +36,7 @@ MIGRATION_OUTPUT_FILES = {
 def audit_legacy_tags(source: str | Path, *, kind: str) -> dict[str, Any]:
     """扫描旧 tags.txt 并生成迁移预检报告；只读源目录，不写旧项目。"""
     migrators = {
-        "style": migrate_legacy_style_tags,
+        "artist": migrate_legacy_artist_tags,
         "character": migrate_legacy_character_tags,
         "action": migrate_legacy_action_tags,
         "background": migrate_legacy_background_tags,
@@ -218,16 +218,16 @@ def apply_legacy_tags_migration(
     }
 
 
-def migrate_legacy_style_tags(
+def migrate_legacy_artist_tags(
     source: str | Path,
     *,
     node_id: str | None = None,
     name: str | None = None,
 ) -> dict[str, Any]:
-    """把旧画风 tags.txt 转成结构化 style node，不依赖旧项目运行时代码。"""
+    """把旧画风 tags.txt 转成结构化 artist node，不依赖旧项目运行时代码。"""
     tags_path = _resolve_tags_path(source)
-    style_dir = tags_path.parent
-    prompt_lines, ext_lines = _split_legacy_style_lines(tags_path)
+    artist_dir = tags_path.parent
+    prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
     prompt_lines, type_flags = _extract_legacy_type_flags(prompt_lines)
     cleaned_prompt_lines = [line.strip(" ,") for line in prompt_lines]
     cleaned_prompt_lines = [line for line in cleaned_prompt_lines if line]
@@ -268,12 +268,12 @@ def migrate_legacy_style_tags(
         novelai["legacy_extensions"] = legacy_extensions
 
     return {
-        "schema": "tags-machine.style/v1",
-        "kind": "style",
-        "id": node_id or style_dir.name,
-        "name": name or style_dir.name,
+        "schema": "tags-machine.artist/v1",
+        "kind": "artist",
+        "id": node_id or artist_dir.name,
+        "name": name or artist_dir.name,
         "description": "由旧画风 tags.txt 迁移生成。请人工复核 tags 分组和跨后端配置。",
-        "tags": {"style": cleaned_prompt_lines},
+        "tags": {"artist": cleaned_prompt_lines},
         "negative_prompt": [],
         "renderers": {"novelai": novelai},
         "legacy": {
@@ -286,7 +286,7 @@ def migrate_legacy_style_tags(
         },
         "agent": {
             "summary": "从旧 tags.txt 自动迁移的画风节点，后端行为优先保持 NovelAI 兼容。",
-            "labels": ["style", "migrated", "legacy_tags_txt"],
+            "labels": ["artist", "migrated", "legacy_tags_txt"],
         },
     }
 
@@ -302,7 +302,7 @@ def migrate_legacy_character_tags(
     """把旧角色 tags.txt 转成结构化 character meta，旧替换规则只归档不执行。"""
     tags_path = _resolve_tags_path(source)
     character_dir = tags_path.parent
-    prompt_lines, ext_lines = _split_legacy_style_lines(tags_path)
+    prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
     prompt_tags_by_line = [_split_top_level_commas(line) for line in prompt_lines]
     identity_tags = prompt_tags_by_line[0] if prompt_tags_by_line else []
     tags: dict[str, list[str]] = {}
@@ -354,7 +354,7 @@ def migrate_legacy_action_tags(
     """把旧动作 tags.txt 转成结构化 action meta，不把规则写进节点。"""
     tags_path = _resolve_tags_path(source)
     action_dir = tags_path.parent
-    prompt_lines, ext_lines = _split_legacy_style_lines(tags_path)
+    prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
     action_tags = _split_legacy_prompt_tags(prompt_lines)
     resolved_scope = character_scope or _infer_action_character_scope(action_tags, tags_path)
     scope_source = "override" if character_scope else "inferred"
@@ -399,7 +399,7 @@ def migrate_legacy_background_tags(
     """把旧背景 tags.txt 转成结构化 background meta，不依赖旧项目运行时代码。"""
     tags_path = _resolve_tags_path(source)
     background_dir = tags_path.parent
-    prompt_lines, ext_lines = _split_legacy_style_lines(tags_path)
+    prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
     cleaned_prompt_lines = [line.strip(" ,") for line in prompt_lines]
     cleaned_prompt_lines = [line for line in cleaned_prompt_lines if line]
 
@@ -456,7 +456,7 @@ def _collect_legacy_tags_paths(source: Path) -> list[Path]:
 
 def _legacy_migrator(kind: str):
     migrators = {
-        "style": migrate_legacy_style_tags,
+        "artist": migrate_legacy_artist_tags,
         "character": migrate_legacy_character_tags,
         "action": migrate_legacy_action_tags,
         "background": migrate_legacy_background_tags,
@@ -531,8 +531,8 @@ def _audit_migrated_node(node: dict[str, Any], *, kind: str, tags_path: Path) ->
     issues: list[dict[str, Any]] = []
     extension_keys = _legacy_extension_keys(node)
 
-    if kind == "style":
-        _audit_style_node(node, tags, extension_keys, issues)
+    if kind == "artist":
+        _audit_artist_node(node, tags, extension_keys, issues)
     elif kind == "character":
         _audit_character_node(node, tags, extension_keys, issues)
     elif kind == "action":
@@ -566,14 +566,14 @@ def _audit_migrated_node(node: dict[str, Any], *, kind: str, tags_path: Path) ->
     return item
 
 
-def _audit_style_node(
+def _audit_artist_node(
     node: dict[str, Any],
     tags: dict[str, list[str]],
     extension_keys: list[str],
     issues: list[dict[str, Any]],
 ) -> None:
-    if not tags.get("style"):
-        _append_issue(issues, "empty_style_tags", "review", "画风节点没有可迁移的正向 tags。")
+    if not tags.get("artist"):
+        _append_issue(issues, "empty_artist_tags", "review", "artist 节点没有可迁移的正向 tags。")
     known_keys = {
         "origin_uc",
         "uc",
@@ -586,9 +586,9 @@ def _audit_style_node(
     if unknown_keys:
         _append_issue(
             issues,
-            "style_unknown_legacy_extension",
+            "artist_unknown_legacy_extension",
             "review",
-            "画风包含未提升为结构化字段的旧扩展，需要确认是否仍要保留。",
+            "artist 节点包含未提升为结构化字段的旧扩展，需要确认是否仍要保留。",
             samples=unknown_keys,
             count=len(unknown_keys),
         )
@@ -606,9 +606,9 @@ def _audit_style_node(
     if reference_keys:
         _append_issue(
             issues,
-            "style_reference_params_present",
+            "artist_reference_params_present",
             "info",
-            "画风包含 NovelAI reference/vibe 参数，迁移后验收需要覆盖这些数组字段。",
+            "artist 节点包含 NovelAI reference/vibe 参数，迁移后验收需要覆盖这些数组字段。",
             samples=reference_keys,
             count=len(reference_keys),
         )
@@ -696,7 +696,7 @@ def _audit_background_node(
             issues,
             "background_legacy_extension_ignored",
             "review",
-            "背景迁移不会提升旧后端扩展参数，需要确认是否应移到 style 或 renderer adapter。",
+            "背景迁移不会提升旧后端扩展参数，需要确认是否应移到 artist 或 renderer adapter。",
             samples=ignored_keys,
             count=len(ignored_keys),
         )
@@ -770,7 +770,7 @@ def _append_issue(
     issues.append(issue)
 
 
-def _split_legacy_style_lines(path: Path) -> tuple[list[str], list[str]]:
+def _split_legacy_tags_lines(path: Path) -> tuple[list[str], list[str]]:
     raw_lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     lines = [line.strip() for line in raw_lines if line.strip()]
     prompt_lines: list[str] = []

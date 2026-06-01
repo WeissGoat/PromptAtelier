@@ -47,16 +47,12 @@ class GenerationJsonApi:
         if _is_agent_compose_request(data):
             return self.compose_agent(data)
 
-        style_node = self._load_optional_node(data.get("style") or data.get("style_node"))
-        style_ref = _optional_string(data.get("style_ref")) or (style_node.id if style_node else None)
-
         # `prompt` 表示调用方已经提供完整角色 + 动作提示词；即使同时带节点，
         # 节点也只作为后续 renderer 的上下文，不在 compose 层二次拼接。
         if "prompt" in data:
             bundle = self.service.compose_full_prompt(
                 prompt=str(data.get("prompt") or ""),
                 negative=str(data.get("negative") or ""),
-                style_ref=style_ref,
             )
             return to_jsonable(bundle)
 
@@ -68,7 +64,6 @@ class GenerationJsonApi:
             resolved_nodes,
             extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
             negative=str(data.get("negative") or ""),
-            style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope")),
             body_scope=_optional_string(data.get("body_scope")),
         )
@@ -76,12 +71,11 @@ class GenerationJsonApi:
 
     def agent_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "agent-task request")
-        resolved_nodes, style_ref = self._load_agent_resolved_inputs(data)
+        resolved_nodes = self._load_agent_resolved_inputs(data)
         task = self.service.build_agent_composition_task_resolved_nodes(
             resolved_nodes,
             extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
             negative=str(data.get("negative") or ""),
-            style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
             instructions=_string_list(_agent_value(data, "instructions", "instruction")),
             agent_model=_agent_model_value(data),
@@ -90,7 +84,7 @@ class GenerationJsonApi:
 
     def compose_agent(self, request: Mapping[str, Any]) -> dict[str, Any]:
         data = _mapping(request, "compose-agent request")
-        resolved_nodes, style_ref = self._load_agent_resolved_inputs(data)
+        resolved_nodes = self._load_agent_resolved_inputs(data)
         result = _optional_mapping(_agent_value(data, "agent_result", "result"))
         task_negative = str(data.get("negative") or "")
         prompt = _optional_string(data.get("prompt"))
@@ -107,7 +101,6 @@ class GenerationJsonApi:
             resolved_nodes,
             extra_prompt=str(data.get("extra_prompt") or ""),
             negative=task_negative,
-            style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
             instructions=_string_list(_agent_value(data, "instructions", "instruction")),
             agent_model=_agent_model_value(data),
@@ -141,13 +134,13 @@ class GenerationJsonApi:
             raise ValueError("render-plan request must include prompt_bundle")
         bundle = PromptBundle.model_validate(bundle_data)
         backend = str(data.get("backend") or "novelai")
-        style = self._load_optional_node(data.get("style") or data.get("style_node"))
+        artist = self._load_optional_node(data.get("artist") or data.get("artist_node"))
         resolved_nodes = self._load_resolved_nodes(data)
         request_model = self.service.build_render_request(
             bundle,
             backend=backend,
             seed=_optional_int(data.get("seed")),
-            style=style or _optional_mapping(data.get("style_payload")),
+            artist=artist,
             resolved_nodes=resolved_nodes,
             width=_int_or_default(data.get("width"), 1024),
             height=_int_or_default(data.get("height"), 1024),
@@ -161,15 +154,11 @@ class GenerationJsonApi:
         data = _mapping(request, "compose-render-plan request")
         compose_request = _mapping(data.get("compose") or data, "compose request")
         render_request = dict(_mapping(data.get("render") or {}, "render request"))
-        if (
-            "style" not in render_request
-            and "style_node" not in render_request
-            and "style_payload" not in render_request
-        ):
-            if "style" in compose_request:
-                render_request["style"] = compose_request["style"]
-            elif "style_node" in compose_request:
-                render_request["style_node"] = compose_request["style_node"]
+        if "artist" not in render_request and "artist_node" not in render_request:
+            if "artist" in compose_request:
+                render_request["artist"] = compose_request["artist"]
+            elif "artist_node" in compose_request:
+                render_request["artist_node"] = compose_request["artist_node"]
         bundle = self.compose(compose_request)
         render_request["prompt_bundle"] = bundle
         self._copy_render_context_nodes(compose_request, render_request)
@@ -264,7 +253,7 @@ class GenerationJsonApi:
                 items.append((role, ref, node))
         else:
             nodes = _mapping(nodes_value or {}, "compose request nodes")
-            for role in ("character", "action", "background"):
+            for role in ("character", "action", "background", "artist"):
                 value = nodes.get(role) or data.get(role)
                 for ref, node in self._load_node_values(value):
                     items.append((role, ref, node))
@@ -299,14 +288,11 @@ class GenerationJsonApi:
     def _load_agent_resolved_inputs(
         self,
         data: Mapping[str, Any],
-    ) -> tuple[ResolvedNodeSet, str | None]:
+    ) -> ResolvedNodeSet:
         resolved_nodes = self._load_resolved_nodes(data)
-        if not [item for item in resolved_nodes if item.role not in {"artist", "style"}]:
-            raise ValueError("agent request must provide at least one non-style node")
-
-        style_node = self._load_optional_node(data.get("style") or data.get("style_node"))
-        style_ref = _optional_string(data.get("style_ref")) or (style_node.id if style_node else None)
-        return resolved_nodes, style_ref
+        if not [item for item in resolved_nodes if item.role != "artist"]:
+            raise ValueError("agent request must provide at least one non-artist node")
+        return resolved_nodes
 
     def _copy_render_context_nodes(
         self,
@@ -315,7 +301,7 @@ class GenerationJsonApi:
     ) -> None:
         if "nodes" not in render_request and "nodes" in compose_request:
             render_request["nodes"] = compose_request["nodes"]
-        for key in ("character", "action", "background"):
+        for key in ("character", "action", "background", "artist"):
             if key not in render_request and key in compose_request:
                 render_request[key] = compose_request[key]
 

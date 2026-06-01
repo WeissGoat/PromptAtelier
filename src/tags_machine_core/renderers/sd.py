@@ -8,7 +8,7 @@ from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.renderers.common import (
     preserve_extra_params,
     render_meta,
-    renderer_style_payload,
+    renderer_artist_payload,
 )
 
 
@@ -26,18 +26,18 @@ class SDRenderAdapter:
         model: str | None = None,
         action: str = "render-plan",
         params: dict[str, Any] | None = None,
-        style: NodeDocument | dict[str, Any] | None = None,
+        artist: NodeDocument | dict[str, Any] | None = None,
     ) -> RenderRequest:
-        style_payload = renderer_style_payload(style, self.backend)
-        style_params = copy.deepcopy(style_payload.get("params", {}) or {})
+        artist_payload = renderer_artist_payload(artist, self.backend)
+        artist_params = copy.deepcopy(artist_payload.get("params", {}) or {})
         final_params = self._build_parameters(
             bundle=bundle,
             seed=seed,
             width=width,
             height=height,
             model=model,
-            style_payload=style_payload,
-            params={**style_params, **(params or {})},
+            artist_payload=artist_payload,
+            params={**artist_params, **(params or {})},
         )
         return RenderRequest(
             backend=self.backend,
@@ -47,7 +47,7 @@ class SDRenderAdapter:
             seed=final_params["seed"],
             size=RenderSize(width=width, height=height),
             params=final_params,
-            style_payload=style_payload,
+            artist_payload=artist_payload,
             meta=render_meta(bundle, action=action, backend=self.backend),
         )
 
@@ -59,15 +59,15 @@ class SDRenderAdapter:
         width: int,
         height: int,
         model: str | None,
-        style_payload: dict[str, Any],
+        artist_payload: dict[str, Any],
         params: dict[str, Any],
     ) -> dict[str, Any]:
         checkpoint = (
             model
             or params.get("checkpoint")
             or params.get("model")
-            or style_payload.get("checkpoint")
-            or style_payload.get("model")
+            or artist_payload.get("checkpoint")
+            or artist_payload.get("model")
             or "default_sd_checkpoint"
         )
         final_params: dict[str, Any] = {
@@ -77,19 +77,19 @@ class SDRenderAdapter:
             "seed": seed if seed is not None else params.get("seed", 0),
             "width": width,
             "height": height,
-            "steps": params.get("steps", style_payload.get("steps", 28)),
+            "steps": params.get("steps", artist_payload.get("steps", 28)),
             "cfg_scale": params.get(
                 "cfg_scale",
-                params.get("cfg", style_payload.get("cfg_scale", 7.0)),
+                params.get("cfg", artist_payload.get("cfg_scale", 7.0)),
             ),
-            "sampler": params.get("sampler", style_payload.get("sampler", "Euler a")),
-            "scheduler": params.get("scheduler", style_payload.get("scheduler", "automatic")),
-            "vae": params.get("vae", style_payload.get("vae")),
-            "clip_skip": params.get("clip_skip", style_payload.get("clip_skip", 1)),
-            "loras": params.get("loras", style_payload.get("loras", [])),
-            "embeddings": params.get("embeddings", style_payload.get("embeddings", [])),
-            "controlnet": params.get("controlnet", style_payload.get("controlnet", [])),
-            "hires_fix": params.get("hires_fix", style_payload.get("hires_fix", {})),
+            "sampler": params.get("sampler", artist_payload.get("sampler", "Euler a")),
+            "scheduler": params.get("scheduler", artist_payload.get("scheduler", "automatic")),
+            "vae": params.get("vae", artist_payload.get("vae")),
+            "clip_skip": params.get("clip_skip", artist_payload.get("clip_skip", 1)),
+            "loras": params.get("loras", artist_payload.get("loras", [])),
+            "embeddings": params.get("embeddings", artist_payload.get("embeddings", [])),
+            "controlnet": params.get("controlnet", artist_payload.get("controlnet", [])),
+            "hires_fix": params.get("hires_fix", artist_payload.get("hires_fix", {})),
         }
         final_params.update(
             preserve_extra_params(params, reserved=set(final_params) | {"model", "cfg"})

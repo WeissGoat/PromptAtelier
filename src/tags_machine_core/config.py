@@ -19,7 +19,6 @@ class RuntimeConfig(BaseModel):
 
 class DefaultsConfig(BaseModel):
     backend: str = "novelai"
-    style_ref: str | None = None
     image_format: str = "png"
 
 

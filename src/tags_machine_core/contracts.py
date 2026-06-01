@@ -26,15 +26,29 @@ class PromptCompositionMeta(BaseModel):
     suppressed_character_sections: list[str] = Field(default_factory=list)
 
 
+class PromptNodeRef(BaseModel):
+    role: str
+    id: str
+    kind: str
+    ref: str
+    index: int = 0
+    content_hash: str | None = None
+
+
+class PromptAgentMeta(BaseModel):
+    task_schema: str | None = None
+    agent_model: str | None = None
+    instructions: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
 class PromptMeta(BaseModel):
-    character_ref: str | None = None
-    action_ref: str | None = None
-    style_ref: str | None = None
-    background_ref: str | None = None
     composer_type: ComposerName = "script"
     composer_version: str = "v1"
     composition: PromptCompositionMeta = Field(default_factory=PromptCompositionMeta)
-    source_nodes: list[str] = Field(default_factory=list)
+    nodes: list[PromptNodeRef] = Field(default_factory=list)
+    agent: PromptAgentMeta | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -47,7 +61,7 @@ class CacheMeta(BaseModel):
 class PromptBundle(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    schema_id: str = Field(default="tags-machine-core.prompt-bundle/v1", alias="schema")
+    schema_id: str = Field(default="tags-machine-core.prompt-bundle/v2", alias="schema")
     prompt: PromptText
     meta: PromptMeta = Field(default_factory=PromptMeta)
     cache: CacheMeta = Field(default_factory=CacheMeta)
@@ -70,7 +84,7 @@ class RenderRequest(BaseModel):
     seed: int | None = None
     size: RenderSize = Field(default_factory=RenderSize)
     params: dict[str, Any] = Field(default_factory=dict)
-    style_payload: dict[str, Any] = Field(default_factory=dict)
+    artist_payload: dict[str, Any] = Field(default_factory=dict)
     meta: dict[str, Any] = Field(default_factory=dict)
 
 

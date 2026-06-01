@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from typing import Any
 
 from tags_machine_core.contracts import (
     CacheMeta,
     PromptBundle,
     PromptCompositionMeta,
     PromptMeta,
+    PromptNodeRef,
     PromptText,
 )
 from tags_machine_core.nodes.character_scope import (
@@ -44,25 +47,16 @@ class ScriptComposer:
         self,
         prompt: str,
         negative: str = "",
-        character_ref: str | None = None,
-        action_ref: str | None = None,
-        style_ref: str | None = None,
     ) -> PromptBundle:
         prompt = prompt.strip()
         negative = negative.strip()
         cache_key = self._cache_key(
             prompt=prompt,
             negative=negative,
-            character_ref=character_ref,
-            action_ref=action_ref,
-            style_ref=style_ref,
         )
         return PromptBundle(
             prompt=PromptText(positive=prompt, negative=negative),
             meta=PromptMeta(
-                character_ref=character_ref,
-                action_ref=action_ref,
-                style_ref=style_ref,
                 composer_type="script",
                 composer_version=self.composer_version,
             ),
@@ -75,9 +69,9 @@ class ScriptComposer:
         character: NodeDocument | None = None,
         action: NodeDocument | None = None,
         background: NodeDocument | None = None,
+        artist: NodeDocument | None = None,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         body_scope: str | None = None,
     ) -> PromptBundle:
@@ -102,27 +96,21 @@ class ScriptComposer:
             node_negative(action, scope),
             node_negative(background, scope),
         )
-        source_nodes = [
-            node.source_ref()
-            for node in [character, action, background]
-            if node is not None
-        ]
+        node_refs = self._prompt_refs_from_nodes(
+            ("character", character, 0),
+            ("action", action, 0),
+            ("background", background, 0),
+            ("artist", artist, 0),
+        )
         cache_key = self._cache_key(
             prompt=positive,
             negative=negative_prompt,
-            character_ref=character.id if character else None,
-            action_ref=action.id if action else None,
-            background_ref=background.id if background else None,
-            style_ref=style_ref,
             character_scope=scope,
+            nodes=json.dumps([ref.model_dump(mode="json") for ref in node_refs], sort_keys=True),
         )
         return PromptBundle(
             prompt=PromptText(positive=positive, negative=negative_prompt),
             meta=PromptMeta(
-                character_ref=character.id if character else None,
-                action_ref=action.id if action else None,
-                background_ref=background.id if background else None,
-                style_ref=style_ref,
                 composer_type="script",
                 composer_version=self.composer_version,
                 composition=PromptCompositionMeta(
@@ -130,7 +118,7 @@ class ScriptComposer:
                     included_character_sections=included_sections,
                     suppressed_character_sections=suppressed_sections,
                 ),
-                source_nodes=source_nodes,
+                nodes=node_refs,
             ),
             cache=CacheMeta(cacheable=True, cache_key=cache_key),
         )
@@ -141,7 +129,6 @@ class ScriptComposer:
         *,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         body_scope: str | None = None,
     ) -> PromptBundle:
@@ -191,24 +178,20 @@ class ScriptComposer:
 
         positive = _join_prompt_parts(*positive_parts)
         negative_prompt = _join_prompt_parts(*negative_parts)
-        prompt_nodes = [
-            item
-            for item in resolved_nodes
-            if item.role not in {"artist", "style"}
+        prompt_nodes = list(resolved_nodes)
+        node_refs = [
+            item.as_prompt_ref(content_hash=self._node_content_hash(item.node))
+            for item in prompt_nodes
         ]
         cache_key = self._cache_key(
             prompt=positive,
             negative=negative_prompt,
-            style_ref=style_ref,
             character_scope=scope,
+            nodes=json.dumps([ref.model_dump(mode="json") for ref in node_refs], sort_keys=True),
         )
         return PromptBundle(
             prompt=PromptText(positive=positive, negative=negative_prompt),
             meta=PromptMeta(
-                character_ref=primary_character.id if len(characters) == 1 else None,
-                action_ref=primary_action.id if primary_action else None,
-                background_ref=backgrounds[0].node.id if len(backgrounds) == 1 else None,
-                style_ref=style_ref,
                 composer_type="script",
                 composer_version=self.composer_version,
                 composition=PromptCompositionMeta(
@@ -216,9 +199,8 @@ class ScriptComposer:
                     included_character_sections=dedupe(included_sections),
                     suppressed_character_sections=dedupe(suppressed_sections),
                 ),
-                source_nodes=[item.node.source_ref() for item in prompt_nodes],
+                nodes=node_refs,
                 extra={
-                    "node_refs": [item.as_ref() for item in prompt_nodes],
                     "character_materials": character_materials,
                 },
             ),
@@ -228,3 +210,33 @@ class ScriptComposer:
     def _cache_key(self, **parts: str | None) -> str:
         normalized = "\n".join(f"{key}={parts.get(key) or ''}" for key in sorted(parts))
         return "sha256:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    def _prompt_refs_from_nodes(
+        self,
+        *items: tuple[str, NodeDocument | None, int],
+    ) -> list[PromptNodeRef]:
+        refs: list[PromptNodeRef] = []
+        for role, node, index in items:
+            if node is None:
+                continue
+            refs.append(
+                PromptNodeRef(
+                    role=role,
+                    id=node.id,
+                    kind=node.kind,
+                    ref=node.source_ref(),
+                    index=index,
+                    content_hash=self._node_content_hash(node),
+                )
+            )
+        return refs
+
+    def _node_content_hash(self, node: NodeDocument) -> str:
+        payload: dict[str, Any] = node.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_none=True,
+            exclude={"path"},
+        )
+        text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()

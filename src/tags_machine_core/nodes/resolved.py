@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator, Literal
 
+from tags_machine_core.contracts import PromptNodeRef
 from tags_machine_core.nodes.models import NodeDocument
 
 
 NodeRole = Literal[
     "artist",
-    "style",
     "character",
     "action",
     "background",
@@ -48,6 +48,16 @@ class ResolvedNode:
             "index": self.index,
         }
 
+    def as_prompt_ref(self, content_hash: str | None = None) -> PromptNodeRef:
+        return PromptNodeRef(
+            role=self.role,
+            ref=self.ref,
+            id=self.node.id,
+            kind=self.node.kind,
+            index=self.index,
+            content_hash=content_hash,
+        )
+
 
 class ResolvedNodeSet:
     def __init__(self, nodes: list[ResolvedNode] | None = None):
@@ -63,12 +73,7 @@ class ResolvedNodeSet:
         return bool(self.nodes)
 
     def by_role(self, role: str) -> list[ResolvedNode]:
-        aliases = {
-            "artist": {"artist", "style"},
-            "style": {"artist", "style"},
-        }
-        roles = aliases.get(role, {role})
-        return [item for item in self.nodes if item.role in roles]
+        return [item for item in self.nodes if item.role == role]
 
     def first(self, role: str) -> ResolvedNode | None:
         items = self.by_role(role)

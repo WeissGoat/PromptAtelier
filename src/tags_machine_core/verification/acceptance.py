@@ -110,7 +110,7 @@ PROMPT_BUNDLE_FORBIDDEN_BACKEND_FIELDS = {
     "seed",
     "size",
     "steps",
-    "style_payload",
+    "artist_payload",
     "v4_negative_prompt",
     "v4_prompt",
     "width",

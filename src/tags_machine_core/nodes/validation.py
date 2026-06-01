@@ -49,7 +49,7 @@ FORBIDDEN_KEYS_BY_KIND = {
         "constraints",
         "renderers",
     },
-    "style": {
+    "artist": {
         "rules",
         "profiles",
         "include_scopes",
@@ -59,27 +59,27 @@ FORBIDDEN_KEYS_BY_KIND = {
     },
 }
 
-SUPPORTED_V1_KINDS = {"character", "action", "background", "style"}
+SUPPORTED_V1_KINDS = {"character", "action", "background", "artist"}
 
 EXPECTED_SCHEMA_BY_KIND = {
     "character": "tags-machine.character/v1",
     "action": "tags-machine.action/v1",
     "background": "tags-machine.background/v1",
-    "style": "tags-machine.style/v1",
+    "artist": "tags-machine.artist/v1",
 }
 
 EXPECTED_FILE_BY_KIND = {
     "character": "meta.yaml",
     "action": "meta.yaml",
     "background": "meta.yaml",
-    "style": "node.yaml",
+    "artist": "node.yaml",
 }
 
 REQUIRED_TAG_SECTIONS_BY_KIND = {
     "character": ("character",),
     "action": ("action",),
     "background": ("background",),
-    "style": ("style",),
+    "artist": ("artist",),
 }
 
 
@@ -235,13 +235,13 @@ def _validate_node_yaml(path: Path, source_root: Path) -> dict[str, Any]:
 
     if kind == "action" and not str(data.get("character_scope") or "").strip():
         _append_issue(issues, "action_missing_character_scope", "action 节点缺少 character_scope。")
-    if kind == "style":
+    if kind == "artist":
         renderers = data.get("renderers")
         if not isinstance(renderers, dict) or not isinstance(renderers.get("novelai"), dict):
             _append_issue(
                 issues,
-                "style_missing_renderers_novelai",
-                "style 节点缺少 renderers.novelai。",
+                "artist_missing_renderers_novelai",
+                "artist 节点缺少 renderers.novelai。",
             )
 
     return {

@@ -13,7 +13,7 @@ from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import PromptBundle, RenderRequest
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
-from tags_machine_core.nodes.novelai_style import NovelAIStyle
+from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.renderers import ComfyUIRenderAdapter, NovelAIRenderAdapter, SDRenderAdapter
 
 
@@ -36,12 +36,10 @@ class GenerationService:
         self,
         prompt: str,
         negative: str = "",
-        style_ref: str | None = None,
     ) -> PromptBundle:
         return self.composer.compose_full_prompt(
             prompt=prompt,
             negative=negative,
-            style_ref=style_ref,
         )
 
     def compose_nodes(
@@ -50,9 +48,9 @@ class GenerationService:
         character: NodeDocument | None = None,
         action: NodeDocument | None = None,
         background: NodeDocument | None = None,
+        artist: NodeDocument | None = None,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         body_scope: str | None = None,
     ) -> PromptBundle:
@@ -60,9 +58,9 @@ class GenerationService:
             character=character,
             action=action,
             background=background,
+            artist=artist,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             body_scope=body_scope,
         )
@@ -73,7 +71,6 @@ class GenerationService:
         *,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         body_scope: str | None = None,
     ) -> PromptBundle:
@@ -81,7 +78,6 @@ class GenerationService:
             resolved_nodes,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             body_scope=body_scope,
         )
@@ -92,9 +88,9 @@ class GenerationService:
         character: NodeDocument | None = None,
         action: NodeDocument | None = None,
         background: NodeDocument | None = None,
+        artist: NodeDocument | None = None,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -103,9 +99,9 @@ class GenerationService:
             character=character,
             action=action,
             background=background,
+            artist=artist,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
             agent_model=agent_model,
@@ -117,7 +113,6 @@ class GenerationService:
         *,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -126,7 +121,6 @@ class GenerationService:
             resolved_nodes,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
             agent_model=agent_model,
@@ -138,9 +132,9 @@ class GenerationService:
         character: NodeDocument | None = None,
         action: NodeDocument | None = None,
         background: NodeDocument | None = None,
+        artist: NodeDocument | None = None,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -151,9 +145,9 @@ class GenerationService:
             character=character,
             action=action,
             background=background,
+            artist=artist,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
             agent_model=agent_model,
@@ -167,7 +161,6 @@ class GenerationService:
         *,
         extra_prompt: str = "",
         negative: str = "",
-        style_ref: str | None = None,
         character_scope: str | None = None,
         instructions: list[str] | None = None,
         agent_model: str | None = None,
@@ -178,7 +171,6 @@ class GenerationService:
             resolved_nodes,
             extra_prompt=extra_prompt,
             negative=negative,
-            style_ref=style_ref,
             character_scope=character_scope,
             instructions=instructions,
             agent_model=agent_model,
@@ -190,7 +182,7 @@ class GenerationService:
         self,
         bundle: PromptBundle,
         seed: int | None = None,
-        style: NovelAIStyle | NodeDocument | dict[str, Any] | None = None,
+        artist: NovelAIArtist | NodeDocument | dict[str, Any] | None = None,
         resolved_nodes: ResolvedNodeSet | None = None,
         width: int = 1024,
         height: int = 1024,
@@ -206,7 +198,7 @@ class GenerationService:
             model=model,
             action=action,
             params=params,
-            style=style,
+            artist=artist,
             resolved_nodes=resolved_nodes,
         )
 
@@ -216,7 +208,7 @@ class GenerationService:
         *,
         backend: str = "novelai",
         seed: int | None = None,
-        style: NovelAIStyle | NodeDocument | dict[str, Any] | None = None,
+        artist: NovelAIArtist | NodeDocument | dict[str, Any] | None = None,
         resolved_nodes: ResolvedNodeSet | None = None,
         width: int = 1024,
         height: int = 1024,
@@ -237,7 +229,7 @@ class GenerationService:
                 model=model or "nai-diffusion-4-5-full",
                 action=action,
                 params=params,
-                style=style,
+                artist=artist,
                 resolved_nodes=resolved_nodes,
             )
         if backend == "comfyui":
@@ -249,7 +241,7 @@ class GenerationService:
                 model=model,
                 action=action,
                 params=params,
-                style=style,
+                artist=artist,
             )
         if backend == "sd":
             return self.sd_adapter.build_request(
@@ -260,6 +252,6 @@ class GenerationService:
                 model=model,
                 action=action,
                 params=params,
-                style=style,
+                artist=artist,
             )
         raise ValueError(f"Unsupported backend: {backend}")

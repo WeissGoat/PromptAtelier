@@ -8,7 +8,6 @@ runtime:
 
 defaults:
   backend: "novelai"
-  style_ref: "20260412_2"
   image_format: "png"
 
 novelai:
