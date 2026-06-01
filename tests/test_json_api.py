@@ -759,6 +759,52 @@ tags:
                 _without_runtime_fields({**second, "cache": {**second["cache"], "cache_hit": False}}),
             )
 
+    def test_agent_json_api_prompt_input_overwrites_cached_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action, style = _write_sample_nodes(root)
+            cache_dir = root / "cache" / "prompt"
+            base_request = {
+                "nodes": {
+                    "character": str(character),
+                    "action": str(action),
+                },
+                "style": str(style),
+                "agent": {
+                    "model": "agent-model-v1",
+                },
+                "cache": {
+                    "cache_dir": str(cache_dir),
+                },
+            }
+            api = GenerationJsonApi()
+
+            first = api.compose_agent(
+                {
+                    **base_request,
+                    "prompt": "cached prompt",
+                    "negative": "cached negative",
+                }
+            )
+            second = api.compose_agent(
+                {
+                    **base_request,
+                    "prompt": "fresh prompt",
+                    "negative": "fresh negative",
+                }
+            )
+            third = api.compose_agent(base_request)
+
+            self.assertFalse(first["cache"]["cache_hit"])
+            self.assertFalse(second["cache"]["cache_hit"])
+            self.assertTrue(third["cache"]["cache_hit"])
+            self.assertEqual(first["cache"]["cache_key"], second["cache"]["cache_key"])
+            self.assertEqual(second["cache"]["cache_key"], third["cache"]["cache_key"])
+            self.assertEqual(second["prompt"]["positive"], "fresh prompt")
+            self.assertEqual(second["prompt"]["negative"], "fresh negative")
+            self.assertEqual(third["prompt"]["positive"], "fresh prompt")
+            self.assertEqual(third["prompt"]["negative"], "fresh negative")
+
     def test_agent_json_api_does_not_reuse_cache_when_agent_model_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

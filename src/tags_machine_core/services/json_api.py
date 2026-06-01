@@ -92,12 +92,21 @@ class GenerationJsonApi:
         data = _mapping(request, "compose-agent request")
         resolved_nodes, style_ref = self._load_agent_resolved_inputs(data)
         result = _optional_mapping(_agent_value(data, "agent_result", "result"))
+        task_negative = str(data.get("negative") or "")
+        prompt = _optional_string(data.get("prompt"))
+        if prompt and result is None:
+            result = {
+                "positive": prompt,
+                "negative": task_negative,
+                "character_scope": _optional_string(data.get("character_scope") or data.get("body_scope")),
+            }
+            task_negative = ""
         cache_dir = _optional_string(_agent_value(data, "cache_dir", "cache_root"))
         cache = PromptCache(cache_dir) if cache_dir else None
         bundle = self.service.compose_resolved_nodes_with_agent(
             resolved_nodes,
-            extra_prompt=str(data.get("extra_prompt") or data.get("prompt") or ""),
-            negative=str(data.get("negative") or ""),
+            extra_prompt=str(data.get("extra_prompt") or ""),
+            negative=task_negative,
             style_ref=style_ref,
             character_scope=_optional_string(data.get("character_scope") or data.get("body_scope")),
             instructions=_string_list(_agent_value(data, "instructions", "instruction")),
