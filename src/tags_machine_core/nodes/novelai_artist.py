@@ -110,6 +110,7 @@ class NovelAIArtistRepository:
             flags=flags,
         )
 
+        gen_json_seen = False
         for line in ext_lines:
             key, value = self._split_ext_line(line)
             if not key:
@@ -119,7 +120,9 @@ class NovelAIArtistRepository:
             elif key == "after_uc":
                 artist.after_negative_prompt = value
             elif key == "gen_json":
-                artist.params.update(self._parse_json_value(value, tags_path))
+                if not gen_json_seen:
+                    artist.params.update(self._parse_json_value(value, tags_path))
+                    gen_json_seen = True
             elif key in {"not_quailty_prompts", "not_quality_prompts"}:
                 artist.flags.add(key)
             else:

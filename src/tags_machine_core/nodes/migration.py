@@ -243,6 +243,7 @@ def migrate_legacy_artist_tags(
     flags: list[str] = list(type_flags)
     legacy_extensions: dict[str, str] = {}
 
+    gen_json_seen = False
     for line in ext_lines:
         key, value = _split_ext_line(line)
         if not key:
@@ -254,7 +255,9 @@ def migrate_legacy_artist_tags(
             if value:
                 novelai["after_negative_prompt"] = [value]
         elif key == "gen_json":
-            novelai["params"].update(_parse_json_value(value, tags_path))
+            if not gen_json_seen:
+                novelai["params"].update(_parse_json_value(value, tags_path))
+                gen_json_seen = True
         elif key in {"not_quailty_prompts", "not_quality_prompts"}:
             flags.append(key)
         else:

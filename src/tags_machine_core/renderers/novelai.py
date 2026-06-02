@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import random
 import re
 from typing import Any
@@ -18,6 +19,8 @@ from tags_machine_core.renderers.common import (
 NovelAIArtistInput = NovelAIArtist | NodeDocument | dict[str, Any] | None
 
 _SEED_RANDOM = random.SystemRandom()
+_NOVELAI_SEED_MIN = 0
+_NOVELAI_SEED_MAX = 4294967295
 
 LEGACY_NAI4_QUALITY_PROMPT = ",::,very aesthetic, masterpiece, no text"
 LEGACY_DEFAULT_NEGATIVE_PROMPT = (
@@ -216,34 +219,68 @@ class NovelAIRenderAdapter:
             legacy_artist=legacy_artist,
         )
 
+        width = _validate_int_parameter("width", width, minimum=64, maximum=49152)
+        height = _validate_int_parameter("height", height, minimum=64, maximum=49152)
         sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_artist else "k_euler")
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
         if sampler == "ddim":
             sampler = "ddim_v3"
         resolved_seed = _resolve_seed(seed, params.get("seed"))
+        extra_noise_seed = _resolve_extra_noise_seed(params.get("extra_noise_seed"), resolved_seed)
+        scale = _validate_number_parameter(
+            "scale",
+            params.get("scale", 6.0 if legacy_artist else 5.0),
+            minimum=0,
+            maximum=10,
+        )
+        steps = _validate_int_parameter("steps", params.get("steps", 28), minimum=1, maximum=50)
+        n_samples = _validate_int_parameter(
+            "n_samples",
+            params.get("n_samples", 1),
+            minimum=1,
+            maximum=_max_n_samples(width, height),
+        )
+        cfg_rescale = _validate_number_parameter(
+            "cfg_rescale",
+            params.get("cfg_rescale", 0.0),
+            minimum=0,
+            maximum=1,
+        )
+        uncond_scale = _validate_number_parameter(
+            "uncond_scale",
+            params.get("uncond_scale", 0.0),
+            minimum=0,
+            maximum=1.5,
+        )
+        controlnet_strength = _validate_number_parameter(
+            "controlnet_strength",
+            params.get("controlnet_strength", 1.0),
+            minimum=0.1,
+            maximum=2,
+        )
 
         # 这些默认值参考 ComfyUI_NAIDGenerator 的 V4/V4.5 请求结构。
         final_params: dict[str, Any] = {
             "params_version": 1,
             "width": width,
             "height": height,
-            "scale": params.get("scale", 6.0 if legacy_artist else 5.0),
+            "scale": scale,
             "sampler": sampler,
-            "steps": params.get("steps", 28),
+            "steps": steps,
             "seed": resolved_seed,
-            "n_samples": params.get("n_samples", 1),
+            "n_samples": n_samples,
             "ucPreset": 3,
             "qualityToggle": False,
             "sm": params.get("sm", True if legacy_artist else False) and sampler != "ddim_v3",
             "sm_dyn": params.get("sm_dyn", False) and sampler != "ddim_v3",
             "dynamic_thresholding": params.get("dynamic_thresholding", False),
-            "controlnet_strength": params.get("controlnet_strength", 1.0),
+            "controlnet_strength": controlnet_strength,
             "legacy": params.get("legacy", False),
             "add_original_image": params.get("add_original_image", True if legacy_artist else False),
-            "cfg_rescale": params.get("cfg_rescale", 0.0),
+            "cfg_rescale": cfg_rescale,
             "noise_schedule": scheduler,
             "legacy_v3_extend": params.get("legacy_v3_extend", False),
-            "uncond_scale": params.get("uncond_scale", 0.0),
+            "uncond_scale": uncond_scale,
             "negative_prompt": negative,
             "prompt": positive,
             "reference_image_multiple": params.get("reference_image_multiple", []),
@@ -252,7 +289,7 @@ class NovelAIRenderAdapter:
             ),
             "reference_strength_multiple": params.get("reference_strength_multiple", []),
             "director_reference_images": params.get("director_reference_images", []),
-            "extra_noise_seed": params.get("extra_noise_seed", resolved_seed),
+            "extra_noise_seed": extra_noise_seed,
             "v4_prompt": {
                 "use_coords": False,
                 "use_order": params.get("use_order", True if legacy_artist else False),
@@ -869,10 +906,85 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _resolve_seed(explicit_seed: int | None, params_seed: Any) -> int:
-    for value in (explicit_seed, params_seed):
-        if value is not None:
-            return int(value)
-    return _SEED_RANDOM.randint(0, 4294967295)
+    resolved_explicit = (
+        _validate_seed("seed", explicit_seed) if explicit_seed is not None else None
+    )
+    resolved_params = _validate_seed("seed", params_seed) if params_seed is not None else None
+    if resolved_explicit is not None:
+        return resolved_explicit
+    if resolved_params is not None:
+        return resolved_params
+    return _SEED_RANDOM.randint(_NOVELAI_SEED_MIN, _NOVELAI_SEED_MAX)
+
+
+def _resolve_extra_noise_seed(value: Any, resolved_seed: int) -> int:
+    if value is None:
+        return resolved_seed
+    return _validate_seed("extra_noise_seed", value)
+
+
+def _validate_seed(name: str, value: Any) -> int:
+    return _validate_int_parameter(
+        name,
+        value,
+        minimum=_NOVELAI_SEED_MIN,
+        maximum=_NOVELAI_SEED_MAX,
+    )
+
+
+def _validate_int_parameter(
+    name: str,
+    value: Any,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool):
+        raise ValueError(_range_error(name, value, minimum, maximum))
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(_range_error(name, value, minimum, maximum))
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(_range_error(name, value, minimum, maximum)) from None
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(_range_error(name, value, minimum, maximum))
+    return parsed
+
+
+def _validate_number_parameter(
+    name: str,
+    value: Any,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if isinstance(value, bool):
+        raise ValueError(_range_error(name, value, minimum, maximum))
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(_range_error(name, value, minimum, maximum)) from None
+    if not math.isfinite(parsed):
+        raise ValueError(_range_error(name, value, minimum, maximum))
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(_range_error(name, value, minimum, maximum))
+    return parsed
+
+
+def _range_error(name: str, value: Any, minimum: int | float, maximum: int | float) -> str:
+    return f"NovelAI parameter {name} must be between {minimum} and {maximum}, got {value!r}"
+
+
+def _max_n_samples(width: int, height: int) -> int:
+    pixels = width * height
+    if pixels <= 512 * 704:
+        return 8
+    if pixels <= 640 * 640:
+        return 6
+    if pixels <= 1024 * 3072:
+        return 4
+    return 0
 
 
 def _raw_character_material(
