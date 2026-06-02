@@ -61,6 +61,8 @@ def build_core_png_text(request: RenderRequest) -> dict[str, str]:
         "composer_type": request.meta.get("composer_type"),
         "composer_version": request.meta.get("composer_version"),
         "prompt_cache_key": request.meta.get("prompt_cache_key"),
+        "resolution": request.meta.get("resolution"),
+        "split_batch": request.meta.get("split_batch"),
         "nodes": request.meta.get("node_refs") or [],
         "source_nodes": request.meta.get("source_nodes") or [],
         "character_prompts": request.meta.get("character_prompts"),

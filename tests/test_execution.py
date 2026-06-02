@@ -151,6 +151,8 @@ class ExecutionTest(unittest.TestCase):
                     "composer_type": "agent",
                     "composer_version": "v1",
                     "prompt_cache_key": "sha256:abc",
+                    "resolution": "portrait",
+                    "split_batch": {"index": 0, "count": 3, "reason": "random_resolution"},
                     "node_refs": [
                         {"role": "character", "id": "homura", "ref": "design/角色/homura"},
                         {"role": "artist", "id": "20260412", "ref": "20260412"},
@@ -176,6 +178,8 @@ class ExecutionTest(unittest.TestCase):
             self.assertEqual(core_info["schema"], "tags-machine-core.png-info/v1")
             self.assertEqual(core_info["nodes"][1]["role"], "artist")
             self.assertEqual(core_info["character_prompts"]["mode"], "auto")
+            self.assertEqual(core_info["resolution"], "portrait")
+            self.assertEqual(core_info["split_batch"]["count"], 3)
 
     def test_execute_novelai_generation_uses_config_and_records_request_body(self):
         with tempfile.TemporaryDirectory() as tmp:
