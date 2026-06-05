@@ -159,7 +159,7 @@ uv run python -m tags_machine_core run-prompt `
   --nt 3
 ```
 
-`run-prompt` 用于“agent 或人工已经给出完整角色+动作混合 prompt”的场景。它不会再按 `character_scope` 裁剪角色节点，只把输入落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--nt` 会写入 NovelAI `n_samples`，默认值保持旧接口习惯为 3。
+`run-prompt` 用于“agent 或人工已经给出完整角色+动作混合 prompt”的场景。它不会再按 `character_scope` 裁剪角色节点，只把输入落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--nt` 表示生成张数，执行层会拆成多次 `n_samples=1` 的 NovelAI 请求，默认值保持旧接口习惯为 3。
 
 JSON API 边界入口：
 
