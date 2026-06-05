@@ -181,7 +181,7 @@ class ExecutionTest(unittest.TestCase):
             self.assertEqual(core_info["resolution"], "portrait")
             self.assertEqual(core_info["split_batch"]["count"], 3)
 
-    def test_execute_novelai_generation_uses_config_and_records_request_body(self):
+    def test_execute_novelai_generation_splits_batch_samples_before_requesting(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output_dir = root / "custom_outputs"
@@ -202,11 +202,11 @@ class ExecutionTest(unittest.TestCase):
                 client.generate_images.return_value = [
                     SimpleNamespace(filename="nai_result", content=b"image-bytes")
                 ]
-                client.build_payload.return_value = {
-                    "input": "akemi homura",
-                    "model": "nai-diffusion-4-5-full",
+                client.build_payload.side_effect = lambda split_request: {
+                    "input": split_request.prompt,
+                    "model": split_request.model,
                     "action": "generate",
-                    "parameters": {"seed": 111, "n_samples": 2},
+                    "parameters": dict(split_request.params),
                 }
 
                 result = execute_novelai_generation(
@@ -222,14 +222,27 @@ class ExecutionTest(unittest.TestCase):
                 timeout=30,
                 retry=1,
             )
-            client.generate_images.assert_called_once_with(request)
-            client.build_payload.assert_called_once_with(request)
+            self.assertEqual(client.generate_images.call_count, 2)
+            called_requests = [item.args[0] for item in client.generate_images.call_args_list]
+            self.assertEqual([item.params["n_samples"] for item in called_requests], [1, 1])
+            self.assertEqual([item.params["seed"] for item in called_requests], [111, 112])
+            self.assertEqual(client.build_payload.call_count, 2)
             self.assertEqual(result.backend, "novelai")
-            self.assertEqual(result.request_body["parameters"]["n_samples"], 2)
-            self.assertEqual(len(result.images), 1)
+            self.assertTrue(result.request_body["split_batch"])
+            self.assertEqual(
+                [item["parameters"]["n_samples"] for item in result.request_body["requests"]],
+                [1, 1],
+            )
+            self.assertEqual(
+                [item["parameters"]["seed"] for item in result.request_body["requests"]],
+                [111, 112],
+            )
+            self.assertEqual(len(result.images), 2)
             self.assertEqual(result.images[0].path.parent, output_dir)
             self.assertEqual(result.images[0].path.read_bytes(), b"image-bytes")
+            self.assertEqual(result.images[1].meta["split_request_index"], 1)
             self.assertIn("Not a PNG file", result.png_info["images"][0]["error"])
+            self.assertEqual(result.png_info["images"][1]["split_request_index"], 1)
 
     def test_execute_novelai_generation_requires_token(self):
         with tempfile.TemporaryDirectory() as tmp:

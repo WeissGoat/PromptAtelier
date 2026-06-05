@@ -202,19 +202,123 @@ def execute_novelai_generation(
         timeout=config.novelai.timeout,
         retry=config.novelai.retry,
     )
-    images = save_generated_images(
-        client.generate_images(request),
-        output_dir=Path(output_dir or config.runtime.output_dir),
-        request=request,
-        default_format=image_format,
-    )
+    output_path = Path(output_dir or config.runtime.output_dir)
+    requests = split_novelai_samples(request)
+    if len(requests) == 1:
+        effective_request = requests[0]
+        images = save_generated_images(
+            client.generate_images(effective_request),
+            output_dir=output_path,
+            request=effective_request,
+            default_format=image_format,
+        )
+        return GenerationResult(
+            backend="novelai",
+            images=images,
+            request_body=client.build_payload(effective_request),
+            png_info=collect_png_info(images),
+            cache_hit=False,
+        )
+
+    images: list[GeneratedImage] = []
+    png_records: list[dict[str, Any]] = []
+    request_bodies: list[dict[str, Any]] = []
+    for index, split_request in enumerate(requests):
+        generated = save_generated_images(
+            client.generate_images(split_request),
+            output_dir=output_path,
+            request=split_request,
+            default_format=image_format,
+        )
+        images.extend(
+            image.model_copy(
+                update={
+                    "meta": {
+                        **image.meta,
+                        "split_request_index": index,
+                    }
+                }
+            )
+            for image in generated
+        )
+        request_bodies.append(client.build_payload(split_request))
+        png_info = collect_png_info(generated)
+        for record in png_info.get("images", []):
+            if isinstance(record, dict):
+                record["split_request_index"] = index
+                png_records.append(record)
+
     return GenerationResult(
         backend="novelai",
         images=images,
-        request_body=client.build_payload(request),
-        png_info=collect_png_info(images),
+        request_body={
+            "split_batch": True,
+            "reason": "force_n_samples_1",
+            "requests": request_bodies,
+        },
+        png_info={"images": png_records},
         cache_hit=False,
     )
+
+
+def split_novelai_samples(request: RenderRequest) -> list[RenderRequest]:
+    """把 NovelAI 批量请求拆成多次单图请求，避免向 API 发送 n_samples > 1。"""
+    count = _request_n_samples(request)
+    if count <= 1:
+        return [request]
+
+    return [_single_novelai_sample_request(request, index, count) for index in range(count)]
+
+
+def _request_n_samples(request: RenderRequest) -> int:
+    value = request.params.get("n_samples", 1)
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"NovelAI parameter n_samples must be an integer, got {value!r}") from None
+    if count < 1:
+        raise ValueError(f"NovelAI parameter n_samples must be at least 1, got {value!r}")
+    return count
+
+
+def _single_novelai_sample_request(
+    request: RenderRequest,
+    index: int,
+    count: int,
+) -> RenderRequest:
+    params = dict(request.params)
+    seed = _offset_novelai_seed(params.get("seed", request.seed), index)
+    params["n_samples"] = 1
+    if seed is not None:
+        params["seed"] = seed
+
+    meta = dict(request.meta)
+    meta["split_batch"] = {
+        "index": index,
+        "count": count,
+        "reason": "force_n_samples_1",
+    }
+    return request.model_copy(
+        deep=True,
+        update={
+            "seed": seed if seed is not None else request.seed,
+            "params": params,
+            "meta": meta,
+        },
+    )
+
+
+def _offset_novelai_seed(seed: Any, index: int) -> int | None:
+    if seed is None:
+        return None
+    try:
+        value = int(seed)
+    except (TypeError, ValueError):
+        raise ValueError(f"NovelAI parameter seed must be an integer, got {seed!r}") from None
+    value += index
+    if value > 4294967295:
+        raise ValueError(f"NovelAI parameter seed must be between 0 and 4294967295, got {value!r}")
+    return value
 
 
 def execute_render_request(
