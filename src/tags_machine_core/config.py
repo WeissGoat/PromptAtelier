@@ -27,6 +27,7 @@ class NovelAIConfig(BaseModel):
     access_token_env: str = "NAI_ACCESS_TOKEN"
     timeout: int = 120
     retry: int = 3
+    retry_interval: float | None = None
 
 
 class ComfyUIConfig(BaseModel):

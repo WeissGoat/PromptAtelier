@@ -85,6 +85,20 @@ class NovelAIClientError(RuntimeError):
         )
 
 
+class FixedIntervalRetry(Retry):
+    def __init__(self, *args, retry_interval: float = 0.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.retry_interval = retry_interval
+
+    def new(self, **kw):
+        retry = super().new(**kw)
+        retry.retry_interval = self.retry_interval
+        return retry
+
+    def get_backoff_time(self) -> float:
+        return float(self.retry_interval)
+
+
 @dataclass(frozen=True)
 class NovelAIImage:
     filename: str
@@ -97,6 +111,7 @@ class NovelAIClient:
     base_url: str = IMAGE_BASE_URL
     timeout: int = 120
     retry: int = 3
+    retry_interval: float | None = None
     http_client: Any | None = None
 
     def build_payload(self, request: RenderRequest) -> dict[str, Any]:
@@ -147,11 +162,16 @@ class NovelAIClient:
         # 只对网络抖动和限流做有限重试，业务错误直接抛出。
         if self.retry <= 1:
             return requests
-        retries = Retry(
+        retry_class = FixedIntervalRetry if self.retry_interval is not None else Retry
+        retry_kwargs = {}
+        if self.retry_interval is not None:
+            retry_kwargs["retry_interval"] = self.retry_interval
+        retries = retry_class(
             total=self.retry,
-            backoff_factor=1,
+            backoff_factor=0 if self.retry_interval is not None else 1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["POST"],
+            **retry_kwargs,
         )
         session = requests.Session()
         session.mount("https://", HTTPAdapter(max_retries=retries))

@@ -201,6 +201,7 @@ def execute_novelai_generation(
         base_url=config.novelai.base_url,
         timeout=config.novelai.timeout,
         retry=config.novelai.retry,
+        retry_interval=config.novelai.retry_interval,
     )
     output_path = Path(output_dir or config.runtime.output_dir)
     requests = split_novelai_samples(request)
