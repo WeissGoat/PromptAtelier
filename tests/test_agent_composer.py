@@ -113,6 +113,28 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(left.cache_key, right.cache_key)
         self.assertNotEqual(left.nodes["character"].ref, right.nodes["character"].ref)
 
+    def test_task_cache_payload_only_uses_node_content_hashes(self):
+        composer = AgentComposer()
+        task = composer.build_task(
+            character=_character("characters/homura"),
+            action=_action("actions/foot_closeup"),
+            character_scope="foot_detail",
+            instructions=["agent wording preference"],
+        )
+        payload = task.model_dump(mode="json", by_alias=True)
+
+        cache_payload = composer._task_cache_payload(payload)
+
+        self.assertNotIn("instructions", cache_payload)
+        self.assertEqual(
+            cache_payload["nodes"]["character"],
+            {"content_hash": task.nodes["character"].content_hash},
+        )
+        self.assertEqual(
+            cache_payload["nodes"]["action"],
+            {"content_hash": task.nodes["action"].content_hash},
+        )
+
     def test_task_cache_key_changes_for_content_version_and_explicit_inputs(self):
         composer = AgentComposer()
         base = composer.build_task(
@@ -175,6 +197,7 @@ class AgentComposerTest(unittest.TestCase):
             base.nodes["character"].content_hash,
             changed_content.nodes["character"].content_hash,
         )
+        self.assertEqual(base.cache_key, changed_instruction.cache_key)
         self.assertEqual(
             len(
                 {
@@ -182,12 +205,11 @@ class AgentComposerTest(unittest.TestCase):
                     changed_content.cache_key,
                     changed_scope.cache_key,
                     changed_extra_prompt.cache_key,
-                    changed_instruction.cache_key,
                     changed_agent_model.cache_key,
                     changed_version.cache_key,
                 }
             ),
-            7,
+            6,
         )
 
     def test_compose_nodes_writes_and_reuses_cache(self):

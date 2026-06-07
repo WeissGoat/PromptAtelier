@@ -363,11 +363,11 @@ class AgentComposer:
         nodes = {}
         for role, snapshot in payload.get("nodes", {}).items():
             nodes[role] = {
-                "id": snapshot.get("id"),
-                "kind": snapshot.get("kind"),
                 "content_hash": snapshot.get("content_hash"),
             }
-        return {**payload, "nodes": nodes}
+        cache_payload = {**payload, "nodes": nodes}
+        cache_payload.pop("instructions", None)
+        return cache_payload
 
 
 def _optional_text(value: str | None) -> str | None:

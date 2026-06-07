@@ -53,7 +53,7 @@
 - `negative`：额外负向提示词。
 - `style_ref`：画风引用。
 - `character_scope`：本次任务采用的裁剪视角，默认由 action `character_scope` 推导；请求级字段只用于临时覆盖/调试。
-- `instructions`：可选的 agent 补充指令。它是 core 接口入参，会写入 `AgentCompositionTask` 供调用方的外部 agent 读取；通用裁剪规则不应依赖每次手写 instruction。
+- `instructions`：可选的 agent 补充指令。它是 core 接口入参，会写入 `AgentCompositionTask` 供调用方的外部 agent 读取，但不进入 `cache_key`；通用裁剪规则不应依赖每次手写 instruction。
 - `agent_model`：外部 agent 模型/版本标识，会进入 `cache_key`，避免模型升级后误用旧缓存。
 - `cache_key`：该任务的稳定缓存 key。
 
@@ -140,7 +140,7 @@ agent 缓存目录推荐使用 `cache.cache_dir`；同时兼容顶层 `cache_dir
 
 如果请求包含 `"composer": "agent"`、`agent` 或 `agent_result`，`api-compose` 会走 agent composer 路径，效果等价于 `api-compose-agent`。
 
-CLI 的 `run-prompt --composer agent` 是 agent prompt 进入真实 NovelAI 生图的业务入口；JSON API 中对应的无联网状态入口仍是 `api-resolve-compose-render-plan`。二者必须共用同一套 `AgentComposer` cache key 语义：节点内容、style_ref、agent instructions、agent_model、解析后的 character_scope、extra_prompt 等显式任务输入进入 cache key；agent 输出的完整 prompt 不进入 cache key。CLI 中带完整 prompt 回填 cache 时，随 prompt 传入的 negative 也作为 agent 输出保存，而不是作为下一次读取缓存必须重复输入的 task negative。
+CLI 的 `run-prompt --composer agent` 是 agent prompt 进入真实 NovelAI 生图的业务入口；JSON API 中对应的无联网状态入口仍是 `api-resolve-compose-render-plan`。二者必须共用同一套 `AgentComposer` cache key 语义：节点内容的 `content_hash`、`agent_model`、解析后的 `character_scope`、`extra_prompt` 等显式任务输入进入 cache key；agent instructions、agent 输出的完整 prompt、生成参数和输出路径不进入 cache key。CLI 中带完整 prompt 回填 cache 时，随 prompt 传入的 negative 也作为 agent 输出保存，而不是作为下一次读取缓存必须重复输入的 task negative。
 
 ### api-agent-task
 

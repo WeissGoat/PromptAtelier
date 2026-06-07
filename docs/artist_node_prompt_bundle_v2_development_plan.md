@@ -170,16 +170,16 @@ prompt_suffix = line C...
 cache key 输入：
 
 - `composer_version`
-- 每个 node 的 `id`、`kind`、`content_hash`
+- 每个 node 的 `content_hash`
 - `extra_prompt`
 - `negative`
 - `character_scope`
-- `instructions`
 - `agent_model`
 
 cache key 不包含：
 
 - artist 字符串 ref
+- agent instructions
 - agent 输出 prompt
 - NovelAI 参数
 - 输出图片路径
