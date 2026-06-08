@@ -53,6 +53,7 @@ class GenerationJsonApi:
             bundle = self.service.compose_full_prompt(
                 prompt=str(data.get("prompt") or ""),
                 negative=str(data.get("negative") or ""),
+                prompt_policy=_optional_mapping(data.get("prompt_policy")),
             )
             return to_jsonable(bundle)
 
@@ -66,6 +67,7 @@ class GenerationJsonApi:
             negative=str(data.get("negative") or ""),
             character_scope=_optional_string(data.get("character_scope")),
             body_scope=_optional_string(data.get("body_scope")),
+            prompt_policy=_optional_mapping(data.get("prompt_policy")),
         )
         return to_jsonable(bundle)
 

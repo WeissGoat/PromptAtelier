@@ -6,6 +6,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from tags_machine_core.policies import PromptPolicyConfig
+
 
 class LegacyConfig(BaseModel):
     tags_machine_root: Path
@@ -44,6 +46,7 @@ class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    prompt_policy: PromptPolicyConfig = Field(default_factory=PromptPolicyConfig)
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     sd: SDConfig = Field(default_factory=SDConfig)

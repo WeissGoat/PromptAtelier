@@ -34,6 +34,7 @@ from tags_machine_core.nodes import (
     validate_node_tree,
 )
 from tags_machine_core.services import GenerationJsonApi, GenerationService
+from tags_machine_core.policies import PromptPolicyConfig
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_image_comparison_report,
@@ -729,6 +730,7 @@ def _build_bundle(service: GenerationService, args):
     return service.compose_full_prompt(
         prompt=args.prompt,
         negative=args.negative or "",
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
     )
 
 
@@ -744,6 +746,7 @@ def _build_bundle_from_nodes(
             negative=args.negative or "",
             character_scope=args.character_scope,
             body_scope=args.body_scope,
+            prompt_policy=_prompt_policy_from_args(args, target="script"),
         )
     character, action, background = _read_node_inputs(args)
     return service.compose_nodes(
@@ -754,6 +757,7 @@ def _build_bundle_from_nodes(
         negative=args.negative or "",
         character_scope=args.character_scope,
         body_scope=args.body_scope,
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
     )
 
 
@@ -768,6 +772,7 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
     bundle = service.compose_full_prompt(
         prompt=prompt,
         negative=args.negative or "",
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -831,6 +836,7 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         character_scope=args.character_scope or args.body_scope,
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -845,6 +851,33 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
         resolved_nodes=resolved_nodes,
     )
     return bundle, request
+
+
+def _prompt_policy_from_args(args, *, target: str):
+    profile = getattr(args, "prompt_policy_profile", None)
+    enabled_rules = getattr(args, "prompt_policy_rule", None) or []
+    disabled_rules = getattr(args, "no_prompt_policy_rule", None) or []
+    if not profile and not enabled_rules and not disabled_rules:
+        config_path = getattr(args, "config", None)
+        if config_path:
+            return load_config(config_path).prompt_policy
+        return None
+    apply_to = {
+        "script": False,
+        "agent": False,
+        "full_prompt": False,
+    }
+    apply_to[target] = True
+    return PromptPolicyConfig(
+        enabled=True,
+        profile=profile or "balanced",
+        apply_to=apply_to,
+        enabled_rules=enabled_rules,
+        disabled_rules=disabled_rules,
+        normalization={
+            "output_style": getattr(args, "prompt_policy_output_style", "underscore"),
+        },
+    )
 
 
 def _read_node_inputs(args):
@@ -927,7 +960,7 @@ def _write_structured_output(data: dict, path: Path, *, output_format: str | Non
 
 
 def _write_generated_core_artifact(data: dict, path: Path, *, overwrite: bool) -> None:
-    # 这个入口会在验收包目录里生成 core 侧产物，默认不覆盖已有人工归档。
+    # Write core acceptance artifacts without replacing existing manual archives.
     if path.exists() and not overwrite:
         raise FileExistsError(f"Output already exists, pass --overwrite to replace: {path}")
     _write_structured_output(data, path, output_format="json")
@@ -953,6 +986,7 @@ def build_parser() -> argparse.ArgumentParser:
     compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
     compose.add_argument("--prompt", required=True)
     compose.add_argument("--negative")
+    _add_prompt_policy_arguments(compose)
     compose.set_defaults(func=cmd_compose)
 
     compose_nodes = subparsers.add_parser(
@@ -1797,6 +1831,7 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--negative")
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
+    _add_prompt_policy_arguments(parser)
 
 
 def _add_prompt_run_arguments(
@@ -1855,6 +1890,7 @@ def _add_prompt_run_arguments(
     parser.add_argument("--height", type=int, default=1024)
     parser.add_argument("--model", default="nai-diffusion-4-5-full")
     parser.add_argument("--params-json", help="Extra NovelAI renderer params as a JSON object")
+    _add_prompt_policy_arguments(parser)
     if output_options:
         parser.add_argument("--output-dir", help="Override output directory")
         parser.add_argument(
@@ -1863,6 +1899,32 @@ def _add_prompt_run_arguments(
             choices=("png", "jpg", "webp"),
             help="Output image format when NovelAI returns files without an extension",
         )
+
+
+def _add_prompt_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--prompt-policy-profile",
+        choices=("off", "normalize_only", "balanced", "strict", "legacy_compat"),
+        help="Enable PromptPolicyPipeline with the selected profile",
+    )
+    parser.add_argument(
+        "--prompt-policy-output-style",
+        default="underscore",
+        choices=("underscore", "preserve"),
+        help="PromptPolicyPipeline output tag style when enabled",
+    )
+    parser.add_argument(
+        "--prompt-policy-rule",
+        action="append",
+        default=[],
+        help="Force-enable one prompt policy rule; can be repeated",
+    )
+    parser.add_argument(
+        "--no-prompt-policy-rule",
+        action="append",
+        default=[],
+        help="Disable one prompt policy rule; can be repeated",
+    )
 
 
 def _add_novelai_render_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1881,7 +1943,6 @@ def _add_novelai_render_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("png", "jpg", "webp"),
         help="Output image format when NovelAI returns files without an extension",
     )
-
 
 def _add_api_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("request", help="JSON request file")
