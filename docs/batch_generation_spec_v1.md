@@ -1,284 +1,323 @@
-# 自动化批量跑图设计规格 v1
+# 自动化批量跑图规格 v1
 
 ## 1. 背景
 
-旧 `tags_machine` 里的 `blackboard.py` 承担了自动化批量跑图职责：按画风、人物、动作、背景等输入集合展开任务，然后循环调用旧 `TagsMachine.run()` 生成图片。这个能力很实用，尤其是旧项目支持按“动作分类文件夹”批量跑，不需要手动逐个填写 action。
+旧 `tags_machine` 里的 `blackboard.py` 承担了自动化批量跑图的核心职责：
 
-`tags_machine_core` 的目标不是复制旧 `blackboard.py` 的全局状态和 formula 耦合，而是在新架构里补一个独立的批量编排层。批量编排层只负责“选什么、跑多少、怎么恢复、怎么归档、怎么报告”，不负责拼提示词，也不直接拼 NovelAI payload。
+- 从角色、动作、画风、背景等目录或列表中选择节点。
+- 支持按分类文件夹批量选择动作，不需要逐个填写动作。
+- 将角色、动作、画风等组合展开成多次生图任务。
+- 支持 `n`、`nt`、`auto_num`、`use_num` 等批量数量控制。
+- 维护输出目录、时间戳、运行参数和旧项目全局状态。
+- 最终调用 `TagsMachine.run()`，由旧 `formula` 和 NovelAI 接入完成真实出图。
+
+新 `tags_machine_core` 已经把提示词生成和生图执行拆成稳定边界：
+
+```text
+NodeDocument / full prompt
++ Composer
++ PromptPolicyPipeline
++ Renderer
++ Executor
+= GenerationResult
++ PNG 参数证据
++ 图片文件
+```
+
+因此新批量跑图功能不应该复刻旧 `blackboard.py` 的全局状态和 hardcode，而应该新增一个批处理编排层。它只负责“选择、展开、调度、恢复、归档、报告”，不负责重新拼 prompt，也不直接拼 NovelAI payload。
 
 ## 2. 目标
 
-第一版目标是做一个类似旧 `blackboard.py` 的自动化跑图能力，但保持 core 架构边界清晰：
+第一版目标是做一个稳定、可恢复、可追踪的自动化跑图系统，功能类似旧 `blackboard.py`，但架构上服务未来前端 UI 和多后端扩展。
 
-- 支持按动作分类文件夹批量选择 action，不要求用户一个个填写动作。
-- 支持 character、action、artist、prompt 列表展开成批量任务。
-- 默认以 `AgentComposer` 和完整 prompt `run-prompt` 链路为主。
-- 支持 agent cache miss：不调用 NovelAI，输出 agent task，等待外部 agent 回填 prompt。
-- 支持真实 NovelAI 出图、失败重试、断点恢复、任务状态记录。
-- 每个任务保存 `PromptBundle`、`RenderRequest`、`GenerationResult`、PNG 参数和图片路径。
-- 自动生成批量报告，方便人工做视觉验收。
-- 验收优先使用真实业务出图，不把 dry-run 或单元测试作为主要完成标准。
+必须支持：
 
-## 3. 非目标
+- 固定或批量选择 artist。
+- 固定或批量选择 character。
+- 按 action 文件夹、分类 collection、显式列表选择动作。
+- 支持完整 prompt 列表，直接走 `run-prompt` 主链路。
+- 支持 `agent` composer：cache hit 继续生图，cache miss 记录 `requires_agent`，不调用 NovelAI。
+- 支持真实 NovelAI 批量出图。
+- 支持 `resume`，已成功任务不重复跑。
+- 支持 retry，尤其是 429、500、502、503、504、timeout。
+- 支持每个任务归档 `PromptBundle`、`RenderRequest`、`GenerationResult`、PNG 参数和图片路径。
+- 支持生成批量报告。
 
-第一版不做这些事情：
+暂不作为第一版重点：
 
-- 不迁移旧提示词库。继续通过 `configs/local.example.yaml` 里的 `legacy.design_root` 读取旧 `design`。
-- 不复刻旧 `formula` 的 hardcode 拼接规则。
-- 不把动作分类、collection、筛选逻辑写进 Composer 或 Renderer。
-- 不接入 SD/WebUI。当前真实执行目标只做 NovelAI。
-- 不做完整前端 UI，只保留未来 UI 可复用的数据结构。
-- 不自动评价图片好坏。视觉验收先由人工查看报告和图片。
-- 不默认让 `AgentComposer` 经过 `PromptPolicyPipeline`，保持当前稳定链路。
+- 复刻旧 `formula/run_action` 的逐字效果。
+- 接入 SD/WebUI。
+- 接入 ComfyUI 真实跑图。
+- 内置 agent 模型调用。
+- 前端 UI。
+- 自动视觉评分。
+- 多线程/并发批量跑图。第一版默认串行，降低 NovelAI 限流风险。
+
+## 3. 设计原则
+
+1. 批量层只编排，不拼提示词规则。
+
+   `BatchRunner` 不知道什么是脚部过滤、衣着过滤、character prompts。它只调用现有 `GenerationService`。
+
+2. 选择器只负责选节点。
+
+   action 分类文件夹、collection、glob、include/exclude 都属于选择输入，不进入 composer 或 renderer。
+
+3. 真实出图优先。
+
+   涉及生成链路的功能验收必须跑 NovelAI 真实出图，`nt=1` 起步，并保存图片路径和参数证据。
+
+4. cache miss 是正常状态。
+
+   agent 模式下没有 prompt cache 时，任务状态是 `requires_agent`，不是失败。
+
+5. 所有任务都能恢复。
+
+   每个任务有独立目录和状态文件。进程中断后可以从 manifest 恢复。
+
+6. 后端参数不污染 PromptBundle。
+
+   batch 配置可以传 render 参数，但这些参数只进入 renderer / RenderRequest，不写入 PromptBundle 的业务契约。
+
+7. 对旧项目友好，但不依赖旧项目运行时代码。
+
+   可以读取旧 `design` 路径和 `tags.txt` / `meta.yaml`，但不 import 旧 `blackboard.py`、`formula.py`、`TagsMachine`。
 
 ## 4. 总体架构
 
 ```mermaid
 flowchart TD
-  A["BatchSpec YAML/JSON"] --> B["SelectorResolver"]
-  B --> C["BatchPlanner"]
-  C --> D["BatchManifest"]
-  D --> E["BatchRunner"]
-  E --> F{"Composer Mode"}
-  F -->|full prompt| G["GenerationService.compose_full_prompt"]
-  F -->|agent| H["AgentComposer cache/result"]
-  F -->|script, later| I["ScriptComposer"]
-  G --> J["PromptPolicyPipeline, optional"]
-  H --> K["PromptBundle"]
-  I --> J
-  J --> K
-  K --> L["NovelAI Renderer"]
-  L --> M["RenderRequest"]
-  M --> N["execute_render_request"]
-  N --> O["GenerationResult + PNG"]
-  O --> P["BatchArchive"]
-  P --> Q["BatchReport"]
+  A["BatchSpec.yaml"] --> B["BatchSpecReader"]
+  B --> C["SelectorRegistry"]
+  C --> D["ActionSelector / NodeSelector / PromptSelector"]
+  D --> E["BatchPlanner"]
+  E --> F["BatchManifest"]
+  F --> G["BatchRunner"]
+  G --> H{"Task composer"}
+  H -->|full| I["GenerationService.compose_full_prompt"]
+  H -->|agent| J["GenerationService.compose_resolved_nodes_with_agent"]
+  H -->|script| K["GenerationService.compose_resolved_nodes"]
+  I --> L["PromptPolicyPipeline 可选"]
+  J --> M{"cache hit?"}
+  M -->|no| N["requires_agent"]
+  M -->|yes| O["PromptBundle"]
+  K --> L
+  L --> O
+  O --> P["NovelAI Renderer"]
+  P --> Q["RenderRequest"]
+  Q --> R["execute_render_request"]
+  R --> S["GenerationResult"]
+  S --> T["BatchArchive"]
+  T --> U["BatchReport"]
 ```
-
-核心边界：
-
-- `BatchSpec` 描述批量任务，不描述 NovelAI 原始 payload。
-- `SelectorResolver` 负责把文件夹、collection、glob 展开成节点引用。
-- `BatchPlanner` 负责把输入集合展开成任务清单。
-- `BatchRunner` 负责调度任务，不拼 prompt。
-- `GenerationService`、`AgentComposer`、`PromptPolicyPipeline`、`NovelAI Renderer`、`execute_render_request` 全部复用现有能力。
 
 ## 5. 新增组件
 
 ### 5.1 BatchSpec
 
-`BatchSpec` 是用户编写的批量跑图配置。支持 YAML 和 JSON，推荐 YAML。
+`BatchSpec` 是批量任务的用户入口，建议支持 YAML 和 JSON。YAML 是主要人写格式，JSON 是未来 UI 或 API 格式。
 
 职责：
 
-- 定义批量任务名称、输出目录、配置文件。
-- 定义默认 artist、composer、nt、分辨率、重试策略。
-- 定义输入集合和展开方式。
-- 定义 agent cache、prompt policy、输出归档策略。
+- 描述本次批量跑图的名称、输出目录、默认参数。
+- 描述如何选择 characters、actions、artists、prompts。
+- 描述如何展开组合。
+- 描述执行策略：resume、retry、limit、shuffle、seed。
+- 描述归档策略和报告策略。
 
 不负责：
 
-- 不保存实际生成结果。
-- 不保存已展开后的所有任务状态。
-- 不承载后端原始请求体。
+- 保存运行状态。
+- 保存每个任务结果。
+- 直接承载 `PromptBundle` 或 `RenderRequest`。
 
-### 5.2 SelectorResolver
-
-把用户友好的选择方式解析成明确的 refs。
-
-第一版 selector：
-
-| selector | 用途 |
-| --- | --- |
-| `list` | 手动列出 refs |
-| `folder` | 从一个文件夹扫描节点 |
-| `collection` | 从命名集合读取一组文件夹或 refs |
-| `glob` | 用 glob 表达式扫描节点 |
-| `prompt_file` | 从文本或 JSONL 读取完整 prompt |
-
-### 5.3 ActionSelector
-
-`ActionSelector` 是 `SelectorResolver` 的 action 专用实现。它保留旧项目“填分类文件夹”的体验。
-
-它支持：
-
-- 扫描动作分类文件夹。
-- 递归扫描子目录。
-- 优先识别 `meta.yaml`。
-- 兼容旧动作节点的 `tags.txt`。
-- 可排除 `classify.yaml`，因为它是打标/分类辅助文件，不是直接动作节点。
-- 支持 include、exclude、limit、shuffle、seed。
-
-### 5.4 NodeSelector
-
-统一处理 character、artist、background 等节点选择。第一版可以只实现 action 和 character 的必要路径，但数据结构按多节点扩展设计。
-
-### 5.5 CollectionRegistry
-
-管理常用集合，例如 `foot`、`common`、`sex`、`body`。集合只是一组 selector 的别名，不影响 Composer 和 Renderer。
-
-可以放在：
-
-```text
-configs/batch_collections.yaml
-```
-
-也可以允许 `BatchSpec` 内联定义 `collections`。
-
-### 5.6 BatchPlanner
-
-把 `BatchSpec` 展开成 `BatchManifest`。
+### 5.2 BatchSpecReader
 
 职责：
 
-- 解析 selectors。
-- 做 `product`、`zip`、`prompt_list`、`sample` 等展开。
-- 分配 task id。
-- 分配 seed。
-- 计算输出目录。
-- 生成待执行任务列表。
+- 读取 YAML/JSON。
+- 做基础 schema 校验。
+- 将相对路径解析到 spec 文件所在目录或 workspace root。
+- 注入 `configs/local.example.yaml` 中的 `legacy.design_root` 等默认路径。
+
+输出：
+
+```text
+BatchSpec
+```
+
+### 5.3 SelectorRegistry
+
+职责：
+
+- 按 selector 类型分发到不同选择器。
+- 支持后续扩展 selector，而不改 `BatchPlanner`。
+
+第一版内置 selector：
+
+- `explicit`
+- `folder`
+- `collection`
+- `glob`
+- `prompt_list`
+- `prompt_file`
+
+### 5.4 ActionSelector
+
+动作选择器。它是新系统里替代旧 `blackboard.py` 分类文件夹能力的关键组件。
+
+职责：
+
+- 从 action 文件夹递归发现动作节点。
+- 支持 `meta.yaml`、`node.yaml`、`tags.txt` 作为动作节点入口。
+- 支持 include / exclude / limit / shuffle。
+- 支持 collection 名称映射到多个旧动作分类文件夹。
 
 不负责：
 
-- 不调用 NovelAI。
-- 不调用外部 agent。
-- 不修改 prompt cache。
+- 判断动作语义。
+- 执行 PromptPolicyPipeline。
+- 根据动作生成 prompt。
 
-### 5.7 BatchManifest
+### 5.5 NodeSelector
 
-记录已展开任务和状态，是断点恢复的核心。
+通用节点选择器。第一版可以先覆盖 character、artist、background，后续可扩展到 reference、vibe、prop 等节点。
 
-建议保存为：
+职责：
+
+- 将显式路径、文件夹、collection 展开成 `NodeRef`。
+- 调用 `NodeReader` 或 `NovelAIArtistRepository` 校验节点可读。
+
+### 5.6 PromptSelector
+
+完整 prompt 选择器。
+
+职责：
+
+- 从 YAML 列表读取 prompt。
+- 从 txt/jsonl/csv 文件读取 prompt。
+- 给每条 prompt 分配稳定 id。
+
+适用场景：
+
+- agent 已经离线拼好 prompt。
+- 想直接复用 `run-prompt` 主链路。
+- 不需要 character/action node。
+
+### 5.7 BatchPlanner
+
+职责：
+
+- 将 `BatchSpec` 展开成 `BatchTask` 列表。
+- 支持 `product`、`zip`、`prompt_list`、`manual` 等展开模式。
+- 计算稳定 task id。
+- 写出初始 `BatchManifest`。
+
+不负责：
+
+- 真实生图。
+- 读取 agent cache。
+- 保存图片。
+
+### 5.8 BatchManifest
+
+批量任务状态中心。建议使用 JSONL，便于追加、恢复和人工查看。
+
+职责：
+
+- 记录每个 task 的输入快照。
+- 记录状态变更。
+- 记录输出路径。
+- 支持 resume。
+
+状态：
 
 ```text
-manifest.jsonl
-index.json
+pending
+requires_agent
+ready
+running
+succeeded
+failed
+skipped
+cancelled
 ```
 
-`manifest.jsonl` 一行一个 task，便于追加和恢复；`index.json` 保存批次摘要。
-
-### 5.8 BatchRunner
+### 5.9 BatchRunner
 
 批量主控。
 
 职责：
 
-- 读取 `BatchManifest`。
-- 按状态执行 `pending`、可重试的 `failed`。
-- 跳过 `succeeded`。
-- 遇到 `requires_agent` 时输出 agent task，不调用 NovelAI。
-- 控制最大图片数、重试、暂停和恢复。
+- 读取或创建 manifest。
+- 按顺序执行 pending / failed 任务。
+- 根据 resume 策略跳过 succeeded。
+- 遇到 requires_agent 时保存 agent task。
+- 捕获错误并更新状态。
+- 控制 retry、limit、stop_on_error。
 
-第一版建议串行执行。NovelAI 真实出图不急着并发，避免触发 429 和难以定位失败。
+不负责：
 
-### 5.9 BatchExecutor
+- 自己拼 prompt。
+- 自己拼 NovelAI 请求。
+
+### 5.10 BatchExecutor
 
 单任务执行器。
 
 职责：
 
-- 根据 task 调用 `GenerationService`。
-- 生成或读取 `PromptBundle`。
-- 生成 `RenderRequest`。
-- 调用 `execute_render_request`。
-- 返回标准化 `BatchTaskResult`。
+- 将 `BatchTask` 转成现有 `GenerationService` 调用。
+- 根据 composer 类型选择链路：
+  - `full`：完整 prompt。
+  - `agent`：节点 + AgentComposer cache。
+  - `script`：节点 + ScriptComposer，低优先级。
+- 调用 renderer 构建 `RenderRequest`。
+- 调用 `execute_render_request` 真实生图。
 
-不负责：
-
-- 不扫描文件夹。
-- 不管理全局批次状态。
-
-### 5.10 BatchArchive
-
-保存每个 task 的证据。
-
-建议目录：
+输出：
 
 ```text
-outputs/batches/<run_id>/
-  batch.yaml
-  manifest.jsonl
-  index.json
-  report.md
-  agent_tasks/
-    <task_id>.json
-  tasks/
-    <task_id>/
-      input.json
-      prompt_bundle.json
-      render_request.json
-      generation_result.json
-      png_params.json
-      status.json
-      images/
-        xxx.png
+BatchTaskResult
 ```
 
-### 5.11 BatchReport
+### 5.11 BatchArchive
 
-生成批次报告。
+归档器。
 
-报告内容：
+职责：
 
-- 批次名称、运行时间、配置摘要。
-- 总任务数、成功数、失败数、requires_agent 数。
-- 每个任务的图片路径、seed、artist、character、action、最终 prompt 摘要。
-- 参数一致性检查结果。
-- 待人工填写或后续补充的视觉结论字段。
+- 为每个 task 创建独立目录。
+- 保存 `prompt_bundle.json`。
+- 保存 `render_request.json`。
+- 保存 `generation_result.json`。
+- 保存 `png_params.json`。
+- 保存 `status.json`。
+- 保存 agent task。
+- 记录图片路径。
 
-### 5.12 Batch CLI
+### 5.12 BatchReport
 
-新增 CLI：
+报告生成器。
 
-```bash
-uv run python -m tags_machine_core run-batch batch.yaml
-```
+职责：
 
-后续可加：
+- 生成 `report.md` 和 `report.json`。
+- 汇总成功、失败、requires_agent 数量。
+- 列出图片路径。
+- 列出最终 prompt 片段。
+- 列出失败原因和 retry 记录。
+- 给人工视觉检查预留字段。
 
-```bash
-uv run python -m tags_machine_core plan-batch batch.yaml
-uv run python -m tags_machine_core resume-batch outputs/batches/<run_id>
-uv run python -m tags_machine_core inspect-batch outputs/batches/<run_id>
-```
+## 6. BatchSpec v1 格式
 
-注意：`plan-batch` 只用于预览展开任务，不作为业务验收标准。业务验收仍然看真实 NovelAI 出图。
-
-## 6. BatchSpec 结构
-
-### 6.1 最小示例：完整 prompt 列表
+### 6.1 完整示例
 
 ```yaml
 schema: tags-machine-core.batch/v1
-name: prompt-list-smoke
-config: configs/local.example.yaml
-output_root: outputs/batches
+name: homura-foot-batch
+description: Homura 脚部动作批量验证
 
-defaults:
-  backend: novelai
-  composer: full
-  artist: 20260412
-  nt: 1
-  resolution: random_standard
-  image_format: png
-
-expand:
-  mode: prompt_list
-  prompts:
-    - "akemi_homura, 1girl, bare feet, foot focus, lower body"
-    - "kaname_madoka, 1girl, standing, smile"
-
-run:
-  resume: true
-  stop_on_error: false
-  max_images: 10
-```
-
-### 6.2 按动作文件夹批量跑
-
-```yaml
-schema: tags-machine-core.batch/v1
-name: homura-foot-folder
 config: configs/local.example.yaml
 output_root: outputs/batches
 
@@ -289,42 +328,58 @@ defaults:
   nt: 1
   resolution: random_standard
   image_format: png
-  prompt_policy_profile: null
+  prompt_policy_profile: off
+  model: nai-diffusion-4-5-full
+  add_male_caption: true
+
+collections:
+  actions:
+    foot:
+      - F:/my_project/new/tags_machine/design/动作改2/st_ft_j
+      - F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
+      - F:/my_project/new/tags_machine/design/动作改2/st_ft_leg
+    common:
+      - F:/my_project/new/tags_machine/design/动作改2/st_comm
+  characters:
+    madoka_main:
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら_魔法少女
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+
+select:
+  artists:
+    - selector: explicit
+      refs:
+        - 20260412
+  characters:
+    - selector: collection
+      name: madoka_main
+  actions:
+    - selector: collection
+      name: foot
+      recursive: true
+      node_files:
+        - meta.yaml
+        - node.yaml
+        - tags.txt
+      exclude:
+        names:
+          - classify.yaml
+        paths:
+          - "**/_archive/**"
+      shuffle: false
+      limit: 20
 
 expand:
   mode: product
-  characters:
-    - selector: list
-      refs:
-        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら_魔法少女
-  actions:
-    - selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
-      recursive: true
-      prefer: meta.yaml
-      include:
-        - meta.yaml
-        - tags.txt
-      exclude:
-        - classify.yaml
-      shuffle: true
-      seed: 24680001
-      limit: 20
-  artists:
-    - selector: list
-      refs:
-        - 20260412
-
-agent:
-  cache_dir: cache/prompt
-  model: default-agent
-  on_cache_miss: record_task
+  max_tasks: 40
+  shuffle: false
 
 run:
   resume: true
   stop_on_error: false
   retry:
     max_attempts: 60
+    timeout_seconds: 1
     retry_on:
       - 429
       - 500
@@ -337,552 +392,783 @@ run:
       - 2
       - 5
       - 10
+
+archive:
+  save_prompt_bundle: true
+  save_render_request: true
+  save_generation_result: true
+  save_png_params: true
+  copy_images: false
+
+report:
+  markdown: true
+  json: true
+  include_prompt_preview: true
+  include_png_params_summary: true
+  visual_check_template: true
 ```
 
-### 6.3 使用 collection
+### 6.2 最小完整 prompt 批量示例
 
 ```yaml
 schema: tags-machine-core.batch/v1
-name: homura-foot-collection
+name: prompt-list-smoke
 config: configs/local.example.yaml
 output_root: outputs/batches
 
-collections:
-  actions:
-    foot:
-      - selector: folder
-        root: F:/my_project/new/tags_machine/design/动作改2/st_ft_j
-        recursive: true
-      - selector: folder
-        root: F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
-        recursive: true
-      - selector: folder
-        root: F:/my_project/new/tags_machine/design/动作改2/st_ft_leg
-        recursive: true
+defaults:
+  composer: full
+  artist: 20260412
+  nt: 1
+  resolution: square
+
+select:
+  prompts:
+    - selector: prompt_list
+      items:
+        - id: foot_001
+          prompt: "akemi_homura, 1girl, bare feet, foot focus, lower body"
+        - id: standing_001
+          prompt: "akemi_homura, 1girl, standing, looking at viewer"
+
+expand:
+  mode: prompt_list
+
+run:
+  resume: true
+```
+
+### 6.3 agent cache 预热示例
+
+```yaml
+schema: tags-machine-core.batch/v1
+name: agent-cache-fill
+config: configs/local.example.yaml
+output_root: outputs/batches
 
 defaults:
-  backend: novelai
   composer: agent
   artist: 20260412
   nt: 1
-  resolution: normal_square
+
+select:
+  characters:
+    - selector: explicit
+      refs:
+        - F:/my_project/new/tags_machine/design/角色/.../homura
+  actions:
+    - selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
+      recursive: true
+      limit: 5
 
 expand:
   mode: product
-  characters:
-    - selector: list
-      refs:
-        - homura
-  actions:
-    - selector: collection
-      name: foot
-      limit: 30
-      shuffle: true
+
+run:
+  resume: true
+  execute_requires_agent: false
 ```
 
-### 6.4 zip 模式
+如果 agent cache miss，该任务输出 `requires_agent`，并在 `agent_tasks/<task_id>.json` 里保存任务。外部 agent 生成 prompt 后，可以通过后续命令回填 cache 再 resume。
 
-用于人工配好的 case：
+## 7. Selector 详细设计
+
+### 7.1 explicit selector
 
 ```yaml
-expand:
-  mode: zip
-  characters:
-    - selector: list
-      refs: [homura, madoka]
+- selector: explicit
+  refs:
+    - 20260412
+    - F:/path/to/node
+```
+
+适合少量精确选择。
+
+### 7.2 folder selector
+
+```yaml
+- selector: folder
+  root: F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
+  recursive: true
+  node_files:
+    - meta.yaml
+    - node.yaml
+    - tags.txt
+  exclude:
+    paths:
+      - "**/_archive/**"
+      - "**/disabled/**"
+  limit: 20
+  shuffle: true
+```
+
+规则：
+
+- 如果某目录下存在 `meta.yaml`，优先将该目录作为一个 action node。
+- 如果没有 `meta.yaml` 但有 `node.yaml`，使用 `node.yaml`。
+- 如果没有结构化 YAML 但有 `tags.txt`，作为 legacy node。
+- `classify.yaml` 不是 action node，只作为分类/打标资料，不直接进入 action refs。
+
+### 7.3 collection selector
+
+```yaml
+- selector: collection
+  name: foot
+  recursive: true
+  limit: 30
+```
+
+`collection` 只是多个 selector root 的别名，用来保留旧项目“分类文件夹”体验。
+
+建议 collection 定义放在 batch spec 里，后续也可以移动到独立配置：
+
+```yaml
+collections:
   actions:
-    - selector: list
-      refs:
-        - actions/foot_closeup/meta.yaml
-        - actions/standing/meta.yaml
+    foot:
+      - F:/.../动作改2/st_ft_j
+      - F:/.../动作改2/st_ft_bare
 ```
 
-展开结果：
+### 7.4 glob selector
 
-```text
-homura + foot_closeup
-madoka + standing
+```yaml
+- selector: glob
+  pattern: F:/my_project/new/tags_machine/design/动作改2/st_ft_*/**/meta.yaml
+  limit: 50
 ```
 
-不是笛卡尔积。
+适合临时高级过滤。
 
-## 7. selector 详细规则
+### 7.5 prompt_file selector
 
-### 7.1 folder selector
+```yaml
+- selector: prompt_file
+  path: prompts/foot_cases.txt
+  format: lines
+```
 
-字段：
+支持格式：
 
-| 字段 | 类型 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `root` | string | 必填 | 扫描根目录 |
-| `recursive` | bool | false | 是否递归 |
-| `prefer` | string | `meta.yaml` | 同目录多个候选时优先文件 |
-| `include` | list[string] | `["meta.yaml"]` | 可识别文件名 |
-| `exclude` | list[string] | `[]` | 排除文件名或 glob |
-| `limit` | int | null | 限制数量 |
-| `shuffle` | bool | false | 是否打乱 |
-| `seed` | int | null | shuffle seed |
-| `sort` | string | `path` | 排序方式 |
-
-默认行为：
-
-- 优先返回 `meta.yaml`。
-- 如果没有 `meta.yaml`，可以按 include 配置返回 `tags.txt`。
-- `classify.yaml` 默认不作为 action 节点。
-- 如果一个目录同时有 `meta.yaml` 和 `tags.txt`，只返回 `meta.yaml`。
-
-### 7.2 collection selector
-
-`collection` 是 selector 的别名集合。它只影响任务选择，不影响 prompt 拼接。
-
-优先级：
-
-1. `BatchSpec.collections`
-2. `configs/batch_collections.yaml`
-3. 未来 UI 或服务层注入的 collection registry
-
-同名 collection 冲突时，BatchSpec 内联定义优先。
-
-### 7.3 list selector
-
-直接列 refs。适合小批量、验收 case、临时补充。
-
-### 7.4 prompt_file selector
-
-用于完整 prompt 批量跑图。
-
-支持：
-
-- `.txt`：一行一个 prompt，空行跳过。
-- `.jsonl`：一行一个对象，可包含 `id`、`prompt`、`negative`、`seed`、`artist`。
+- `lines`：每行一个 prompt。
+- `jsonl`：每行 `{ "id": "...", "prompt": "..." }`。
+- `json`：数组。
+- `csv`：包含 `id,prompt,negative` 列。
 
 ## 8. 展开模式
 
 ### 8.1 product
 
-笛卡尔积：
+角色、动作、画风做笛卡尔积。
 
 ```text
-characters x actions x artists x prompts
+characters x actions x artists x backgrounds
 ```
 
 适合旧 `blackboard.py` 风格批量跑图。
 
 ### 8.2 zip
 
-按索引配对。所有列表长度必须一致，或允许长度为 1 的列表广播。
+按索引配对。
 
-适合人工设计验收集。
+```text
+characters[0] + actions[0]
+characters[1] + actions[1]
+```
+
+适合人工整理的成对案例。
 
 ### 8.3 prompt_list
 
-只展开 prompt，不要求 character/action 节点。默认走 `composer: full`。
+每条完整 prompt 生成一个 task。
 
-### 8.4 sample
+适合当前稳定的 `run-prompt` 主链路。
 
-先按 product 展开，再随机抽样。用于大集合冒烟式业务测试，避免一次生成过多图片。
+### 8.4 manual
 
-## 9. BatchTask
+用户直接列 task。
 
-展开后的任务建议结构：
+```yaml
+tasks:
+  - id: homura_foot_001
+    composer: agent
+    character: F:/.../homura
+    action: F:/.../foot_detail
+    artist: 20260412
+```
+
+适合验收集。
+
+## 9. BatchTask 数据结构
+
+内部结构建议：
 
 ```json
 {
   "schema": "tags-machine-core.batch-task/v1",
-  "id": "task_000001",
-  "status": "pending",
-  "input": {
-    "composer": "agent",
-    "prompt": null,
-    "negative": null,
-    "nodes": [
-      {
-        "role": "character",
-        "ref": "F:/.../homura"
-      },
-      {
-        "role": "action",
-        "ref": "F:/.../foot_detail/meta.yaml"
-      },
-      {
-        "role": "artist",
-        "ref": "20260412"
-      }
-    ]
-  },
+  "id": "sha256-or-readable-id",
+  "index": 0,
+  "composer": "full|agent|script",
+  "nodes": [
+    {
+      "role": "character",
+      "ref": "F:/path/to/character",
+      "index": 0
+    },
+    {
+      "role": "action",
+      "ref": "F:/path/to/action",
+      "index": 0
+    },
+    {
+      "role": "artist",
+      "ref": "20260412",
+      "index": 0
+    }
+  ],
+  "prompt": null,
+  "negative": null,
   "render": {
     "backend": "novelai",
     "artist": "20260412",
     "nt": 1,
-    "resolution": "normal_square",
-    "seed": 24680001,
-    "image_format": "png"
+    "resolution": "square",
+    "seed": 246814101,
+    "image_format": "png",
+    "params": {}
   },
   "policy": {
-    "prompt_policy_profile": null
+    "prompt_policy_profile": "balanced"
   },
   "output": {
-    "dir": "outputs/batches/20260612_homura-foot/tasks/task_000001"
+    "task_dir": "outputs/batches/<run_id>/tasks/<task_id>"
   },
-  "attempts": []
+  "source": {
+    "batch_spec": "batch.yaml",
+    "selected_by": ["collection:foot"]
+  }
 }
 ```
 
-## 10. 任务状态
+`id` 生成规则：
 
-状态机：
+- 第一版建议可读 id 优先：`<index>_<character_slug>_<action_slug>_<artist_slug>`。
+- 同名冲突时追加短 hash。
+- hash 输入包括 composer、节点 refs、prompt、negative、artist、render 参数、policy 参数。
+- 输出目录不进入 hash，避免移动 batch 后 id 改变。
+
+## 10. BatchManifest 格式
+
+建议文件：
 
 ```text
-pending -> running -> succeeded
-pending -> running -> failed
-pending -> requires_agent
-failed -> running -> succeeded
-failed -> skipped
-requires_agent -> pending
+outputs/batches/<run_id>/manifest.jsonl
 ```
 
-状态说明：
-
-| 状态 | 说明 |
-| --- | --- |
-| `pending` | 已展开但未执行 |
-| `running` | 当前执行中 |
-| `requires_agent` | agent cache miss，需要外部 agent 拼 prompt |
-| `succeeded` | 已真实出图成功 |
-| `failed` | 执行失败，可根据 retry 策略重试 |
-| `skipped` | 因限制、用户选择或不可恢复错误跳过 |
-
-## 11. AgentComposer 工作流
-
-`composer: agent` 时：
-
-1. BatchTask 带完整 `prompt`：
-   - 认为这是外部 agent 已拼好的结果。
-   - 调用现有 AgentComposer 回填 cache。
-   - 继续生成 `PromptBundle`、`RenderRequest` 并真实出图。
-
-2. BatchTask 不带完整 `prompt`：
-   - 根据 character/action/background/artist 节点查 AgentComposer cache。
-   - cache hit：继续真实出图。
-   - cache miss：写入 `agent_tasks/<task_id>.json`，任务状态为 `requires_agent`，不调用 NovelAI。
-
-3. 外部 agent 回填后：
-   - 更新对应 task 的 prompt 或 agent result。
-   - 将状态从 `requires_agent` 改回 `pending`。
-   - `resume-batch` 继续执行。
-
-约束：
-
-- Batch 不直接调用大模型 agent。
-- Batch 不改变 AgentComposer cache key 规则。
-- `PromptPolicyPipeline` 默认不处理 agent 输出，除非用户显式启用。
-
-## 12. PromptPolicyPipeline 关系
-
-BatchSpec 可以显式启用：
-
-```yaml
-defaults:
-  prompt_policy_profile: balanced
-```
-
-规则：
-
-- `composer: full` 时可以启用 PromptPolicyPipeline。
-- `composer: script` 时可以启用 PromptPolicyPipeline。
-- `composer: agent` 默认不启用，除非 BatchSpec 明确写：
-
-```yaml
-agent:
-  apply_prompt_policy: true
-```
-
-第一版建议保持 `agent.apply_prompt_policy: false`，避免破坏已经稳定的 agent prompt cache 和真实出图效果。
-
-## 13. 分辨率策略
-
-支持三种标准尺寸：
-
-| 名称 | 尺寸 |
-| --- | --- |
-| `normal_square` | `1024x1024` |
-| `normal_landscape` | 标准横图 |
-| `normal_portrait` | 标准竖图 |
-
-`random_standard` 表示每个 task 从三种标准尺寸中随机选择。
-
-随机策略：
-
-- 如果 task 有固定 seed，则 resolution random 使用 task seed 派生，保证 resume 后一致。
-- 如果没有 seed，则 BatchPlanner 分配 seed 后再决定分辨率。
-
-## 14. NovelAI 执行策略
-
-继续复用当前 execution 层：
-
-- NovelAI `n_samples > 1` 会拆成多次 `n_samples=1` 请求。
-- 每次请求独立保存图片。
-- 每张图片写入 PNG info。
-- `GenerationResult.request_body` 保留实际请求证据。
-
-Batch 层补充：
-
-- `nt` 表示这个 task 目标生成张数。
-- 默认 `nt: 1`，避免不必要消耗。
-- 批量多图通过多个 task 或 execution 拆分完成。
-
-## 15. 重试策略
-
-建议第一版支持：
-
-```yaml
-run:
-  retry:
-    max_attempts: 60
-    retry_on: [429, 500, 502, 503, 504, timeout]
-    backoff_seconds: [1, 2, 5, 10]
-```
-
-规则：
-
-- 429、502、503、504、timeout 默认可重试。
-- 参数校验失败、节点不存在、agent cache miss 不重试。
-- 每次失败记录 attempt，包括时间、错误、是否会重试。
-- 达到最大次数后标记 `failed`。
-
-## 16. 输出和归档
-
-每个 task 都应保存：
-
-- `input.json`
-- `prompt_bundle.json`
-- `render_request.json`
-- `generation_result.json`
-- `png_params.json`
-- `status.json`
-- 图片文件
-
-批次级保存：
-
-- 原始 `batch.yaml`
-- `manifest.jsonl`
-- `index.json`
-- `report.md`
-
-`status.json` 示例：
+每行一个任务状态快照：
 
 ```json
 {
-  "id": "task_000001",
+  "schema": "tags-machine-core.batch-manifest-entry/v1",
+  "task_id": "0001_homura_foot_20260412",
   "status": "succeeded",
-  "started_at": "2026-06-12T10:00:00+08:00",
-  "finished_at": "2026-06-12T10:00:12+08:00",
+  "attempt": 1,
+  "task_path": "tasks/0001_homura_foot_20260412/task.json",
+  "status_path": "tasks/0001_homura_foot_20260412/status.json",
+  "generation_result_path": "tasks/0001_homura_foot_20260412/generation_result.json",
   "image_paths": [
-    "F:/.../task_000001/images/abc.png"
+    "F:/.../image.png"
   ],
-  "attempt_count": 1,
-  "error": null
+  "error": null,
+  "updated_at": "2026-06-13T00:00:00+08:00"
 }
 ```
 
-## 17. Report 格式
+为了简化恢复：
 
-`report.md` 建议结构：
+- `manifest.jsonl` 可以追加状态。
+- `index.json` 保存每个 task 最新状态。
+- task 自己的 `status.json` 是单任务权威状态。
 
-```markdown
-# Batch Report: homura-foot-folder
+## 11. 输出目录规范
 
-## Summary
-
-- total: 20
-- succeeded: 18
-- failed: 1
-- requires_agent: 1
-
-## Tasks
-
-| id | status | artist | character | action | seed | image | note |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| task_000001 | succeeded | 20260412 | homura | foot_detail | 123 | images/abc.png | visual_result: pending |
+```text
+outputs/batches/<run_id>/
+  batch.yaml
+  manifest.jsonl
+  index.json
+  report.md
+  report.json
+  agent_tasks/
+    <task_id>.json
+  tasks/
+    <task_id>/
+      task.json
+      status.json
+      prompt_bundle.json
+      render_request.json
+      generation_result.json
+      png_params.json
+      images.json
 ```
 
-每个 task 可追加：
+图片是否复制进 task 目录由 `archive.copy_images` 控制：
+
+- `false`：只记录图片原路径，避免重复占空间。
+- `true`：复制图片到 `tasks/<task_id>/images/`，适合归档验收集。
+
+第一版默认 `false`。
+
+## 12. 执行链路
+
+### 12.1 full composer
+
+输入：
+
+```text
+prompt
+negative
+artist
+render params
+policy config
+```
+
+链路：
+
+```text
+GenerationService.compose_full_prompt()
+-> PromptPolicyPipeline 可选
+-> build_render_request()
+-> execute_render_request()
+```
+
+### 12.2 agent composer
+
+输入：
+
+```text
+character/action/background/artist nodes
+extra_prompt
+negative
+agent_model
+cache_dir
+```
+
+链路：
+
+```text
+GenerationService.compose_resolved_nodes_with_agent()
+```
+
+结果：
+
+- cache hit：返回 `PromptBundle`，继续生图。
+- cache miss：抛出或返回 `AgentCompositionRequired`，任务状态标记为 `requires_agent`。
+
+重要规则：
+
+- `requires_agent` 不算失败。
+- batch 不调用外部 agent。
+- 如果 spec/task 携带完整 prompt，可视为 agent 结果回填 cache 后继续生图。
+
+### 12.3 script composer
+
+第一版保留接口，但优先级低。
+
+用途：
+
+- 后续评估 action/character meta.yaml 通用拼接能力。
+- 不作为 MVP 真实业务主链路。
+
+## 13. Retry 与限流
+
+第一版默认串行执行，避免 NovelAI 限流。
+
+retry 配置：
 
 ```yaml
-visual_result: pending | pass | fail | review
-visual_note: ""
+retry:
+  max_attempts: 60
+  timeout_seconds: 1
+  retry_on:
+    - 429
+    - 500
+    - 502
+    - 503
+    - 504
+    - timeout
+  backoff_seconds:
+    - 1
+    - 2
+    - 5
+    - 10
 ```
 
-## 18. 错误处理
+执行策略：
 
-错误分类：
+- 每次失败写入 `status.json` 和 manifest。
+- 命中 retry 条件则等待后重试。
+- 超出次数后标记 `failed`。
+- 非 retry 错误直接 `failed`。
+- `stop_on_error: true` 时遇到 failed 停止整批。
 
-| 类型 | 行为 |
-| --- | --- |
-| selector 失败 | 批次规划失败，不进入执行 |
-| 节点不存在 | task failed，不重试 |
-| agent cache miss | task requires_agent，不重试 |
-| NovelAI 429/502/timeout | 按 retry 策略重试 |
-| NovelAI 参数非法 | task failed，不重试 |
-| 图片保存失败 | task failed，可重试 |
-| PNG 参数读取失败 | task failed 或 warning，按配置决定 |
+注意：
 
-## 19. CLI 设计
+- 旧 `prompt_preset_service.py run-prompt` 里的 `timeout 1s retry 60` 语义可以迁移到 batch 层，但不应该写死在 NovelAI client。
+- client 和 execution 层保留通用 timeout/retry 能力；batch 层负责业务级 retry 策略。
 
-第一版 CLI：
+## 14. 分辨率与样本数
+
+第一版支持：
+
+```yaml
+resolution: square | landscape | portrait | random_standard
+```
+
+对应旧逻辑：
+
+```text
+Resolution.NORMAL_SQUARE
+Resolution.NORMAL_LANDSCAPE
+Resolution.NORMAL_PORTRAIT
+```
+
+策略：
+
+- `random_standard` 在每个 task 执行前随机三种标准尺寸。
+- 随机结果写入 task render 参数和 `status.json`，resume 时复用原结果，避免重复执行时尺寸漂移。
+- `nt > 1` 仍传给 `RenderRequest.params.n_samples`，由现有 execution 拆成多次 `n_samples=1` 请求。
+- 如果用户担心 Anlas，batch spec 应支持 `max_images` 总量限制。
+
+## 15. Agent cache 回填流程
+
+第一阶段不实现内置 agent，只提供文件化协作流程。
+
+流程：
+
+1. `run-batch batch.yaml`
+2. 部分任务进入 `requires_agent`
+3. 生成：
+
+```text
+agent_tasks/<task_id>.json
+```
+
+4. 外部 agent 读取任务并生成 prompt。
+5. 用户或脚本写入：
+
+```text
+agent_results/<task_id>.json
+```
+
+6. 再次执行：
+
+```bash
+uv run python -m tags_machine_core resume-batch outputs/batches/<run_id>
+```
+
+7. BatchRunner 回填 AgentComposer cache，再继续真实生图。
+
+agent result 格式：
+
+```json
+{
+  "schema": "tags-machine-core.agent-composition-result/v2",
+  "task_id": "0001_homura_foot_20260412",
+  "prompt": {
+    "positive": "akemi_homura, 1girl, bare feet, foot focus",
+    "negative": ""
+  },
+  "meta": {
+    "agent_model": "codex",
+    "notes": []
+  }
+}
+```
+
+## 16. CLI 设计
+
+### 16.1 plan-batch
+
+只展开任务，不调用 NovelAI。
+
+```bash
+uv run python -m tags_machine_core plan-batch batch.yaml --output outputs/batches
+```
+
+输出：
+
+- run_id
+- task count
+- selector summary
+- manifest path
+
+### 16.2 run-batch
+
+展开并执行。
 
 ```bash
 uv run python -m tags_machine_core run-batch batch.yaml
 ```
 
-参数：
-
-| 参数 | 说明 |
-| --- | --- |
-| `--config` | 覆盖 BatchSpec 中的 config |
-| `--output-root` | 覆盖输出根目录 |
-| `--limit` | 限制本次最多执行多少 task |
-| `--only-status` | 只执行指定状态，比如 failed |
-| `--resume` | 开启恢复 |
-| `--no-resume` | 忽略旧 manifest，重新规划 |
-| `--log-level` | 日志级别 |
-
-后续 CLI：
+常用参数：
 
 ```bash
-uv run python -m tags_machine_core plan-batch batch.yaml
-uv run python -m tags_machine_core resume-batch outputs/batches/<run_id>
-uv run python -m tags_machine_core inspect-batch outputs/batches/<run_id>
+--limit 10
+--resume
+--no-resume
+--stop-on-error
+--output-root outputs/batches
+--log-level info
 ```
 
-## 20. JSON API 关系
+### 16.3 resume-batch
 
-已有 JSON API 中的 `BatchItemRequest`、`BatchItemResult` 可以作为单任务契约基础，但当前只覆盖“单 item 解析”。新 BatchRunner 应该在它之上增加批次级对象：
+从已有 run 目录恢复。
+
+```bash
+uv run python -m tags_machine_core resume-batch outputs/batches/20260613_homura-foot-batch
+```
+
+### 16.4 inspect-batch
+
+查看状态。
+
+```bash
+uv run python -m tags_machine_core inspect-batch outputs/batches/20260613_homura-foot-batch
+```
+
+输出：
+
+```text
+succeeded: 8
+failed: 1
+requires_agent: 3
+pending: 0
+```
+
+## 17. JSON API 设计
+
+现有 JSON API 已有 `BatchItemRequest` 和 `resolve_batch_item` 的雏形。批量系统应复用它，但补上批量级 API。
+
+建议新增：
+
+- `api-plan-batch`
+- `api-run-batch`
+- `api-resume-batch`
+- `api-inspect-batch`
+
+第一版可以只做 CLI，内部模型设计时保留 API 兼容。
+
+未来 UI 只依赖这些 JSON API：
+
+- 选择节点。
+- 预览展开任务。
+- 启动批量。
+- 查看状态。
+- 查看 report 和图片。
+- 处理 `requires_agent`。
+
+## 18. 与旧 blackboard.py 的映射
+
+| 旧能力 | 新组件 |
+| --- | --- |
+| `CustomDirInput.input_by_select` | `SelectorRegistry` + `ActionSelector` + `NodeSelector` |
+| `topic_type` / `action_type` | `collections.actions` |
+| `artist_list` / `character_list` / `action_list` | `select.artists` / `select.characters` / `select.actions` |
+| `action_path` / `character_path` | `folder selector` |
+| `tasks_func` | `BatchPlanner` + `BatchRunner` |
+| `auto_num` | `expand.max_tasks` 或 `run.max_images` |
+| `use_num` | `expand.count_from` 后续扩展 |
+| `run_ts` | `run_id` |
+| `n` / `nt` | `max_tasks` / `nt` |
+| `CONST_STATE` | 显式 batch 配置 |
+| `del_node_types` | PromptPolicy / Composer 显式策略，不用全局变量 |
+| `TagsMachine.run()` | `GenerationService` + `execute_render_request` |
+| `formula` | Composer / PromptPolicyPipeline，不放进 batch |
+
+## 19. 错误处理
+
+错误分类：
+
+```text
+selector_error
+compose_error
+requires_agent
+render_error
+execute_error
+png_info_error
+archive_error
+```
+
+处理策略：
+
+- selector 阶段失败：默认整批失败，因为任务无法展开。
+- 单 task compose/render/execute 失败：记录 task failed，是否继续由 `stop_on_error` 决定。
+- `requires_agent`：不是 failed。
+- PNG 参数读取失败：任务可标记 `succeeded_with_warning` 或 `failed`，第一版建议 `failed`，因为业务验收需要 PNG 参数证据。
+
+## 20. 日志
+
+复用现有日志系统：
+
+- 默认 `error`。
+- 批量执行建议 `info`。
+- 排查 selector 和 resume 用 `trace`。
+
+关键日志：
+
+- BatchSpec loaded
+- selector expanded
+- task planned
+- task started
+- task requires_agent
+- task succeeded
+- task failed
+- retry scheduled
+- report written
+
+## 21. 验收标准
+
+### 21.1 第一阶段功能验收
+
+固定画风 `20260412`，真实 NovelAI 出图。
+
+至少覆盖：
+
+- `prompt_list` 模式 2 张。
+- `folder selector` 选择 action 文件夹 3 张。
+- `collection selector` 选择旧动作分类 3 张。
+- `agent` 模式 cache miss，确认生成 `agent_tasks` 且不调用 NovelAI。
+- `resume` 跳过已成功任务。
+- 一次 429/502/timeout 可重试场景，可以通过人工中断或 mock client 辅助验证，但最终仍要跑真实图。
+
+### 21.2 每个成功任务的验收
+
+必须保存：
+
+- `task.json`
+- `status.json`
+- `prompt_bundle.json`
+- `render_request.json`
+- `generation_result.json`
+- `png_params.json`
+- 图片路径
+
+必须满足：
+
+- PNG 参数能读取。
+- `GenerationResult.request_body` 与 PNG 参数对比 `diff_count=0`，或差异写入报告。
+- `report.md` 能直接看到图片路径和最终 prompt 摘要。
+
+### 21.3 业务验收优先级
+
+验收优先顺序：
+
+1. 真实 NovelAI 出图。
+2. 图片路径和 PNG 参数证据。
+3. 批量 resume / retry 是否可用。
+4. 单元测试和接口测试。
+
+## 22. MVP 开发顺序
+
+### 阶段 1：批量 spec 和 planner
+
+- 新增 batch models。
+- 新增 BatchSpecReader。
+- 新增 ActionSelector 的 folder / explicit。
+- 新增 BatchPlanner。
+- 新增 `plan-batch` CLI。
+
+验收：
+
+- 能从 action 文件夹展开任务。
+- 生成 manifest。
+
+### 阶段 2：真实执行
+
+- 新增 BatchRunner。
+- 新增 BatchExecutor。
+- 调用现有 GenerationService 和 execute_render_request。
+- 新增 `run-batch` CLI。
+
+验收：
+
+- 固定 `20260412` 真实出 2-3 张图。
+- 保存 GenerationResult 和 PNG 参数。
+
+### 阶段 3：resume / archive / report
+
+- 新增 BatchArchive。
+- 新增 BatchReport。
+- 新增 `resume-batch` / `inspect-batch`。
+
+验收：
+
+- 成功任务不会重复执行。
+- report 能列出图片路径和失败任务。
+
+### 阶段 4：collection selector
+
+- 支持 spec 内 `collections.actions`。
+- 支持旧分类文件夹映射。
+
+验收：
+
+- 用 `foot` collection 展开动作并真实出图。
+
+### 阶段 5：agent cache 流程
+
+- agent cache miss 生成 `agent_tasks`。
+- 支持 agent result 回填。
+- resume 后继续生图。
+
+验收：
+
+- cache miss 不调用 NovelAI。
+- 回填 prompt 后 resume 能真实出图。
+
+## 23. 待确认问题
+
+1. 第一版 collection 定义放在每个 batch spec 内，还是放在 `configs/action_collections.yaml` 里？
+
+   建议：第一版两者都支持，但以 batch spec 内定义为主，便于任务自包含。
+
+2. `classify.yaml` 是否只作为筛选标签来源？
+
+   建议：第一版不读取 classify 规则，只跳过它。后续可以作为 selector filter 的输入。
+
+3. 任务图片是否默认复制到 task 目录？
+
+   建议：默认不复制，只记录路径。验收集需要归档时再开启 `archive.copy_images: true`。
+
+4. 第一版是否需要并发？
+
+   建议：不要。NovelAI 限流和 Anlas 成本更重要，先串行稳定。
+
+5. BatchRunner 是否接入父项目 `prompt_preset_service.py`？
+
+   建议：第一版只在 `refactor` 内开发 CLI。父项目后续可加很薄的桥接命令。
+
+## 24. 推荐结论
+
+第一版自动化跑图应实现为 `tags_machine_core.batch` 包，提供：
 
 - `BatchSpec`
-- `BatchManifest`
-- `BatchTask`
-- `BatchRunResult`
+- `ActionSelector`
+- `BatchPlanner`
+- `BatchRunner`
+- `BatchArchive`
+- `BatchReport`
+- CLI：`plan-batch`、`run-batch`、`resume-batch`、`inspect-batch`
 
-未来 UI 可以直接消费这些对象：
+它复用现有：
 
-- 展开预览：读取 `BatchManifest`。
-- agent 待处理列表：读取 `requires_agent` tasks。
-- 结果页：读取 `report.md` 和 `index.json`。
-- 单图详情：读取 task 目录下的 `generation_result.json` 和 PNG。
+- `GenerationService`
+- `AgentComposer`
+- `PromptPolicyPipeline`
+- `NovelAIRenderer`
+- `execute_render_request`
 
-## 21. 旧 blackboard 能力映射
-
-| 旧能力 | 新设计 |
-| --- | --- |
-| `CustomDirInput.input_by_select` | `SelectorResolver` |
-| `action_type/topic_type` 分类 | `CollectionRegistry` |
-| 分类文件夹批量动作 | `ActionSelector(folder/collection)` |
-| `tasks_func` 展开和循环 | `BatchPlanner + BatchRunner` |
-| `TagsMachine.run` | `GenerationService + execute_render_request` |
-| `run_ts/output_dir` | `BatchArchive` |
-| `auto_num/use_num` | `expand.limit`、`run.max_images`、`sample` |
-| `CONST_STATE` 全局状态 | 显式 BatchSpec 配置 |
-| `del_node_types` | PromptPolicy/Composer 明确规则，不放全局变量 |
-
-## 22. MVP 实施范围
-
-第一版建议只做：
-
-1. `BatchSpec` 数据模型。
-2. `ActionSelector` 支持 `folder`、`collection`、`list`。
-3. `BatchPlanner` 支持 `product`、`prompt_list`。
-4. `BatchRunner` 串行执行。
-5. `composer: full` 和 `composer: agent`。
-6. NovelAI 真实出图。
-7. `resume`、`retry`、`requires_agent`。
-8. `BatchArchive` 保存完整证据。
-9. `BatchReport` 生成 markdown。
-10. CLI `run-batch`。
-
-暂缓：
-
-- 并发执行。
-- Web UI。
-- 图片自动评分。
-- ScriptComposer 大规模扩展。
-- ComfyUI / SD 真实批量执行。
-
-## 23. 业务验收
-
-验收不以 dry-run 为主。每个新增批量能力至少跑一组真实 NovelAI 出图。
-
-### 23.1 基础验收
-
-固定 artist：`20260412`
-
-准备一个 batch：
-
-- 1 个 character：Homura。
-- 1 个 action folder：脚部相关小文件夹。
-- limit：3 到 5。
-- composer：agent。
-- nt：1。
-
-验收条件：
-
-- 成功展开多个 action，不需要手动逐个列 action。
-- cache miss 的任务标记为 `requires_agent`，没有调用 NovelAI。
-- 回填 prompt 后，任务可 resume 并真实出图。
-- 每个成功 task 都保存图片、`PromptBundle`、`RenderRequest`、`GenerationResult`、PNG 参数。
-- PNG 参数和 `GenerationResult` 一致。
-- `report.md` 能列出所有图片路径和任务状态。
-
-### 23.2 完整 prompt 验收
-
-准备一个 prompt list batch：
-
-- 3 个完整 prompt。
-- artist：`20260412`
-- composer：full。
-- prompt_policy_profile：balanced。
-- nt：1。
-
-验收条件：
-
-- 3 张真实图片成功生成。
-- PromptPolicy trace 写入 `PromptBundle.meta.extra`。
-- 报告中能看到最终 prompt 摘要和图片路径。
-
-### 23.3 恢复验收
-
-手动中断或制造一个失败任务后重跑：
-
-- 已成功任务不重复生成。
-- 失败任务按 retry 策略重试。
-- `requires_agent` 任务保持等待状态。
-
-## 24. 风险和开放点
-
-### 24.1 action 节点格式不统一
-
-旧动作目录可能有 `tags.txt`、`meta.yaml`、`classify.yaml` 混用。第一版 selector 只负责发现候选，实际读取仍交给 NodeReader 或兼容读取器。遇到无法读取的节点，task failed 并记录路径。
-
-### 24.2 agent cache miss 会中断真实出图
-
-这是预期行为。Batch 不应该伪造 prompt，也不直接调用外部 agent。报告里需要清晰列出待 agent 处理任务。
-
-### 24.3 批量过大导致成本和限流
-
-第一版默认串行、`nt: 1`，并支持 `limit`、`max_images`、`sample`。用户明确扩大规模时再跑大量任务。
-
-### 24.4 视觉验收仍需人工
-
-BatchReport 先提供人工验收入口，不做自动判断。后续可以接入图像对比或人工标注文件。
-
-## 25. 推荐开发顺序
-
-1. 写 `BatchSpec` / `BatchTask` / `BatchManifest` 模型。
-2. 实现 `ActionSelector` 的 folder/list/collection。
-3. 实现 `BatchPlanner` 展开 product 和 prompt_list。
-4. 实现 `BatchArchive` 和目录结构。
-5. 实现 `BatchExecutor` 复用现有 `GenerationService`。
-6. 实现 `BatchRunner` 串行执行、resume、retry。
-7. 实现 `BatchReport`。
-8. 加 `run-batch` CLI。
-9. 用 `20260412` 跑真实 NovelAI 小批量验收。
+这样既能恢复旧 `blackboard.py` 的“按分类批量跑图”体验，又不会把旧全局状态和 formula hardcode 带进新架构。
