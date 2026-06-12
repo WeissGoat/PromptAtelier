@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from tags_machine_core.config import AppConfig
+from tags_machine_core.logging_config import get_logger
 
 from .archive import BatchArchive
 from .executor import BatchExecutionResult, BatchExecutor
@@ -17,6 +18,9 @@ from .manifest import (
 )
 from .models import ArchiveConfig, BatchTask, ReportConfig, RunConfig
 from .report import write_report
+
+
+logger = get_logger(__name__)
 
 
 class BatchRunner:
@@ -50,6 +54,14 @@ class BatchRunner:
         root.mkdir(parents=True, exist_ok=True)
         if not (run_config.resume and (root / "manifest.jsonl").exists()):
             write_initial_manifest(root, tasks)
+        logger.info(
+            "batch run started run_dir=%s task_count=%s limit=%s resume=%s max_images=%s",
+            root,
+            len(tasks),
+            limit,
+            run_config.resume,
+            run_config.max_images,
+        )
 
         entries: list[dict[str, Any]] = []
         image_budget = run_config.max_images
@@ -61,10 +73,12 @@ class BatchRunner:
             if run_config.resume and task_already_succeeded(task):
                 entry = self._record_skipped(run_dir=root, task=task)
                 entries.append(entry)
+                logger.info("batch task skipped task_id=%s", task.id)
                 continue
 
             run_task = _task_with_image_budget(task, image_budget)
             self.archive.write_task(run_task)
+            logger.info("batch task started task_id=%s composer=%s", run_task.id, run_task.composer)
             result = self._execute_with_retry(
                 root=root,
                 task=run_task,
@@ -76,6 +90,7 @@ class BatchRunner:
             if result["status"] == "succeeded" and image_budget is not None:
                 image_budget -= max(1, len(result.get("image_paths") or []))
             if result["status"] == "failed" and run_config.stop_on_error:
+                logger.warning("batch stopped on failed task task_id=%s", result["task_id"])
                 break
 
         report = write_report(
@@ -87,6 +102,7 @@ class BatchRunner:
             include_png_params_summary=report_config.include_png_params_summary,
             visual_check_template=report_config.visual_check_template,
         )
+        logger.info("batch report written run_dir=%s counts=%s", root, report["counts"])
         return {"run_dir": str(root), "counts": report["counts"], "entries": entries}
 
     def _execute_with_retry(
@@ -150,6 +166,13 @@ class BatchRunner:
                 delay = _retry_delay(run_config.retry.backoff_seconds, attempt)
                 retry_record["delay_seconds"] = delay
                 retry_records.append(retry_record)
+                logger.warning(
+                    "batch task retry scheduled task_id=%s attempt=%s delay=%s error=%s",
+                    task.id,
+                    attempt,
+                    delay,
+                    last_error,
+                )
                 self.archive.write_status(
                     task,
                     status="running",
@@ -176,6 +199,7 @@ class BatchRunner:
     ) -> dict[str, Any]:
         if result.status == "requires_agent":
             self.archive.write_agent_task(run_dir=root, task=task, value=result.agent_task)
+            logger.info("batch task requires_agent task_id=%s", task.id)
             return self._record(
                 run_dir=root,
                 task=task,
@@ -185,6 +209,7 @@ class BatchRunner:
                 error=None,
             )
         if result.status != "succeeded":
+            logger.error("batch task failed task_id=%s error=%s", task.id, result.error)
             return self._record(
                 run_dir=root,
                 task=task,
@@ -194,6 +219,7 @@ class BatchRunner:
                 error=result.error or f"unexpected status: {result.status}",
             )
         if result.prompt_bundle is None or result.render_request is None or result.generation_result is None:
+            logger.error("batch task failed incomplete artifacts task_id=%s", task.id)
             return self._record(
                 run_dir=root,
                 task=task,
@@ -203,6 +229,7 @@ class BatchRunner:
                 error="executor returned incomplete success artifacts",
             )
         if not result.generation_result.png_info:
+            logger.error("batch task failed missing png_info task_id=%s", task.id)
             return self._record(
                 run_dir=root,
                 task=task,
@@ -230,6 +257,7 @@ class BatchRunner:
             "image_count": len(archived_generation.png_info.get("images", [])),
             "has_png_info": bool(archived_generation.png_info),
         }
+        logger.info("batch task succeeded task_id=%s image_count=%s", task.id, len(entry["image_paths"]))
         return entry
 
     def _record(
