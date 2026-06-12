@@ -440,5 +440,5 @@ def _character_materials(
 
 
 def load_agent_result(path: str | Path) -> AgentCompositionResult:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     return AgentCompositionResult.model_validate(data)

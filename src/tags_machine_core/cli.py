@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,13 @@ from tags_machine_core.verification import (
     run_core_verification,
     verify_acceptance_record,
     verify_acceptance_suite,
+)
+from tags_machine_core.batch import (
+    BatchPlanner,
+    BatchRunner,
+    latest_manifest_entries,
+    load_batch_spec,
+    write_initial_manifest,
 )
 
 
@@ -753,6 +761,104 @@ def cmd_api_generate(args) -> int:
     return 0
 
 
+def cmd_plan_batch(args) -> int:
+    spec_path = Path(args.batch_spec)
+    spec = load_batch_spec(spec_path)
+    run_dir = _batch_run_dir(spec, output_root=args.output_root)
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    tasks = planner.plan(spec, run_dir=run_dir)
+    manifest_path = write_initial_manifest(run_dir, tasks)
+    _write_batch_source(run_dir, spec_path)
+    _copy_batch_spec(run_dir, spec_path)
+    print_json(
+        {
+            "schema": "tags-machine-core.plan-batch-result/v1",
+            "batch": spec.name,
+            "task_count": len(tasks),
+            "run_dir": str(run_dir),
+            "manifest_path": str(manifest_path),
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def cmd_run_batch(args) -> int:
+    spec_path = Path(args.batch_spec)
+    spec = load_batch_spec(spec_path)
+    run_dir = _batch_run_dir(spec, output_root=args.output_root)
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    tasks = planner.plan(spec, run_dir=run_dir)
+    config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
+    config = _load_command_config(config_path, args)
+    _write_batch_source(run_dir, spec_path)
+    _copy_batch_spec(run_dir, spec_path)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=args.limit,
+    )
+    print_json(
+        {
+            "schema": "tags-machine-core.run-batch-result/v1",
+            "batch": spec.name,
+            **result,
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def cmd_resume_batch(args) -> int:
+    run_dir = Path(args.run_dir)
+    spec_path = Path(args.batch_spec) if args.batch_spec else _batch_source_path(run_dir)
+    spec = load_batch_spec(spec_path)
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    tasks = planner.plan(spec, run_dir=run_dir)
+    config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
+    config = _load_command_config(config_path, args)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=args.limit,
+    )
+    print_json(
+        {
+            "schema": "tags-machine-core.resume-batch-result/v1",
+            "batch": spec.name,
+            **result,
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def cmd_inspect_batch(args) -> int:
+    run_dir = Path(args.run_dir)
+    entries = latest_manifest_entries(run_dir)
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry.status] = counts.get(entry.status, 0) + 1
+    print_json(
+        {
+            "schema": "tags-machine-core.inspect-batch-result/v1",
+            "run_dir": str(run_dir),
+            "counts": counts,
+            "tasks": entries,
+        },
+        full=args.full,
+    )
+    return 0
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
@@ -774,6 +880,62 @@ def _load_render_request(path: str | Path) -> RenderRequest:
     if not isinstance(data, dict):
         raise ValueError(f"Expected RenderRequest JSON object: {path}")
     return RenderRequest.model_validate(data)
+
+
+def _batch_run_dir(spec, *, output_root: str | None) -> Path:
+    root = Path(output_root or spec.output_root)
+    return root / spec.name
+
+
+def _batch_config_path(spec, *, spec_path: Path, override: str | None) -> Path:
+    if override:
+        return Path(override)
+    raw = Path(spec.config)
+    if raw.is_absolute():
+        return raw
+    if raw.exists():
+        return raw
+    return spec_path.parent / raw
+
+
+def _write_batch_source(run_dir: str | Path, spec_path: Path) -> Path:
+    root = Path(run_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "batch_source.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "tags-machine-core.batch-source/v1",
+                "spec_path": str(spec_path.resolve()),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _copy_batch_spec(run_dir: str | Path, spec_path: Path) -> Path:
+    target = Path(run_dir) / "batch.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(spec_path, target)
+    return target
+
+
+def _batch_source_path(run_dir: str | Path) -> Path:
+    source_path = Path(run_dir) / "batch_source.json"
+    if source_path.exists():
+        data = json.loads(source_path.read_text(encoding="utf-8"))
+        value = data.get("spec_path")
+        if value:
+            return Path(value)
+    fallback = Path(run_dir) / "batch.yaml"
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(
+        f"Cannot resume batch without batch_source.json or batch.yaml under {run_dir}"
+    )
 
 
 def _read_prompt_value(args) -> str:
@@ -1144,6 +1306,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_action.add_argument("--config", help="Load runtime config and artist nodes")
     run_action.set_defaults(func=cmd_run_action)
+
+    plan_batch = subparsers.add_parser(
+        "plan-batch",
+        parents=[output_parent],
+        help="Expand a BatchSpec into tasks without calling NovelAI",
+    )
+    plan_batch.add_argument("batch_spec")
+    plan_batch.add_argument("--output-root")
+    plan_batch.set_defaults(func=cmd_plan_batch)
+
+    run_batch = subparsers.add_parser(
+        "run-batch",
+        parents=[output_parent],
+        help="Run a BatchSpec through the generation pipeline",
+    )
+    run_batch.add_argument("batch_spec")
+    run_batch.add_argument("--config", help="Override BatchSpec config")
+    run_batch.add_argument("--output-root")
+    run_batch.add_argument("--limit", type=int)
+    run_batch.set_defaults(func=cmd_run_batch)
+
+    resume_batch = subparsers.add_parser(
+        "resume-batch",
+        parents=[output_parent],
+        help="Resume a previous batch run directory",
+    )
+    resume_batch.add_argument("run_dir")
+    resume_batch.add_argument("--batch-spec", help="Override stored source BatchSpec")
+    resume_batch.add_argument("--config", help="Override BatchSpec config")
+    resume_batch.add_argument("--limit", type=int)
+    resume_batch.set_defaults(func=cmd_resume_batch)
+
+    inspect_batch = subparsers.add_parser(
+        "inspect-batch",
+        parents=[output_parent],
+        help="Inspect a batch run manifest",
+    )
+    inspect_batch.add_argument("run_dir")
+    inspect_batch.set_defaults(func=cmd_inspect_batch)
 
     api_compose = subparsers.add_parser(
         "api-compose",
