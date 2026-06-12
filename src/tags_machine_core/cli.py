@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -773,8 +774,10 @@ def cmd_api_plan_batch(args) -> int:
     _archive_batch_spec_source(run_dir, spec_path=spec_path, spec=spec, inline=inline)
     result = {
         "schema": "tags-machine-core.api-plan-batch-result/v1",
+        "run_id": spec.name,
         "batch": spec.name,
         "task_count": len(tasks),
+        "selector_summary": _batch_selector_summary(tasks),
         "run_dir": str(run_dir),
         "manifest_path": str(manifest_path),
     }
@@ -900,8 +903,10 @@ def cmd_plan_batch(args) -> int:
     print_json(
         {
             "schema": "tags-machine-core.plan-batch-result/v1",
+            "run_id": spec.name,
             "batch": spec.name,
             "task_count": len(tasks),
+            "selector_summary": _batch_selector_summary(tasks),
             "run_dir": str(run_dir),
             "manifest_path": str(manifest_path),
         },
@@ -1018,10 +1023,19 @@ def _reconciled_manifest_entry(run_dir: Path, entry):
         status_data = json.loads(status_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return entry
+    task_dir = (run_dir / entry.task_path).parent
+    generation_result_path = entry.generation_result_path
+    generation_result = task_dir / "generation_result.json"
+    if generation_result_path is None and generation_result.exists():
+        try:
+            generation_result_path = str(generation_result.relative_to(run_dir))
+        except ValueError:
+            generation_result_path = str(generation_result)
     return entry.model_copy(
         update={
             "status": status_data.get("status", entry.status),
             "attempt": status_data.get("attempt", entry.attempt),
+            "generation_result_path": generation_result_path,
             "image_paths": status_data.get("image_paths", entry.image_paths),
             "error": status_data.get("error", entry.error),
         }
@@ -1154,6 +1168,28 @@ def _load_render_request(path: str | Path) -> RenderRequest:
 def _batch_run_dir(spec, *, output_root: str | None) -> Path:
     root = Path(output_root or spec.output_root)
     return root / spec.name
+
+
+def _batch_selector_summary(tasks) -> dict[str, Any]:
+    role_counts = Counter()
+    artist_counts = Counter()
+    composer_counts = Counter()
+    prompt_count = 0
+    for task in tasks:
+        composer_counts[task.composer] += 1
+        if task.prompt:
+            prompt_count += 1
+        if task.render.artist:
+            artist_counts[task.render.artist] += 1
+        for node in task.nodes:
+            role_counts[node.role] += 1
+    return {
+        "tasks": len(tasks),
+        "composers": dict(composer_counts),
+        "node_roles": dict(role_counts),
+        "artists": dict(artist_counts),
+        "prompts": prompt_count,
+    }
 
 
 def _batch_config_path(spec, *, spec_path: Path, override: str | None) -> Path:

@@ -148,6 +148,46 @@ uv run python -m tags_machine_core run-batch examples\batches\prompt_file_202604
 
 人工查看图片，主体为单角色站姿，正面视线，画风与 `20260412` 的线稿/水彩倾向一致。该 case 验证了 `prompt_file` selector 可以从文本文件展开完整 prompt，并继续走真实 NovelAI 生图链路。
 
+## Action Folder / Collection 真实出图验收
+
+为避免该验收被 agent cache miss 卡住，本次使用临时 spec 将 `composer` 设为 `script`，只验证旧 `design` 动作分类文件夹选择、collection 展开、脚部动作节点读取、NovelAI 出图和归档链路。
+
+命令：
+
+```powershell
+$tokenText = Get-Content -Path 'F:\my_project\new\tags_machine\novelai\client.py' -Raw
+$env:NAI_ACCESS_TOKEN = [regex]::Match($tokenText, 'return\s+"([^"]+)"').Groups[1].Value
+uv run python -m tags_machine_core run-batch examples\batches\action_folder_script_20260412.yaml --limit 3 --full
+```
+
+结果：
+
+| Case | Status | Image | Parameter Diff | Visual Result |
+| --- | --- | --- | --- | --- |
+| `action-folder-script-20260412 / 0_0309_1709954237` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\80d3a228_0_01.png` | `diff_count=0` | pass |
+| `action-folder-script-20260412 / 10_20240810_1723219638` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\f34fec5d_0_01.png` | `diff_count=0` | pass |
+| `action-folder-script-20260412 / 11_裸足_聚焦` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\82f1e0c8_0_01.png` | `diff_count=0` | pass with note |
+
+参数证据：
+
+- `80d3a228_0_01.png` sha256: `E05558D60ED298CE9DBD23500E6087A33893E2AD9DF355BF303279E1B93D0672`, size: `1909503` bytes
+- `f34fec5d_0_01.png` sha256: `34D3435C4ACD03D3E122A6559DC3F3F7795E1E1B14C3C6075866F4C659FDE1CD`, size: `1313749` bytes
+- `82f1e0c8_0_01.png` sha256: `880B10CB6A48DAE5A001433A12763A41C400BD947B651DFCC6085740678E0C9F`, size: `1138206` bytes
+- 三张图片的 `compare-render-params` 对比结果均为 `diff_count=0`。
+
+视觉结论：
+
+- 第一张：足部/腿部主体明确，角色和 `20260412` 画风一致。
+- 第二张：足部/束缚腿部动作明确，角色和 `20260412` 画风一致。
+- 第三张：脚部元素存在，但足部动作表达弱于前两张；链路和参数验收通过，后续应归入 ScriptComposer / 动作 prompt 质量优化。
+
+该 case 验证了：
+
+- `collection selector` 可以映射旧 `design/动作改2/st_ft_bare` 分类文件夹。
+- `folder selector` 可以发现旧 action 节点。
+- `script` composer 可以把 character + action + artist 传入现有 `GenerationService` 和 NovelAI renderer。
+- 每个成功任务都归档了 `task.json`、`status.json`、`prompt_bundle.json`、`render_request.json`、`generation_result.json`、`png_params.json`、`images.json`。
+
 ## Batch JSON API 入口验收
 
 命令：
@@ -175,6 +215,7 @@ uv run python -m tags_machine_core api-inspect-batch $env:TEMP\api_batch_inspect
 - `api-plan-batch` 可以从 JSON request 展开 batch 任务。
 - `api-run-batch`、`api-resume-batch` 和 `api-inspect-batch` 可以通过 JSON request 驱动同一套 batch runner / manifest 链路。
 - `prompt_file` selector 可以从文本文件展开完整 prompt 并真实出图。
+- `action folder` / `collection selector` 可以从旧动作分类展开 3 个任务并真实出图。
 - `run-batch` 可以真实调用 NovelAI，并归档 `task.json`、`prompt_bundle.json`、`render_request.json`、`generation_result.json`、`png_params.json`、`images.json`。
 - `inspect-batch` 可以读取 manifest。
 - `agent` 模式 cache miss 会保存 agent task，不会误调用 NovelAI；回填 agent result 后可以继续真实出图。

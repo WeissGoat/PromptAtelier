@@ -12,6 +12,9 @@ def write_report(
     *,
     markdown: bool = True,
     json_report: bool = True,
+    include_prompt_preview: bool = True,
+    include_png_params_summary: bool = True,
+    visual_check_template: bool = True,
 ) -> dict[str, Any]:
     root = Path(run_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -24,15 +27,37 @@ def write_report(
     }
     if json_report:
         (root / "report.json").write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
+            json.dumps(
+                _filtered_report_data(
+                    data,
+                    include_prompt_preview=include_prompt_preview,
+                    include_png_params_summary=include_png_params_summary,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
     if markdown:
-        (root / "report.md").write_text(_markdown_report(data), encoding="utf-8")
+        (root / "report.md").write_text(
+            _markdown_report(
+                data,
+                include_prompt_preview=include_prompt_preview,
+                include_png_params_summary=include_png_params_summary,
+                visual_check_template=visual_check_template,
+            ),
+            encoding="utf-8",
+        )
     return data
 
 
-def _markdown_report(data: dict[str, Any]) -> str:
+def _markdown_report(
+    data: dict[str, Any],
+    *,
+    include_prompt_preview: bool,
+    include_png_params_summary: bool,
+    visual_check_template: bool,
+) -> str:
     lines = [
         "# Batch Generation Report",
         "",
@@ -48,15 +73,27 @@ def _markdown_report(data: dict[str, Any]) -> str:
             "",
             "## Tasks",
             "",
-            "| Task | Status | Images | Error | Visual Result |",
-            "| --- | --- | --- | --- | --- |",
+            (
+                "| Task | Status | Images | Error | Visual Result |"
+                if visual_check_template
+                else "| Task | Status | Images | Error |"
+            ),
+            (
+                "| --- | --- | --- | --- | --- |"
+                if visual_check_template
+                else "| --- | --- | --- | --- |"
+            ),
         ]
     )
     for entry in data["entries"]:
         images = "<br>".join(str(path) for path in entry.get("image_paths") or [])
         error = str(entry.get("error") or "")
-        prompt = str(entry.get("prompt_preview") or "")
-        png_summary = entry.get("png_params_summary") or {}
+        prompt = str(entry.get("prompt_preview") or "") if include_prompt_preview else ""
+        png_summary = (
+            entry.get("png_params_summary") or {}
+            if include_png_params_summary
+            else {}
+        )
         detail = []
         if prompt:
             detail.append(f"prompt: `{_escape_table(prompt)}`")
@@ -66,11 +103,31 @@ def _markdown_report(data: dict[str, Any]) -> str:
             detail.append(f"retry: `{json.dumps(entry['retry_records'], ensure_ascii=False)}`")
         if detail:
             error = "<br>".join([item for item in [error, *detail] if item])
-        lines.append(
-            f"| `{entry.get('task_id')}` | {entry.get('status')} | {images} | {error} | pending |"
-        )
+        if visual_check_template:
+            lines.append(
+                f"| `{entry.get('task_id')}` | {entry.get('status')} | {images} | {error} | pending |"
+            )
+        else:
+            lines.append(f"| `{entry.get('task_id')}` | {entry.get('status')} | {images} | {error} |")
     lines.append("")
     return "\n".join(lines)
+
+
+def _filtered_report_data(
+    data: dict[str, Any],
+    *,
+    include_prompt_preview: bool,
+    include_png_params_summary: bool,
+) -> dict[str, Any]:
+    entries = []
+    for entry in data["entries"]:
+        item = dict(entry)
+        if not include_prompt_preview:
+            item.pop("prompt_preview", None)
+        if not include_png_params_summary:
+            item.pop("png_params_summary", None)
+        entries.append(item)
+    return {**data, "entries": entries}
 
 
 def _escape_table(value: str) -> str:

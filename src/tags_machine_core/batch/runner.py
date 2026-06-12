@@ -54,15 +54,16 @@ class BatchRunner:
         entries: list[dict[str, Any]] = []
         image_budget = run_config.max_images
         selected = tasks[:limit] if limit is not None else tasks
-        for task in selected:
+        for planned_task in selected:
             if image_budget is not None and image_budget <= 0:
                 break
-            run_task = _task_with_image_budget(task, image_budget)
+            task = _resume_task_snapshot(planned_task) if run_config.resume else planned_task
             if run_config.resume and task_already_succeeded(task):
                 entry = self._record_skipped(run_dir=root, task=task)
                 entries.append(entry)
                 continue
 
+            run_task = _task_with_image_budget(task, image_budget)
             self.archive.write_task(run_task)
             result = self._execute_with_retry(
                 root=root,
@@ -82,6 +83,9 @@ class BatchRunner:
             entries,
             markdown=report_config.markdown,
             json_report=report_config.json_report,
+            include_prompt_preview=report_config.include_prompt_preview,
+            include_png_params_summary=report_config.include_png_params_summary,
+            visual_check_template=report_config.visual_check_template,
         )
         return {"run_dir": str(root), "counts": report["counts"], "entries": entries}
 
@@ -115,12 +119,15 @@ class BatchRunner:
                     else task.render.output_dir
                 )
                 result = self.executor.execute(task, config=config, output_dir=output_dir)
-                return self._handle_execution_result(
+                entry = self._handle_execution_result(
                     root=root,
                     task=task,
                     attempt=attempt,
                     result=result,
                 )
+                if retry_records:
+                    entry["retry_records"] = retry_records
+                return entry
             except Exception as exc:
                 last_error = str(exc)
                 retry_record = {
@@ -194,6 +201,15 @@ class BatchRunner:
                 attempt=attempt,
                 image_paths=[],
                 error="executor returned incomplete success artifacts",
+            )
+        if not result.generation_result.png_info:
+            return self._record(
+                run_dir=root,
+                task=task,
+                status="failed",
+                attempt=attempt,
+                image_paths=result.image_paths,
+                error="executor returned success without PNG parameter evidence",
             )
         archived_generation = self.archive.archive_success(
             task=task,
@@ -279,6 +295,16 @@ def _task_with_image_budget(task: BatchTask, image_budget: int | None) -> BatchT
         deep=True,
         update={"render": task.render.model_copy(update={"nt": max(1, image_budget)})},
     )
+
+
+def _resume_task_snapshot(task: BatchTask) -> BatchTask:
+    task_path = Path(task.output.task_dir) / "task.json"
+    if not task_path.exists():
+        return task
+    try:
+        return BatchTask.model_validate(json.loads(task_path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return task
 
 
 def _retryable(exc: Exception, retry_on: list[str]) -> bool:

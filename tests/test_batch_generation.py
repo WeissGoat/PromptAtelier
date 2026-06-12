@@ -22,7 +22,7 @@ from tags_machine_core.batch.models import BatchSpec, BatchTask, RenderOptions, 
 from tags_machine_core.batch.report import write_report
 from tags_machine_core.cli import main
 from tags_machine_core.config import AppConfig, LegacyConfig
-from tags_machine_core.contracts import GeneratedImage, GenerationResult
+from tags_machine_core.contracts import GeneratedImage, GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 
@@ -72,6 +72,41 @@ class FlakyExecutor:
         return BatchExecutionResult(
             status="requires_agent",
             agent_task={"task_id": task.id, "prompt": "fill me"},
+        )
+
+
+class SuccessfulExecutor:
+    def __init__(self, *, png_info=None):
+        self.calls = 0
+        self.tasks = []
+        self.png_info = png_info if png_info is not None else {"images": [{"parameters": {"seed": 1}}]}
+
+    def execute(self, task, *, config, output_dir=None):
+        self.calls += 1
+        self.tasks.append(task)
+        image_dir = Path(output_dir or task.output.task_dir)
+        image_dir.mkdir(parents=True, exist_ok=True)
+        image_path = image_dir / f"{task.id}.png"
+        image_path.write_bytes(b"png")
+        return BatchExecutionResult(
+            status="succeeded",
+            prompt_bundle=PromptBundle.model_validate(
+                {"prompt": {"positive": task.prompt or "akemi_homura", "negative": ""}}
+            ),
+            render_request=RenderRequest.model_validate(
+                {
+                    "backend": "novelai",
+                    "prompt": task.prompt or "akemi_homura",
+                    "params": {"n_samples": task.render.nt},
+                }
+            ),
+            generation_result=GenerationResult(
+                backend="novelai",
+                images=[GeneratedImage(path=image_path, filename=image_path.name)],
+                request_body={"parameters": {"n_samples": task.render.nt}},
+                png_info=self.png_info,
+            ),
+            image_paths=[str(image_path)],
         )
 
 
@@ -129,6 +164,23 @@ class BatchGenerationTest(unittest.TestCase):
             self.assertEqual(len(tasks), 2)
             self.assertEqual([task.nodes[0].role for task in tasks], ["action", "action"])
 
+    def test_glob_selector_expands_matching_node_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "actions" / "a1", kind="action", node_id="a1", prompt="standing")
+            _write_node(root / "actions" / "a2", kind="action", node_id="a2", prompt="sitting")
+
+            refs = expand_selector(
+                role="action",
+                spec=SelectorSpec(
+                    selector="glob",
+                    pattern=str(root / "actions" / "*" / "meta.yaml"),
+                ),
+                context=SelectorContext(base_dir=root, collections={}),
+            )
+
+            self.assertEqual([Path(ref).name for ref in refs], ["a1", "a2"])
+
     def test_folder_selector_supports_include_filter(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -175,6 +227,89 @@ class BatchGenerationTest(unittest.TestCase):
             self.assertEqual([item.id for item in items], ["prompts_0001", "prompts_0002"])
             self.assertEqual(items[0].prompt, "akemi_homura, standing")
 
+    def test_prompt_file_selector_reads_jsonl_and_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            jsonl_path = root / "prompts.jsonl"
+            jsonl_path.write_text(
+                '{"id":"j1","prompt":"akemi_homura, standing"}\n',
+                encoding="utf-8",
+            )
+            csv_path = root / "prompts.csv"
+            csv_path.write_text(
+                "id,prompt,negative\nc1,\"akemi_homura, sitting\",bad anatomy\n",
+                encoding="utf-8",
+            )
+
+            jsonl_items = expand_selector(
+                role="prompt",
+                spec=SelectorSpec(selector="prompt_file", path=str(jsonl_path), format="jsonl"),
+                context=SelectorContext(base_dir=root, collections={}),
+            )
+            csv_items = expand_selector(
+                role="prompt",
+                spec=SelectorSpec(selector="prompt_file", path=str(csv_path), format="csv"),
+                context=SelectorContext(base_dir=root, collections={}),
+            )
+
+            self.assertEqual(jsonl_items[0].id, "j1")
+            self.assertEqual(csv_items[0].id, "c1")
+            self.assertEqual(csv_items[0].negative, "bad anatomy")
+
+    def test_zip_and_manual_expand_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "c1", kind="character", node_id="c1", prompt="akemi_homura")
+            _write_node(root / "characters" / "c2", kind="character", node_id="c2", prompt="kaname_madoka")
+            _write_node(root / "actions" / "a1", kind="action", node_id="a1", prompt="standing")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "zip-smoke",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "folder",
+                                "root": str(root / "characters"),
+                                "recursive": True,
+                            }
+                        ],
+                        "actions": [
+                            {
+                                "selector": "folder",
+                                "root": str(root / "actions"),
+                                "recursive": True,
+                            }
+                        ],
+                    },
+                    "expand": {"mode": "zip"},
+                }
+            )
+
+            zip_tasks = BatchPlanner(base_dir=root).plan(spec)
+            manual_tasks = BatchPlanner(base_dir=root).plan(
+                BatchSpec.model_validate(
+                    {
+                        "name": "manual-smoke",
+                        "defaults": {"composer": "full", "artist": "20260412"},
+                        "expand": {"mode": "manual"},
+                        "tasks": [
+                            {
+                                "id": "m1",
+                                "composer": "full",
+                                "prompt": "akemi_homura, standing",
+                                "negative": "bad anatomy",
+                            }
+                        ],
+                    }
+                )
+            )
+
+            self.assertEqual(len(zip_tasks), 2)
+            self.assertEqual(zip_tasks[0].nodes[0].role, "character")
+            self.assertEqual(manual_tasks[0].id, "m1")
+            self.assertEqual(manual_tasks[0].prompt, "akemi_homura, standing")
+
     def test_cli_plan_batch_writes_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -206,6 +341,8 @@ expand:
             data = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["task_count"], 1)
+            self.assertEqual(data["run_id"], "cli-plan")
+            self.assertEqual(data["selector_summary"]["prompts"], 1)
             self.assertTrue(Path(data["manifest_path"]).exists())
 
     def test_api_plan_batch_accepts_inline_spec(self):
@@ -248,6 +385,7 @@ expand:
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["schema"], "tags-machine-core.api-plan-batch-result/v1")
             self.assertEqual(data["task_count"], 1)
+            self.assertEqual(data["selector_summary"]["artists"], {"20260412": 1})
             self.assertTrue(Path(data["manifest_path"]).exists())
 
     def test_runner_records_requires_agent_without_generation(self):
@@ -295,6 +433,81 @@ expand:
             )
 
             self.assertEqual(executor.tasks[0].render.nt, 1)
+
+    def test_runner_resume_uses_existing_task_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planned = BatchTask(
+                id="resume_task",
+                index=0,
+                composer="agent",
+                nodes=[],
+                render=RenderOptions(artist="20260412", width=1024, height=1024),
+                output={"task_dir": str(root / "run" / "tasks" / "resume_task")},
+            )
+            archived = planned.model_copy(
+                deep=True,
+                update={"render": planned.render.model_copy(update={"width": 832, "height": 1216})},
+            )
+            BatchArchive().write_task(archived)
+            executor = FakeExecutor()
+
+            BatchRunner(executor=executor).run_tasks(
+                run_dir=root / "run",
+                tasks=[planned],
+                config=_config(root),
+                run_config=RunConfig(resume=True),
+            )
+
+            self.assertEqual(executor.tasks[0].render.width, 832)
+            self.assertEqual(executor.tasks[0].render.height, 1216)
+
+    def test_runner_fails_success_without_png_info(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            task = BatchTask(
+                id="no_png_info",
+                index=0,
+                composer="full",
+                prompt="akemi_homura",
+                render=RenderOptions(artist="20260412"),
+                output={"task_dir": str(root / "run" / "tasks" / "no_png_info")},
+            )
+
+            result = BatchRunner(executor=SuccessfulExecutor(png_info={})).run_tasks(
+                run_dir=root / "run",
+                tasks=[task],
+                config=_config(root),
+            )
+
+            self.assertEqual(result["counts"], {"failed": 1})
+            self.assertIn("PNG parameter", result["entries"][0]["error"])
+
+    def test_runner_stop_on_error_stops_after_first_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tasks = [
+                BatchTask(
+                    id=f"failed_{index}",
+                    index=index,
+                    composer="agent",
+                    nodes=[],
+                    render=RenderOptions(artist="20260412"),
+                    output={"task_dir": str(root / "run" / "tasks" / f"failed_{index}")},
+                )
+                for index in range(2)
+            ]
+            executor = FakeExecutor(status="failed")
+
+            result = BatchRunner(executor=executor).run_tasks(
+                run_dir=root / "run",
+                tasks=tasks,
+                config=_config(root),
+                run_config=RunConfig(stop_on_error=True),
+            )
+
+            self.assertEqual(result["counts"], {"failed": 1})
+            self.assertEqual(executor.calls, 1)
 
     def test_runner_resume_skip_does_not_overwrite_succeeded_status(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -344,6 +557,11 @@ expand:
                 json.dumps({"status": "succeeded", "attempt": 1, "image_paths": ["image.png"]}),
                 encoding="utf-8",
             )
+            generation_result_path = status_path.parent / "generation_result.json"
+            generation_result_path.write_text(
+                json.dumps({"schema": "tags-machine-core.generation-result/v1"}),
+                encoding="utf-8",
+            )
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -353,6 +571,10 @@ expand:
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["counts"], {"succeeded": 1})
             self.assertEqual(data["tasks"][0]["image_paths"], ["image.png"])
+            self.assertEqual(
+                data["tasks"][0]["generation_result_path"].replace("\\", "/"),
+                "tasks/done/generation_result.json",
+            )
 
     def test_status_json_records_render_options(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -426,6 +648,32 @@ expand:
 
             self.assertIn("retry:", (root / "report.md").read_text(encoding="utf-8"))
 
+    def test_report_respects_prompt_png_and_visual_template_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_report(
+                root,
+                [
+                    {
+                        "task_id": "done",
+                        "status": "succeeded",
+                        "image_paths": ["image.png"],
+                        "prompt_preview": "akemi_homura",
+                        "png_params_summary": {"has_png_info": True},
+                    }
+                ],
+                include_prompt_preview=False,
+                include_png_params_summary=False,
+                visual_check_template=False,
+            )
+
+            report_md = (root / "report.md").read_text(encoding="utf-8")
+            report_json = json.loads((root / "report.json").read_text(encoding="utf-8"))
+            self.assertNotIn("akemi_homura", report_md)
+            self.assertNotIn("Visual Result", report_md)
+            self.assertNotIn("prompt_preview", report_json["entries"][0])
+            self.assertNotIn("png_params_summary", report_json["entries"][0])
+
     def test_executor_reads_agent_result_file_for_agent_task(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -487,6 +735,7 @@ expand:
             self.assertEqual(result["counts"], {"requires_agent": 1})
             self.assertEqual(executor.calls, 2)
             self.assertEqual(executor.timeouts, [1, 1])
+            self.assertEqual(result["entries"][0]["retry_records"][0]["attempt"], 1)
 
 
 def _config(root: Path) -> AppConfig:

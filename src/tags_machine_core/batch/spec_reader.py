@@ -16,7 +16,7 @@ def load_batch_spec(path: str | Path) -> BatchSpec:
 
 
 def _read_mapping(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".json":
         data = json.loads(text)
     else:
