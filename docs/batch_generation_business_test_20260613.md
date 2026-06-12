@@ -21,11 +21,14 @@ uv run python -m tags_machine_core run-batch examples\batches\prompt_list_202604
 | Case | Status | Image | GenerationResult | PNG Params | Visual Result |
 | --- | --- | --- | --- | --- | --- |
 | `prompt-list-20260412 / standing_001` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\03b8a8e3_0_01.png` | `outputs\batches\prompt-list-20260412\tasks\standing_001_20260412_full_akemi_homura_1girl_standing_looking_at_viewer_39081556\generation_result.json` | `outputs\batches\prompt-list-20260412\tasks\standing_001_20260412_full_akemi_homura_1girl_standing_looking_at_viewer_39081556\png_params.json` | pass |
+| `prompt-list-20260412 / foot_001` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\7d488468_0_01.png` | `outputs\batches\prompt-list-20260412\tasks\foot_001_20260412_full_akemi_homura_1girl_bare_feet_foot_focus_lower_body_7f54ad88\generation_result.json` | `outputs\batches\prompt-list-20260412\tasks\foot_001_20260412_full_akemi_homura_1girl_bare_feet_foot_focus_lower_body_7f54ad88\png_params.json` | pass |
 
 ## 参数证据
 
 - 图片 sha256: `748150FD12AE61872C792F8BAB81789366338F8C1CD7426B461C2B28EC8A47A3`
 - 图片大小: `1407907` bytes
+- `foot_001` 图片 sha256: `0324C291D479C76AB2BEBBFF72F1A454AF2B7DCD1BE4043EA211382095762DE2`
+- `foot_001` 图片大小: `1332412` bytes
 - PNG 参数读取: pass
 - `compare-render-params` 对比 PNG 参数与 `generation_result.json`: `diff_count=0`
 - 生成参数摘要:
@@ -39,7 +42,7 @@ uv run python -m tags_machine_core run-batch examples\batches\prompt_list_202604
 
 ## 视觉结论
 
-人工查看图片，主体为单人角色，正面站姿，画风与 `20260412` 的手绘/线稿倾向一致。该 case 可证明 `prompt_list` 批量任务已经真实经过：
+人工查看图片，`standing_001` 主体为单人角色，正面站姿，画风与 `20260412` 的手绘/线稿倾向一致；`foot_001` 为脚部特写/下半身构图，符合 foot focus case。该 case 可证明 `prompt_list` 批量任务已经真实经过：
 
 ```text
 BatchSpec -> BatchPlanner -> BatchRunner -> BatchExecutor
