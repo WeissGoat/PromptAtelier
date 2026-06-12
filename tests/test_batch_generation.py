@@ -705,6 +705,43 @@ expand:
             self.assertEqual(bundle.prompt.positive, "akemi homura, standing")
             self.assertEqual(bundle.prompt.negative, "bad anatomy")
 
+    def test_executor_uses_agent_cache_hit_after_result_backfill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character = NodeDocument(kind="character", id="homura", tags={"default": ["akemi homura"]})
+            action = NodeDocument(kind="action", id="standing", tags={"default": ["standing"]})
+            resolved = ResolvedNodeSet(
+                [
+                    ResolvedNode(role="character", ref="homura", index=0, node=character),
+                    ResolvedNode(role="action", ref="standing", index=0, node=action),
+                ]
+            )
+            task = BatchTask(
+                id="agent_cached",
+                index=0,
+                composer="agent",
+                nodes=[],
+                render=RenderOptions(artist="20260412"),
+                agent={"cache_dir": str(root / "cache")},
+                output={"task_dir": str(root / "run" / "tasks" / "agent_cached")},
+            )
+            result_dir = root / "run" / "agent_results"
+            result_dir.mkdir(parents=True)
+            result_path = result_dir / "agent_cached.json"
+            result_path.write_text(
+                json.dumps({"positive": "akemi homura, standing", "negative": "bad anatomy"}),
+                encoding="utf-8",
+            )
+            executor = BatchExecutor()
+
+            first = executor._compose(task, resolved)
+            result_path.unlink()
+            second = executor._compose(task, resolved)
+
+            self.assertFalse(first.cache.cache_hit)
+            self.assertTrue(second.cache.cache_hit)
+            self.assertEqual(second.prompt.positive, "akemi homura, standing")
+
     def test_runner_retries_retryable_errors_and_applies_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
