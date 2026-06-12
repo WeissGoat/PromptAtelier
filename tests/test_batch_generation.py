@@ -116,6 +116,34 @@ class BatchGenerationTest(unittest.TestCase):
             self.assertEqual(len(tasks), 2)
             self.assertEqual([task.nodes[0].role for task in tasks], ["action", "action"])
 
+    def test_folder_selector_supports_include_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "actions" / "keep", kind="action", node_id="keep", prompt="standing")
+            _write_node(root / "actions" / "drop", kind="action", node_id="drop", prompt="sitting")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "include-smoke",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "actions": [
+                            {
+                                "selector": "folder",
+                                "root": str(root / "actions"),
+                                "recursive": True,
+                                "include": {"names": ["keep"]},
+                            }
+                        ]
+                    },
+                    "expand": {"mode": "product"},
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertIn("keep", tasks[0].nodes[0].ref)
+
     def test_cli_plan_batch_writes_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

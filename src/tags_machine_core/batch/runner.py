@@ -189,7 +189,7 @@ class BatchRunner:
             render_request=result.render_request,
             generation_result=result.generation_result,
         )
-        return self._record(
+        entry = self._record(
             run_dir=root,
             task=task,
             status="succeeded",
@@ -197,6 +197,12 @@ class BatchRunner:
             image_paths=[str(image.path) for image in archived_generation.images],
             error=None,
         )
+        entry["prompt_preview"] = result.render_request.prompt[:300]
+        entry["png_params_summary"] = {
+            "image_count": len(archived_generation.png_info.get("images", [])),
+            "has_png_info": bool(archived_generation.png_info),
+        }
+        return entry
 
     def _record(
         self,

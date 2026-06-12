@@ -55,8 +55,21 @@ def _markdown_report(data: dict[str, Any]) -> str:
     for entry in data["entries"]:
         images = "<br>".join(str(path) for path in entry.get("image_paths") or [])
         error = str(entry.get("error") or "")
+        prompt = str(entry.get("prompt_preview") or "")
+        png_summary = entry.get("png_params_summary") or {}
+        if prompt or png_summary:
+            detail = []
+            if prompt:
+                detail.append(f"prompt: `{_escape_table(prompt)}`")
+            if png_summary:
+                detail.append(f"png: `{json.dumps(png_summary, ensure_ascii=False)}`")
+            error = "<br>".join([item for item in [error, *detail] if item])
         lines.append(
             f"| `{entry.get('task_id')}` | {entry.get('status')} | {images} | {error} | pending |"
         )
     lines.append("")
     return "\n".join(lines)
+
+
+def _escape_table(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")[:300]

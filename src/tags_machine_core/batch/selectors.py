@@ -89,6 +89,8 @@ def _discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
     for candidate in sorted(candidates):
         if _excluded(candidate, spec):
             continue
+        if not _included(candidate, spec):
+            continue
         if _has_node_file(candidate, spec.node_files):
             result.append(str(candidate))
 
@@ -154,6 +156,18 @@ def _excluded(path: Path, spec: SelectorSpec) -> bool:
         return True
     patterns = [str(item) for item in spec.exclude.get("paths") or []]
     return any(path.match(pattern) for pattern in patterns)
+
+
+def _included(path: Path, spec: SelectorSpec) -> bool:
+    if not spec.include:
+        return True
+    names = set(spec.include.get("names") or [])
+    if names and path.name not in names:
+        return False
+    patterns = [str(item) for item in spec.include.get("paths") or []]
+    if patterns and not any(path.match(pattern) for pattern in patterns):
+        return False
+    return True
 
 
 def _dedupe(values: list[str]) -> list[str]:
