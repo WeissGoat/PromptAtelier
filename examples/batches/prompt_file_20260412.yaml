@@ -1,0 +1,24 @@
+schema: tags-machine-core.batch/v1
+name: prompt-file-20260412
+config: configs/local.example.yaml
+output_root: outputs/batches
+
+defaults:
+  composer: full
+  artist: 20260412
+  nt: 1
+  resolution: random_standard
+  model: nai-diffusion-4-5-full
+
+select:
+  prompts:
+    - selector: prompt_file
+      path: prompts_20260412.txt
+      format: lines
+
+expand:
+  mode: prompt_list
+
+run:
+  resume: true
+  max_images: 1

@@ -14,6 +14,7 @@ from .models import (
     SelectorSpec,
 )
 from .executor import BatchExecutionResult, BatchExecutor
+from .archive import BatchArchive
 from .manifest import (
     append_manifest_entry,
     latest_manifest_entries,
@@ -29,6 +30,7 @@ __all__ = [
     "AgentOptions",
     "ArchiveConfig",
     "BatchDefaults",
+    "BatchArchive",
     "BatchExecutionResult",
     "BatchExecutor",
     "BatchPlanner",

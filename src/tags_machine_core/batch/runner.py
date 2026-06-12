@@ -57,15 +57,16 @@ class BatchRunner:
         for task in selected:
             if image_budget is not None and image_budget <= 0:
                 break
+            run_task = _task_with_image_budget(task, image_budget)
             if run_config.resume and task_already_succeeded(task):
                 entry = self._record_skipped(run_dir=root, task=task)
                 entries.append(entry)
                 continue
 
-            self.archive.write_task(task)
+            self.archive.write_task(run_task)
             result = self._execute_with_retry(
                 root=root,
-                task=task,
+                task=run_task,
                 config=effective_config,
                 run_config=run_config,
                 archive_config=archive_config,
@@ -95,6 +96,7 @@ class BatchRunner:
     ) -> dict[str, Any]:
         max_attempts = run_config.retry.max_attempts
         last_error: str | None = None
+        retry_records: list[dict[str, Any]] = []
         for attempt in range(1, max_attempts + 1):
             self.archive.write_status(task, status="running", attempt=attempt)
             append_manifest_entry(
@@ -121,8 +123,14 @@ class BatchRunner:
                 )
             except Exception as exc:
                 last_error = str(exc)
+                retry_record = {
+                    "attempt": attempt,
+                    "error": last_error,
+                    "retryable": attempt < max_attempts and _retryable(exc, run_config.retry.retry_on),
+                }
                 if attempt >= max_attempts or not _retryable(exc, run_config.retry.retry_on):
-                    return self._record(
+                    retry_records.append(retry_record)
+                    entry = self._record(
                         run_dir=root,
                         task=task,
                         status="failed",
@@ -130,7 +138,11 @@ class BatchRunner:
                         image_paths=[],
                         error=last_error,
                     )
+                    entry["retry_records"] = retry_records
+                    return entry
                 delay = _retry_delay(run_config.retry.backoff_seconds, attempt)
+                retry_record["delay_seconds"] = delay
+                retry_records.append(retry_record)
                 self.archive.write_status(
                     task,
                     status="running",
@@ -258,6 +270,15 @@ class BatchRunner:
             "image_paths": image_paths,
             "error": None,
         }
+
+
+def _task_with_image_budget(task: BatchTask, image_budget: int | None) -> BatchTask:
+    if image_budget is None or image_budget >= task.render.nt:
+        return task
+    return task.model_copy(
+        deep=True,
+        update={"render": task.render.model_copy(update={"nt": max(1, image_budget)})},
+    )
 
 
 def _retryable(exc: Exception, retry_on: list[str]) -> bool:

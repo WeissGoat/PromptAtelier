@@ -57,12 +57,14 @@ def _markdown_report(data: dict[str, Any]) -> str:
         error = str(entry.get("error") or "")
         prompt = str(entry.get("prompt_preview") or "")
         png_summary = entry.get("png_params_summary") or {}
-        if prompt or png_summary:
-            detail = []
-            if prompt:
-                detail.append(f"prompt: `{_escape_table(prompt)}`")
-            if png_summary:
-                detail.append(f"png: `{json.dumps(png_summary, ensure_ascii=False)}`")
+        detail = []
+        if prompt:
+            detail.append(f"prompt: `{_escape_table(prompt)}`")
+        if png_summary:
+            detail.append(f"png: `{json.dumps(png_summary, ensure_ascii=False)}`")
+        if entry.get("retry_records"):
+            detail.append(f"retry: `{json.dumps(entry['retry_records'], ensure_ascii=False)}`")
+        if detail:
             error = "<br>".join([item for item in [error, *detail] if item])
         lines.append(
             f"| `{entry.get('task_id')}` | {entry.get('status')} | {images} | {error} | pending |"

@@ -118,11 +118,11 @@ def _read_prompt_file(path: Path, format_name: str) -> list[PromptItem]:
     format_name = format_name.strip().lower()
     if format_name == "lines":
         items = []
-        for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+        for line in path.read_text(encoding="utf-8").splitlines():
             prompt = line.strip()
             if not prompt or prompt.startswith("#"):
                 continue
-            items.append(PromptItem(id=f"{path.stem}_{index:04d}", prompt=prompt))
+            items.append(PromptItem(id=f"{path.stem}_{len(items) + 1:04d}", prompt=prompt))
         return items
     if format_name == "jsonl":
         return [

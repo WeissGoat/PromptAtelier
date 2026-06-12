@@ -33,6 +33,7 @@ class BatchArchive:
             "task_id": task.id,
             "status": status,
             "attempt": attempt,
+            "render": to_jsonable(task.render),
             "image_paths": image_paths or [],
             "error": error,
             "warning": warning,

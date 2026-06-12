@@ -120,9 +120,61 @@ uv run python -m tags_machine_core run-batch examples\batches\prompt_list_202604
 - 任务 `status.json` 仍保持 `succeeded`
 - 未重新调用 NovelAI
 
+## Prompt File 真实出图验收
+
+命令：
+
+```powershell
+$tokenText = Get-Content -Path 'F:\my_project\new\tags_machine\novelai\client.py' -Raw
+$env:NAI_ACCESS_TOKEN = [regex]::Match($tokenText, 'return\s+"([^"]+)"').Groups[1].Value
+uv run python -m tags_machine_core run-batch examples\batches\prompt_file_20260412.yaml --limit 1 --full
+```
+
+结果：
+
+| Case | Status | Image | Parameter Diff | Visual Result |
+| --- | --- | --- | --- | --- |
+| `prompt-file-20260412 / prompts_20260412_0001` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\8f13219e_0_01.png` | `diff_count=0` | pass |
+
+参数证据：
+
+- 图片 sha256: `69441744A373AB768EB315B2F3FFE9E00262E52ADC3BF70C5E552D26D6093139`
+- 图片大小: `1341757` bytes
+- `compare-render-params` 对比 PNG 参数与 `generation_result.json`: `diff_count=0`
+- 分辨率: `832x1216`，来自 `resolution: random_standard`
+- `reference_image_multiple`: 已写入并可读取，PNG 参数与 `GenerationResult.request_body` 一致。
+
+视觉结论：
+
+人工查看图片，主体为单角色站姿，正面视线，画风与 `20260412` 的线稿/水彩倾向一致。该 case 验证了 `prompt_file` selector 可以从文本文件展开完整 prompt，并继续走真实 NovelAI 生图链路。
+
+## Batch JSON API 入口验收
+
+命令：
+
+```powershell
+uv run python -m tags_machine_core api-plan-batch $env:TEMP\api_batch_plan_request.json --full
+uv run python -m tags_machine_core api-run-batch $env:TEMP\api_batch_run_request.json --full
+uv run python -m tags_machine_core api-resume-batch $env:TEMP\api_batch_resume_request.json --full
+uv run python -m tags_machine_core api-inspect-batch $env:TEMP\api_batch_inspect_request.json --full
+```
+
+结果：
+
+- status: pass
+- schema: `tags-machine-core.api-plan-batch-result/v1`
+- task_count: `2`
+- `api-plan-batch` 支持 PowerShell BOM JSON request，内部复用 `BatchPlanner` 和同一套 manifest 写入逻辑。
+- `api-run-batch` 在 resume 场景返回 `skipped: 1`，没有重复调用 NovelAI。
+- `api-resume-batch` 在显式 run_dir + batch_spec 场景返回 `skipped: 1`，没有重复调用 NovelAI。
+- `api-inspect-batch` 返回 `succeeded: 1`、`pending: 1`，并从 task `status.json` 回读成功任务图片路径。
+
 ## 当前结论
 
 - `plan-batch` 可以展开 prompt list 和 action collection。
+- `api-plan-batch` 可以从 JSON request 展开 batch 任务。
+- `api-run-batch`、`api-resume-batch` 和 `api-inspect-batch` 可以通过 JSON request 驱动同一套 batch runner / manifest 链路。
+- `prompt_file` selector 可以从文本文件展开完整 prompt 并真实出图。
 - `run-batch` 可以真实调用 NovelAI，并归档 `task.json`、`prompt_bundle.json`、`render_request.json`、`generation_result.json`、`png_params.json`、`images.json`。
 - `inspect-batch` 可以读取 manifest。
 - `agent` 模式 cache miss 会保存 agent task，不会误调用 NovelAI；回填 agent result 后可以继续真实出图。
@@ -130,5 +182,5 @@ uv run python -m tags_machine_core run-batch examples\batches\prompt_list_202604
 
 ## 待继续补强
 
-- `retry` 当前已按异常文本匹配实现，但还需要用可控的假 executor 或真实 429/502 场景补充业务记录。
+- `retry` 当前已按异常文本匹配实现并写入 report，但还需要真实 429/502 场景补充业务记录。
 - `report.md` 是按单次运行写入，resume 后会显示本次 skipped 结果；后续可以增加 `report_history.md` 或 inspect 级总览。

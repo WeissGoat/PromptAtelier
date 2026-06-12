@@ -55,6 +55,7 @@ from tags_machine_core.verification import (
 from tags_machine_core.batch import (
     BatchPlanner,
     BatchRunner,
+    BatchSpec,
     latest_manifest_entries,
     load_batch_spec,
     write_initial_manifest,
@@ -761,6 +762,132 @@ def cmd_api_generate(args) -> int:
     return 0
 
 
+def cmd_api_plan_batch(args) -> int:
+    request_path = Path(args.request)
+    data = _load_json_mapping_file(request_path)
+    spec, spec_path, inline = _batch_spec_from_api_request(data, request_path)
+    run_dir = _batch_run_dir(spec, output_root=_optional_request_string(data, "output_root"))
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    tasks = planner.plan(spec, run_dir=run_dir)
+    manifest_path = write_initial_manifest(run_dir, tasks)
+    _archive_batch_spec_source(run_dir, spec_path=spec_path, spec=spec, inline=inline)
+    result = {
+        "schema": "tags-machine-core.api-plan-batch-result/v1",
+        "batch": spec.name,
+        "task_count": len(tasks),
+        "run_dir": str(run_dir),
+        "manifest_path": str(manifest_path),
+    }
+    _emit_api_result(result, args)
+    return 0
+
+
+def cmd_api_run_batch(args) -> int:
+    request_path = Path(args.request)
+    data = _load_json_mapping_file(request_path)
+    spec, spec_path, inline = _batch_spec_from_api_request(data, request_path)
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=_optional_request_bool(data, "resume"),
+        stop_on_error=_optional_request_bool(data, "stop_on_error"),
+    )
+    run_dir = _batch_run_dir(spec, output_root=_optional_request_string(data, "output_root"))
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    tasks = planner.plan(spec, run_dir=run_dir)
+    config_path = _batch_config_path(
+        spec,
+        spec_path=spec_path,
+        override=_optional_request_string(data, "config"),
+    )
+    config = _load_command_config(config_path, args)
+    _archive_batch_spec_source(run_dir, spec_path=spec_path, spec=spec, inline=inline)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=_optional_request_int(data, "limit"),
+    )
+    _emit_api_result(
+        {
+            "schema": "tags-machine-core.api-run-batch-result/v1",
+            "batch": spec.name,
+            **result,
+        },
+        args,
+    )
+    return 0
+
+
+def cmd_api_resume_batch(args) -> int:
+    request_path = Path(args.request)
+    data = _load_json_mapping_file(request_path)
+    run_dir_value = _optional_request_string(data, "run_dir")
+    if not run_dir_value:
+        raise ValueError("api-resume-batch request requires run_dir")
+    run_dir = Path(run_dir_value)
+    spec, spec_path, _inline = _batch_spec_from_api_request(
+        data,
+        request_path,
+        fallback_run_dir=run_dir,
+    )
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=True,
+        stop_on_error=_optional_request_bool(data, "stop_on_error"),
+    )
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    tasks = planner.plan(spec, run_dir=run_dir)
+    config_path = _batch_config_path(
+        spec,
+        spec_path=spec_path,
+        override=_optional_request_string(data, "config"),
+    )
+    config = _load_command_config(config_path, args)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=_optional_request_int(data, "limit"),
+    )
+    _emit_api_result(
+        {
+            "schema": "tags-machine-core.api-resume-batch-result/v1",
+            "batch": spec.name,
+            **result,
+        },
+        args,
+    )
+    return 0
+
+
+def cmd_api_inspect_batch(args) -> int:
+    data = _load_json_mapping_file(args.request)
+    run_dir_value = _optional_request_string(data, "run_dir")
+    if not run_dir_value:
+        raise ValueError("api-inspect-batch request requires run_dir")
+    run_dir = Path(run_dir_value)
+    entries = [_reconciled_manifest_entry(run_dir, entry) for entry in latest_manifest_entries(run_dir)]
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry.status] = counts.get(entry.status, 0) + 1
+    _emit_api_result(
+        {
+            "schema": "tags-machine-core.api-inspect-batch-result/v1",
+            "run_dir": str(run_dir),
+            "counts": counts,
+            "tasks": entries,
+        },
+        args,
+    )
+    return 0
+
+
 def cmd_plan_batch(args) -> int:
     spec_path = Path(args.batch_spec)
     spec = load_batch_spec(spec_path)
@@ -786,6 +913,11 @@ def cmd_plan_batch(args) -> int:
 def cmd_run_batch(args) -> int:
     spec_path = Path(args.batch_spec)
     spec = load_batch_spec(spec_path)
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=args.resume,
+        stop_on_error=args.stop_on_error,
+    )
     run_dir = _batch_run_dir(spec, output_root=args.output_root)
     planner = BatchPlanner(base_dir=spec_path.parent)
     tasks = planner.plan(spec, run_dir=run_dir)
@@ -817,6 +949,11 @@ def cmd_resume_batch(args) -> int:
     run_dir = Path(args.run_dir)
     spec_path = Path(args.batch_spec) if args.batch_spec else _batch_source_path(run_dir)
     spec = load_batch_spec(spec_path)
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=True,
+        stop_on_error=args.stop_on_error,
+    )
     planner = BatchPlanner(base_dir=spec_path.parent)
     tasks = planner.plan(spec, run_dir=run_dir)
     config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
@@ -843,7 +980,7 @@ def cmd_resume_batch(args) -> int:
 
 def cmd_inspect_batch(args) -> int:
     run_dir = Path(args.run_dir)
-    entries = latest_manifest_entries(run_dir)
+    entries = [_reconciled_manifest_entry(run_dir, entry) for entry in latest_manifest_entries(run_dir)]
     counts: dict[str, int] = {}
     for entry in entries:
         counts[entry.status] = counts.get(entry.status, 0) + 1
@@ -859,6 +996,38 @@ def cmd_inspect_batch(args) -> int:
     return 0
 
 
+def _batch_spec_with_cli_overrides(
+    spec,
+    *,
+    resume: bool | None,
+    stop_on_error: bool | None,
+):
+    run_config = spec.run
+    if resume is not None:
+        run_config = run_config.model_copy(update={"resume": resume})
+    if stop_on_error is not None:
+        run_config = run_config.model_copy(update={"stop_on_error": stop_on_error})
+    return spec.model_copy(update={"run": run_config})
+
+
+def _reconciled_manifest_entry(run_dir: Path, entry):
+    status_path = run_dir / entry.status_path
+    if not status_path.exists():
+        return entry
+    try:
+        status_data = json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return entry
+    return entry.model_copy(
+        update={
+            "status": status_data.get("status", entry.status),
+            "attempt": status_data.get("attempt", entry.attempt),
+            "image_paths": status_data.get("image_paths", entry.image_paths),
+            "error": status_data.get("error", entry.error),
+        }
+    )
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
@@ -869,14 +1038,114 @@ def _load_json_arg(value: str | None) -> dict:
 
 
 def _load_json_mapping_file(path: str | Path) -> dict[str, Any]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object: {path}")
     return data
 
 
+def _batch_spec_from_api_request(
+    data: dict[str, Any],
+    request_path: Path,
+    *,
+    fallback_run_dir: Path | None = None,
+) -> tuple[BatchSpec, Path, bool]:
+    inline_spec = data.get("spec") or data.get("batch")
+    if inline_spec is not None:
+        if not isinstance(inline_spec, dict):
+            raise ValueError("inline batch spec must be a JSON object")
+        return BatchSpec.model_validate(inline_spec), request_path, True
+
+    raw_path = data.get("batch_spec") or data.get("spec_path")
+    if raw_path:
+        spec_path = _resolve_request_relative_path(str(raw_path), request_path.parent)
+    elif fallback_run_dir is not None:
+        spec_path = _batch_source_path(fallback_run_dir)
+    else:
+        raise ValueError("batch API request requires batch_spec or spec")
+    return load_batch_spec(spec_path), spec_path, False
+
+
+def _resolve_request_relative_path(value: str, base_dir: Path) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    request_relative = base_dir / path
+    return request_relative if request_relative.exists() else path
+
+
+def _archive_batch_spec_source(
+    run_dir: str | Path,
+    *,
+    spec_path: Path,
+    spec: BatchSpec,
+    inline: bool,
+) -> None:
+    if inline:
+        root = Path(run_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "batch.yaml").write_text(
+            yaml.safe_dump(
+                spec.model_dump(by_alias=True, mode="json"),
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        (root / "batch_source.json").write_text(
+            json.dumps(
+                {
+                    "schema": "tags-machine-core.batch-source/v1",
+                    "source": "inline_api_request",
+                    "request_path": str(spec_path.resolve()),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return
+    _write_batch_source(run_dir, spec_path)
+    _copy_batch_spec(run_dir, spec_path)
+
+
+def _optional_request_string(data: dict[str, Any], key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_request_bool(data: dict[str, Any], key: str) -> bool | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{key} must be a boolean")
+
+
+def _optional_request_int(data: dict[str, Any], key: str) -> int | None:
+    value = data.get(key)
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def _emit_api_result(result: dict[str, Any], args) -> None:
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+
+
 def _load_render_request(path: str | Path) -> RenderRequest:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected RenderRequest JSON object: {path}")
     return RenderRequest.model_validate(data)
@@ -1325,6 +1594,18 @@ def build_parser() -> argparse.ArgumentParser:
     run_batch.add_argument("--config", help="Override BatchSpec config")
     run_batch.add_argument("--output-root")
     run_batch.add_argument("--limit", type=int)
+    run_batch.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override BatchSpec run.resume",
+    )
+    run_batch.add_argument(
+        "--stop-on-error",
+        action="store_true",
+        default=None,
+        help="Stop the batch after the first failed task",
+    )
     run_batch.set_defaults(func=cmd_run_batch)
 
     resume_batch = subparsers.add_parser(
@@ -1336,6 +1617,12 @@ def build_parser() -> argparse.ArgumentParser:
     resume_batch.add_argument("--batch-spec", help="Override stored source BatchSpec")
     resume_batch.add_argument("--config", help="Override BatchSpec config")
     resume_batch.add_argument("--limit", type=int)
+    resume_batch.add_argument(
+        "--stop-on-error",
+        action="store_true",
+        default=None,
+        help="Stop the resumed batch after the first failed task",
+    )
     resume_batch.set_defaults(func=cmd_resume_batch)
 
     inspect_batch = subparsers.add_parser(
@@ -1345,6 +1632,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_batch.add_argument("run_dir")
     inspect_batch.set_defaults(func=cmd_inspect_batch)
+
+    api_plan_batch = subparsers.add_parser(
+        "api-plan-batch",
+        parents=[output_parent],
+        help="Plan a BatchSpec from a JSON API request without calling NovelAI",
+    )
+    _add_api_request_arguments(api_plan_batch)
+    api_plan_batch.set_defaults(func=cmd_api_plan_batch)
+
+    api_run_batch = subparsers.add_parser(
+        "api-run-batch",
+        parents=[output_parent],
+        help="Run a BatchSpec from a JSON API request through the generation pipeline",
+    )
+    _add_api_request_arguments(api_run_batch)
+    api_run_batch.set_defaults(func=cmd_api_run_batch)
+
+    api_resume_batch = subparsers.add_parser(
+        "api-resume-batch",
+        parents=[output_parent],
+        help="Resume a batch run from a JSON API request",
+    )
+    _add_api_request_arguments(api_resume_batch)
+    api_resume_batch.set_defaults(func=cmd_api_resume_batch)
+
+    api_inspect_batch = subparsers.add_parser(
+        "api-inspect-batch",
+        parents=[output_parent],
+        help="Inspect a batch run from a JSON API request",
+    )
+    _add_api_request_arguments(api_inspect_batch)
+    api_inspect_batch.set_defaults(func=cmd_api_inspect_batch)
 
     api_compose = subparsers.add_parser(
         "api-compose",
