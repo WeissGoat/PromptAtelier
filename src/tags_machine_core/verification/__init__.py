@@ -11,6 +11,7 @@ from .composer_eval import build_composer_evaluation_report
 from .compare_report import build_image_comparison_report
 from .core import run_core_verification
 from .image_params import read_png_dimensions, read_png_text_chunks, read_image_parameters
+from .prompt_policy_acceptance import build_prompt_policy_acceptance_report
 from .render_params import (
     RenderParamDiff,
     compare_render_parameters,
@@ -24,6 +25,7 @@ __all__ = [
     "build_acceptance_record",
     "build_composer_evaluation_report",
     "build_image_comparison_report",
+    "build_prompt_policy_acceptance_report",
     "compare_render_parameters",
     "load_acceptance_record",
     "load_render_parameter_source",

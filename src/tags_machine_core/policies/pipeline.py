@@ -5,6 +5,7 @@ import json
 from typing import Iterable
 
 from tags_machine_core.contracts import CacheMeta, PromptBundle, PromptText
+from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
 from tags_machine_core.policies.config import PolicyTarget, PromptPolicyConfig
 from tags_machine_core.policies.context import PromptRuleContext
@@ -20,6 +21,9 @@ PHASE_ORDER = {
 }
 
 
+logger = get_logger(__name__)
+
+
 class PromptPolicyPipeline:
     def __init__(self, rules: Iterable[PromptRule] | None = None):
         self.rules = list(rules or DEFAULT_RULES)
@@ -33,7 +37,19 @@ class PromptPolicyPipeline:
         target: PolicyTarget = "script",
     ) -> PromptBundle:
         policy = _coerce_config(config)
+        logger.trace(
+            "PromptPolicyPipeline.apply called target=%s enabled=%s profile=%s",
+            target,
+            policy.enabled,
+            policy.profile,
+        )
         if not policy.target_enabled(target):
+            logger.trace(
+                "PromptPolicyPipeline skipped target=%s enabled=%s apply_to=%s",
+                target,
+                policy.enabled,
+                policy.apply_to.model_dump(mode="json"),
+            )
             return bundle
 
         working = bundle.model_copy(deep=True)
@@ -46,8 +62,27 @@ class PromptPolicyPipeline:
             negative_tokens=parse_prompt_tokens(working.prompt.negative),
         )
         enabled_rules = self._enabled_rules(policy)
+        if not enabled_rules:
+            logger.warning(
+                "PromptPolicyPipeline enabled but no rules selected target=%s profile=%s",
+                target,
+                policy.profile,
+            )
+        else:
+            logger.info(
+                "PromptPolicyPipeline applying target=%s profile=%s rules=%s",
+                target,
+                policy.profile,
+                [rule.id for rule in enabled_rules],
+            )
         for rule in enabled_rules:
+            before_trace_count = len(context.trace)
             context = rule.apply(context)
+            logger.trace(
+                "PromptPolicyPipeline rule applied rule=%s new_trace_entries=%s",
+                rule.id,
+                len(context.trace) - before_trace_count,
+            )
 
         output_style = policy.normalization.output_style
         positive = render_prompt_tokens(context.positive_tokens, output_style)
@@ -55,6 +90,12 @@ class PromptPolicyPipeline:
         working.prompt = PromptText(positive=positive, negative=negative)
         self._write_policy_meta(working, policy, enabled_rules, context, target)
         self._update_cache_key(working, policy, enabled_rules)
+        logger.info(
+            "PromptPolicyPipeline complete target=%s trace_entries=%s positive_tokens=%s",
+            target,
+            len(context.trace),
+            len(context.positive_tokens),
+        )
         return working
 
     def _enabled_rules(self, policy: PromptPolicyConfig) -> list[PromptRule]:

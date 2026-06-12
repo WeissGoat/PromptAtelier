@@ -18,6 +18,7 @@ from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
+from tags_machine_core.logging_config import configure_logging, get_logger
 from tags_machine_core.nodes import (
     NodeInput,
     NodeReader,
@@ -39,6 +40,7 @@ from tags_machine_core.verification import (
     archive_acceptance_case,
     build_image_comparison_report,
     build_acceptance_record,
+    build_prompt_policy_acceptance_report,
     compare_render_parameters,
     load_render_parameter_source,
     normalize_render_parameters,
@@ -51,6 +53,9 @@ from tags_machine_core.verification import (
 )
 
 
+logger = get_logger(__name__)
+
+
 def _agent_instructions(args) -> list[str]:
     return (getattr(args, "agent_instruction", None) or []) + (
         getattr(args, "instruction", None) or []
@@ -60,6 +65,14 @@ def _agent_instructions(args) -> list[str]:
 def print_json(value, *, full: bool = False) -> None:
     data = sanitize_json_for_display(value, full=full)
     print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _load_command_config(path: str | Path, args=None):
+    config = load_config(Path(path))
+    if args is None or not getattr(args, "log_level", None):
+        configure_logging(config.logging.level)
+    logger.trace("loaded config path=%s logging.level=%s", path, config.logging.level)
+    return config
 
 
 def cmd_compose(args) -> int:
@@ -159,6 +172,14 @@ def cmd_render_plan_nodes(args) -> int:
 
 def cmd_run_prompt(args) -> int:
     service = GenerationService()
+    logger.info(
+        "run-prompt start composer=%s dry_run=%s artist=%s model=%s nt=%s",
+        getattr(args, "composer", "full"),
+        args.dry_run,
+        getattr(args, "artist", None) or getattr(args, "artist_node", None),
+        args.model,
+        args.nt,
+    )
     try:
         bundle, request = _build_novelai_prompt_artifacts(service, args)
     except AgentCompositionRequired as exc:
@@ -180,7 +201,7 @@ def cmd_run_prompt(args) -> int:
     if not args.dry_run:
         if not args.config:
             raise ValueError("run-prompt without --dry-run requires --config")
-        config = load_config(Path(args.config))
+        config = _load_command_config(args.config, args)
         result["generation_result"] = _execute_render_request(
             config,
             request,
@@ -188,12 +209,25 @@ def cmd_run_prompt(args) -> int:
             image_format=args.format,
             allow_experimental_backend=False,
         )
+        images = result["generation_result"].images
+        logger.info(
+            "run-prompt generation complete image_count=%s paths=%s",
+            len(images),
+            [str(image.path) for image in images],
+        )
     print_json(result, full=args.full)
     return 0
 
 
 def cmd_run_action(args) -> int:
     service = GenerationService()
+    logger.info(
+        "run-action start dry_run=%s artist=%s model=%s nt=%s",
+        args.dry_run,
+        getattr(args, "artist", None) or getattr(args, "artist_node", None),
+        args.model,
+        args.nt,
+    )
     bundle, request = _build_novelai_action_artifacts(service, args)
     result: dict[str, Any] = {
         "schema": "tags-machine-core.run-action-result/v1",
@@ -205,7 +239,7 @@ def cmd_run_action(args) -> int:
     if not args.dry_run:
         if not args.config:
             raise ValueError("run-action without --dry-run requires --config")
-        config = load_config(Path(args.config))
+        config = _load_command_config(args.config, args)
         result["generation_result"] = _execute_render_request(
             config,
             request,
@@ -218,7 +252,7 @@ def cmd_run_action(args) -> int:
 
 
 def cmd_generate(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
     service = GenerationService()
     artist_ref, artist = _load_render_artist(args)
     bundle = _build_bundle(service, args)
@@ -245,7 +279,7 @@ def cmd_generate(args) -> int:
 
 
 def cmd_execute_render_request(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
     request = _load_render_request(args.request)
     result = _execute_render_request(
         config,
@@ -263,7 +297,7 @@ def cmd_execute_render_request(args) -> int:
 
 
 def cmd_inspect_artist(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
     artist = NovelAIArtistRepository(config.legacy.design_root).load_node(args.artist)
     print_json(artist, full=args.full)
     return 0
@@ -284,7 +318,7 @@ def cmd_validate_node_tree(args) -> int:
 
 
 def cmd_config(args) -> int:
-    config = load_config(Path(args.path))
+    config = _load_command_config(args.path, args)
     print_json(config, full=args.full)
     return 0
 
@@ -330,6 +364,28 @@ def cmd_compare_image_result(args) -> int:
         _write_structured_output(report, Path(args.output), output_format=args.format)
     print_json(report, full=args.full)
     return 0 if report["match"] else 2
+
+
+def cmd_verify_prompt_policy_acceptance(args) -> int:
+    report = build_prompt_policy_acceptance_report(
+        legacy_image=args.legacy_image,
+        core_run_result=args.core_run_result,
+        core_generation_result=args.core_generation_result,
+        prompt_bundle=args.prompt_bundle,
+        core_image=args.core_image,
+        visual_result=args.visual_result,
+        visual_notes=args.visual_note or [],
+        whitelist=parse_whitelist_args(args.whitelist),
+        intentional_differences=parse_intentional_difference_args(args.intentional_difference),
+        expected_profile=args.expected_profile,
+        required_rules=args.require_policy_rule or [],
+        expect_tokens=args.expect_token or [],
+        reject_tokens=args.reject_token or [],
+    )
+    if args.output:
+        _write_structured_output(report, Path(args.output), output_format=args.format)
+    print_json(report, full=args.full)
+    return 0 if report["result"] == "pass" else 2
 
 
 def cmd_create_acceptance_record(args) -> int:
@@ -671,7 +727,7 @@ def cmd_api_backend_support(args) -> int:
 
 
 def cmd_api_generate(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
 
     def executor(request: RenderRequest, request_data: dict[str, Any]) -> GenerationResult:
         ensure_backend_can_execute(
@@ -860,7 +916,7 @@ def _prompt_policy_from_args(args, *, target: str):
     if not profile and not enabled_rules and not disabled_rules:
         config_path = getattr(args, "config", None)
         if config_path:
-            return load_config(config_path).prompt_policy
+            return _load_command_config(config_path, args).prompt_policy
         return None
     apply_to = {
         "script": False,
@@ -928,7 +984,7 @@ def _load_render_artist(args):
         return node.id, node
     artist_ref = getattr(args, "artist", None)
     if artist_ref and getattr(args, "config", None):
-        config = load_config(Path(args.config))
+        config = _load_command_config(args.config, args)
         return artist_ref, NovelAIArtistRepository(config.legacy.design_root).load_node(artist_ref)
     return artist_ref, None
 
@@ -981,6 +1037,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--full",
         action="store_true",
         help="Print full JSON without truncating long image/base64 fields",
+    )
+    output_parent.add_argument(
+        "--log-level",
+        choices=("trace", "info", "warning", "error"),
+        help="Write diagnostic logs to stderr; defaults to TAGS_MACHINE_CORE_LOG_LEVEL or error",
     )
 
     compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
@@ -1321,6 +1382,77 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output report file format when --output is used",
     )
     compare_image_result.set_defaults(func=cmd_compare_image_result)
+
+    prompt_policy_acceptance = subparsers.add_parser(
+        "verify-prompt-policy-acceptance",
+        parents=[output_parent],
+        help="Verify real PromptPolicyPipeline output against legacy image evidence",
+    )
+    prompt_policy_acceptance.add_argument("--legacy-image", required=True)
+    prompt_policy_acceptance.add_argument(
+        "--core-run-result",
+        help="JSON/YAML output from run-prompt containing prompt_bundle and generation_result",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--core-generation-result",
+        help="GenerationResult JSON/YAML when not using --core-run-result",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--prompt-bundle",
+        help="PromptBundle JSON/YAML when not using --core-run-result",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--core-image",
+        help="Override the core image path; defaults to GenerationResult.images[0].path",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--visual-result",
+        default="pending",
+        choices=("pending", "pass", "fail", "review"),
+        help="Manual visual check result; pass is required for acceptance",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--visual-note",
+        action="append",
+        help="Manual visual check note; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--expected-profile",
+        help="Expected PromptPolicyPipeline profile, for example balanced",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--require-policy-rule",
+        action="append",
+        help="Required policy rule id; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--expect-token",
+        action="append",
+        help="Token/text that must appear in the core PNG prompt; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--reject-token",
+        action="append",
+        help="Token/text that must not appear in the core PNG prompt; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--whitelist",
+        action="append",
+        help="Approved legacy-vs-core diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--intentional-difference",
+        action="append",
+        help="Intentional legacy-vs-core diff path with optional reason",
+    )
+    prompt_policy_acceptance.add_argument("--output", help="Write the report to JSON/YAML")
+    prompt_policy_acceptance.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output report file format when --output is used",
+    )
+    prompt_policy_acceptance.set_defaults(func=cmd_verify_prompt_policy_acceptance)
 
     create_acceptance_record = subparsers.add_parser(
         "create-acceptance-record",
@@ -1979,7 +2111,9 @@ def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> No
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    configure_logging(getattr(args, "log_level", None))
     if not hasattr(args, "func"):
         parser.print_help()
         return 1
+    logger.trace("cli command selected command=%s", getattr(args, "command", None))
     return args.func(args)

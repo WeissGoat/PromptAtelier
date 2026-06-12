@@ -24,6 +24,10 @@ class DefaultsConfig(BaseModel):
     image_format: str = "png"
 
 
+class LoggingConfig(BaseModel):
+    level: str = "error"
+
+
 class NovelAIConfig(BaseModel):
     base_url: str = "https://image.novelai.net"
     access_token_env: str = "NAI_ACCESS_TOKEN"
@@ -46,6 +50,7 @@ class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     prompt_policy: PromptPolicyConfig = Field(default_factory=PromptPolicyConfig)
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)

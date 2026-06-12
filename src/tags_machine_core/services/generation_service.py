@@ -11,11 +11,15 @@ from tags_machine_core.composers import (
 )
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import PromptBundle, RenderRequest
+from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
 from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.policies import PromptPolicyConfig, PromptPolicyPipeline
 from tags_machine_core.renderers import ComfyUIRenderAdapter, NovelAIRenderAdapter, SDRenderAdapter
+
+
+logger = get_logger(__name__)
 
 
 class GenerationService:
@@ -44,6 +48,11 @@ class GenerationService:
         bundle = self.composer.compose_full_prompt(
             prompt=prompt,
             negative=negative,
+        )
+        logger.info(
+            "compose_full_prompt produced bundle composer=%s positive_chars=%s",
+            bundle.meta.composer_type,
+            len(bundle.prompt.positive),
         )
         return self.policy_pipeline.apply(
             bundle,
@@ -74,6 +83,11 @@ class GenerationService:
             character_scope=character_scope,
             body_scope=body_scope,
         )
+        logger.info(
+            "compose_nodes produced bundle composer=%s node_count=%s",
+            bundle.meta.composer_type,
+            len(bundle.meta.nodes),
+        )
         return self.policy_pipeline.apply(
             bundle,
             config=prompt_policy,
@@ -97,6 +111,11 @@ class GenerationService:
             character_scope=character_scope,
             body_scope=body_scope,
         )
+        logger.info(
+            "compose_resolved_nodes produced bundle composer=%s resolved_node_count=%s",
+            bundle.meta.composer_type,
+            len(resolved_nodes),
+        )
         return self.policy_pipeline.apply(
             bundle,
             resolved_nodes=resolved_nodes,
@@ -117,6 +136,7 @@ class GenerationService:
         instructions: list[str] | None = None,
         agent_model: str | None = None,
     ) -> AgentCompositionTask:
+        logger.info("build_agent_composition_task started")
         return self.agent_composer.build_task(
             character=character,
             action=action,
@@ -139,6 +159,10 @@ class GenerationService:
         instructions: list[str] | None = None,
         agent_model: str | None = None,
     ) -> AgentCompositionTask:
+        logger.info(
+            "build_agent_composition_task_resolved_nodes started resolved_node_count=%s",
+            len(resolved_nodes),
+        )
         return self.agent_composer.build_task_resolved_nodes(
             resolved_nodes,
             extra_prompt=extra_prompt,
@@ -163,6 +187,9 @@ class GenerationService:
         result: AgentCompositionResult | dict[str, Any] | None = None,
         cache: PromptCache | None = None,
     ) -> PromptBundle:
+        logger.info(
+            "compose_nodes_with_agent started; PromptPolicyPipeline bypassed by design"
+        )
         return self.agent_composer.compose_nodes(
             character=character,
             action=action,
@@ -189,6 +216,9 @@ class GenerationService:
         result: AgentCompositionResult | dict[str, Any] | None = None,
         cache: PromptCache | None = None,
     ) -> PromptBundle:
+        logger.info(
+            "compose_resolved_nodes_with_agent started; PromptPolicyPipeline bypassed by design"
+        )
         return self.agent_composer.compose_resolved_nodes(
             resolved_nodes,
             extra_prompt=extra_prompt,
@@ -212,6 +242,13 @@ class GenerationService:
         action: str = "generate",
         params: dict[str, Any] | None = None,
     ) -> RenderRequest:
+        logger.info(
+            "build_novelai_request started model=%s size=%sx%s composer=%s",
+            model,
+            width,
+            height,
+            bundle.meta.composer_type,
+        )
         return self.novelai_adapter.build_request(
             bundle,
             seed=seed,
@@ -241,6 +278,14 @@ class GenerationService:
         ensure_backend_can_build_render_plan(
             backend,
             entrypoint="GenerationService.build_render_request",
+        )
+        logger.info(
+            "build_render_request started backend=%s model=%s size=%sx%s composer=%s",
+            backend,
+            model,
+            width,
+            height,
+            bundle.meta.composer_type,
         )
         if backend == "novelai":
             return self.novelai_adapter.build_request(

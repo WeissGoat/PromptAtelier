@@ -7,7 +7,7 @@ from tags_machine_core.policies.tokens import parse_prompt_token
 
 
 _COUNT_RE = re.compile(
-    r"^(?:\d+|multiple)_(?:girl|girls|boy|boys|woman|women|man|men)$"
+    r"^(?:\d+|multiple)_?(?:girl|girls|boy|boys|woman|women|man|men)$"
 )
 
 

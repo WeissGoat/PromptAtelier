@@ -178,6 +178,32 @@ class PromptPolicyPipelineTest(unittest.TestCase):
         self.assertEqual(result["prompt"]["positive"], "bare feet, high heels")
         self.assertNotIn("policy", result["meta"]["extra"])
 
+    def test_generation_service_agent_path_logs_policy_bypass(self):
+        class ExplodingPolicyPipeline:
+            def apply(self, *args, **kwargs):
+                raise AssertionError("AgentComposer path must not call PromptPolicyPipeline")
+
+        character = NodeDocument(kind="character", id="homura", tags={"character": ["akemi homura"]})
+        action = NodeDocument(kind="action", id="foot", tags={"action": ["bare feet, high heels"]})
+        resolved_nodes = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=character),
+                ResolvedNode(role="action", ref="foot", index=0, node=action),
+            ]
+        )
+        service = GenerationService(policy_pipeline=ExplodingPolicyPipeline())
+
+        with self.assertLogs("tags_machine_core", level="INFO") as logs:
+            bundle = service.compose_resolved_nodes_with_agent(
+                resolved_nodes,
+                result={"positive": "bare feet, high heels", "negative": ""},
+            )
+
+        output = "\n".join(logs.output)
+        self.assertIn("PromptPolicyPipeline bypassed by design", output)
+        self.assertNotIn("PromptPolicyPipeline applying", output)
+        self.assertEqual(bundle.prompt.positive, "bare feet, high heels")
+
     def test_json_api_compose_accepts_prompt_policy(self):
         from tags_machine_core.services.json_api import GenerationJsonApi
 

@@ -12,11 +12,13 @@ from tags_machine_core.backends import ensure_backend_can_execute
 from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
+from tags_machine_core.logging_config import get_logger
 from tags_machine_core.verification import read_image_parameters
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CORE_PNG_INFO_KEY = "tags_machine_core"
+logger = get_logger(__name__)
 
 
 def save_generated_images(
@@ -49,6 +51,7 @@ def save_generated_images(
                 meta=meta,
             )
         )
+        logger.info("saved generated image path=%s", path)
     return generated_images
 
 
@@ -205,6 +208,12 @@ def execute_novelai_generation(
     )
     output_path = Path(output_dir or config.runtime.output_dir)
     requests = split_novelai_samples(request)
+    logger.info(
+        "execute_novelai_generation start model=%s split_requests=%s output_dir=%s",
+        request.model,
+        len(requests),
+        output_path,
+    )
     if len(requests) == 1:
         effective_request = requests[0]
         images = save_generated_images(
@@ -268,6 +277,7 @@ def split_novelai_samples(request: RenderRequest) -> list[RenderRequest]:
     if count <= 1:
         return [request]
 
+    logger.info("split NovelAI n_samples into single requests count=%s", count)
     return [_single_novelai_sample_request(request, index, count) for index in range(count)]
 
 
@@ -340,6 +350,7 @@ def execute_render_request(
         entrypoint="execute-render-request",
         experimental_flag="--allow-experimental-backend",
     )
+    logger.info("execute_render_request backend=%s model=%s", request.backend, request.model)
 
     if request.backend == "novelai":
         return execute_novelai_generation(

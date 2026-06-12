@@ -226,7 +226,6 @@ meta:
       - character
       - copyright
       - feet
-      - footwear
     suppressed_character_sections:
       - hair
       - eyes
