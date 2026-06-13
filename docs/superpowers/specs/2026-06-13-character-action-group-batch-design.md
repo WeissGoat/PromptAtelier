@@ -100,6 +100,35 @@ character_c -> st_foot -> st_foot/01_xxx, st_foot/02_xxx, st_foot/03_xxx ...
 
 ## BatchSpec 契约变化
 
+### `select.actions` 与 `select.action_groups` 的关系
+
+`select.actions` 保留原语义，不被 `ActionGroupSelector` 替代。两者按 `expand.mode` 分流：
+
+```text
+expand.mode = product / zip
+  -> 解析 select.characters
+  -> 解析 select.actions
+  -> 解析 select.artists / select.backgrounds
+  -> 产出普通 BatchTask
+
+expand.mode = character_action_group
+  -> 解析 select.characters
+  -> 解析 select.action_groups
+  -> ActionGroupStrategy 为每个 character 选择一个 group
+  -> 展开该 group 内的 actions
+  -> 产出普通 BatchTask
+```
+
+因此：
+
+- 原有 `select.actions` + `expand.mode: product` / `zip` 行为不改变。
+- 新增 `select.action_groups` 只服务 `expand.mode: character_action_group`。
+- `character_action_group` 模式必须配置 `select.action_groups`。
+- `character_action_group` 模式不允许同时配置 `select.actions`，第一版直接报错，避免用户误以为会把动作池和动作组混合。
+- 非 `character_action_group` 模式如果配置了 `select.action_groups`，第一版也直接报错，避免静默忽略。
+
+这个分流规则保证 action group 是 batch 规划层能力，不会污染现有 selector、composer、renderer 或 execution 链路。
+
 ### `select.action_groups`
 
 新增 `select.action_groups`，每一项是命名动作组。它复用现有 selector 能力，但必须有 `name`。
@@ -233,13 +262,14 @@ character_action_group
 
 ```text
 BatchSpec
+  -> BatchSelect.actions           # 原有动作池，服务 product / zip
   -> BatchSelect.action_groups
   -> ExpandConfig.character_action_group fields
 
 BatchPlanner
-  -> SelectionResolver
-  -> ActionGroupResolver
-  -> ActionGroupStrategy
+  -> 按 expand.mode 分流
+  -> product / zip: 复用 select.actions
+  -> character_action_group: 使用 ActionGroupResolver + ActionGroupStrategy
   -> BatchTask[]
 
 BatchRunner
@@ -269,19 +299,47 @@ action_groups.py
 
 这样 `planner.py` 不会继续膨胀，selector 也不用理解“动作组调度”的业务语义。
 
+### 改动模块清单
+
+第一版预计只改动 refactor 的 batch、文档、示例和测试：
+
+| 模块 | 改动 |
+| --- | --- |
+| `src/tags_machine_core/batch/models.py` | 增加 `select.action_groups`，扩展 `ExpandMode`，给 `ExpandConfig` 增加 action group 策略字段。 |
+| `src/tags_machine_core/batch/action_groups.py` | 新增模块，负责 action group 解析、策略选择、record 读写。 |
+| `src/tags_machine_core/batch/planner.py` | 增加 `character_action_group` 分支，按角色选择动作组并展开成普通 `BatchTask`。 |
+| `src/tags_machine_core/batch/runner.py` | 补充业务日志：任务进度、角色、动作组、动作、重试、图片路径、组完成摘要。 |
+| `src/tags_machine_core/batch/report.py` | 报告中展示 `source.action_group`、`source.character`、`source.action` 等来源字段，保持旧 report 兼容。 |
+| `tests/test_batch_generation.py` | 补规划层和策略层覆盖：`ordered`、`random + seed`、`balanced_random + record`、冲突校验。 |
+| `examples/batches/character_action_group_20260412.yaml` | 新增最小业务示例。 |
+| `docs/batch_generation_readme.md` | 增加新模式的 YAML 字段、使用方式、日志说明和输出结构说明。 |
+| `docs/superpowers/specs/2026-06-13-character-action-group-batch-design.md` | 保持本设计文档与实现同步。 |
+
+明确不改动：
+
+- AgentComposer / ScriptComposer。
+- NovelAI renderer / execution。
+- 旧 `tags_machine` 项目代码。
+- `prompt_list`、`prompt_file`、`product`、`zip`、`manual` 的既有语义。
+
 ### 数据流
 
 ```text
 load_batch_spec
 -> BatchSpec.model_validate
 -> BatchPlanner.plan
-   -> resolve characters
-   -> resolve artists
-   -> resolve backgrounds
-   -> resolve action_groups
-   -> for each character:
-        selected_group = strategy.choose(action_groups)
-        for action in selected_group.actions:
+   -> if mode in product / zip:
+        resolve select.actions
+        build existing task matrix
+   -> if mode == character_action_group:
+        resolve characters
+        resolve artists
+        resolve backgrounds
+        resolve action_groups
+        validate select.actions is empty
+        for each character:
+          selected_group = strategy.choose(action_groups)
+          for action in selected_group.actions:
             build BatchTask(nodes=[character, action, artist], source={...})
 -> BatchRunner.run_tasks
 -> BatchExecutor.execute
@@ -326,6 +384,8 @@ warning / error：
 
 - `expand.mode: character_action_group` 但没有 `select.characters`：直接报错。
 - 没有 `select.action_groups`：直接报错。
+- `character_action_group` 模式同时配置了 `select.actions`：直接报错。
+- 非 `character_action_group` 模式配置了 `select.action_groups`：直接报错，提示改用 `character_action_group` 或删除 `select.action_groups`。
 - action group 缺少 `name`：直接报错。
 - action group 解析后动作数为 0：直接报错，错误中包含 group name 和 root/pattern。
 - `action_group_strategy` 不在允许范围：直接报错。
@@ -341,6 +401,29 @@ warning / error：
 - `character_action_group`：用于“每个角色选择一组动作分类，再跑完该组动作”。
 
 该模式只影响 `BatchPlanner` 阶段。产出的 `BatchTask` 和其他模式一致，因此不会影响 AgentComposer 稳定链路。
+
+字段选择建议：
+
+```yaml
+# 全量组合旧模式：继续用 select.actions
+select:
+  actions:
+    - selector: folder
+      root: F:/.../动作改2/st_rp
+      recursive: true
+expand:
+  mode: product
+
+# 每个角色抽一个动作分类：使用 select.action_groups
+select:
+  action_groups:
+    - name: st_rp
+      selector: folder
+      root: F:/.../动作改2/st_rp
+      recursive: true
+expand:
+  mode: character_action_group
+```
 
 ## 示例任务展开
 
@@ -446,4 +529,3 @@ D + st_rp/03
 - record 损坏时直接失败，不自动重置。
 - `completed_count` / `failed_count` 第一版只记录整组执行后的摘要，不参与选择。
 - `action_groups` 放在 `select` 下，不复用 `collections.actions`。
-
