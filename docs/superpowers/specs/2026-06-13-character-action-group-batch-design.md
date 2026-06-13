@@ -163,7 +163,7 @@ character_action_group
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
 | `action_group_strategy` | `balanced_random` | 动作组选择策略：`random`、`ordered`、`balanced_random`。 |
-| `action_group_record` | `null` | `balanced_random` 的历史记录文件。为空时使用临时内存记录，只在本次 plan 内均衡。 |
+| `action_group_record` | `null` | `balanced_random` 的历史记录文件。为空时使用临时内存记录，只在本次 plan 内均衡。相对路径按当前运行目录解析，和 `cache_dir` / `output_root` 一样属于运行态路径。 |
 | `seed` | `null` | 让 `random` / `balanced_random` 可复现。 |
 
 ### `BatchTask.source`

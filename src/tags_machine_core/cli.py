@@ -1173,6 +1173,7 @@ def _batch_run_dir(spec, *, output_root: str | None) -> Path:
 def _batch_selector_summary(tasks) -> dict[str, Any]:
     role_counts = Counter()
     artist_counts = Counter()
+    action_group_counts = Counter()
     composer_counts = Counter()
     prompt_count = 0
     for task in tasks:
@@ -1181,6 +1182,8 @@ def _batch_selector_summary(tasks) -> dict[str, Any]:
             prompt_count += 1
         if task.render.artist:
             artist_counts[task.render.artist] += 1
+        if task.source.get("action_group"):
+            action_group_counts[task.source["action_group"]] += 1
         for node in task.nodes:
             role_counts[node.role] += 1
     return {
@@ -1188,6 +1191,7 @@ def _batch_selector_summary(tasks) -> dict[str, Any]:
         "composers": dict(composer_counts),
         "node_roles": dict(role_counts),
         "artists": dict(artist_counts),
+        "action_groups": dict(action_group_counts),
         "prompts": prompt_count,
     }
 

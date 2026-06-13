@@ -8,6 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tags_machine_core.logging_config import get_logger
+
+from .action_groups import (
+    ActionGroupRecord,
+    choose_action_group,
+    resolve_action_groups,
+    resolve_record_path,
+)
 from .models import (
     AgentOptions,
     BatchSpec,
@@ -19,6 +27,8 @@ from .models import (
 )
 from .selectors import SelectorContext, expand_selector
 
+
+logger = get_logger(__name__)
 
 STANDARD_RESOLUTIONS: dict[str, tuple[int, int]] = {
     "square": (1024, 1024),
@@ -42,6 +52,7 @@ class BatchPlanner:
 
     def plan(self, spec: BatchSpec, *, run_dir: str | Path | None = None) -> list[BatchTask]:
         resolved_run_dir = Path(run_dir or Path(spec.output_root) / spec.name)
+        self._validate_expand_select_contract(spec)
         selections = self._resolve_selections(spec)
         if spec.expand.mode == "prompt_list":
             tasks = self._plan_prompt_list(spec, selections, run_dir=resolved_run_dir)
@@ -49,6 +60,8 @@ class BatchPlanner:
             tasks = self._plan_product(spec, selections, run_dir=resolved_run_dir)
         elif spec.expand.mode == "zip":
             tasks = self._plan_zip(spec, selections, run_dir=resolved_run_dir)
+        elif spec.expand.mode == "character_action_group":
+            tasks = self._plan_character_action_group(spec, selections, run_dir=resolved_run_dir)
         elif spec.expand.mode == "manual":
             tasks = self._plan_manual(spec, run_dir=resolved_run_dir)
         else:
@@ -87,6 +100,23 @@ class BatchPlanner:
             backgrounds=backgrounds,
             prompts=prompts,
         )
+
+    def _validate_expand_select_contract(self, spec: BatchSpec) -> None:
+        if spec.expand.mode == "character_action_group":
+            if not spec.select.characters:
+                raise ValueError("character_action_group expand mode requires select.characters")
+            if not spec.select.action_groups:
+                raise ValueError("character_action_group expand mode requires select.action_groups")
+            if spec.select.actions:
+                raise ValueError(
+                    "character_action_group expand mode uses select.action_groups and "
+                    "does not allow select.actions"
+                )
+            return
+        if spec.select.action_groups:
+            raise ValueError(
+                "select.action_groups is only supported with expand.mode: character_action_group"
+            )
 
     def _expand_refs(
         self,
@@ -217,6 +247,89 @@ class BatchPlanner:
                     run_dir=run_dir,
                 )
             )
+        return tasks
+
+    def _plan_character_action_group(
+        self,
+        spec: BatchSpec,
+        selections: SelectionSet,
+        *,
+        run_dir: Path,
+    ) -> list[BatchTask]:
+        artists = selections.artists or ([spec.defaults.artist] if spec.defaults.artist else [None])
+        backgrounds = selections.backgrounds or [None]
+        context = SelectorContext(base_dir=self.base_dir, collections=spec.collections)
+        groups = resolve_action_groups(spec.select.action_groups, context=context)
+        group_indices = {group.name: index for index, group in enumerate(groups)}
+        record_path = resolve_record_path(spec.expand.action_group_record, base_dir=self.base_dir)
+        record = ActionGroupRecord.load(record_path)
+        rng = random.Random(spec.expand.seed)
+        tasks: list[BatchTask] = []
+
+        logger.info(
+            "batch plan action_groups resolved groups=%s characters=%s strategy=%s",
+            len(groups),
+            len(selections.characters),
+            spec.expand.action_group_strategy,
+        )
+        for character_index, character in enumerate(selections.characters):
+            group, selected_count = choose_action_group(
+                groups,
+                strategy=spec.expand.action_group_strategy,
+                character_index=character_index,
+                rng=rng,
+                record=record,
+            )
+            if spec.expand.action_group_strategy == "balanced_random":
+                record.save(record_path)
+            logger.info(
+                "action group selected character=%s group=%s strategy=%s action_count=%s selected_count=%s",
+                Path(character).name,
+                group.name,
+                spec.expand.action_group_strategy,
+                len(group.actions),
+                selected_count,
+            )
+            for action_index, action in enumerate(group.actions):
+                for artist, background in itertools.product(artists, backgrounds):
+                    nodes = _node_refs(
+                        character=character,
+                        action=action,
+                        artist=artist,
+                        background=background,
+                    )
+                    task_id = _task_id(
+                        character,
+                        group.name,
+                        action,
+                        artist,
+                        background,
+                        spec.defaults.composer,
+                    )
+                    tasks.append(
+                        self._task(
+                            spec,
+                            task_id=task_id,
+                            index=len(tasks),
+                            composer=spec.defaults.composer,
+                            nodes=nodes,
+                            artist=artist,
+                            source={
+                                "character": character,
+                                "action": action,
+                                "artist": artist,
+                                "background": background,
+                                "action_group": group.name,
+                                "action_group_strategy": spec.expand.action_group_strategy,
+                                "action_group_record": str(record_path) if record_path else None,
+                                "action_group_index": group_indices[group.name],
+                                "action_index_in_group": action_index,
+                                "action_count_in_group": len(group.actions),
+                                "action_group_selected_count": selected_count,
+                            },
+                            run_dir=run_dir,
+                        )
+                    )
         return tasks
 
     def _plan_manual(self, spec: BatchSpec, *, run_dir: Path) -> list[BatchTask]:

@@ -212,13 +212,119 @@ uv run python -m tags_machine_core api-inspect-batch $env:TEMP\api_batch_inspect
 - `api-resume-batch` 在显式 run_dir + batch_spec 场景返回 `skipped: 1`，没有重复调用 NovelAI。
 - `api-inspect-batch` 返回 `succeeded: 1`、`pending: 1`，并从 task `status.json` 回读成功任务图片路径。
 
+## Character Action Group 真实出图验收
+
+### 目标
+
+验证 `character_action_group` 批量展开模式已经打通真实 NovelAI 出图链路：
+
+```text
+BatchSpec.select.characters
+-> BatchSpec.select.action_groups
+-> BatchPlanner(character_action_group)
+-> BatchRunner
+-> BatchExecutor
+-> ScriptComposer
+-> NovelAIRenderer
+-> NovelAI execution
+-> GenerationResult + PNG 参数
+```
+
+### 配置
+
+- BatchSpec: `examples/batches/character_action_group_20260412.yaml`
+- strategy: `balanced_random`
+- action_group_record: `cache/batch/character_action_group_20260412_record.json`
+- artist: `20260412`
+- composer: `script`
+- model: `nai-diffusion-4-5-full`
+- limit: `1`
+
+### 规划验证
+
+命令：
+
+```powershell
+uv run python -m tags_machine_core plan-batch examples\batches\character_action_group_20260412.yaml --log-level info --full
+```
+
+结果：
+
+- `task_count`: `4`
+- `selector_summary.composers.script`: `4`
+- `selector_summary.node_roles.character`: `4`
+- `selector_summary.node_roles.action`: `4`
+- `selector_summary.action_groups.st_rp`: `2`
+- `selector_summary.action_groups.st_sfw`: `2`
+
+日志证明 planner 按角色选择动作组：
+
+```text
+batch plan action_groups resolved groups=3 characters=2 strategy=balanced_random
+action group selected character=danbooru_akemi_homura_暁美ほむら _魔法少女 group=st_rp strategy=balanced_random action_count=2 selected_count=1
+action group selected character=danbooru_kaname_madoka_鹿目まどか_魔法少女 group=st_sfw strategy=balanced_random action_count=2 selected_count=1
+```
+
+### 真实出图验证
+
+命令：
+
+```powershell
+$tokenText = Get-Content -Path 'F:\my_project\new\tags_machine\novelai\client.py' -Raw
+$env:NAI_ACCESS_TOKEN = [regex]::Match($tokenText, 'return\s+"([^"]+)"').Groups[1].Value
+uv run python -m tags_machine_core run-batch examples\batches\character_action_group_20260412.yaml --limit 1 --log-level info --full
+```
+
+结果：
+
+| Case | Status | Image | Task Dir | GenerationResult | PNG Params | Visual |
+| --- | --- | --- | --- | --- | --- | --- |
+| `character-action-group-20260412 / st_rp` | succeeded | `F:\my_project\new\tags_machine\refactor\outputs\f28188dd_0_01.png` | `outputs\batches\character-action-group-20260412\tasks\danbooru_akemi_homura_暁美_魔法少女_st_rp_00_licks_penis_disgustingly_20260412_14807e1a` | `outputs\batches\character-action-group-20260412\tasks\danbooru_akemi_homura_暁美_魔法少女_st_rp_00_licks_penis_disgustingly_20260412_14807e1a\generation_result.json` | readable | pass |
+
+关键输出：
+
+- `counts.succeeded`: `1`
+- `source.action_group`: `st_rp`
+- `source.action_group_strategy`: `balanced_random`
+- `source.action_group_record`: `cache\batch\character_action_group_20260412_record.json`
+- `source.action_index_in_group`: `0`
+- `source.action_count_in_group`: `2`
+- `png_params_summary.has_png_info`: `true`
+
+PNG 参数读取命令：
+
+```powershell
+uv run python -m tags_machine_core inspect-image-params outputs\f28188dd_0_01.png --normalized --full
+```
+
+PNG 参数验证：
+
+- `model`: `nai-diffusion-4-5-full`
+- `width`: `832`
+- `height`: `1216`
+- `n_samples`: `1`
+- `steps`: `28`
+- `sampler`: `k_euler_ancestral`
+- `reference_image_multiple`: present
+- `v4_prompt.caption.char_captions`: present
+- `v4_negative_prompt.caption.char_captions`: present
+
+业务结论：
+
+- `character_action_group` 可以读取多个角色和多个动作分类。
+- `balanced_random` 可以为角色选择动作组，并写入 `task.source`。
+- 产出的任务仍然走普通 `BatchTask -> BatchExecutor -> Composer -> Renderer -> NovelAI` 链路。
+- 真实 NovelAI 出图成功，图片可读取 PNG 参数。
+
 ## 当前结论
 
 - `plan-batch` 可以展开 prompt list 和 action collection。
+- `plan-batch` 可以展开 `character_action_group`，并在 summary 中统计 `action_groups`。
 - `api-plan-batch` 可以从 JSON request 展开 batch 任务。
 - `api-run-batch`、`api-resume-batch` 和 `api-inspect-batch` 可以通过 JSON request 驱动同一套 batch runner / manifest 链路。
 - `prompt_file` selector 可以从文本文件展开完整 prompt 并真实出图。
 - `action folder` / `collection selector` 可以从旧动作分类展开 3 个任务并真实出图。
+- `character_action_group` 可以按角色选择动作分类并真实出图。
 - `run-batch` 可以真实调用 NovelAI，并归档 `task.json`、`prompt_bundle.json`、`render_request.json`、`generation_result.json`、`png_params.json`、`images.json`。
 - `inspect-batch` 可以读取 manifest。
 - `agent` 模式 cache miss 会保存 agent task，不会误调用 NovelAI；回填 agent result 后可以继续真实出图。

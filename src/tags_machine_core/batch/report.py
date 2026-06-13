@@ -101,6 +101,9 @@ def _markdown_report(
             detail.append(f"png: `{json.dumps(png_summary, ensure_ascii=False)}`")
         if entry.get("retry_records"):
             detail.append(f"retry: `{json.dumps(entry['retry_records'], ensure_ascii=False)}`")
+        source_detail = _source_detail(entry.get("source") or {})
+        if source_detail:
+            detail.append(f"source: `{_escape_table(source_detail)}`")
         if detail:
             error = "<br>".join([item for item in [error, *detail] if item])
         if visual_check_template:
@@ -132,3 +135,16 @@ def _filtered_report_data(
 
 def _escape_table(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")[:300]
+
+
+def _source_detail(source: dict[str, Any]) -> str:
+    if not source:
+        return ""
+    parts = []
+    for key in ("character", "action_group", "action", "artist"):
+        value = source.get(key)
+        if value is None:
+            continue
+        text = Path(str(value)).name if key in {"character", "action"} else str(value)
+        parts.append(f"{key}={text}")
+    return ", ".join(parts)

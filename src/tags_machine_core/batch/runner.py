@@ -66,19 +66,30 @@ class BatchRunner:
         entries: list[dict[str, Any]] = []
         image_budget = run_config.max_images
         selected = tasks[:limit] if limit is not None else tasks
-        for planned_task in selected:
+        total_selected = len(selected)
+        for position, planned_task in enumerate(selected, start=1):
             if image_budget is not None and image_budget <= 0:
                 break
             task = _resume_task_snapshot(planned_task) if run_config.resume else planned_task
             if run_config.resume and task_already_succeeded(task):
                 entry = self._record_skipped(run_dir=root, task=task)
                 entries.append(entry)
-                logger.info("batch task skipped task_id=%s", task.id)
+                logger.info("batch task skipped task_id=%s source=%s", task.id, _source_log(task))
                 continue
 
             run_task = _task_with_image_budget(task, image_budget)
             self.archive.write_task(run_task)
-            logger.info("batch task started task_id=%s composer=%s", run_task.id, run_task.composer)
+            logger.info(
+                "batch task started index=%s/%s task_id=%s composer=%s source=%s resolution=%s nt=%s seed=%s",
+                position,
+                total_selected,
+                run_task.id,
+                run_task.composer,
+                _source_log(run_task),
+                run_task.render.resolution,
+                run_task.render.nt,
+                run_task.render.seed,
+            )
             result = self._execute_with_retry(
                 root=root,
                 task=run_task,
@@ -93,6 +104,7 @@ class BatchRunner:
                 logger.warning("batch stopped on failed task task_id=%s", result["task_id"])
                 break
 
+        _log_action_group_summary(entries)
         report = write_report(
             root,
             entries,
@@ -167,9 +179,10 @@ class BatchRunner:
                 retry_record["delay_seconds"] = delay
                 retry_records.append(retry_record)
                 logger.warning(
-                    "batch task retry scheduled task_id=%s attempt=%s delay=%s error=%s",
+                    "batch task retry scheduled task_id=%s attempt=%s/%s delay=%s error=%s",
                     task.id,
                     attempt,
+                    max_attempts,
                     delay,
                     last_error,
                 )
@@ -199,7 +212,7 @@ class BatchRunner:
     ) -> dict[str, Any]:
         if result.status == "requires_agent":
             self.archive.write_agent_task(run_dir=root, task=task, value=result.agent_task)
-            logger.info("batch task requires_agent task_id=%s", task.id)
+            logger.info("batch task requires_agent task_id=%s source=%s", task.id, _source_log(task))
             return self._record(
                 run_dir=root,
                 task=task,
@@ -257,7 +270,13 @@ class BatchRunner:
             "image_count": len(archived_generation.png_info.get("images", [])),
             "has_png_info": bool(archived_generation.png_info),
         }
-        logger.info("batch task succeeded task_id=%s image_count=%s", task.id, len(entry["image_paths"]))
+        logger.info(
+            "batch task succeeded task_id=%s image_count=%s images=%s source=%s",
+            task.id,
+            len(entry["image_paths"]),
+            entry["image_paths"],
+            _source_log(task),
+        )
         return entry
 
     def _record(
@@ -295,6 +314,7 @@ class BatchRunner:
             "task_dir": task.output.task_dir,
             "image_paths": image_paths,
             "error": error,
+            "source": task.source,
         }
 
     def _record_skipped(self, *, run_dir: Path, task: BatchTask) -> dict[str, Any]:
@@ -313,6 +333,7 @@ class BatchRunner:
             "task_dir": task.output.task_dir,
             "image_paths": image_paths,
             "error": None,
+            "source": task.source,
         }
 
 
@@ -358,3 +379,47 @@ def _config_with_timeout(config: AppConfig, timeout_seconds: float | None) -> Ap
             "sd": config.sd.model_copy(update={"timeout": timeout}),
         },
     )
+
+
+def _source_log(task: BatchTask) -> dict[str, Any]:
+    source = task.source or {}
+    return {
+        "character": _basename(source.get("character")),
+        "action_group": source.get("action_group"),
+        "action": _basename(source.get("action")),
+        "artist": source.get("artist") or task.render.artist,
+    }
+
+
+def _basename(value: Any) -> Any:
+    if value is None:
+        return None
+    return Path(str(value)).name
+
+
+def _log_action_group_summary(entries: list[dict[str, Any]]) -> None:
+    grouped: dict[tuple[str, str], dict[str, int]] = {}
+    for entry in entries:
+        source = entry.get("source") or {}
+        group = source.get("action_group")
+        character = source.get("character")
+        if not group or not character:
+            continue
+        key = (_basename(character), str(group))
+        counts = grouped.setdefault(key, {"succeeded": 0, "failed": 0, "other": 0})
+        status = str(entry.get("status") or "unknown")
+        if status == "succeeded":
+            counts["succeeded"] += 1
+        elif status == "failed":
+            counts["failed"] += 1
+        else:
+            counts["other"] += 1
+    for (character, group), counts in grouped.items():
+        logger.info(
+            "action group completed character=%s group=%s succeeded=%s failed=%s other=%s",
+            character,
+            group,
+            counts["succeeded"],
+            counts["failed"],
+            counts["other"],
+        )

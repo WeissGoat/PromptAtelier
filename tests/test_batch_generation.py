@@ -310,6 +310,212 @@ class BatchGenerationTest(unittest.TestCase):
             self.assertEqual(manual_tasks[0].id, "m1")
             self.assertEqual(manual_tasks[0].prompt, "akemi_homura, standing")
 
+    def test_character_action_group_ordered_plans_character_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "c1", kind="character", node_id="c1", prompt="homura")
+            _write_node(root / "characters" / "c2", kind="character", node_id="c2", prompt="madoka")
+            _write_node(root / "groups" / "g1" / "a1", kind="action", node_id="a1", prompt="standing")
+            _write_node(root / "groups" / "g1" / "a2", kind="action", node_id="a2", prompt="sitting")
+            _write_node(root / "groups" / "g2" / "b1", kind="action", node_id="b1", prompt="running")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "character-action-group",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [
+                                    str(root / "characters" / "c1"),
+                                    str(root / "characters" / "c2"),
+                                ],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            },
+                            {
+                                "name": "g2",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g2"),
+                                "recursive": True,
+                            },
+                        ],
+                    },
+                    "expand": {
+                        "mode": "character_action_group",
+                        "action_group_strategy": "ordered",
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 3)
+            self.assertEqual([task.source["action_group"] for task in tasks], ["g1", "g1", "g2"])
+            self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2"])
+            self.assertEqual([Path(task.source["action"]).name for task in tasks], ["a1", "a2", "b1"])
+
+    def test_character_action_group_random_seed_is_reproducible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("c1", "c2", "c3"):
+                _write_node(root / "characters" / name, kind="character", node_id=name, prompt=name)
+            for group_name in ("g1", "g2"):
+                _write_node(
+                    root / "groups" / group_name / "a1",
+                    kind="action",
+                    node_id=f"{group_name}_a1",
+                    prompt="standing",
+                )
+            raw_spec = {
+                "name": "character-action-random",
+                "defaults": {"composer": "agent", "artist": "20260412"},
+                "select": {
+                    "characters": [
+                        {
+                            "selector": "folder",
+                            "root": str(root / "characters"),
+                            "recursive": True,
+                        }
+                    ],
+                    "action_groups": [
+                        {
+                            "name": "g1",
+                            "selector": "folder",
+                            "root": str(root / "groups" / "g1"),
+                            "recursive": True,
+                        },
+                        {
+                            "name": "g2",
+                            "selector": "folder",
+                            "root": str(root / "groups" / "g2"),
+                            "recursive": True,
+                        },
+                    ],
+                },
+                "expand": {
+                    "mode": "character_action_group",
+                    "action_group_strategy": "random",
+                    "seed": 1234,
+                },
+            }
+
+            first = BatchPlanner(base_dir=root).plan(BatchSpec.model_validate(raw_spec))
+            second = BatchPlanner(base_dir=root).plan(BatchSpec.model_validate(raw_spec))
+
+            self.assertEqual(
+                [task.source["action_group"] for task in first],
+                [task.source["action_group"] for task in second],
+            )
+
+    def test_character_action_group_balanced_random_updates_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record_path = root / "cache" / "action_group_record.json"
+            record_path.parent.mkdir(parents=True)
+            record_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "tags-machine-core.action-group-record/v1",
+                        "groups": {
+                            "g1": {"selected_count": 2},
+                            "g2": {"selected_count": 0},
+                            "g3": {"selected_count": 0},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            for name in ("c1", "c2"):
+                _write_node(root / "characters" / name, kind="character", node_id=name, prompt=name)
+            for group_name in ("g1", "g2", "g3"):
+                _write_node(
+                    root / "groups" / group_name / "a1",
+                    kind="action",
+                    node_id=f"{group_name}_a1",
+                    prompt="standing",
+                )
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "character-action-balanced",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "folder",
+                                "root": str(root / "characters"),
+                                "recursive": True,
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": group_name,
+                                "selector": "folder",
+                                "root": str(root / "groups" / group_name),
+                                "recursive": True,
+                            }
+                            for group_name in ("g1", "g2", "g3")
+                        ],
+                    },
+                    "expand": {
+                        "mode": "character_action_group",
+                        "action_group_strategy": "balanced_random",
+                        "action_group_record": str(record_path),
+                        "seed": 7,
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(sorted(task.source["action_group"] for task in tasks), ["g2", "g3"])
+            self.assertEqual(record["groups"]["g1"]["selected_count"], 2)
+            self.assertEqual(record["groups"]["g2"]["selected_count"], 1)
+            self.assertEqual(record["groups"]["g3"]["selected_count"], 1)
+
+    def test_character_action_group_rejects_select_actions(self):
+        spec = BatchSpec.model_validate(
+            {
+                "name": "bad-mixed-actions",
+                "defaults": {"composer": "agent", "artist": "20260412"},
+                "select": {
+                    "characters": [{"selector": "explicit", "refs": ["character"]}],
+                    "actions": [{"selector": "explicit", "refs": ["action"]}],
+                    "action_groups": [
+                        {"name": "group", "selector": "explicit", "refs": ["action"]}
+                    ],
+                },
+                "expand": {"mode": "character_action_group"},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "does not allow select.actions"):
+            BatchPlanner(base_dir=Path(".")).plan(spec)
+
+    def test_non_character_action_group_rejects_action_groups(self):
+        spec = BatchSpec.model_validate(
+            {
+                "name": "bad-action-groups",
+                "defaults": {"composer": "agent", "artist": "20260412"},
+                "select": {
+                    "action_groups": [
+                        {"name": "group", "selector": "explicit", "refs": ["action"]}
+                    ]
+                },
+                "expand": {"mode": "product"},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "only supported"):
+            BatchPlanner(base_dir=Path(".")).plan(spec)
+
     def test_cli_plan_batch_writes_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -647,6 +853,31 @@ expand:
             )
 
             self.assertIn("retry:", (root / "report.md").read_text(encoding="utf-8"))
+
+    def test_report_includes_action_group_source_detail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_report(
+                root,
+                [
+                    {
+                        "task_id": "group_task",
+                        "status": "succeeded",
+                        "image_paths": ["image.png"],
+                        "source": {
+                            "character": str(root / "characters" / "c1"),
+                            "action_group": "st_rp",
+                            "action": str(root / "actions" / "a1"),
+                            "artist": "20260412",
+                        },
+                    }
+                ],
+            )
+
+            report_md = (root / "report.md").read_text(encoding="utf-8")
+            report_json = json.loads((root / "report.json").read_text(encoding="utf-8"))
+            self.assertIn("action_group=st_rp", report_md)
+            self.assertEqual(report_json["entries"][0]["source"]["action_group"], "st_rp")
 
     def test_report_respects_prompt_png_and_visual_template_flags(self):
         with tempfile.TemporaryDirectory() as tmp:

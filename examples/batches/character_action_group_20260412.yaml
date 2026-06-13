@@ -1,0 +1,56 @@
+schema: tags-machine-core.batch/v1
+name: character-action-group-20260412
+config: configs/local.example.yaml
+output_root: outputs/batches
+
+defaults:
+  composer: script
+  artist: 20260412
+  nt: 1
+  resolution: random_standard
+  model: nai-diffusion-4-5-full
+
+select:
+  characters:
+    - selector: explicit
+      refs:
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+
+  action_groups:
+    - name: st_rp
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_body_mouth_rp
+      recursive: true
+      limit: 2
+
+    - name: st_sfw
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/sfw_pose
+      recursive: true
+      limit: 2
+
+    - name: st_foot
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
+      recursive: true
+      limit: 2
+
+expand:
+  mode: character_action_group
+  action_group_strategy: balanced_random
+  action_group_record: cache/batch/character_action_group_20260412_record.json
+  seed: 20260613
+
+run:
+  resume: true
+  stop_on_error: false
+  retry:
+    max_attempts: 3
+
+report:
+  markdown: true
+  json: true
+  include_prompt_preview: true
+  include_png_params_summary: true
+  visual_check_template: true

@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 ComposerMode = Literal["full", "agent", "script"]
-ExpandMode = Literal["product", "zip", "prompt_list", "manual"]
+ExpandMode = Literal["product", "zip", "prompt_list", "manual", "character_action_group"]
+ActionGroupStrategyName = Literal["random", "ordered", "balanced_random"]
 BatchStatus = Literal[
     "pending",
     "ready",
@@ -127,6 +128,7 @@ class BatchSelect(BaseModel):
     artists: list[SelectorSpec] = Field(default_factory=list)
     characters: list[SelectorSpec] = Field(default_factory=list)
     actions: list[SelectorSpec] = Field(default_factory=list)
+    action_groups: list[SelectorSpec] = Field(default_factory=list)
     backgrounds: list[SelectorSpec] = Field(default_factory=list)
     prompts: list[SelectorSpec] = Field(default_factory=list)
 
@@ -135,6 +137,9 @@ class ExpandConfig(BaseModel):
     mode: ExpandMode = "product"
     max_tasks: int | None = None
     shuffle: bool = False
+    action_group_strategy: ActionGroupStrategyName = "balanced_random"
+    action_group_record: str | None = None
+    seed: int | None = None
 
 
 class NodeRef(BaseModel):
