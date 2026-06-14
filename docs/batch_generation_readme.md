@@ -423,6 +423,8 @@ select:
 }
 ```
 
+注意：`plan-batch` 也会执行动作组选择，因此配置了 `action_group_record` 时会更新 record。想复现一次全新的随机均衡选择时，先删除对应 record 文件。
+
 `manual` 示例：
 
 ```yaml

@@ -245,6 +245,9 @@ BatchSpec.select.characters
 命令：
 
 ```powershell
+if (Test-Path 'cache\batch\character_action_group_20260412_record.json') {
+  Remove-Item -LiteralPath 'cache\batch\character_action_group_20260412_record.json' -Force
+}
 uv run python -m tags_machine_core plan-batch examples\batches\character_action_group_20260412.yaml --log-level info --full
 ```
 
@@ -270,6 +273,9 @@ action group selected character=danbooru_kaname_madoka_鹿目まどか_魔法少
 命令：
 
 ```powershell
+if (Test-Path 'cache\batch\character_action_group_20260412_record.json') {
+  Remove-Item -LiteralPath 'cache\batch\character_action_group_20260412_record.json' -Force
+}
 $tokenText = Get-Content -Path 'F:\my_project\new\tags_machine\novelai\client.py' -Raw
 $env:NAI_ACCESS_TOKEN = [regex]::Match($tokenText, 'return\s+"([^"]+)"').Groups[1].Value
 uv run python -m tags_machine_core run-batch examples\batches\character_action_group_20260412.yaml --limit 1 --log-level info --full
