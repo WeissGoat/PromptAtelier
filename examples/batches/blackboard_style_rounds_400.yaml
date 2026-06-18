@@ -1,0 +1,58 @@
+schema: tags-machine-core.batch/v1
+name: blackboard-style-rounds-400
+config: configs/local.example.yaml
+output_root: outputs/batches
+
+defaults:
+  composer: agent
+  artist: 20260412
+  nt: 1
+  resolution: random_standard
+  model: nai-diffusion-4-5-full
+
+select:
+  characters:
+    - selector: explicit
+      refs:
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_miki_sayaka_美樹さやか_魔法少女
+
+  action_groups:
+    - name: st_rp
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_rp
+      recursive: true
+
+    - name: st_sfw
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_sfw
+      recursive: true
+
+    - name: st_body_show
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_body_show
+      recursive: true
+
+    - name: st_body_breast
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_body_breast
+      recursive: true
+
+expand:
+  mode: blackboard_rounds
+  action_group_strategy: ordered
+  max_tasks: 400
+
+run:
+  resume: true
+  stop_on_error: false
+  retry:
+    max_attempts: 3
+
+report:
+  markdown: true
+  json: true
+  include_prompt_preview: true
+  include_png_params_summary: true
+  visual_check_template: true

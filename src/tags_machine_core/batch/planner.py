@@ -62,6 +62,8 @@ class BatchPlanner:
             tasks = self._plan_zip(spec, selections, run_dir=resolved_run_dir)
         elif spec.expand.mode == "character_action_group":
             tasks = self._plan_character_action_group(spec, selections, run_dir=resolved_run_dir)
+        elif spec.expand.mode == "blackboard_rounds":
+            tasks = self._plan_blackboard_rounds(spec, selections, run_dir=resolved_run_dir)
         elif spec.expand.mode == "manual":
             tasks = self._plan_manual(spec, run_dir=resolved_run_dir)
         else:
@@ -69,7 +71,7 @@ class BatchPlanner:
 
         if spec.expand.shuffle:
             random.shuffle(tasks)
-        if spec.expand.max_tasks is not None:
+        if spec.expand.max_tasks is not None and spec.expand.mode != "blackboard_rounds":
             tasks = tasks[: spec.expand.max_tasks]
         return [
             task.model_copy(
@@ -102,16 +104,18 @@ class BatchPlanner:
         )
 
     def _validate_expand_select_contract(self, spec: BatchSpec) -> None:
-        if spec.expand.mode == "character_action_group":
+        if spec.expand.mode in {"character_action_group", "blackboard_rounds"}:
             if not spec.select.characters:
-                raise ValueError("character_action_group expand mode requires select.characters")
+                raise ValueError(f"{spec.expand.mode} expand mode requires select.characters")
             if not spec.select.action_groups:
-                raise ValueError("character_action_group expand mode requires select.action_groups")
+                raise ValueError(f"{spec.expand.mode} expand mode requires select.action_groups")
             if spec.select.actions:
                 raise ValueError(
-                    "character_action_group expand mode uses select.action_groups and "
+                    f"{spec.expand.mode} expand mode uses select.action_groups and "
                     "does not allow select.actions"
                 )
+            if spec.expand.mode == "blackboard_rounds" and not spec.expand.max_tasks:
+                raise ValueError("blackboard_rounds expand mode requires expand.max_tasks")
             return
         if spec.select.action_groups:
             raise ValueError(
@@ -330,6 +334,97 @@ class BatchPlanner:
                             run_dir=run_dir,
                         )
                     )
+        return tasks
+
+    def _plan_blackboard_rounds(
+        self,
+        spec: BatchSpec,
+        selections: SelectionSet,
+        *,
+        run_dir: Path,
+    ) -> list[BatchTask]:
+        artists = selections.artists or ([spec.defaults.artist] if spec.defaults.artist else [None])
+        backgrounds = selections.backgrounds or [None]
+        context = SelectorContext(base_dir=self.base_dir, collections=spec.collections)
+        groups = resolve_action_groups(spec.select.action_groups, context=context)
+        group_indices = {group.name: index for index, group in enumerate(groups)}
+        record_path = resolve_record_path(spec.expand.action_group_record, base_dir=self.base_dir)
+        record = ActionGroupRecord.load(record_path)
+        rng = random.Random(spec.expand.seed)
+        task_target = spec.expand.max_tasks or 0
+        tasks: list[BatchTask] = []
+
+        logger.info(
+            "batch plan blackboard_rounds groups=%s characters=%s strategy=%s max_tasks=%s",
+            len(groups),
+            len(selections.characters),
+            spec.expand.action_group_strategy,
+            task_target,
+        )
+        round_index = 0
+        while len(tasks) < task_target:
+            character = selections.characters[round_index % len(selections.characters)]
+            group, selected_count = choose_action_group(
+                groups,
+                strategy=spec.expand.action_group_strategy,
+                character_index=round_index,
+                rng=rng,
+                record=record,
+            )
+            if spec.expand.action_group_strategy == "balanced_random":
+                record.save(record_path)
+            logger.info(
+                "blackboard round selected round=%s character=%s group=%s action_count=%s selected_count=%s",
+                round_index,
+                Path(character).name,
+                group.name,
+                len(group.actions),
+                selected_count,
+            )
+            for action_index, action in enumerate(group.actions):
+                for artist, background in itertools.product(artists, backgrounds):
+                    nodes = _node_refs(
+                        character=character,
+                        action=action,
+                        artist=artist,
+                        background=background,
+                    )
+                    task_id = _task_id(
+                        round_index,
+                        action_index,
+                        character,
+                        group.name,
+                        action,
+                        artist,
+                        background,
+                        spec.defaults.composer,
+                    )
+                    tasks.append(
+                        self._task(
+                            spec,
+                            task_id=task_id,
+                            index=len(tasks),
+                            composer=spec.defaults.composer,
+                            nodes=nodes,
+                            artist=artist,
+                            source={
+                                "character": character,
+                                "action": action,
+                                "artist": artist,
+                                "background": background,
+                                "round_index": round_index,
+                                "action_group": group.name,
+                                "action_group_strategy": spec.expand.action_group_strategy,
+                                "action_group_record": str(record_path) if record_path else None,
+                                "action_group_index": group_indices[group.name],
+                                "action_index_in_group": action_index,
+                                "action_count_in_group": len(group.actions),
+                                "action_group_selected_count": selected_count,
+                            },
+                            run_dir=run_dir,
+                        )
+                    )
+            round_index += 1
         return tasks
 
     def _plan_manual(self, spec: BatchSpec, *, run_dir: Path) -> list[BatchTask]:

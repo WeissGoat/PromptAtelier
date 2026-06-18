@@ -20,10 +20,11 @@ Batch YAML
 
 当前正式接入目标是 NovelAI。ComfyUI / SD 暂不作为本阶段主线。
 
-日常推荐两种用法：
+日常推荐三种用法：
 
 - 已经有完整 prompt：用 `composer: full`，批量只负责叠加 artist 和 NovelAI 参数。
 - 需要 agent 拼 prompt：用 `composer: agent`，没有缓存时先生成 `requires_agent` 任务，填回 agent 结果后再 `resume-batch`。
+- 想复刻旧 `blackboard.py` 的“角色 + 动作分类文件夹”自动跑法：用 `expand.mode: blackboard_rounds`。
 
 ## 2. 快速开始
 
@@ -231,9 +232,10 @@ artist 的 `refs` 通常是旧 `design/画风/<artist>/` 的目录名；characte
 `select.actions` 和 `select.action_groups` 的区别：
 
 - `select.actions` 是动作节点池，用于 `product` / `zip` 这类组合展开。
-- `select.action_groups` 是动作分类池，用于 `character_action_group`，每个角色先选一个动作组，再跑完组内动作。
-- `character_action_group` 模式不能同时配置 `select.actions`。
-- 非 `character_action_group` 模式不能配置 `select.action_groups`。
+- `select.action_groups` 是动作分类池，用于 `character_action_group` / `blackboard_rounds`，每个动作组通常对应旧 `design/动作改2/<分类名>` 文件夹。
+- `character_action_group` 和 `blackboard_rounds` 模式不能同时配置 `select.actions`。
+- 非 `character_action_group` / `blackboard_rounds` 模式不能配置 `select.action_groups`。
+- `folder` / `glob` selector 使用 natural sort，`1_xxx` 会排在 `10_xxx` 前面。
 
 #### `folder`
 
@@ -305,12 +307,12 @@ select:
 
     - name: st_sfw
       selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/sfw_pose
+      root: F:/my_project/new/tags_machine/design/动作改2/st_sfw
       recursive: true
       limit: 20
 ```
 
-它的目标展开方式是：
+在 `character_action_group` 里的目标展开方式是：
 
 ```python
 for character in characters:
@@ -318,6 +320,18 @@ for character in characters:
     for action in action_group.actions:
         run(character + action)
 ```
+
+在 `blackboard_rounds` 里的目标展开方式是：
+
+```python
+while total_tasks < max_tasks:
+    character = next_character()
+    action_group = strategy.choose(action_groups)
+    for action in action_group.actions:
+        run(character + action)
+```
+
+`blackboard_rounds` 不会把已选中的 action group 截断；如果最后一组跑完后超过 `max_tasks`，会保留整组任务。
 
 `name` 会进入每个任务的 `source.action_group`，报告和日志会显示这个字段。
 
@@ -385,10 +399,10 @@ select:
 
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
-| `mode` | `product` | 展开模式：`product`、`zip`、`prompt_list`、`manual`、`character_action_group`。 |
-| `max_tasks` | `null` | 最多保留多少个任务。 |
+| `mode` | `product` | 展开模式：`product`、`zip`、`prompt_list`、`manual`、`character_action_group`、`blackboard_rounds`。 |
+| `max_tasks` | `null` | 任务数量上限或目标数量。普通模式是硬截断；`blackboard_rounds` 是目标数量，会跑完整个 selected group。 |
 | `shuffle` | `false` | 展开后是否打乱任务顺序。 |
-| `action_group_strategy` | `balanced_random` | `character_action_group` 使用：`random`、`ordered`、`balanced_random`。 |
+| `action_group_strategy` | `balanced_random` | `character_action_group` / `blackboard_rounds` 使用：`random`、`ordered`、`balanced_random`。 |
 | `action_group_record` | `null` | `balanced_random` 使用的历史记录文件。 |
 | `seed` | `null` | 固定动作组随机策略的随机种子。 |
 
@@ -401,13 +415,14 @@ select:
 | `zip` | 按索引配对；长度不一致时短列表会循环取值。 |
 | `manual` | 不看 selector，直接使用顶层 `tasks`。 |
 | `character_action_group` | 每个 character 选择一个 action group，再跑完该组内全部 action。 |
+| `blackboard_rounds` | 按 `max_tasks` 作为目标循环选择 `(character, action_group)`，每次选中后跑完整个 action group，再进入下一轮。 |
 
-`character_action_group` 策略：
+`action_group_strategy` 策略：
 
 | `action_group_strategy` | 行为 |
 | --- | --- |
-| `random` | 每个角色随机选一组，允许重复。 |
-| `ordered` | 按角色顺序轮流选组，动作组不够时循环。 |
+| `random` | 每轮随机选一组，允许重复。 |
+| `ordered` | 按轮次顺序轮流选组，动作组不够时循环。 |
 | `balanced_random` | 优先从 `action_group_record` 里历史 `selected_count` 最少的组中随机选，尽量避免重复。 |
 
 `balanced_random` 的记录文件示例：
@@ -423,7 +438,7 @@ select:
 }
 ```
 
-注意：`plan-batch` 也会执行动作组选择，因此配置了 `action_group_record` 时会更新 record。想复现一次全新的随机均衡选择时，先删除对应 record 文件。
+注意：`plan-batch` 也会执行动作组选择，因此配置了 `action_group_record` 时会更新 record。想复现一次全新的随机均衡选择时，先删除对应 record 文件。`blackboard_rounds` 的 `max_tasks` 不是硬截断，目标 400 可能实际展开 402，因为最后一个 selected group 会完整保留。
 
 `manual` 示例：
 
@@ -578,9 +593,9 @@ uv run python -m tags_machine_core run-batch examples\batches\action_folder_scri
 
 这类用法对应旧 tags_machine “指定动作分类文件夹批量跑”的习惯。
 
-### 5.4 每个角色随机选择一个动作分类
+### 5.4 每个角色选择一个动作分类
 
-适合类似 blackboard 的循环：
+适合一次性给每个角色选择一个动作分类：
 
 ```python
 for character in characters:
@@ -613,7 +628,7 @@ select:
 
     - name: st_sfw
       selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/sfw_pose
+      root: F:/my_project/new/tags_machine/design/动作改2/st_sfw
       recursive: true
 
     - name: st_foot
@@ -637,7 +652,79 @@ uv run python -m tags_machine_core run-batch examples\batches\character_action_g
 
 `plan-batch` 输出的 `selector_summary.action_groups` 会显示每个动作组展开出的任务数。`report.md` 的任务详情会包含 `source: character=..., action_group=..., action=...`。
 
-### 5.5 AgentComposer 缓存流程
+### 5.5 Blackboard 风格固定目标批量
+
+这是目前最接近旧 `blackboard.py` 的“几个人物 + 几个动作分类 + 跑到目标数量附近”的方式。配置示例见：
+
+```text
+examples/batches/blackboard_style_rounds_400.yaml
+```
+
+核心 YAML：
+
+```yaml
+defaults:
+  composer: agent
+  artist: 20260412
+  nt: 1
+  resolution: random_standard
+  model: nai-diffusion-4-5-full
+
+select:
+  characters:
+    - selector: explicit
+      refs:
+        - F:/my_project/new/tags_machine/design/角色/.../character_a
+        - F:/my_project/new/tags_machine/design/角色/.../character_b
+        - F:/my_project/new/tags_machine/design/角色/.../character_c
+
+  action_groups:
+    - name: st_rp
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_rp
+      recursive: true
+
+    - name: st_sfw
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_sfw
+      recursive: true
+
+    - name: st_body_show
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_body_show
+      recursive: true
+
+    - name: st_body_breast
+      selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_body_breast
+      recursive: true
+
+expand:
+  mode: blackboard_rounds
+  action_group_strategy: ordered
+  max_tasks: 400
+```
+
+展开语义：
+
+```python
+while total_tasks < max_tasks:
+    character = next_character()
+    selected_group = choose(action_groups)
+    for action in selected_group.actions:
+        run(character + action + artist)
+```
+
+命令：
+
+```powershell
+uv run python -m tags_machine_core plan-batch examples\batches\blackboard_style_rounds_400.yaml --full
+uv run python -m tags_machine_core run-batch examples\batches\blackboard_style_rounds_400.yaml --limit 1 --log-level info --full
+```
+
+当前示例目标是 400，实际规划会展开 402 条，因为最后一个 selected group 会完整跑完。完整展开表见 `docs/batch_blackboard_style_rounds_400_plan.md`。
+
+### 5.6 AgentComposer 缓存流程
 
 第一次跑没有缓存时，任务会进入 `requires_agent`，并在批次目录生成 agent 任务：
 
@@ -663,7 +750,7 @@ uv run python -m tags_machine_core resume-batch outputs\batches\agent-cache-miss
 - `agent_results` 或 cache 的落盘方式以后可以接 UI/worker；当前核心逻辑是“没有缓存就退出并提示 requires_agent，有缓存就继续生成”。
 - AgentComposer 不经过 PromptPolicyPipeline，避免规则系统影响 agent 已经拼好的 prompt。
 
-### 5.6 JSON API 入口
+### 5.7 JSON API 入口
 
 适合前端或 worker 调用：
 
@@ -796,7 +883,7 @@ outputs/batches/<batch-name>/
 | `output.task_dir` | 本任务输出目录。 |
 | `source` | selector 或 prompt item 带来的来源信息。 |
 
-`character_action_group` 模式下，`source` 会包含：
+`character_action_group` / `blackboard_rounds` 模式下，`source` 会包含：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -805,6 +892,7 @@ outputs/batches/<batch-name>/
 | `action_group` | 当前动作来自哪个动作分类。 |
 | `action_group_strategy` | 动作组选择策略。 |
 | `action_group_record` | 使用的 record 文件路径，可能为空。 |
+| `round_index` | `blackboard_rounds` 的轮次索引；`character_action_group` 中不存在。 |
 | `action_index_in_group` | 当前动作在组内的索引。 |
 | `action_count_in_group` | 当前动作组总动作数。 |
 | `action_group_selected_count` | `balanced_random` 选择后该组累计选中次数。 |
@@ -928,7 +1016,7 @@ CLI 结果和 `report.md` 也会打印图片路径；业务验收时优先打开
 uv run python -m tags_machine_core run-batch examples\batches\character_action_group_20260412.yaml --limit 1 --log-level info --full
 ```
 
-`character_action_group` 模式会输出：
+`character_action_group` / `blackboard_rounds` 模式会输出：
 
 - 解析出的动作组数量、角色数量、策略。
 - 每个角色选中的动作组、动作数量、`selected_count`。

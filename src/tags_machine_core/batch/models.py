@@ -7,7 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 ComposerMode = Literal["full", "agent", "script"]
-ExpandMode = Literal["product", "zip", "prompt_list", "manual", "character_action_group"]
+ExpandMode = Literal[
+    "product",
+    "zip",
+    "prompt_list",
+    "manual",
+    "character_action_group",
+    "blackboard_rounds",
+]
 ActionGroupStrategyName = Literal["random", "ordered", "balanced_random"]
 BatchStatus = Literal[
     "pending",

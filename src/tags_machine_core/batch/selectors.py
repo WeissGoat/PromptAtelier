@@ -4,6 +4,7 @@ import csv
 import glob
 import json
 import random
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -86,7 +87,7 @@ def _discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
         candidates.extend(path for path in root.iterdir() if path.is_dir())
 
     result: list[str] = []
-    for candidate in sorted(candidates):
+    for candidate in sorted(candidates, key=_natural_sort_key):
         if _excluded(candidate, spec):
             continue
         if not _included(candidate, spec):
@@ -103,7 +104,7 @@ def _discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
 
 def _glob_nodes(pattern: str, base_dir: Path, spec: SelectorSpec) -> list[str]:
     resolved_pattern = pattern if Path(pattern).is_absolute() else str(base_dir / pattern)
-    matches = sorted(glob.glob(resolved_pattern, recursive=True))
+    matches = sorted(glob.glob(resolved_pattern, recursive=True), key=_natural_sort_key)
     result: list[str] = []
     for value in matches:
         path = Path(value)
@@ -172,3 +173,8 @@ def _included(path: Path, spec: SelectorSpec) -> bool:
 
 def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
+
+
+def _natural_sort_key(value: str | Path) -> list[int | str]:
+    text = str(value)
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", text)]

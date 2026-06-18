@@ -361,6 +361,73 @@ class BatchGenerationTest(unittest.TestCase):
             self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2"])
             self.assertEqual([Path(task.source["action"]).name for task in tasks], ["a1", "a2", "b1"])
 
+    def test_folder_selector_uses_natural_sort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "actions" / "10_late", kind="action", node_id="a10", prompt="late")
+            _write_node(root / "actions" / "2_middle", kind="action", node_id="a2", prompt="middle")
+            _write_node(root / "actions" / "1_first", kind="action", node_id="a1", prompt="first")
+            values = expand_selector(
+                role="action",
+                spec=SelectorSpec(selector="folder", root=str(root / "actions"), recursive=True),
+                context=SelectorContext(base_dir=root, collections={}),
+            )
+
+            self.assertEqual([Path(value).name for value in values], ["1_first", "2_middle", "10_late"])
+
+    def test_blackboard_rounds_runs_selected_group_actions_before_next_character(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "c1", kind="character", node_id="c1", prompt="homura")
+            _write_node(root / "characters" / "c2", kind="character", node_id="c2", prompt="madoka")
+            _write_node(root / "groups" / "g1" / "1_a", kind="action", node_id="a1", prompt="a1")
+            _write_node(root / "groups" / "g1" / "2_a", kind="action", node_id="a2", prompt="a2")
+            _write_node(root / "groups" / "g2" / "1_b", kind="action", node_id="b1", prompt="b1")
+            _write_node(root / "groups" / "g2" / "2_b", kind="action", node_id="b2", prompt="b2")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "blackboard-rounds",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [
+                                    str(root / "characters" / "c1"),
+                                    str(root / "characters" / "c2"),
+                                ],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            },
+                            {
+                                "name": "g2",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g2"),
+                                "recursive": True,
+                            },
+                        ],
+                    },
+                    "expand": {
+                        "mode": "blackboard_rounds",
+                        "action_group_strategy": "ordered",
+                        "max_tasks": 3,
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 4)
+            self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2", "c2"])
+            self.assertEqual([task.source["action_group"] for task in tasks], ["g1", "g1", "g2", "g2"])
+            self.assertEqual([Path(task.source["action"]).name for task in tasks], ["1_a", "2_a", "1_b", "2_b"])
+
     def test_character_action_group_random_seed_is_reproducible(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
