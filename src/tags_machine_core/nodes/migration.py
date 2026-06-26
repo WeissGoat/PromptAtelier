@@ -18,6 +18,14 @@ LEGACY_PROMPT_DIRECTIVE_KEYS = {
     "type",
 }
 
+LEGACY_INLINE_EXTENSION_MARKERS = (
+    "after_uc",
+    "origin_uc",
+    "origin_clear",
+    "gen_json",
+    "gen_param",
+)
+
 MIGRATION_OUTPUT_DIRS = {
     "artist": "artists",
     "character": "characters",
@@ -306,6 +314,9 @@ def migrate_legacy_character_tags(
     tags_path = _resolve_tags_path(source)
     character_dir = tags_path.parent
     prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
+    raw_prompt_lines = list(prompt_lines)
+    type_lines = [line for line in raw_prompt_lines if line[:4] == "type"]
+    prompt_lines, _type_flags = _extract_legacy_type_flags(prompt_lines)
     prompt_tags_by_line = [_split_top_level_commas(line) for line in prompt_lines]
     identity_tags = prompt_tags_by_line[0] if prompt_tags_by_line else []
     tags: dict[str, list[str]] = {}
@@ -331,10 +342,11 @@ def migrate_legacy_character_tags(
         "negative_prompt": _collect_legacy_negative_prompt(ext_lines),
         "legacy": {
             "source_file": str(tags_path),
-            "raw_lines": prompt_lines + (["="] if ext_lines else []) + ext_lines,
+            "raw_lines": raw_prompt_lines + (["="] if ext_lines else []) + ext_lines,
             "raw_sections": {
                 "prompt": prompt_lines,
                 "extension": ext_lines,
+                **({"type": type_lines} if type_lines else {}),
             },
         },
         "agent": {
@@ -780,13 +792,21 @@ def _split_legacy_tags_lines(path: Path) -> tuple[list[str], list[str]]:
     ext_lines: list[str] = []
     in_ext = False
     for line in lines:
-        if line == "=":
-            in_ext = True
-            continue
         if in_ext:
             ext_lines.append(line)
-        else:
-            prompt_lines.append(line)
+            continue
+        stripped = line.strip()
+        if stripped.startswith("="):
+            in_ext = True
+            inline_ext = stripped[1:].strip(" ,")
+            if inline_ext:
+                ext_lines.append(inline_ext)
+            continue
+        if any(marker in line for marker in LEGACY_INLINE_EXTENSION_MARKERS):
+            in_ext = True
+            ext_lines.append(line)
+            continue
+        prompt_lines.append(line)
     return prompt_lines, ext_lines
 
 
