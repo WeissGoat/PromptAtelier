@@ -161,6 +161,46 @@ def character_positive(
     return texts, include_sections, suppressed_sections
 
 
+def character_positive_with_selected_keys(
+    node: NodeDocument | None,
+    character_scope: str | None,
+    selected_keys: list[str] | None,
+) -> tuple[list[str], list[str], list[str]]:
+    if node is None:
+        return [], [], []
+    normalized_keys = [str(key).strip() for key in selected_keys or [] if str(key).strip()]
+    if not normalized_keys:
+        return character_positive(node, character_scope)
+    if node.prompt.positive:
+        return _character_prompt_fragments_by_selected_keys(node, normalized_keys)
+    sections = list(node.tags.keys())
+    include_set = set(normalized_keys)
+    included_sections = [section for section in sections if section in include_set]
+    suppressed_sections = [section for section in sections if section not in include_set]
+    texts: list[str] = []
+    for section in included_sections:
+        texts.extend(node.tags.get(section, []))
+    return texts, included_sections, suppressed_sections
+
+
+def _character_prompt_fragments_by_selected_keys(
+    node: NodeDocument,
+    selected_keys: list[str],
+) -> tuple[list[str], list[str], list[str]]:
+    include_set = set(selected_keys)
+    texts: list[str] = []
+    included_roles: list[str] = []
+    suppressed_roles: list[str] = []
+    for fragment in node.prompt.positive:
+        role = fragment.role or "prompt"
+        if role in include_set:
+            texts.append(fragment.text)
+            included_roles.append(role)
+        else:
+            suppressed_roles.append(role)
+    return texts, dedupe(included_roles), dedupe(suppressed_roles)
+
+
 def node_positive(
     node: NodeDocument | None,
     character_scope: str | None,

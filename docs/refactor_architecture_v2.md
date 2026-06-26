@@ -380,7 +380,35 @@ PromptPolicyPipeline applying
 
 这就是当前架构里确认“AgentComposer 没经过 PromptPolicyPipeline”的运行时证据。
 
-## 13. 功能验收门禁
+## 13. ScriptComposer selected_keys 角色字段选择
+
+ScriptComposer 支持 action 侧的 `selected_keys` 角色字段选择规则。
+
+数据流：
+
+```text
+action_profile.yaml
+或 run-prompt-prompt.md YAML front matter
+-> NodeReader
+-> action NodeDocument.composition.character_selection
+-> ScriptComposer
+-> PromptBundle.meta.extra.character_selection
+-> PromptBundle.meta.extra.character_materials
+```
+
+ScriptComposer 的 character section 选择优先级：
+
+```text
+characters[index].selected_keys
+> default_selected_keys
+> character_scope policy
+> default all character tags
+```
+
+`character_scope` 现在是兼容 fallback，不再作为新规则扩展入口。
+AgentComposer 不经过该规则，避免影响当前稳定的 agent prompt cache 和外部 agent 拼接链路。
+
+## 14. 功能验收门禁
 
 后续新增或修改真实生图功能时，验收优先级如下：
 
@@ -454,7 +482,7 @@ uv run python -m tags_machine_core verify-prompt-policy-acceptance \
 - 指定的 `--reject-token` 没有出现在 core PNG prompt 中。
 - `--visual-result pass`，人工视觉检查通过。
 
-## 14. 文档入口
+## 15. 文档入口
 
 当前建议优先阅读：
 

@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from .action_profile import load_action_profile
 from .models import LegacyNodeMeta, NodeDocument
 
 
@@ -41,7 +42,8 @@ class NodeReader:
         data = self._normalize_yaml_data(data)
         data.setdefault("id", node_dir.name)
         data.setdefault("path", node_dir)
-        return NodeDocument.model_validate(data)
+        node = NodeDocument.model_validate(data)
+        return self._attach_action_profile(node, node_dir)
 
     def _normalize_yaml_data(self, data: dict[str, Any]) -> dict[str, Any]:
         tags = data.get("tags") or {}
@@ -63,7 +65,7 @@ class NodeReader:
             for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        return NodeDocument(
+        node = NodeDocument(
             kind="unknown",
             id=node_dir.name,
             name=node_dir.name,
@@ -72,6 +74,15 @@ class NodeReader:
             prompt={"positive": lines},
             legacy=LegacyNodeMeta(source_file=str(path), raw_lines=lines),
         )
+        return self._attach_action_profile(node, node_dir)
+
+    def _attach_action_profile(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
+        profile = load_action_profile(node_dir)
+        if profile is None:
+            return node
+        composition = dict(node.composition)
+        composition.update(profile.to_node_composition())
+        return node.model_copy(update={"composition": composition})
 
     def _as_string_list(self, value: Any) -> list[str]:
         if value is None:

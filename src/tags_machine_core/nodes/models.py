@@ -94,6 +94,7 @@ class NodeDocument(BaseModel):
     prompt: NodePrompt = Field(default_factory=NodePrompt)
     generation: dict[str, Any] = Field(default_factory=dict)
     renderers: dict[str, Any] = Field(default_factory=dict)
+    composition: dict[str, Any] = Field(default_factory=dict)
     agent: dict[str, Any] = Field(default_factory=dict)
     legacy: LegacyNodeMeta = Field(default_factory=LegacyNodeMeta)
 
