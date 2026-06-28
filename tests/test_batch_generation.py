@@ -140,6 +140,33 @@ class BatchGenerationTest(unittest.TestCase):
         self.assertEqual(tasks[0].render.width, 1024)
         self.assertEqual(tasks[0].render.height, 1024)
 
+    def test_planner_writes_task_output_dir_under_outputs(self):
+        spec = BatchSpec.model_validate(
+            {
+                "schema": "tags-machine-core.batch/v1",
+                "name": "prompt-output",
+                "defaults": {"artist": 20260412, "resolution": "square"},
+                "select": {
+                    "prompts": [
+                        {
+                            "selector": "prompt_list",
+                            "items": [
+                                {"id": "p1", "prompt": "akemi_homura, standing"},
+                            ],
+                        }
+                    ]
+                },
+                "expand": {"mode": "prompt_list"},
+            }
+        )
+
+        tasks = BatchPlanner(base_dir=Path(".")).plan(spec, run_dir=Path("run"), run_id="testrun")
+
+        self.assertEqual(len(tasks), 1)
+        self.assertIn("outputs", tasks[0].render.output_dir.replace("\\", "/"))
+        self.assertTrue(tasks[0].render.output_dir.replace("\\", "/").endswith(tasks[0].id))
+        self.assertTrue(tasks[0].output.output_dir.replace("\\", "/").endswith(tasks[0].id))
+
     def test_collection_action_selector_expands_folders(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -587,12 +614,12 @@ class BatchGenerationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec_path = root / "batch.yaml"
-            output_root = (root / "outputs").as_posix()
+            output_dir = (root / "custom_outputs").as_posix()
             spec_path.write_text(
                 f"""
 schema: tags-machine-core.batch/v1
 name: cli-plan
-output_root: {output_root}
+output_dir: {output_dir}
 defaults:
   artist: 20260412
 select:
@@ -614,9 +641,40 @@ expand:
             data = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["task_count"], 1)
-            self.assertEqual(data["run_id"], "cli-plan")
+            self.assertEqual(len(data["run_id"]), 8)
             self.assertEqual(data["selector_summary"]["prompts"], 1)
             self.assertTrue(Path(data["manifest_path"]).exists())
+            self.assertEqual(Path(data["run_dir"]), root / "cli-plan")
+            self.assertEqual(Path(data["output_dir"]), root / "custom_outputs")
+            source = json.loads((Path(data["run_dir"]) / "batch_source.json").read_text(encoding="utf-8"))
+            self.assertEqual(source["run_id"], data["run_id"])
+            self.assertEqual(Path(source["output_dir"]).resolve(), (root / "custom_outputs").resolve())
+
+    def test_planner_accepts_separate_work_and_output_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "split-dirs",
+                    "output_dir": str(root / "images"),
+                    "defaults": {"artist": "20260412", "resolution": "square"},
+                    "select": {
+                        "prompts": [
+                            {
+                                "selector": "prompt_list",
+                                "items": [{"id": "p1", "prompt": "akemi_homura"}],
+                            }
+                        ]
+                    },
+                    "expand": {"mode": "prompt_list"},
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec, run_dir=root / "work")
+
+            self.assertEqual(Path(tasks[0].output.task_dir).parent.parent, root / "work")
+            self.assertEqual(Path(tasks[0].output.output_dir).parent.resolve(), (root / "images").resolve())
+            self.assertEqual(tasks[0].render.output_dir, tasks[0].output.output_dir)
 
     def test_api_plan_batch_accepts_inline_spec(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -661,6 +719,37 @@ expand:
             self.assertEqual(data["selector_summary"]["artists"], {"20260412": 1})
             self.assertTrue(Path(data["manifest_path"]).exists())
 
+    def test_runner_fresh_clears_existing_run_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            stale = run_dir / "stale.txt"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("old", encoding="utf-8")
+            task = BatchTask(
+                id="fresh_task",
+                index=0,
+                composer="full",
+                prompt="akemi_homura",
+                render=RenderOptions(artist="20260412"),
+                output={
+                    "task_dir": str(run_dir / "tasks" / "fresh_task"),
+                    "output_dir": str(run_dir / "outputs" / "fresh_task"),
+                },
+            )
+
+            result = BatchRunner(executor=SuccessfulExecutor()).run_tasks(
+                run_dir=run_dir,
+                tasks=[task],
+                config=_config(root),
+                run_config=RunConfig(fresh=True),
+            )
+
+            self.assertEqual(result["counts"], {"succeeded": 1})
+            self.assertFalse(stale.exists())
+            self.assertTrue((run_dir / "tasks" / "fresh_task" / "task.json").exists())
+            self.assertTrue((run_dir / "outputs" / "fresh_task").exists())
+
     def test_runner_records_requires_agent_without_generation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -670,7 +759,10 @@ expand:
                 composer="agent",
                 nodes=[],
                 render=RenderOptions(artist="20260412"),
-                output={"task_dir": str(root / "run" / "tasks" / "agent_task")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "agent_task"),
+                    "output_dir": str(root / "run" / "outputs" / "agent_task"),
+                },
             )
             runner = BatchRunner(executor=FakeExecutor())
 
@@ -694,7 +786,10 @@ expand:
                 composer="agent",
                 nodes=[],
                 render=RenderOptions(artist="20260412", nt=3),
-                output={"task_dir": str(root / "run" / "tasks" / "budget_task")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "budget_task"),
+                    "output_dir": str(root / "run" / "outputs" / "budget_task"),
+                },
             )
             executor = FakeExecutor()
 
@@ -716,7 +811,10 @@ expand:
                 composer="agent",
                 nodes=[],
                 render=RenderOptions(artist="20260412", width=1024, height=1024),
-                output={"task_dir": str(root / "run" / "tasks" / "resume_task")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "resume_task"),
+                    "output_dir": str(root / "run" / "outputs" / "resume_task"),
+                },
             )
             archived = planned.model_copy(
                 deep=True,
@@ -744,7 +842,10 @@ expand:
                 composer="full",
                 prompt="akemi_homura",
                 render=RenderOptions(artist="20260412"),
-                output={"task_dir": str(root / "run" / "tasks" / "no_png_info")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "no_png_info"),
+                    "output_dir": str(root / "run" / "outputs" / "no_png_info"),
+                },
             )
 
             result = BatchRunner(executor=SuccessfulExecutor(png_info={})).run_tasks(
@@ -766,7 +867,10 @@ expand:
                     composer="agent",
                     nodes=[],
                     render=RenderOptions(artist="20260412"),
-                    output={"task_dir": str(root / "run" / "tasks" / f"failed_{index}")},
+                    output={
+                        "task_dir": str(root / "run" / "tasks" / f"failed_{index}"),
+                        "output_dir": str(root / "run" / "outputs" / f"failed_{index}"),
+                    },
                 )
                 for index in range(2)
             ]
@@ -791,7 +895,10 @@ expand:
                 composer="full",
                 prompt="akemi_homura",
                 render=RenderOptions(artist="20260412"),
-                output={"task_dir": str(root / "run" / "tasks" / "done")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "done"),
+                    "output_dir": str(root / "run" / "outputs" / "done"),
+                },
             )
             write_initial_manifest(root / "run", [task])
             status_path = Path(task.output.task_dir) / "status.json"
@@ -821,7 +928,10 @@ expand:
                 composer="full",
                 prompt="akemi_homura",
                 render=RenderOptions(artist="20260412"),
-                output={"task_dir": str(root / "run" / "tasks" / "done")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "done"),
+                    "output_dir": str(root / "run" / "outputs" / "done"),
+                },
             )
             write_initial_manifest(root / "run", [task])
             status_path = Path(task.output.task_dir) / "status.json"
@@ -830,7 +940,9 @@ expand:
                 json.dumps({"status": "succeeded", "attempt": 1, "image_paths": ["image.png"]}),
                 encoding="utf-8",
             )
-            generation_result_path = status_path.parent / "generation_result.json"
+            output_dir = root / "run" / "outputs" / "done"
+            output_dir.mkdir(parents=True)
+            generation_result_path = output_dir / "generation_result.json"
             generation_result_path.write_text(
                 json.dumps({"schema": "tags-machine-core.generation-result/v1"}),
                 encoding="utf-8",
@@ -846,7 +958,7 @@ expand:
             self.assertEqual(data["tasks"][0]["image_paths"], ["image.png"])
             self.assertEqual(
                 data["tasks"][0]["generation_result_path"].replace("\\", "/"),
-                "tasks/done/generation_result.json",
+                "outputs/done/generation_result.json",
             )
 
     def test_status_json_records_render_options(self):
@@ -858,7 +970,10 @@ expand:
                 composer="full",
                 prompt="akemi_homura",
                 render=RenderOptions(artist="20260412", width=832, height=1216, nt=1),
-                output={"task_dir": str(root / "run" / "tasks" / "status_render")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "status_render"),
+                    "output_dir": str(root / "run" / "outputs" / "status_render"),
+                },
             )
 
             BatchArchive().write_status(task, status="running", attempt=1)
@@ -867,7 +982,7 @@ expand:
             self.assertEqual(data["render"]["width"], 832)
             self.assertEqual(data["render"]["height"], 1216)
 
-    def test_copy_images_archives_images_inside_task_dir(self):
+    def test_copy_images_archives_images_inside_output_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source.png"
@@ -878,7 +993,10 @@ expand:
                 composer="full",
                 prompt="akemi_homura",
                 render=RenderOptions(artist="20260412"),
-                output={"task_dir": str(root / "run" / "tasks" / "copy_task")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "copy_task"),
+                    "output_dir": str(root / "run" / "outputs" / "copy_task"),
+                },
             )
             result = GenerationResult(
                 backend="novelai",
@@ -893,9 +1011,165 @@ expand:
                 generation_result=result,
             )
 
-            self.assertEqual(archived.images[0].path.parent.name, "images")
+            self.assertEqual(archived.images[0].path.parent.name, "copy_task")
             self.assertEqual(archived.images[0].filename, "source.png")
             self.assertEqual(archived.images[0].path.read_bytes(), b"png")
+
+    def test_archive_creates_parameter_details_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            source.write_bytes(b"png")
+            task = BatchTask(
+                id="param_img_task",
+                index=0,
+                composer="full",
+                prompt="akemi_homura",
+                render=RenderOptions(artist="20260412"),
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "param_img_task"),
+                    "output_dir": str(root / "run" / "outputs" / "param_img_task"),
+                },
+            )
+            result = GenerationResult(
+                backend="novelai",
+                images=[GeneratedImage(path=source, filename="source.png")],
+                png_info={"images": [{"parameters": {"seed": 1, "steps": 28}}]},
+                request_body={"parameters": {"n_samples": task.render.nt, "seed": 1}},
+            )
+
+            BatchArchive(ArchiveConfig(save_parameter_image=True)).archive_success(
+                task=task,
+                prompt_bundle={"prompt": {"positive": "akemi_homura", "negative": ""}},
+                render_request={"backend": "novelai", "prompt": "akemi_homura"},
+                generation_result=result,
+            )
+
+            image_path = Path(task.output.output_dir) / f"zz_{task.id}_parameter_details.png"
+            self.assertTrue(image_path.exists())
+            self.assertTrue(image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+            from PIL import Image
+
+            with Image.open(image_path) as image:
+                self.assertEqual(image.size, (1400, 1500))
+
+    def test_archive_parameter_details_image_keeps_fixed_size_for_long_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            source.write_bytes(b"png")
+            long_prompt = ", ".join([f"tag_{index}" for index in range(800)])
+            task = BatchTask(
+                id="long_param_img_task",
+                index=0,
+                composer="full",
+                prompt=long_prompt,
+                render=RenderOptions(artist="20260412"),
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "long_param_img_task"),
+                    "output_dir": str(root / "run" / "outputs" / "long_param_img_task"),
+                },
+            )
+            result = GenerationResult(
+                backend="novelai",
+                images=[GeneratedImage(path=source, filename="source.png")],
+                png_info={"images": [{"parameters": {"seed": 1, "prompt": long_prompt}}]},
+                request_body={"parameters": {"n_samples": task.render.nt, "seed": 1, "prompt": long_prompt}},
+            )
+
+            BatchArchive(ArchiveConfig(save_parameter_image=True)).archive_success(
+                task=task,
+                prompt_bundle={"prompt": {"positive": long_prompt, "negative": ""}},
+                render_request={"backend": "novelai", "prompt": long_prompt},
+                generation_result=result,
+            )
+
+            image_path = Path(task.output.output_dir) / f"zz_{task.id}_parameter_details.png"
+            from PIL import Image
+
+            with Image.open(image_path) as image:
+                self.assertEqual(image.size, (1400, 1500))
+
+    def test_parameter_details_uses_actual_png_parameters_for_split_generation(self):
+        from tags_machine_core.batch.parameter_image import (
+            _display_parameters,
+            _prompt_negative,
+            _prompt_positive,
+        )
+
+        bundle = {"prompt": {"positive": "bundle prompt", "negative": "bundle negative"}}
+        request = {
+            "prompt": "request prompt",
+            "negative_prompt": "request negative",
+            "params": {"seed": 999, "n_samples": 3},
+        }
+        result = {
+            "request_body": {"parameters": {"seed": 999, "n_samples": 3}},
+            "png_info": {
+                "images": [
+                    {
+                        "parameters": {
+                            "seed": 101,
+                            "n_samples": 1,
+                            "prompt": "actual prompt",
+                            "uc": "actual negative",
+                            "width": 1216,
+                            "height": 832,
+                        }
+                    },
+                    {
+                        "parameters": {
+                            "seed": 102,
+                            "n_samples": 1,
+                            "prompt": "actual prompt",
+                            "uc": "actual negative",
+                            "width": 1216,
+                            "height": 832,
+                        }
+                    },
+                ]
+            },
+        }
+
+        params = _display_parameters(request=request, result=result)
+
+        self.assertEqual(params["seed"], [101, 102])
+        self.assertEqual(params["n_samples"], 1)
+        self.assertEqual(params["_actual_image_count"], 2)
+        self.assertEqual(_prompt_positive(bundle=bundle, request=request, params=params), "actual prompt")
+        self.assertEqual(_prompt_negative(bundle=bundle, request=request, params=params), "actual negative")
+
+    def test_archive_parameter_details_image_disabled_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            source.write_bytes(b"png")
+            task = BatchTask(
+                id="param_img_disabled_task",
+                index=0,
+                composer="full",
+                prompt="akemi_homura",
+                render=RenderOptions(artist="20260412"),
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "param_img_disabled_task"),
+                    "output_dir": str(root / "run" / "outputs" / "param_img_disabled_task"),
+                },
+            )
+            result = GenerationResult(
+                backend="novelai",
+                images=[GeneratedImage(path=source, filename="source.png")],
+                png_info={"images": [{"parameters": {"seed": 1}}]},
+            )
+
+            BatchArchive(ArchiveConfig()).archive_success(
+                task=task,
+                prompt_bundle={"prompt": {"positive": "akemi_homura", "negative": ""}},
+                render_request={"backend": "novelai", "prompt": "akemi_homura"},
+                generation_result=result,
+            )
+
+            image_path = Path(task.output.output_dir) / f"zz_{task.id}_parameter_details.png"
+            self.assertFalse(image_path.exists())
 
     def test_report_includes_retry_records_without_prompt_preview(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -989,7 +1263,10 @@ expand:
                 composer="agent",
                 nodes=[],
                 render=RenderOptions(artist="20260412"),
-                output={"task_dir": str(root / "run" / "tasks" / "agent_ready")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "agent_ready"),
+                    "output_dir": str(root / "run" / "outputs" / "agent_ready"),
+                },
             )
             result_dir = root / "run" / "agent_results"
             result_dir.mkdir(parents=True)
@@ -1021,7 +1298,10 @@ expand:
                 nodes=[],
                 render=RenderOptions(artist="20260412"),
                 agent={"cache_dir": str(root / "cache")},
-                output={"task_dir": str(root / "run" / "tasks" / "agent_cached")},
+                output={
+                    "task_dir": str(root / "run" / "tasks" / "agent_cached"),
+                    "output_dir": str(root / "run" / "outputs" / "agent_cached"),
+                },
             )
             result_dir = root / "run" / "agent_results"
             result_dir.mkdir(parents=True)

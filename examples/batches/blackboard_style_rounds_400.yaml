@@ -1,14 +1,13 @@
 schema: tags-machine-core.batch/v1
 name: blackboard-style-rounds-400
 config: configs/local.example.yaml
-output_root: outputs/batches
+output_dir: G:\ai_auto\blackboard-style-rounds-400
 
 defaults:
-  composer: agent
+  composer: script
   artist: 20260412
-  nt: 1
+  nt: 3
   resolution: random_standard
-  model: nai-diffusion-4-5-full
 
 select:
   characters:
@@ -49,6 +48,9 @@ run:
   stop_on_error: false
   retry:
     max_attempts: 3
+
+archive:
+  save_parameter_image: true
 
 report:
   markdown: true

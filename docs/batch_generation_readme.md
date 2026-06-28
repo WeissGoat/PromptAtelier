@@ -71,6 +71,27 @@ uv run python -m tags_machine_core inspect-batch outputs\batches\prompt-list-202
 uv run python -m tags_machine_core resume-batch outputs\batches\prompt-list-20260412 --full
 ```
 
+## 目录规则
+
+batch 会把“工作区”和“图片输出目录”分开：
+
+- 工作区保存 `manifest.jsonl`、`index.json`、`batch_source.json`、`batch.yaml`、`tasks/`、`report.*` 等状态文件。
+- 工作区默认位置是 `batch.yaml` 所在目录下的 `<name>/`。
+- 图片输出目录保存每个任务真实生成的图片和归档文件，结构是 `output_dir/<task_id>/...`。
+- 图片输出目录默认是 `工作区/outputs/`。
+- 推荐在 YAML 中用 `output_dir` 指定图片输出目录，或命令行用 `--output-dir` 临时覆盖。
+- `output_root` 只保留给旧配置兼容，表示旧版“工作区根目录”；新配置优先使用 `work_root` 和 `output_dir`。
+
+示例：
+
+```yaml
+schema: tags-machine-core.batch/v1
+name: blackboard-style-rounds-400
+output_dir: G:\ai_auto\blackboard-style-rounds-400
+```
+
+如果这个 YAML 位于 `examples/batches/blackboard_style_rounds_400.yaml`，默认工作区会在 `examples/batches/blackboard-style-rounds-400/`，真实图片会在 `G:\ai_auto\blackboard-style-rounds-400/<task_id>/`。
+
 ## 3. 最小 YAML 示例
 
 适合 agent 已经拼好完整 prompt 的场景：
@@ -79,7 +100,7 @@ uv run python -m tags_machine_core resume-batch outputs\batches\prompt-list-2026
 schema: tags-machine-core.batch/v1
 name: prompt-list-20260412
 config: configs/local.example.yaml
-output_root: outputs/batches
+output_dir: outputs/prompt-list-20260412
 
 defaults:
   composer: full
@@ -116,7 +137,9 @@ run:
 | `name` | 是 | 无 | 批次名称，也会作为输出目录名：`outputs/batches/<name>`。 |
 | `description` | 否 | `null` | 给人看的说明，不影响生图。 |
 | `config` | 否 | `configs/local.example.yaml` | core 运行配置，主要用于读取旧 `design_root` 和后端配置。 |
-| `output_root` | 否 | `outputs/batches` | 批次输出根目录。 |
+| `work_root` | 否 | `batch.yaml` 所在目录 | 批次工作区根目录；最终工作区是 `work_root/<name>`。 |
+| `output_dir` | 否 | `工作区/outputs` | 图片和任务归档文件输出根目录；每个任务写入 `output_dir/<task_id>/`。 |
+| `output_root` | 否 | `null` | 旧字段，仅兼容旧配置；表示旧版工作区根目录。新配置建议使用 `work_root` + `output_dir`。 |
 | `defaults` | 否 | 见下文 | 每个任务的默认生图参数和 composer 参数。 |
 | `collections` | 否 | `{}` | 给 selector 用的目录集合，适合把“动作分类文件夹”起名后复用。 |
 | `select` | 否 | 空选择 | 选择 artist、character、action、background、prompt 的规则。 |
@@ -492,7 +515,8 @@ run:
 | `save_render_request` | `true` | 保存 `render_request.json`。 |
 | `save_generation_result` | `true` | 保存 `generation_result.json`。 |
 | `save_png_params` | `true` | 保存从 PNG 读取到的参数摘要 `png_params.json`。 |
-| `copy_images` | `false` | 是否把图片复制进任务目录的 `images/`。默认图片仍保存在全局输出目录，但路径会写进结果。 |
+| `save_parameter_image` | `false` | 生成一张人可读的参数详情图，文件名为 `zz_<task_id>_parameter_details.png`，保存到该任务的输出/归档目录；`zz_` 前缀用于按名称排序时放在生成图后面。 |
+| `copy_images` | `false` | 是否把图片复制进任务输出/归档目录。默认图片仍保存在生成器输出路径，但路径会写进结果。 |
 
 建议日常保持默认，便于问题排查和对比旧 tags_machine。
 

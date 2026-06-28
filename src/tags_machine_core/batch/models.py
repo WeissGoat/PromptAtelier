@@ -50,6 +50,8 @@ class RunConfig(BaseModel):
     stop_on_error: bool = False
     max_images: int | None = None
     execute_requires_agent: bool = False
+    fresh: bool = False
+    output_mode: Literal["global", "task_dir"] = "task_dir"
     retry: RetryConfig = Field(default_factory=RetryConfig)
 
 
@@ -58,6 +60,7 @@ class ArchiveConfig(BaseModel):
     save_render_request: bool = True
     save_generation_result: bool = True
     save_png_params: bool = True
+    save_parameter_image: bool = False
     copy_images: bool = False
 
 
@@ -200,6 +203,7 @@ class AgentOptions(BaseModel):
 
 class TaskOutput(BaseModel):
     task_dir: str
+    output_dir: str | None = None
 
 
 class BatchTask(BaseModel):
@@ -256,7 +260,9 @@ class BatchSpec(BaseModel):
     name: str
     description: str | None = None
     config: str = "configs/local.example.yaml"
-    output_root: str = "outputs/batches"
+    work_root: str | None = None
+    output_root: str | None = None
+    output_dir: str | None = None
     defaults: BatchDefaults = Field(default_factory=BatchDefaults)
     collections: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     select: BatchSelect = Field(default_factory=BatchSelect)
