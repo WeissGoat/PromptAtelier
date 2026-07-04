@@ -48,12 +48,12 @@ BACKEND_SUPPORT: dict[BackendName, BackendSupport] = {
     "comfyui": BackendSupport(
         backend="comfyui",
         display_name="ComfyUI",
-        stage="experimental",
+        stage="stable",
         render_plan_supported=True,
         execution_supported=True,
-        executes_by_default=False,
-        requires_experimental_execution=True,
-        note="预研后端；可生成 dry-run plan，真实执行必须显式开启实验入口。",
+        executes_by_default=True,
+        requires_experimental_execution=False,
+        note="正式 opt-in 后端；通过 artist node 的 API workflow 生成真实图片。",
     ),
     "sd": BackendSupport(
         backend="sd",

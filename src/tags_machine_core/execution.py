@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import time
 from typing import Any
 from uuid import uuid4
 import zlib
@@ -13,12 +14,14 @@ from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.logging_config import get_logger
+from tags_machine_core.renderers.comfyui_workflow import normalize_binding_paths
 from tags_machine_core.verification import read_image_parameters
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CORE_PNG_INFO_KEY = "tags_machine_core"
 logger = get_logger(__name__)
+_last_novelai_request_at = 0.0
 
 
 def save_generated_images(
@@ -194,10 +197,11 @@ def execute_novelai_generation(
     output_dir: str | Path | None,
     image_format: str,
 ) -> GenerationResult:
-    access_token = os.environ.get(config.novelai.access_token_env)
+    access_token = config.novelai.access_token or os.environ.get(config.novelai.access_token_env)
     if not access_token:
         raise RuntimeError(
-            f"Missing NovelAI token environment variable: {config.novelai.access_token_env}"
+            "Missing NovelAI token: set novelai.access_token in config or "
+            f"environment variable {config.novelai.access_token_env}"
         )
     client = NovelAIClient(
         access_token=access_token,
@@ -217,7 +221,11 @@ def execute_novelai_generation(
     if len(requests) == 1:
         effective_request = requests[0]
         images = save_generated_images(
-            client.generate_images(effective_request),
+            _generate_novelai_images(
+                client,
+                effective_request,
+                request_interval=config.novelai.request_interval,
+            ),
             output_dir=output_path,
             request=effective_request,
             default_format=image_format,
@@ -235,7 +243,11 @@ def execute_novelai_generation(
     request_bodies: list[dict[str, Any]] = []
     for index, split_request in enumerate(requests):
         generated = save_generated_images(
-            client.generate_images(split_request),
+            _generate_novelai_images(
+                client,
+                split_request,
+                request_interval=config.novelai.request_interval,
+            ),
             output_dir=output_path,
             request=split_request,
             default_format=image_format,
@@ -269,6 +281,31 @@ def execute_novelai_generation(
         png_info={"images": png_records},
         cache_hit=False,
     )
+
+
+def _generate_novelai_images(
+    client: NovelAIClient,
+    request: RenderRequest,
+    *,
+    request_interval: float,
+):
+    _wait_for_novelai_request_slot(request_interval)
+    return client.generate_images(request)
+
+
+def _wait_for_novelai_request_slot(request_interval: float) -> None:
+    global _last_novelai_request_at
+    interval = max(0.0, float(request_interval or 0.0))
+    if interval <= 0:
+        _last_novelai_request_at = time.monotonic()
+        return
+
+    now = time.monotonic()
+    wait_seconds = interval - (now - _last_novelai_request_at)
+    if wait_seconds > 0:
+        logger.info("NovelAI request throttle sleep seconds=%.2f", wait_seconds)
+        time.sleep(wait_seconds)
+    _last_novelai_request_at = time.monotonic()
 
 
 def split_novelai_samples(request: RenderRequest) -> list[RenderRequest]:
@@ -341,7 +378,7 @@ def execute_render_request(
     allow_experimental_backend: bool = False,
     client_id: str | None = None,
     comfyui_no_wait: bool = False,
-    comfyui_poll_interval: float = 1.0,
+    comfyui_poll_interval: float | None = None,
     comfyui_max_wait_seconds: float | None = None,
 ) -> GenerationResult:
     ensure_backend_can_execute(
@@ -388,28 +425,57 @@ def execute_comfyui_generation(
     image_format: str,
     client_id: str | None = None,
     no_wait: bool = False,
-    poll_interval: float = 1.0,
+    poll_interval: float | None = None,
     max_wait_seconds: float | None = None,
 ) -> GenerationResult:
     client = ComfyUIClient(
         base_url=config.comfyui.base_url,
         timeout=config.comfyui.timeout,
+        retry=config.comfyui.retry,
+        retry_interval=config.comfyui.retry_interval,
     )
+    output_path = Path(output_dir or config.runtime.output_dir)
+    requests = split_comfyui_samples(request)
+    effective_poll_interval = (
+        config.comfyui.poll_interval if poll_interval is None else poll_interval
+    )
+    effective_max_wait = (
+        config.comfyui.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
+    )
+    logger.info(
+        "execute_comfyui_generation start workflow=%s split_requests=%s output_dir=%s",
+        request.params.get("workflow"),
+        len(requests),
+        output_path,
+    )
+    if len(requests) > 1:
+        return _execute_split_comfyui_generation(
+            client=client,
+            requests=requests,
+            output_dir=output_path,
+            image_format=image_format,
+            client_id=client_id,
+            no_wait=no_wait,
+            poll_interval=effective_poll_interval,
+            max_wait_seconds=effective_max_wait,
+        )
+
+    effective_request = requests[0]
     if no_wait:
-        queued = client.queue_prompt(request, client_id=client_id)
+        queued = client.queue_prompt(effective_request, client_id=client_id)
         images: list[GeneratedImage] = []
         comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
     else:
         generated = client.generate_images(
-            request,
+            effective_request,
             client_id=client_id,
-            poll_interval=poll_interval,
-            max_wait_seconds=max_wait_seconds,
+            poll_interval=effective_poll_interval,
+            max_wait_seconds=effective_max_wait,
         )
         images = save_generated_images(
             generated.images,
-            output_dir=Path(output_dir or config.runtime.output_dir),
-            request=request,
+            output_dir=output_path,
+            request=effective_request,
             default_format=image_format,
         )
         comfyui_meta = {
@@ -422,10 +488,165 @@ def execute_comfyui_generation(
     return GenerationResult(
         backend="comfyui",
         images=images,
-        request_body=client.build_payload(request, client_id=client_id),
+        request_body=client.build_payload(effective_request, client_id=client_id),
         png_info=png_info,
         cache_hit=False,
     )
+
+
+def _execute_split_comfyui_generation(
+    *,
+    client: ComfyUIClient,
+    requests: list[RenderRequest],
+    output_dir: Path,
+    image_format: str,
+    client_id: str | None,
+    no_wait: bool,
+    poll_interval: float,
+    max_wait_seconds: float | None,
+) -> GenerationResult:
+    images: list[GeneratedImage] = []
+    png_records: list[dict[str, Any]] = []
+    request_bodies: list[dict[str, Any]] = []
+    prompt_records: list[dict[str, Any]] = []
+
+    for index, split_request in enumerate(requests):
+        if no_wait:
+            queued = client.queue_prompt(split_request, client_id=client_id)
+            request_bodies.append(client.build_payload(split_request, client_id=client_id))
+            prompt_records.append({"split_request_index": index, "prompt_id": queued.prompt_id})
+            continue
+
+        generated = client.generate_images(
+            split_request,
+            client_id=client_id,
+            poll_interval=poll_interval,
+            max_wait_seconds=max_wait_seconds,
+        )
+        generated_images = save_generated_images(
+            generated.images,
+            output_dir=output_dir,
+            request=split_request,
+            default_format=image_format,
+        )
+        images.extend(
+            image.model_copy(
+                update={
+                    "meta": {
+                        **image.meta,
+                        "split_request_index": index,
+                        "prompt_id": generated.prompt_id,
+                    }
+                }
+            )
+            for image in generated_images
+        )
+        request_bodies.append(client.build_payload(split_request, client_id=client_id))
+        prompt_records.append(
+            {
+                "split_request_index": index,
+                "prompt_id": generated.prompt_id,
+                "queue_raw": generated.queue_raw,
+                "history": generated.history,
+            }
+        )
+        png_info = collect_png_info(generated_images)
+        for record in png_info.get("images", []):
+            if isinstance(record, dict):
+                record["split_request_index"] = index
+                record["prompt_id"] = generated.prompt_id
+                png_records.append(record)
+
+    return GenerationResult(
+        backend="comfyui",
+        images=images,
+        request_body={
+            "split_batch": True,
+            "reason": "force_n_samples_1",
+            "requests": request_bodies,
+        },
+        png_info={
+            "images": png_records,
+            "comfyui": {
+                "split_batch": True,
+                "requests": prompt_records,
+            },
+        },
+        cache_hit=False,
+    )
+
+
+def split_comfyui_samples(request: RenderRequest) -> list[RenderRequest]:
+    count = _request_n_samples_for_backend(request, backend="ComfyUI")
+    if count <= 1:
+        return [request]
+
+    logger.info("split ComfyUI n_samples into single requests count=%s", count)
+    return [_single_comfyui_sample_request(request, index, count) for index in range(count)]
+
+
+def _single_comfyui_sample_request(
+    request: RenderRequest,
+    index: int,
+    count: int,
+) -> RenderRequest:
+    params = dict(request.params)
+    seed = _offset_comfyui_seed(params.get("seed", request.seed), index)
+    params["n_samples"] = 1
+    if seed is not None:
+        params["seed"] = seed
+        params["node_overrides"] = _comfyui_seed_overrides(params, seed)
+
+    meta = dict(request.meta)
+    meta["split_batch"] = {
+        "index": index,
+        "count": count,
+        "reason": "force_n_samples_1",
+    }
+    return request.model_copy(
+        deep=True,
+        update={
+            "seed": seed if seed is not None else request.seed,
+            "params": params,
+            "meta": meta,
+        },
+    )
+
+
+def _request_n_samples_for_backend(request: RenderRequest, *, backend: str) -> int:
+    value = request.params.get("n_samples", 1)
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{backend} parameter n_samples must be an integer, got {value!r}") from None
+    if count < 1:
+        raise ValueError(f"{backend} parameter n_samples must be at least 1, got {value!r}")
+    return count
+
+
+def _offset_comfyui_seed(seed: Any, index: int) -> int | None:
+    if seed is None:
+        return None
+    try:
+        value = int(seed)
+    except (TypeError, ValueError):
+        raise ValueError(f"ComfyUI parameter seed must be an integer, got {seed!r}") from None
+    if value < 0:
+        return value
+    return value + index
+
+
+def _comfyui_seed_overrides(params: dict[str, Any], seed: int) -> dict[str, Any]:
+    overrides = dict(params.get("node_overrides") or {})
+    comfyui_inputs = params.get("comfyui_inputs")
+    if not isinstance(comfyui_inputs, dict):
+        return overrides
+    inputs = comfyui_inputs.get("inputs")
+    if not isinstance(inputs, dict) or "seed" not in inputs:
+        return overrides
+    for path in normalize_binding_paths(inputs["seed"], source="comfyui_inputs.inputs.seed"):
+        overrides[path] = seed
+    return overrides
 
 
 def execute_sd_generation(

@@ -84,7 +84,7 @@ class BatchDefaults(BaseModel):
     height: int | None = None
     seed: int | None = None
     image_format: str = "png"
-    model: str = "nai-diffusion-4-5-full"
+    model: str | None = "nai-diffusion-4-5-full"
     prompt_policy_profile: str | None = None
     agent_model: str | None = None
     cache_dir: str | None = None
@@ -190,7 +190,7 @@ class RenderOptions(BaseModel):
     width: int | None = None
     height: int | None = None
     seed: int | None = None
-    model: str = "nai-diffusion-4-5-full"
+    model: str | None = "nai-diffusion-4-5-full"
     image_format: str = "png"
     output_dir: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)

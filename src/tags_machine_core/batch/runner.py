@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import inspect
+import logging
 import time
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
 from tags_machine_core.config import AppConfig
-from tags_machine_core.logging_config import get_logger
+from tags_machine_core.logging_config import emit_console_record, get_logger
 
 from .archive import BatchArchive
 from .executor import BatchExecutionResult, BatchExecutor
@@ -21,6 +24,32 @@ from .report import write_report
 
 
 logger = get_logger(__name__)
+
+
+def _emit_progress(message: str, *, level: str = "info") -> None:
+    # 批量真实出图经常需要长时间运行；这里复用统一 formatter 输出到 stderr，
+    # 保留时间、颜色、文件和行号，同时不污染 stdout 的 JSON 结果。
+    frame = inspect.currentframe()
+    caller = frame.f_back if frame else None
+    lineno = caller.f_lineno if caller else 0
+    del frame
+    emit_console_record(
+        level=_progress_level(level),
+        logger_name=__name__,
+        pathname=__file__,
+        lineno=lineno,
+        message=message,
+    )
+
+
+def _progress_level(level: str) -> int:
+    mapping = {
+        "trace": 5,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+    }
+    return mapping.get(level.lower(), 20)
 
 
 class BatchRunner:
@@ -51,6 +80,8 @@ class BatchRunner:
         effective_config = _config_with_timeout(config, run_config.retry.timeout_seconds)
 
         root = Path(run_dir)
+        if run_config.fresh and root.exists():
+            shutil.rmtree(root)
         root.mkdir(parents=True, exist_ok=True)
         if not (run_config.resume and (root / "manifest.jsonl").exists()):
             write_initial_manifest(root, tasks)
@@ -61,6 +92,11 @@ class BatchRunner:
             limit,
             run_config.resume,
             run_config.max_images,
+        )
+        _emit_progress(
+            "[batch] started "
+            f"run_dir={root} task_count={len(tasks)} limit={limit or 'all'} "
+            f"resume={run_config.resume} fresh={run_config.fresh}"
         )
 
         entries: list[dict[str, Any]] = []
@@ -90,6 +126,12 @@ class BatchRunner:
                 run_task.render.nt,
                 run_task.render.seed,
             )
+            _emit_progress(
+                "[batch] task "
+                f"{position}/{total_selected} started task_id={run_task.id} "
+                f"artist={run_task.render.artist or '-'} "
+                f"resolution={run_task.render.width}x{run_task.render.height}"
+            )
             result = self._execute_with_retry(
                 root=root,
                 task=run_task,
@@ -98,10 +140,19 @@ class BatchRunner:
                 archive_config=archive_config,
             )
             entries.append(result)
+            progress_level = "error" if result["status"] == "failed" else "info"
+            _emit_progress(
+                "[batch] task "
+                f"{position}/{total_selected} {result['status']} task_id={run_task.id} "
+                f"attempt={result['attempt']} images={len(result.get('image_paths') or [])}"
+                + (f" error={result['error']}" if result.get("error") else ""),
+                level=progress_level,
+            )
             if result["status"] == "succeeded" and image_budget is not None:
                 image_budget -= max(1, len(result.get("image_paths") or []))
             if result["status"] == "failed" and run_config.stop_on_error:
                 logger.warning("batch stopped on failed task task_id=%s", result["task_id"])
+                _emit_progress(f"[batch] stopped_on_error task_id={result['task_id']}", level="warning")
                 break
 
         _log_action_group_summary(entries)
@@ -115,6 +166,7 @@ class BatchRunner:
             visual_check_template=report_config.visual_check_template,
         )
         logger.info("batch report written run_dir=%s counts=%s", root, report["counts"])
+        _emit_progress(f"[batch] completed run_dir={root} counts={report['counts']}")
         return {"run_dir": str(root), "counts": report["counts"], "entries": entries}
 
     def _execute_with_retry(
@@ -141,11 +193,7 @@ class BatchRunner:
                 ),
             )
             try:
-                output_dir = (
-                    Path(task.output.task_dir) / "images"
-                    if archive_config.copy_images
-                    else task.render.output_dir
-                )
+                output_dir = Path(task.output.output_dir or task.render.output_dir or task.output.task_dir)
                 result = self.executor.execute(task, config=config, output_dir=output_dir)
                 entry = self._handle_execution_result(
                     root=root,

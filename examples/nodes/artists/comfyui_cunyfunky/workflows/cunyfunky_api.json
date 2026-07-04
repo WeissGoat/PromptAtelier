@@ -1,0 +1,1117 @@
+{
+  "3": {
+    "inputs": {
+      "seed": [
+        "202",
+        0
+      ],
+      "steps": 34,
+      "cfg": 7,
+      "sampler_name": "euler",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "192",
+        0
+      ],
+      "positive": [
+        "165",
+        0
+      ],
+      "negative": [
+        "153",
+        0
+      ],
+      "latent_image": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "cocoStyleNoobaiXL_v70.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "watermark,signature,Artist name,lowres,bad anatomy,bad hands,text,error,missing fingers,extra digit,fewer digits,cropped,worst quality,low quality,normal quality,jpeg artifacts,signature,watermark,username,blurry,artist name worst quality,low quality,swollen or deformed toes,overlapping toes,excess toenail,incorrect toe count,uneven toe count,unnatural foot proportions.,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "17": {
+    "inputs": {
+      "seed": [
+        "202",
+        0
+      ],
+      "steps": 50,
+      "cfg": 7,
+      "sampler_name": "euler",
+      "scheduler": "karras",
+      "denoise": 0.5,
+      "model": [
+        "192",
+        0
+      ],
+      "positive": [
+        "165",
+        0
+      ],
+      "negative": [
+        "153",
+        0
+      ],
+      "latent_image": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "23": {
+    "inputs": {
+      "width": 1024,
+      "height": 1536,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "64": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "scale_by": 1.1,
+      "samples": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "LatentUpscaleBy",
+    "_meta": {
+      "title": "缩放Latent（比例）"
+    }
+  },
+  "68": {
+    "inputs": {
+      "mode": "Take First n",
+      "count": 4,
+      "images": [
+        "118",
+        0
+      ],
+      "latents": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "Preview Chooser",
+    "_meta": {
+      "title": "Preview Chooser"
+    }
+  },
+  "73": {
+    "inputs": {
+      "upscale_by": 2,
+      "seed": 477926714642052,
+      "steps": 20,
+      "cfg": 8,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.2,
+      "mode_type": "Linear",
+      "tile_width": 512,
+      "tile_height": 512,
+      "mask_blur": 8,
+      "tile_padding": 32,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 1,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "image": [
+        "181",
+        0
+      ],
+      "model": [
+        "192",
+        0
+      ],
+      "positive": [
+        "165",
+        0
+      ],
+      "negative": [
+        "153",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ],
+      "upscale_model": [
+        "74",
+        0
+      ]
+    },
+    "class_type": "UltimateSDUpscale",
+    "_meta": {
+      "title": "Ultimate SD Upscale"
+    }
+  },
+  "74": {
+    "inputs": {
+      "model_name": "RealESRGAN_x4.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "加载放大模型"
+    }
+  },
+  "75": {
+    "inputs": {
+      "images": [
+        "73",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "77": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "73",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "78": {
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "101": {
+    "inputs": {
+      "action": "append",
+      "tidy_tags": "yes",
+      "text_a": "cute girl,",
+      "text_b": "",
+      "text_c": "score_9,score_8_up,score_7_up,source_anime,zPDXL, \n(masterpiece), (best quality), (ultra-detailed), ",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "StringFunction|pysssss",
+    "_meta": {
+      "title": "String Function 🐍"
+    }
+  },
+  "118": {
+    "inputs": {
+      "samples": [
+        "17",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "132": {
+    "inputs": {
+      "text": "negative_hand, NegfeetV2, bad anatomy,blurry,(worst quality:1.8),low quality,hands bad,face bad,(normal quality:1.3),bad hands,mutated hands and fingers,extra legs,extra arms,duplicate,cropped,text,jpeg,artifacts,signature,watermark,username,blurry,artist name,trademark,title,multiple view,Reference sheet,long body,multiple breasts,mutated,bad anatomy,disfigured,bad proportions,duplicate,bad feet,artist name,ugly,text font ui,missing limb,monochrome,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "135": {
+    "inputs": {
+      "text_0": "cute girl, score_9,score_8_up,score_7_up,source_anime,zPDXL, (masterpiece), (best quality), (ultra-detailed),",
+      "text_1": "cute girl, score_9,score_8_up,score_7_up,source_anime,zPDXL, (masterpiece), (best quality), (ultra-detailed),",
+      "text": [
+        "101",
+        0
+      ]
+    },
+    "class_type": "ShowText|pysssss",
+    "_meta": {
+      "title": "Show Text 🐍"
+    }
+  },
+  "137": {
+    "inputs": {
+      "text": "bad feet,bad hands,blurry,worstquality,watermark,score_4,score_3,score_2,score_1,simple background,\nbad hands,bad feet,watermark,score_4,score_3,score_2,score_1,too many fingers,penis,dick,man,Blurred eyes,man body,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "142": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": 887769448898457,
+      "steps": 20,
+      "cfg": 7,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.5,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "image": [
+        "176",
+        0
+      ],
+      "model": [
+        "192",
+        0
+      ],
+      "clip": [
+        "193",
+        1
+      ],
+      "vae": [
+        "4",
+        2
+      ],
+      "positive": [
+        "165",
+        0
+      ],
+      "negative": [
+        "153",
+        0
+      ],
+      "bbox_detector": [
+        "143",
+        0
+      ],
+      "sam_model_opt": [
+        "144",
+        0
+      ]
+    },
+    "class_type": "FaceDetailer",
+    "_meta": {
+      "title": "FaceDetailer"
+    }
+  },
+  "143": {
+    "inputs": {
+      "model_name": "bbox/face_yolov8m.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "144": {
+    "inputs": {
+      "model_name": "sam_vit_b_01ec64.pth",
+      "device_mode": "AUTO"
+    },
+    "class_type": "SAMLoader",
+    "_meta": {
+      "title": "SAMLoader (Impact)"
+    }
+  },
+  "146": {
+    "inputs": {
+      "image": "123637631_p0.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "147": {
+    "inputs": {
+      "text": "artist:yoneyama mai,(artist:kedama_milk:0.8), (artist:wanke:1.1), artist:mocha, (cotton:1.1), artist:date, (senpen:1.1), artist:ciloranko, artist:noyu, noyu23386566, (artist:sho:0.8264462809917354), (sho lwlw:0.9090909090909091),(artist:tianliang duohe fangdongye:1),(bee_\\(deadflow\\):0.8),year 2023, (solo:1.3310000000000004), (disheveled hair:1)",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "149": {
+    "inputs": {
+      "text_0": "aris \\(blue archive\\), 1girl, long hair, blush, blue eyes, shirt, black hair, thighhighs, long sleeves, 1boy, navel, holding, hair between eyes, very long hair, school uniform, blue hair, white shirt, hetero, hairband, censored, penis, pussy, solo focus, spread legs, cum, sex, sailor collar, vaginal, cum in pussy, bottomless, halo, clothed sex, handheld game console, nintendo switch, holding handheld game console",
+      "text_1": "aris \\(blue archive\\), 1girl, long hair, blush, blue eyes, shirt, black hair, thighhighs, long sleeves, 1boy, navel, holding, hair between eyes, very long hair, school uniform, blue hair, white shirt, hetero, hairband, censored, penis, pussy, solo focus, spread legs, cum, sex, sailor collar, vaginal, cum in pussy, bottomless, halo, clothed sex, handheld game console, nintendo switch, holding handheld game console"
+    },
+    "class_type": "ShowText|pysssss",
+    "_meta": {
+      "title": "Show Text 🐍"
+    }
+  },
+  "150": {
+    "inputs": {
+      "action": "append",
+      "tidy_tags": "yes",
+      "text_a": "spooning,straddling, upright straddle, leg up, testicles, dress lift, clothed sex, against wall,mouth hold,uncensored, testicles, sex from behind, hug from behind, clitoris, m legs, reverse suspended congress, collarbone, oral, fellatio, clothed female nude male, hand on another's head, irrumatio, deepthroat, deep penetration,stomach bulge",
+      "text_b": "",
+      "text_c": "uncensored, anus, no panties, cum in pussy, erection, after sex, cumdrip, after vaginal,half-closed eyes, sex from behind, clothed female nude male, doggystyle, saliva trail, against wall, grabbing another's hair,scornful eyes,bottomless, bed sheet, sex from behind, all fours, doggystyle, top-down bottom-up, sheet grab,completely nude,erection,Hanging Legs Sex,thigh_sex, sitting_on_person, on_back, 1boy, lying, POV, penis between thighs, breast grab",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "StringFunction|pysssss",
+    "_meta": {
+      "title": "String Function 🐍"
+    }
+  },
+  "153": {
+    "inputs": {
+      "text": "censored,censor,censor bar,negative_hand, NegfeetV2, bad anatomy,blurry,(worst quality:1.8),low quality,hands bad,face bad,(normal quality:1.3),bad hands,[extra fingers],mutated hands and fingers,extra legs,extra arms,duplicate,cropped,text,jpeg,artifacts,signature,watermark,username,blurry,artist name,trademark,title,multiple view,Reference sheet,long body,multiple breasts,mutated,bad anatomy,disfigured,bad proportions,duplicate,bad feet,artist name,ugly,text font ui,missing limb,monochrome,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "193",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "155": {
+    "inputs": {
+      "text": "(worst quality, low quality:1.2), bad hands,bad feet,watermark,score_4,score_3,score_2,score_1,too many fingers,penis,dick,man,Blurred eyes,man body,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "193",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "156": {
+    "inputs": {
+      "text": "sex,pussy,uncensored,vaginal,sex,navel, saliva, sex from behind, saliva trail,foot,cum on floor,wall, against wall, standing sex,pussy,nipple,saliva, forced,male, vaginal penetration,deep penetration, half closed eyes,squeeze breast,grab waist,Arched Back,lick",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "161": {
+    "inputs": {
+      "text": "watermark,signature,Artist name,lowres,bad anatomy,bad hands,text,error,missing fingers,extra digit,fewer digits,cropped,worst quality,low quality,normal quality,jpeg artifacts,signature,watermark,username,blurry,artist name worst quality,low quality,swollen or deformed toes,overlapping toes,excess toenail,incorrect toe count,uneven toe count,unnatural foot proportions.,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "162": {
+    "inputs": {
+      "text": "bad feet, bad body,deformed,mutated,watermark,blurry,worstquality,watermark,score_4,score_3,score_2,score_1,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "163": {
+    "inputs": {
+      "text": "artist:yoneyama mai, (artist:wanke:1.1), artist:mocha, (cotton:1.1), artist:date, (senpen:1.1), artist:ciloranko, artist:noyu, noyu23386566, (artist:sho:0.8264462809917354), (sho lwlw:0.9090909090909091),(artist:tianliang duohe fangdongye:0.8), year 2023, (solo:1.3310000000000004), (disheveled hair:1.1), (dark heme:1.2100000000000002),  arona \\(blue archive\\),1girl, solo, blush,detailed eyes, short hair, shirt, long sleeves, (blue hair:1.1), portrait,look at viewer,blue hair,happy,joy, pink hair, multicolored hair, hairband, choker, serafuku, sailor collar, blue halo, blue shirt, colored inner hair, white sailor collar, bubble, white hairband, white choker,bright,cold lighting, bubble, blue sky, cloud,blurry background,depth of field, cinematic, motion blur,good composition,ray,highlight,dynamic,hand on chin,smug",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "165": {
+    "inputs": {
+      "text": [
+        "219",
+        0
+      ],
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "193",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "166": {
+    "inputs": {
+      "text": "bad feet,bad hands,bad body,deformed,mutated,watermark,blurry,worstquality,watermark,score_4,score_3,score_2,score_1,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "168": {
+    "inputs": {
+      "vae_name": "sdxl_vae_fp16fix.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "170": {
+    "inputs": {
+      "text": "bad hands,worst quality, low quality, bad quality, multiple views, 4koma, comic, jpeg artifacts, monochrome, sepia, greyscale, flat color, pale color, muted color, low contrast, bad anatomy, picture frame, english text, signature, watermark, logo, patreon username, web address, artist name",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "171": {
+    "inputs": {
+      "sampling": "v_prediction",
+      "zsnr": false,
+      "model": [
+        "193",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingDiscrete",
+    "_meta": {
+      "title": "采样算法（离散）"
+    }
+  },
+  "172": {
+    "inputs": {
+      "text": "blush,ahegao,fucked_silly,rolling eyes,heart pupil,dress,nipple, 1boy,half_closed_eyes,close up,from above, hetero, penis,watery pussy, solo focus,pussy focus,arched_back, indoors,torso_grab,orgasm, spread legs,squeeze,squeezing, cum,pov, sex ,crotch_focus,groin, vaginal,drooling,melting,cum,cumdrip,cum overflow,think cum,bubbles,cum_bubble,cum_on_body ,cum_on_stomach,bukkake,after_vaginal , cum in pussy, bottomless, heavy breathing,barefoot,sweat,sweatdrop,wet,shiny,on_bed,sitting,sitting_on_lap,sitting_on_person,room,expressive,dark,blue theme,\n",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "175": {
+    "inputs": {
+      "lora_name": "Expressive_H-000001.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  },
+  "176": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": 827307888173041,
+      "steps": 20,
+      "cfg": 8,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.5,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "image": [
+        "68",
+        0
+      ],
+      "model": [
+        "192",
+        0
+      ],
+      "clip": [
+        "193",
+        1
+      ],
+      "vae": [
+        "4",
+        2
+      ],
+      "positive": [
+        "165",
+        0
+      ],
+      "negative": [
+        "153",
+        0
+      ],
+      "bbox_detector": [
+        "177",
+        0
+      ]
+    },
+    "class_type": "FaceDetailer",
+    "_meta": {
+      "title": "FaceDetailer"
+    }
+  },
+  "177": {
+    "inputs": {
+      "model_name": "bbox/hand_yolov8s.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "180": {
+    "inputs": {
+      "images": [
+        "176",
+        2
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "181": {
+    "inputs": {
+      "mode": "Always pause",
+      "count": 2,
+      "images": [
+        "176",
+        0
+      ]
+    },
+    "class_type": "Preview Chooser",
+    "_meta": {
+      "title": "Preview Chooser"
+    }
+  },
+  "182": {
+    "inputs": {
+      "images": [
+        "176",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "183": {
+    "inputs": {
+      "ckpt_name": "confusionxl_v50B.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  },
+  "184": {
+    "inputs": {
+      "text": "(rimochan:1.2),chef,a girl,solo,long hair,gold hair,(yellow eyes:1.2),\nhalf-closed_eyes,light_smile,blush,arms_up, \nnaked_towel,nude_cover,bare_shoulders,very long hair,panty_pull,\nsitting,wariza,looking at viewer,sweat,\n(masterpiece), (best quality), (ultra-detailed),simple_background,",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "187",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "185": {
+    "inputs": {
+      "text": "lowres,bad anatomy,bad hands,text,error,missing_fingers,extra_digit,fewer_digits,cropped,worst_quality,low_quality,normal_quality,jpeg,artifacts,signature,watermark,username,blurry",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "187",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "187": {
+    "inputs": {
+      "lora_name": "rimochan_v2_xl.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 1,
+      "model": [
+        "183",
+        0
+      ],
+      "clip": [
+        "183",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  },
+  "188": {
+    "inputs": {
+      "lora_name": "画风调整\\add_contrast_XL.safetensors",
+      "strength_model": -2,
+      "strength_clip": 1,
+      "model": [
+        "222",
+        0
+      ],
+      "clip": [
+        "222",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  },
+  "189": {
+    "inputs": {
+      "lora_name": "画风调整\\add_brightness_XL.safetensors",
+      "strength_model": 0.5,
+      "strength_clip": 1,
+      "model": [
+        "188",
+        0
+      ],
+      "clip": [
+        "188",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  },
+  "191": {
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "192": {
+    "inputs": {
+      "lora_name": "cum wiping_illustrious_V1.0.safetensors",
+      "strength_model": 0.45,
+      "strength_clip": 1,
+      "model": [
+        "193",
+        0
+      ],
+      "clip": [
+        "193",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  },
+  "193": {
+    "inputs": {
+      "lora_name": "画风调整\\add_saturation_XL.safetensors",
+      "strength_model": -1,
+      "strength_clip": 1,
+      "model": [
+        "189",
+        0
+      ],
+      "clip": [
+        "189",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  },
+  "195": {
+    "inputs": {
+      "control_net_name": "SDXL\\controlnet-union-sdxl-1.0\\diffusion_pytorch_model_promax.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "加载ControlNet模型"
+    }
+  },
+  "196": {
+    "inputs": {
+      "image": "ComfyUI_02532_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "197": {
+    "inputs": {
+      "preprocessor": "scribble",
+      "sd_version": "sdxl",
+      "resolution": 768,
+      "preprocessor_override": "None",
+      "image": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "AV_ControlNetPreprocessor",
+    "_meta": {
+      "title": "ControlNet Preprocessor"
+    }
+  },
+  "202": {
+    "inputs": {
+      "seed": 70193927806191
+    },
+    "class_type": "CR Seed",
+    "_meta": {
+      "title": "🌱 CR Seed"
+    }
+  },
+  "210": {
+    "inputs": {
+      "images": [
+        "142",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "211": {
+    "inputs": {
+      "images": [
+        "142",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "212": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "142",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "218": {
+    "inputs": {
+      "wildcard_text": "akemi homura, 1girl, long hair, black hair,  purple eyes,  black hairband,,magical girl,neck ribbon, \nUncensored,\nwet skin texture,\n,, __story_type/action_sex_list__ ,\n\n\nindoors,sunlight, shallow depth of field，\n\n",
+      "populated_text": "akemi homura, 1girl, long hair, black hair,  purple eyes,  black hairband,,magical girl,neck ribbon, \nUncensored,\nwet skin texture,\n,, 1girl,clenched teeth,scowl,half closed eyes,heart-shaped pupils,open mouth,blush,,,from side,giant penis with protruding abdomen,1boy,stomach protrusion,boy puts his hand behind the girl's head,spread legs,reverse suspended congress,full nelson,carrying,leg grab,open mouth,penis,pussy,spread pussy,sex from behind,sweat,vaginal,indoors,at night ,\n\n\nindoors,sunlight, shallow depth of field，\n\n",
+      "mode": "populate",
+      "seed": 1081670228684304,
+      "Select to add Wildcard": "Select the Wildcard to add to the text",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "ImpactWildcardProcessor",
+    "_meta": {
+      "title": "ImpactWildcardProcessor"
+    }
+  },
+  "219": {
+    "inputs": {
+      "novelai_old_prompt": [
+        "218",
+        0
+      ],
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "OldNAIToComfyUI",
+    "_meta": {
+      "title": "Convert Old NAI to ComfyUI"
+    }
+  },
+  "220": {
+    "inputs": {
+      "text": "bright,dynamic lighting,church,blurry background, cinematic,highlight,glaze,ray on face,light particle, best quality, very aesthetic, highres, absurdres",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "221": {
+    "inputs": {
+      "text": "(artist:tianliang duohe fangdongye:0.9), artist:ciloranko, artist:noyu, noyu23386566,ningen mame, (artist:sho:0.8264462809917354), (sho lwlw:0.9090909090909091),(artist:kedama_milk:0.5),(bee_\\(deadflow\\):0.7),artist:dino,(artist:fkey:0.8),(artist:wlop:1),year 2023, (solo:1.3310000000000004), (disheveled hair:0.5),\n\nakemi homura, 1girl, black hair purple eyes, black hairband,,magical girl,\n\nblush,ahegao,fucked_silly,rolling eyes,heart pupil,dress,nipple, 1boy,half_closed_eyes,close up,from above, hetero, penis,watery pussy, solo focus,pussy focus,arched_back, indoors,torso_grab,orgasm, spread legs,squeeze,squeezing, cum,pov, sex ,crotch_focus,groin, vaginal,drooling,melting,cum,cumdrip,cum overflow,think cum,bubbles,cum_bubble,cum_on_body ,cum_on_stomach,bukkake,after_vaginal , cum in pussy, bottomless, heavy breathing,barefoot,sweat,sweatdrop,wet,shiny,on_bed,sitting,sitting_on_lap,sitting_on_person,room,expressive,dark,blue theme,\n\nsimple background,blurry background,depth of field,dynamic lighting,light particle, best quality, very aesthetic, highres, absurdres",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      }
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "222": {
+    "inputs": {
+      "lora_name": "character\\homura-akemi-s1-illustriousxl-lora-nochekaiser.safetensors",
+      "strength_model": 0.45,
+      "strength_clip": 1,
+      "model": [
+        "175",
+        0
+      ],
+      "clip": [
+        "175",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "加载LoRA"
+    }
+  }
+}

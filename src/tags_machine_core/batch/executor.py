@@ -59,7 +59,7 @@ class BatchExecutor:
             resolved_nodes=resolved_nodes,
             width=task.render.width or 1024,
             height=task.render.height or 1024,
-            model=task.render.model,
+            model=task.render.model if task.render.backend == "novelai" else None,
             action="generate" if task.render.backend == "novelai" else "render-plan",
             params=render_params,
         )
@@ -124,7 +124,11 @@ class BatchExecutor:
             index = role_counts.get(node_ref.role, 0)
             role_counts[node_ref.role] = index + 1
             if node_ref.role == "artist":
-                document = artist_repo.load_node(node_ref.ref)
+                document = (
+                    self.node_reader.read(node_ref.ref)
+                    if Path(node_ref.ref).exists() or task.render.backend != "novelai"
+                    else artist_repo.load_node(node_ref.ref)
+                )
             else:
                 document = self.node_reader.read(node_ref.ref)
             items.append(

@@ -10,7 +10,7 @@
 - Renderer 负责把业务节点和 `PromptBundle` 转成后端请求。
 - Executor / Client 负责真正联网生图。
 
-当前真实主链路优先支持 NovelAI。ComfyUI / SD 目前保留 render-plan 和实验执行能力，不作为真实验收重点。
+当前真实主链路支持 NovelAI 和 ComfyUI。NovelAI 继续负责旧 tags_machine 画风兼容与 NAI API；ComfyUI 通过 artist node 绑定 API workflow，作为 opt-in 真实出图后端。SD 仍保留为预研后端。
 
 ## 2. 总体链路
 
@@ -498,3 +498,14 @@ uv run python -m tags_machine_core verify-prompt-policy-acceptance \
 ```text
 docs/archive/2026-06-current-refactor/
 ```
+## ComfyUI 后端边界补充
+
+ComfyUI 接入遵循“提示词生成层不感知 workflow”的原则：
+
+- Composer 只输出 backend-neutral `PromptBundle`。
+- ComfyUI artist node 归属于输入层，保存 `renderers.comfyui.workflow_path`、`inputs`、`optional_inputs`、`output_nodes`。
+- ComfyUI renderer 是业务适配层，读取 artist node，加载 API workflow，按绑定路径 patch positive prompt、negative prompt、width、height、seed 和显式 optional 参数。
+- ComfyUI client 是原始 API 层，只负责 `/prompt`、`/history/{prompt_id}`、`/view`、`/object_info`，不理解 character/action/artist 业务节点。
+- checkpoint、VAE、LoRA、ControlNet、upscale、自定义节点和复杂图生图逻辑继续由 workflow 自己控制。
+
+`run-prompt --backend comfyui` 和 batch 的 `defaults.backend: comfyui` 都走同一条链路。真实验收记录见 `docs/comfyui_aki_cunyfunky_business_test_20260704.md`。

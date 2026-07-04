@@ -1,0 +1,43 @@
+schema: tags-machine-core.batch/v1
+name: comfyui-cunyfunky-smoke
+description: ComfyUI Aki cunyfunky business validation
+config: configs/local.example.yaml
+output_dir: outputs/comfyui_cunyfunky_batch
+
+defaults:
+  composer: full
+  backend: comfyui
+  artist: examples/nodes/artists/comfyui_cunyfunky
+  nt: 1
+  resolution: portrait
+  width: 1024
+  height: 1536
+  seed: 123456
+  image_format: png
+
+expand:
+  mode: manual
+
+run:
+  resume: true
+  stop_on_error: false
+  retry:
+    max_attempts: 2
+    timeout_seconds: 600
+    backoff_seconds: [2.0, 5.0]
+
+archive:
+  save_parameter_image: true
+
+tasks:
+  - id: comfyui_prompt_001
+    prompt: "akemi_homura, 1girl, black_hair, purple_eyes, magical_girl, standing, looking_at_viewer"
+    negative: "bad hands, low quality"
+
+  - id: comfyui_prompt_002
+    prompt: "akemi_homura, 1girl, black_hair, purple_eyes, magical_girl, sitting, indoors"
+    negative: "bad hands, low quality"
+
+  - id: comfyui_prompt_003
+    prompt: "akemi_homura, 1girl, black_hair, purple_eyes, magical_girl, upper_body, portrait"
+    negative: "bad hands, low quality"

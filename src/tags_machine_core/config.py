@@ -30,15 +30,21 @@ class LoggingConfig(BaseModel):
 
 class NovelAIConfig(BaseModel):
     base_url: str = "https://image.novelai.net"
+    access_token: str | None = None
     access_token_env: str = "NAI_ACCESS_TOKEN"
     timeout: int = 120
     retry: int = 3
     retry_interval: float | None = None
+    request_interval: float = 0.0
 
 
 class ComfyUIConfig(BaseModel):
     base_url: str = "http://127.0.0.1:8188"
-    timeout: int = 120
+    timeout: int = 300
+    poll_interval: float = 1.0
+    max_wait_seconds: float | None = 600
+    retry: int = 3
+    retry_interval: float = 2.0
 
 
 class SDConfig(BaseModel):

@@ -20,6 +20,95 @@ _LEVELS: dict[str, int] = {
     "error": logging.ERROR,
 }
 
+_RESET = "\033[0m"
+_COLORS: dict[int, str] = {
+    TRACE_LEVEL: "\033[38;5;244m",
+    logging.DEBUG: "\033[36m",
+    logging.INFO: "\033[32m",
+    logging.WARNING: "\033[33m",
+    logging.ERROR: "\033[31m",
+    logging.CRITICAL: "\033[35m",
+}
+
+
+class ColorFormatter(logging.Formatter):
+    def __init__(self) -> None:
+        super().__init__(
+            fmt="%(asctime_colored)s %(levelname_colored)s %(filename_colored)s:%(lineno)d %(message)s",
+            datefmt="%H:%M:%S",
+        )
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = _COLORS.get(record.levelno, "")
+        record.message = record.getMessage()
+        asctime = self.formatTime(record, self.datefmt)
+        record.asctime_colored = _wrap_color(asctime, color)
+        record.levelname_colored = _wrap_color(f"{record.levelname:<7}", color)
+        record.filename_colored = _wrap_color(record.filename, color)
+        message = self.formatMessage(record)
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            if message[-1:] != "\n":
+                message += "\n"
+            message += record.exc_text
+        if record.stack_info:
+            if message[-1:] != "\n":
+                message += "\n"
+            message += self.formatStack(record.stack_info)
+        return message
+
+
+def _wrap_color(text: str, color: str) -> str:
+    if not color:
+        return text
+    return f"{color}{text}{_RESET}"
+
+
+_DEFAULT_FORMATTER = ColorFormatter()
+
+
+def format_console_record(
+    *,
+    level: int,
+    logger_name: str,
+    pathname: str,
+    lineno: int,
+    message: str,
+) -> str:
+    record = logging.LogRecord(
+        name=logger_name,
+        level=level,
+        pathname=pathname,
+        lineno=lineno,
+        msg=message,
+        args=(),
+        exc_info=None,
+    )
+    return _DEFAULT_FORMATTER.format(record)
+
+
+def emit_console_record(
+    *,
+    level: int,
+    logger_name: str,
+    pathname: str,
+    lineno: int,
+    message: str,
+) -> None:
+    print(
+        format_console_record(
+            level=level,
+            logger_name=logger_name,
+            pathname=pathname,
+            lineno=lineno,
+            message=message,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
 
 def _install_trace_level() -> None:
     if logging.getLevelName(TRACE_LEVEL) != "TRACE":
@@ -51,9 +140,7 @@ def configure_logging(level: str | None = None) -> int:
 
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(
-            logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
-        )
+        handler.setFormatter(_DEFAULT_FORMATTER)
         logger.addHandler(handler)
 
     for handler in logger.handlers:

@@ -1117,3 +1117,36 @@ prompt: "{akemi_homura}, (bare feet:1.2), [simple background]"
 ```
 
 这样 `()`、`{}`、`[]` 都会作为普通字符串内容，不会被 YAML 当成结构语法。
+## ComfyUI Aki 快速使用
+
+ComfyUI 现在是 opt-in 真实出图后端。它不使用旧 `design/画风/<artist>/tags.txt` 的画风拼接逻辑，而是通过结构化 artist node 指向一个 ComfyUI API workflow。
+
+最小 run-prompt：
+
+```powershell
+uv run python -m tags_machine_core run-prompt `
+  --backend comfyui `
+  --prompt "akemi_homura, 1girl, black_hair, purple_eyes, magical_girl, standing, looking_at_viewer" `
+  --negative "bad hands, low quality" `
+  --artist-node examples\nodes\artists\comfyui_cunyfunky `
+  --width 1024 `
+  --height 1536 `
+  --seed 123456 `
+  --nt 1 `
+  --config configs\local.example.yaml `
+  --output-dir outputs\comfyui_cunyfunky_acceptance `
+  --log-level info
+```
+
+最小 batch：
+
+```powershell
+uv run python -m tags_machine_core run-batch examples\batches\comfyui_cunyfunky_smoke.yaml `
+  --fresh `
+  --config configs\local.example.yaml `
+  --log-level info
+```
+
+输出结构仍然是 `output_dir/<task_id>/*`。每个 task 目录会包含生成图片、`prompt_bundle.json`、`render_request.json`、`generation_result.json`、`png_params.json`，开启 `archive.save_parameter_image: true` 时还会有 `zz_<task_id>_parameter_details.png`。
+
+ComfyUI artist node 的字段规范见 `docs/comfyui_artist_node_spec_v1.md`，真实验收记录见 `docs/comfyui_aki_cunyfunky_business_test_20260704.md`。

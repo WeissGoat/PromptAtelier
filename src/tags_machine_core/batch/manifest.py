@@ -82,7 +82,8 @@ def manifest_entry_for_task(
 ) -> ManifestEntry:
     root = Path(run_dir)
     task_dir = Path(task.output.task_dir)
-    generation_path = task_dir / "generation_result.json"
+    artifact_dir = Path(task.output.output_dir or task.render.output_dir or task_dir)
+    generation_path = artifact_dir / "generation_result.json"
     return ManifestEntry(
         task_id=task.id,
         status=status,

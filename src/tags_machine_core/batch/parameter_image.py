@@ -92,7 +92,7 @@ def write_parameter_details_image(
         y=y,
         width=CANVAS_WIDTH - MARGIN * 2,
         height=270,
-        title="NovelAI Parameters",
+        title=_parameter_section_title(request),
         lines=_parameter_lines(params=params, request=request),
         fonts=fonts,
     )
@@ -200,34 +200,110 @@ def _render_lines(*, task: BatchTask, request: dict[str, Any], params: dict[str,
 
 
 def _parameter_lines(*, params: dict[str, Any], request: dict[str, Any]) -> list[str]:
-    keys = [
-        "seed",
-        "extra_noise_seed",
-        "steps",
-        "scale",
-        "cfg_rescale",
-        "sampler",
-        "noise_schedule",
-        "ucPreset",
-        "qualityToggle",
-        "sm",
-        "sm_dyn",
-        "dynamic_thresholding",
-        "characterPrompts",
-        "reference_image_multiple",
-        "reference_strength_multiple",
-        "director_reference_images",
-    ]
-    lines = []
-    if request.get("action"):
-        lines.append(f"action: {request.get('action')}")
-    for key in keys:
-        if key not in params:
+    if request.get("backend") == "comfyui":
+        return _comfyui_parameter_lines(params=params, request=request)
+    return _character_prompt_lines(params) or ["characterPrompts: -"]
+
+
+def _parameter_section_title(request: dict[str, Any]) -> str:
+    if request.get("backend") == "comfyui":
+        return "ComfyUI Parameters"
+    return "NovelAI Parameters"
+
+
+def _comfyui_parameter_lines(*, params: dict[str, Any], request: dict[str, Any]) -> list[str]:
+    request_params = request.get("params") if isinstance(request.get("params"), dict) else {}
+    source = {**request_params, **params}
+    lines: list[str] = []
+    workflow = source.get("workflow")
+    workflow_hash = source.get("workflow_hash")
+    output_nodes = source.get("output_nodes") or []
+    node_overrides = source.get("node_overrides") if isinstance(source.get("node_overrides"), dict) else {}
+    if workflow:
+        lines.append(f"workflow: {workflow}")
+    if workflow_hash:
+        lines.append(f"workflow_hash: {workflow_hash}")
+    if output_nodes:
+        lines.append("output_nodes: " + ", ".join(str(item) for item in output_nodes))
+    if source.get("seed") is not None:
+        lines.append(f"seed: {source.get('seed')}")
+    if source.get("width") and source.get("height"):
+        lines.append(f"size: {source.get('width')} x {source.get('height')}")
+    if node_overrides:
+        lines.append(f"node_overrides: {len(node_overrides)} patched values")
+    return lines or ["workflow: -"]
+
+
+def _character_prompt_lines(params: dict[str, Any]) -> list[str]:
+    prompts = _character_prompts_from_params(params)
+    if not prompts:
+        return []
+
+    lines = [f"characterPrompts: {len(prompts)}"]
+    for index, prompt in enumerate(prompts, start=1):
+        positive = _display_value(prompt.get("prompt") or "", limit=520)
+        negative = _display_value(prompt.get("uc") or "", limit=260)
+        lines.append(f"{index}. prompt: {positive}")
+        if negative:
+            lines.append(f"   uc: {negative}")
+    return lines
+
+
+def _character_prompts_from_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+    direct = params.get("characterPrompts")
+    direct_prompts = _normalize_character_prompts(direct)
+    if direct_prompts:
+        return direct_prompts
+
+    v4_prompt = params.get("v4_prompt")
+    v4_negative = params.get("v4_negative_prompt")
+    positive_captions = _v4_char_captions(v4_prompt)
+    negative_captions = _v4_char_captions(v4_negative)
+    prompts: list[dict[str, Any]] = []
+    for index, positive in enumerate(positive_captions):
+        negative = negative_captions[index] if index < len(negative_captions) else ""
+        if not positive and not negative:
             continue
-        value = params[key]
-        value = _display_value(value, limit=220)
-        lines.append(f"{key}: {value}")
-    return lines or ["-"]
+        prompts.append({"prompt": positive, "uc": negative})
+    return prompts
+
+
+def _normalize_character_prompts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    if value and all(isinstance(item, list) for item in value):
+        value = value[0]
+    prompts: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        prompt = item.get("prompt")
+        if prompt is None:
+            prompt = item.get("char_caption")
+        uc = item.get("uc")
+        if uc is None:
+            uc = item.get("negative_prompt") or ""
+        if prompt or uc:
+            prompts.append({"prompt": str(prompt or ""), "uc": str(uc or "")})
+    return prompts
+
+
+def _v4_char_captions(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    caption = value.get("caption")
+    if not isinstance(caption, dict):
+        return []
+    char_captions = caption.get("char_captions")
+    if not isinstance(char_captions, list):
+        return []
+    result: list[str] = []
+    for item in char_captions:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("char_caption")
+        result.append(str(text or ""))
+    return result
 
 
 def _prompt_positive(*, bundle: dict[str, Any], request: dict[str, Any], params: dict[str, Any]) -> str:

@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from tags_machine_core.logging_config import get_logger
 
@@ -50,22 +51,52 @@ class BatchPlanner:
     def __init__(self, *, base_dir: str | Path):
         self.base_dir = Path(base_dir)
 
-    def plan(self, spec: BatchSpec, *, run_dir: str | Path | None = None) -> list[BatchTask]:
-        resolved_run_dir = Path(run_dir or Path(spec.output_root) / spec.name)
+    def plan(
+        self,
+        spec: BatchSpec,
+        *,
+        run_dir: str | Path | None = None,
+        output_dir: str | Path | None = None,
+        run_id: str | None = None,
+    ) -> list[BatchTask]:
+        resolved_run_dir = Path(run_dir or self.base_dir / spec.name)
+        resolved_output_dir = self._resolve_output_dir(
+            output_dir or spec.output_dir,
+            fallback=resolved_run_dir / "outputs",
+        )
+        resolved_run_id = run_id or uuid4().hex[:8]
         self._validate_expand_select_contract(spec)
         selections = self._resolve_selections(spec)
         if spec.expand.mode == "prompt_list":
-            tasks = self._plan_prompt_list(spec, selections, run_dir=resolved_run_dir)
+            tasks = self._plan_prompt_list(
+                spec,
+                selections,
+                run_dir=resolved_run_dir,
+                output_dir=resolved_output_dir,
+                run_id=resolved_run_id,
+            )
         elif spec.expand.mode == "product":
-            tasks = self._plan_product(spec, selections, run_dir=resolved_run_dir)
+            tasks = self._plan_product(spec, selections, run_dir=resolved_run_dir, output_dir=resolved_output_dir, run_id=resolved_run_id)
         elif spec.expand.mode == "zip":
-            tasks = self._plan_zip(spec, selections, run_dir=resolved_run_dir)
+            tasks = self._plan_zip(spec, selections, run_dir=resolved_run_dir, output_dir=resolved_output_dir, run_id=resolved_run_id)
         elif spec.expand.mode == "character_action_group":
-            tasks = self._plan_character_action_group(spec, selections, run_dir=resolved_run_dir)
+            tasks = self._plan_character_action_group(
+                spec,
+                selections,
+                run_dir=resolved_run_dir,
+                output_dir=resolved_output_dir,
+                run_id=resolved_run_id,
+            )
         elif spec.expand.mode == "blackboard_rounds":
-            tasks = self._plan_blackboard_rounds(spec, selections, run_dir=resolved_run_dir)
+            tasks = self._plan_blackboard_rounds(
+                spec,
+                selections,
+                run_dir=resolved_run_dir,
+                output_dir=resolved_output_dir,
+                run_id=resolved_run_id,
+            )
         elif spec.expand.mode == "manual":
-            tasks = self._plan_manual(spec, run_dir=resolved_run_dir)
+            tasks = self._plan_manual(spec, run_dir=resolved_run_dir, output_dir=resolved_output_dir, run_id=resolved_run_id)
         else:
             raise ValueError(f"Unsupported expand mode: {spec.expand.mode}")
 
@@ -77,7 +108,10 @@ class BatchPlanner:
             task.model_copy(
                 update={
                     "index": index,
-                    "output": TaskOutput(task_dir=str(resolved_run_dir / "tasks" / task.id)),
+                    "output": TaskOutput(
+                        task_dir=str(resolved_run_dir / "tasks" / task.id),
+                        output_dir=str((resolved_output_dir / task.id).resolve()),
+                    ),
                 }
             )
             for index, task in enumerate(tasks)
@@ -102,6 +136,12 @@ class BatchPlanner:
             backgrounds=backgrounds,
             prompts=prompts,
         )
+
+    def _resolve_output_dir(self, value: str | Path | None, *, fallback: Path) -> Path:
+        if value is None:
+            return fallback
+        path = Path(value)
+        return path if path.is_absolute() else self.base_dir / path
 
     def _validate_expand_select_contract(self, spec: BatchSpec) -> None:
         if spec.expand.mode in {"character_action_group", "blackboard_rounds"}:
@@ -141,6 +181,8 @@ class BatchPlanner:
         selections: SelectionSet,
         *,
         run_dir: Path,
+        output_dir: Path,
+        run_id: str,
     ) -> list[BatchTask]:
         if not selections.prompts:
             raise ValueError("prompt_list expand mode requires select.prompts")
@@ -151,6 +193,8 @@ class BatchPlanner:
             if artist:
                 nodes.append(NodeRef(role="artist", ref=artist, index=0))
             task_id = _task_id(
+                run_id,
+                len(tasks),
                 prompt_item.id,
                 artist or "no_artist",
                 spec.defaults.composer,
@@ -168,6 +212,8 @@ class BatchPlanner:
                     artist=artist,
                     source={"prompt_id": prompt_item.id, "prompt_meta": prompt_item.meta},
                     run_dir=run_dir,
+                    output_dir=output_dir,
+                    run_id=run_id,
                 )
             )
         return tasks
@@ -178,6 +224,8 @@ class BatchPlanner:
         selections: SelectionSet,
         *,
         run_dir: Path,
+        output_dir: Path,
+        run_id: str,
     ) -> list[BatchTask]:
         artists = selections.artists or ([spec.defaults.artist] if spec.defaults.artist else [None])
         characters = selections.characters or [None]
@@ -196,7 +244,7 @@ class BatchPlanner:
                 artist=artist,
                 background=background,
             )
-            task_id = _task_id(character, action, artist, background, spec.defaults.composer)
+            task_id = _task_id(run_id, len(tasks), character, action, artist, background, spec.defaults.composer)
             tasks.append(
                 self._task(
                     spec,
@@ -210,8 +258,11 @@ class BatchPlanner:
                         "action": action,
                         "artist": artist,
                         "background": background,
+                        "run_id": run_id,
                     },
                     run_dir=run_dir,
+                    output_dir=output_dir,
+                    run_id=run_id,
                 )
             )
         return tasks
@@ -222,6 +273,8 @@ class BatchPlanner:
         selections: SelectionSet,
         *,
         run_dir: Path,
+        output_dir: Path,
+        run_id: str,
     ) -> list[BatchTask]:
         artists = selections.artists or ([spec.defaults.artist] if spec.defaults.artist else [None])
         max_len = max(len(selections.characters), len(selections.actions), len(artists))
@@ -242,13 +295,15 @@ class BatchPlanner:
             tasks.append(
                 self._task(
                     spec,
-                    task_id=_task_id(index, character, action, artist, background),
+                    task_id=_task_id(run_id, index, character, action, artist, background),
                     index=index,
                     composer=spec.defaults.composer,
                     nodes=nodes,
                     artist=artist,
-                    source={"zip_index": index},
+                    source={"zip_index": index, "run_id": run_id},
                     run_dir=run_dir,
+                    output_dir=output_dir,
+                    run_id=run_id,
                 )
             )
         return tasks
@@ -259,6 +314,8 @@ class BatchPlanner:
         selections: SelectionSet,
         *,
         run_dir: Path,
+        output_dir: Path,
+        run_id: str,
     ) -> list[BatchTask]:
         artists = selections.artists or ([spec.defaults.artist] if spec.defaults.artist else [None])
         backgrounds = selections.backgrounds or [None]
@@ -303,6 +360,8 @@ class BatchPlanner:
                         background=background,
                     )
                     task_id = _task_id(
+                        run_id,
+                        len(tasks),
                         character,
                         group.name,
                         action,
@@ -323,6 +382,7 @@ class BatchPlanner:
                                 "action": action,
                                 "artist": artist,
                                 "background": background,
+                                "run_id": run_id,
                                 "action_group": group.name,
                                 "action_group_strategy": spec.expand.action_group_strategy,
                                 "action_group_record": str(record_path) if record_path else None,
@@ -332,6 +392,8 @@ class BatchPlanner:
                                 "action_group_selected_count": selected_count,
                             },
                             run_dir=run_dir,
+                            output_dir=output_dir,
+                            run_id=run_id,
                         )
                     )
         return tasks
@@ -342,6 +404,8 @@ class BatchPlanner:
         selections: SelectionSet,
         *,
         run_dir: Path,
+        output_dir: Path,
+        run_id: str,
     ) -> list[BatchTask]:
         artists = selections.artists or ([spec.defaults.artist] if spec.defaults.artist else [None])
         backgrounds = selections.backgrounds or [None]
@@ -390,6 +454,8 @@ class BatchPlanner:
                         background=background,
                     )
                     task_id = _task_id(
+                        run_id,
+                        len(tasks),
                         round_index,
                         action_index,
                         character,
@@ -412,6 +478,7 @@ class BatchPlanner:
                                 "action": action,
                                 "artist": artist,
                                 "background": background,
+                                "run_id": run_id,
                                 "round_index": round_index,
                                 "action_group": group.name,
                                 "action_group_strategy": spec.expand.action_group_strategy,
@@ -422,12 +489,14 @@ class BatchPlanner:
                                 "action_group_selected_count": selected_count,
                             },
                             run_dir=run_dir,
+                            output_dir=output_dir,
+                            run_id=run_id,
                         )
                     )
             round_index += 1
         return tasks
 
-    def _plan_manual(self, spec: BatchSpec, *, run_dir: Path) -> list[BatchTask]:
+    def _plan_manual(self, spec: BatchSpec, *, run_dir: Path, output_dir: Path, run_id: str) -> list[BatchTask]:
         tasks: list[BatchTask] = []
         for index, raw in enumerate(spec.tasks):
             nodes = [NodeRef.model_validate(item) for item in raw.get("nodes", [])]
@@ -436,7 +505,7 @@ class BatchPlanner:
                 if value:
                     nodes.append(NodeRef(role=role, ref=str(value), index=_role_index(nodes, role)))
             artist = raw.get("artist") or spec.defaults.artist
-            task_id = str(raw.get("id") or _task_id(index, artist, raw.get("prompt"), raw.get("action")))
+            task_id = str(raw.get("id") or _task_id(run_id, index, artist, raw.get("prompt"), raw.get("action")))
             tasks.append(
                 self._task(
                     spec,
@@ -447,8 +516,10 @@ class BatchPlanner:
                     prompt=raw.get("prompt"),
                     negative=raw.get("negative"),
                     artist=artist,
-                    source={"manual": True},
+                    source={"manual": True, "run_id": run_id},
                     run_dir=run_dir,
+                    output_dir=output_dir,
+                    run_id=run_id,
                 )
             )
         return tasks
@@ -466,6 +537,8 @@ class BatchPlanner:
         negative: str | None = None,
         source: dict[str, Any] | None = None,
         run_dir: Path,
+        output_dir: Path,
+        run_id: str,
     ) -> BatchTask:
         render_params = dict(spec.defaults.params)
         if spec.defaults.character_prompts == "auto":
@@ -489,8 +562,9 @@ class BatchPlanner:
             width=width,
             height=height,
             seed=spec.defaults.seed,
-            model=spec.defaults.model,
+            model=spec.defaults.model if spec.defaults.backend == "novelai" else None,
             image_format=spec.defaults.image_format,
+            output_dir=str((output_dir / task_id).resolve()),
             params=render_params,
         )
         return BatchTask(
@@ -506,7 +580,10 @@ class BatchPlanner:
                 cache_dir=spec.defaults.cache_dir,
             ),
             policy=_policy_config(spec.defaults.prompt_policy_profile, composer=composer),
-            output={"task_dir": str(run_dir / "tasks" / task_id)},
+            output={
+                "task_dir": str(run_dir / "tasks" / task_id),
+                "output_dir": str((output_dir / task_id).resolve()),
+            },
             source=source or {},
         )
 

@@ -48,9 +48,11 @@ def _app_config(root: Path) -> AppConfig:
             },
             "novelai": {
                 "base_url": "http://novelai.local",
+                "access_token": None,
                 "access_token_env": "NAI_ACCESS_TOKEN",
                 "timeout": 30,
                 "retry": 1,
+                "request_interval": 0,
             },
             "comfyui": {
                 "base_url": "http://comfy.local",
@@ -221,6 +223,7 @@ class ExecutionTest(unittest.TestCase):
                 base_url="http://novelai.local",
                 timeout=30,
                 retry=1,
+                retry_interval=None,
             )
             self.assertEqual(client.generate_images.call_count, 2)
             called_requests = [item.args[0] for item in client.generate_images.call_args_list]
@@ -244,6 +247,45 @@ class ExecutionTest(unittest.TestCase):
             self.assertIn("Not a PNG file", result.png_info["images"][0]["error"])
             self.assertEqual(result.png_info["images"][1]["split_request_index"], 1)
 
+    def test_execute_novelai_generation_prefers_config_access_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base_config = _app_config(root)
+            config = base_config.model_copy(
+                update={
+                    "novelai": base_config.novelai.model_copy(update={"access_token": "config-token"})
+                }
+            )
+            request = RenderRequest(
+                backend="novelai",
+                prompt="akemi homura",
+            )
+
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                patch("tags_machine_core.execution.NovelAIClient") as client_cls,
+            ):
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="nai_result", content=b"image-bytes")
+                ]
+                client.build_payload.return_value = {"input": request.prompt, "model": request.model, "parameters": {}}
+
+                execute_novelai_generation(
+                    config,
+                    request,
+                    output_dir=None,
+                    image_format="png",
+                )
+
+            client_cls.assert_called_once_with(
+                access_token="config-token",
+                base_url="http://novelai.local",
+                timeout=30,
+                retry=1,
+                retry_interval=None,
+            )
+
     def test_execute_novelai_generation_requires_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -264,19 +306,19 @@ class ExecutionTest(unittest.TestCase):
                     image_format="png",
                 )
 
+            self.assertIn("novelai.access_token", str(raised.exception))
             self.assertIn("NAI_ACCESS_TOKEN", str(raised.exception))
 
-    def test_execute_render_request_rejects_experimental_backend_by_default(self):
+    def test_execute_render_request_rejects_sd_experimental_backend_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = _app_config(Path(tmp))
             request = RenderRequest(
-                backend="comfyui",
+                backend="sd",
                 prompt="akemi homura",
-                params={"workflow_json": {}},
             )
 
             with (
-                patch("tags_machine_core.execution.ComfyUIClient") as client_cls,
+                patch("tags_machine_core.execution.SDClient") as client_cls,
                 self.assertRaises(ValueError) as raised,
             ):
                 execute_render_request(
@@ -286,7 +328,7 @@ class ExecutionTest(unittest.TestCase):
                     image_format="png",
                 )
 
-            self.assertIn("only NovelAI by default", str(raised.exception))
+            self.assertIn("NovelAI, ComfyUI", str(raised.exception))
             client_cls.assert_not_called()
 
     def test_execute_render_request_routes_novelai_backend(self):
@@ -343,7 +385,12 @@ class ExecutionTest(unittest.TestCase):
                     no_wait=True,
                 )
 
-            client_cls.assert_called_once_with(base_url="http://comfy.local", timeout=31)
+            client_cls.assert_called_once_with(
+                base_url="http://comfy.local",
+                timeout=31,
+                retry=3,
+                retry_interval=2.0,
+            )
             client.queue_prompt.assert_called_once_with(request, client_id="client-1")
             client.generate_images.assert_not_called()
             client.build_payload.assert_called_once_with(request, client_id="client-1")

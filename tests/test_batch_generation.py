@@ -645,7 +645,7 @@ expand:
             self.assertEqual(data["selector_summary"]["prompts"], 1)
             self.assertTrue(Path(data["manifest_path"]).exists())
             self.assertEqual(Path(data["run_dir"]), root / "cli-plan")
-            self.assertEqual(Path(data["output_dir"]), root / "custom_outputs")
+            self.assertEqual(Path(data["output_dir"]).resolve(), (root / "custom_outputs").resolve())
             source = json.loads((Path(data["run_dir"]) / "batch_source.json").read_text(encoding="utf-8"))
             self.assertEqual(source["run_id"], data["run_id"])
             self.assertEqual(Path(source["output_dir"]).resolve(), (root / "custom_outputs").resolve())
@@ -1093,6 +1093,7 @@ expand:
     def test_parameter_details_uses_actual_png_parameters_for_split_generation(self):
         from tags_machine_core.batch.parameter_image import (
             _display_parameters,
+            _parameter_lines,
             _prompt_negative,
             _prompt_positive,
         )
@@ -1138,6 +1139,51 @@ expand:
         self.assertEqual(params["_actual_image_count"], 2)
         self.assertEqual(_prompt_positive(bundle=bundle, request=request, params=params), "actual prompt")
         self.assertEqual(_prompt_negative(bundle=bundle, request=request, params=params), "actual negative")
+
+        params["characterPrompts"] = [
+            {"prompt": "girl, akemi_homura, black_hair", "uc": "red_glasses"},
+            {"prompt": "boy, ", "uc": ""},
+        ]
+        lines = _parameter_lines(params=params, request=request)
+
+        self.assertEqual(lines[0], "characterPrompts: 2")
+        self.assertIn("1. prompt: girl, akemi_homura, black_hair", lines)
+        self.assertIn("   uc: red_glasses", lines)
+        self.assertIn("2. prompt: boy, ", lines)
+        self.assertFalse(any(line.startswith("seed:") for line in lines))
+        self.assertFalse(any(line.startswith("steps:") for line in lines))
+
+    def test_parameter_details_extracts_v4_character_prompts(self):
+        from tags_machine_core.batch.parameter_image import _parameter_lines
+
+        params = {
+            "seed": 101,
+            "steps": 28,
+            "v4_prompt": {
+                "caption": {
+                    "char_captions": [
+                        {"char_caption": "girl, akemi_homura"},
+                        {"char_caption": "boy, "},
+                    ]
+                }
+            },
+            "v4_negative_prompt": {
+                "caption": {
+                    "char_captions": [
+                        {"char_caption": "red_glasses"},
+                        {"char_caption": ""},
+                    ]
+                }
+            },
+        }
+
+        lines = _parameter_lines(params=params, request={})
+
+        self.assertEqual(lines[0], "characterPrompts: 2")
+        self.assertIn("1. prompt: girl, akemi_homura", lines)
+        self.assertIn("   uc: red_glasses", lines)
+        self.assertIn("2. prompt: boy, ", lines)
+        self.assertFalse(any(line.startswith("seed:") for line in lines))
 
     def test_archive_parameter_details_image_disabled_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
