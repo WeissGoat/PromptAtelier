@@ -1,0 +1,29 @@
+schema: tags-machine-core.batch/v1
+name: agent-cache-miss
+config: configs/local.example.yaml
+output_root: outputs/batches
+
+defaults:
+  composer: agent
+  artist: 20260412
+  nt: 1
+  resolution: square
+  cache_dir: cache/agent_composer
+
+select:
+  characters:
+    - selector: explicit
+      refs:
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+  actions:
+    - selector: folder
+      root: F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
+      recursive: true
+      limit: 1
+  artists:
+    - selector: explicit
+      refs:
+        - 20260412
+
+expand:
+  mode: product

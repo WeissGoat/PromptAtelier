@@ -5,7 +5,16 @@ from typing import Any
 
 import yaml
 
+from .action_profile import load_action_profile
 from .models import LegacyNodeMeta, NodeDocument
+
+LEGACY_EXTENSION_PREFIXES = (
+    "after_uc",
+    "origin_uc",
+    "origin_clear",
+    "gen_json",
+    "gen_param",
+)
 
 
 class NodeReader:
@@ -41,7 +50,8 @@ class NodeReader:
         data = self._normalize_yaml_data(data)
         data.setdefault("id", node_dir.name)
         data.setdefault("path", node_dir)
-        return NodeDocument.model_validate(data)
+        node = NodeDocument.model_validate(data)
+        return self._attach_action_profile(node, node_dir)
 
     def _normalize_yaml_data(self, data: dict[str, Any]) -> dict[str, Any]:
         tags = data.get("tags") or {}
@@ -63,15 +73,65 @@ class NodeReader:
             for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        return NodeDocument(
+        prompt_lines, type_lines, ext_lines = self._split_legacy_cnode_lines(lines)
+        raw_sections: dict[str, list[str]] = {
+            "prompt": prompt_lines,
+        }
+        if type_lines:
+            raw_sections["type"] = type_lines
+        if ext_lines:
+            raw_sections["extension"] = ext_lines
+        node = NodeDocument(
             kind="unknown",
             id=node_dir.name,
             name=node_dir.name,
             path=node_dir,
-            tags={"legacy": lines},
-            prompt={"positive": lines},
-            legacy=LegacyNodeMeta(source_file=str(path), raw_lines=lines),
+            tags={"legacy": prompt_lines},
+            prompt={"positive": prompt_lines},
+            legacy=LegacyNodeMeta(
+                source_file=str(path),
+                raw_lines=lines,
+                raw_sections=raw_sections,
+            ),
         )
+        return self._attach_action_profile(node, node_dir)
+
+    def _attach_action_profile(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
+        profile = load_action_profile(node_dir)
+        if profile is None:
+            return node
+        composition = dict(node.composition)
+        composition.update(profile.to_node_composition())
+        return node.model_copy(update={"composition": composition})
+
+    def _split_legacy_cnode_lines(self, lines: list[str]) -> tuple[list[str], list[str], list[str]]:
+        prompt_lines: list[str] = []
+        type_lines: list[str] = []
+        ext_lines: list[str] = []
+        in_extension = False
+        for line in lines:
+            if in_extension:
+                ext_lines.append(line)
+                continue
+            if line[:4] == "type":
+                type_lines.append(line)
+                continue
+            stripped = line.strip()
+            if stripped.startswith("="):
+                in_extension = True
+                inline_extension = stripped[1:].strip(" ,")
+                if inline_extension:
+                    ext_lines.append(inline_extension)
+                continue
+            if self._is_legacy_inline_extension(line):
+                in_extension = True
+                ext_lines.append(line)
+                continue
+            prompt_lines.append(line)
+        return prompt_lines, type_lines, ext_lines
+
+    def _is_legacy_inline_extension(self, line: str) -> bool:
+        return any(marker in line for marker in LEGACY_EXTENSION_PREFIXES)
 
     def _as_string_list(self, value: Any) -> list[str]:
         if value is None:

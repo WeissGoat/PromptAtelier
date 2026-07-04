@@ -20,7 +20,7 @@ composer 需要知道：
 character_scope: foot_detail
 ```
 
-`foot_detail` 具体要保留 `feet / footwear / legwear`，并过滤 `hair / eyes / upper_clothes`，这是 composer policy 的职责，不写进每个 action `meta.yaml`。
+`foot_detail` 具体要保留 `feet / legwear`，并过滤 `hair / eyes / upper_clothes`，这是 composer policy 的职责，不写进每个 action `meta.yaml`。
 
 ## 文件约定
 
@@ -300,13 +300,12 @@ character_scope_policy:
       - body
       - feet
       - legwear
-      - footwear
       - extra
     suppress_character_sections:
       - hair
       - eyes
       - face
-      - head_accessories
+      - headwear
       - upper_clothes
       - full_body_clothes
 ```

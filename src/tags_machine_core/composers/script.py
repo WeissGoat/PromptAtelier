@@ -13,8 +13,7 @@ from tags_machine_core.contracts import (
     PromptText,
 )
 from tags_machine_core.nodes.character_scope import (
-    character_material,
-    character_positive,
+    character_positive_with_selected_keys,
     dedupe,
     node_negative,
     node_positive,
@@ -80,9 +79,13 @@ class ScriptComposer:
             character=character,
             character_scope=character_scope or body_scope,
         )
-        character_positive_tags, included_sections, suppressed_sections = character_positive(
-            character,
-            scope,
+        selected_keys = self._character_selected_keys(action, 0)
+        character_positive_tags, included_sections, suppressed_sections = (
+            character_positive_with_selected_keys(
+                character,
+                scope,
+                selected_keys,
+            )
         )
         positive = _join_prompt_parts(
             character_positive_tags,
@@ -108,6 +111,7 @@ class ScriptComposer:
             character_scope=scope,
             nodes=json.dumps([ref.model_dump(mode="json") for ref in node_refs], sort_keys=True),
         )
+        extra = self._prompt_extra(action=action)
         return PromptBundle(
             prompt=PromptText(positive=positive, negative=negative_prompt),
             meta=PromptMeta(
@@ -119,6 +123,7 @@ class ScriptComposer:
                     suppressed_character_sections=suppressed_sections,
                 ),
                 nodes=node_refs,
+                extra=extra,
             ),
             cache=CacheMeta(cacheable=True, cache_key=cache_key),
         )
@@ -150,9 +155,11 @@ class ScriptComposer:
         suppressed_sections: list[str] = []
 
         for item in characters:
-            character_positive_tags, included, suppressed = character_positive(
+            selected_keys = self._character_selected_keys(primary_action, item.index)
+            character_positive_tags, included, suppressed = character_positive_with_selected_keys(
                 item.node,
                 scope,
+                selected_keys,
             )
             character_negative = node_negative(item.node, scope)
             positive_parts.append(character_positive_tags)
@@ -160,12 +167,16 @@ class ScriptComposer:
             included_sections.extend(included)
             suppressed_sections.extend(suppressed)
             character_materials.append(
-                character_material(
-                    node=item.node,
-                    ref=item.ref,
-                    index=item.index,
-                    character_scope=scope,
-                )
+                {
+                    "ref": item.ref,
+                    "id": item.node.id,
+                    "index": item.index,
+                    "used_sections": included,
+                    "suppressed_sections": suppressed,
+                    "positive_tags": character_positive_tags,
+                    "negative_tags": character_negative,
+                    "selected_keys": selected_keys or [],
+                }
             )
 
         for item in actions:
@@ -189,6 +200,12 @@ class ScriptComposer:
             character_scope=scope,
             nodes=json.dumps([ref.model_dump(mode="json") for ref in node_refs], sort_keys=True),
         )
+        extra = {
+            "character_materials": character_materials,
+        }
+        selection_meta = self._character_selection_meta(primary_action)
+        if selection_meta:
+            extra["character_selection"] = selection_meta
         return PromptBundle(
             prompt=PromptText(positive=positive, negative=negative_prompt),
             meta=PromptMeta(
@@ -200,9 +217,7 @@ class ScriptComposer:
                     suppressed_character_sections=dedupe(suppressed_sections),
                 ),
                 nodes=node_refs,
-                extra={
-                    "character_materials": character_materials,
-                },
+                extra=extra,
             ),
             cache=CacheMeta(cacheable=True, cache_key=cache_key),
         )
@@ -240,3 +255,37 @@ class ScriptComposer:
         )
         text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _character_selected_keys(
+        self,
+        action: NodeDocument | None,
+        character_index: int,
+    ) -> list[str] | None:
+        selection = self._character_selection_meta(action)
+        if not selection:
+            return None
+        characters = selection.get("characters") or []
+        if isinstance(characters, list) and characters:
+            entry = characters[character_index] if character_index < len(characters) else characters[-1]
+            if isinstance(entry, dict):
+                keys = entry.get("selected_keys") or []
+                if isinstance(keys, list):
+                    normalized = [str(key).strip() for key in keys if str(key).strip()]
+                    if normalized:
+                        return normalized
+        default_keys = selection.get("default_selected_keys") or []
+        if isinstance(default_keys, list) and default_keys:
+            return [str(key).strip() for key in default_keys if str(key).strip()]
+        return None
+
+    def _character_selection_meta(self, action: NodeDocument | None) -> dict[str, Any] | None:
+        if action is None:
+            return None
+        selection = action.composition.get("character_selection")
+        return selection if isinstance(selection, dict) else None
+
+    def _prompt_extra(self, *, action: NodeDocument | None) -> dict[str, Any]:
+        selection_meta = self._character_selection_meta(action)
+        if not selection_meta:
+            return {}
+        return {"character_selection": selection_meta}

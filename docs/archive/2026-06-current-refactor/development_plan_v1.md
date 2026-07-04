@@ -256,7 +256,7 @@ UI 不直接拼复杂 prompt，也不直接理解 NovelAI / ComfyUI 的底层参
 - 通用过滤策略放在 composer，不重复写进每个 character YAML。
 - 输出稳定的 `PromptBundle`。
 
-例子：脚底特写镜头中，composer 可以默认取 `character`、`copyright`、`body`、`feet`、`legwear`、`footwear`，并跳过 `eyes`、`hair`、`upper_clothes` 等 section。这个策略不写进角色节点。
+例子：脚底特写镜头中，composer 可以默认取 `character`、`copyright`、`body`、`feet`、`legwear`，并跳过 `eyes`、`hair`、`upper_clothes` 等 section。这个策略不写进角色节点。
 
 ### Agent composer
 
@@ -391,7 +391,7 @@ uv run python -m tags_machine_core generate --config configs\local.example.yaml 
 
 - `render-plan` / `render-plan-nodes` 只生成请求计划，不联网；当前正式验收只要求 NovelAI 链路稳定。
 - `run-prompt` 面向完整角色+动作混合 prompt。它不读取 character/action 节点，也不做 `character_scope` 裁剪，只把完整 prompt 落成 `PromptBundle`，再由 NovelAI adapter 叠加画风、quality、negative、V4 payload、reference/vibe 参数。`--dry-run` 输出 `PromptBundle + RenderRequest`，去掉 `--dry-run` 后需要 `NAI_ACCESS_TOKEN` 并真实生图；`--nt` 表示生成张数，执行层会拆成多次 `n_samples=1` 的 NovelAI 请求，默认值保持旧接口习惯为 3。
-- `run-prompt --composer agent` 是 agent 拼接进入真实生图的业务入口。它读取 character/action/background 节点，默认从 action `character_scope` 推导本次角色裁剪视角，`--character-scope` 只作为覆盖参数；它使用节点内容 hash、style_ref、可选 agent instructions、agent_model、解析后的 character_scope、extra_prompt 等生成 cache key。带 `--prompt` / `--prompt-file` 时，core 认为这是 agent 已完成的完整 prompt，会写入 `PromptBundle` cache 并继续生成；此时随 prompt 传入的 `--negative` 视为 agent 输出的一部分，不参与 task cache key。不带完整 prompt 时，只读取 cache，命中则继续生成，未命中则返回 `status: requires_agent` 和 `agent_task`，不会调用 NovelAI。
+- `run-prompt --composer agent` 是 agent 拼接进入真实生图的业务入口。它读取 character/action/background/artist 节点，默认从 action `character_scope` 推导本次角色裁剪视角，`--character-scope` 只作为覆盖参数；它使用节点内容 `content_hash`、agent_model、解析后的 character_scope、extra_prompt 等生成 cache key。agent instructions 会写入 task 供外部 agent 读取，但不进入 cache key。带 `--prompt` / `--prompt-file` 时，core 认为这是 agent 已完成的完整 prompt，会写入 `PromptBundle` cache 并继续生成；此时随 prompt 传入的 `--negative` 视为 agent 输出的一部分，不参与 task cache key。不带完整 prompt 时，只读取 cache，命中则继续生成，未命中则返回 `status: requires_agent` 和 `agent_task`，不会调用 NovelAI。
 - `run-action` 是 core 新节点 composer 的真实入口。它读取 character/action/background 节点，先用脚本 composer 生成 `PromptBundle`，再通过 NovelAI adapter 生成 `RenderRequest`，非 `--dry-run` 时进入统一 execution。它不复刻旧 `formula/run_action` 的逐字拼接；局部镜头由 action 的 `character_scope` 驱动 composer policy，`PromptBundle.meta.composition` 会记录纳入和抑制的角色 section。
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-backend-support` / `api-generate` 是面向前端、worker 和队列的本地 JSON 边界，分别覆盖 `AgentCompositionTask`、agent 状态分支、`PromptBundle`、`RenderRequest`、后端支持矩阵和 `GenerationResult` 契约；请求样例在 `examples/requests/`，响应形状 golden 在 `examples/responses/json_api_response_shapes.json`。
 - `generate` 是旧兼容快捷入口，当前只会调用 NovelAI，需要环境变量 `NAI_ACCESS_TOKEN`；新流程优先用 `run-prompt --dry-run` 预览，再真实执行。
@@ -663,8 +663,8 @@ intentional_differences:
     reason: foot_detail 按统一 composer 规则过滤 hair / eyes / upper_clothes
 composition:
   character_scope: foot_detail
-  included_character_sections: [character, copyright, body, feet, legwear, footwear]
-  suppressed_character_sections: [hair, eyes, head_accessories, upper_clothes]
+  included_character_sections: [character, copyright, body, feet, legwear]
+  suppressed_character_sections: [hair, eyes, headwear, upper_clothes]
 result: pass
 ```
 

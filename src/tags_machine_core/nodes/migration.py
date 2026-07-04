@@ -18,6 +18,14 @@ LEGACY_PROMPT_DIRECTIVE_KEYS = {
     "type",
 }
 
+LEGACY_INLINE_EXTENSION_MARKERS = (
+    "after_uc",
+    "origin_uc",
+    "origin_clear",
+    "gen_json",
+    "gen_param",
+)
+
 MIGRATION_OUTPUT_DIRS = {
     "artist": "artists",
     "character": "characters",
@@ -306,6 +314,9 @@ def migrate_legacy_character_tags(
     tags_path = _resolve_tags_path(source)
     character_dir = tags_path.parent
     prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
+    raw_prompt_lines = list(prompt_lines)
+    type_lines = [line for line in raw_prompt_lines if line[:4] == "type"]
+    prompt_lines, _type_flags = _extract_legacy_type_flags(prompt_lines)
     prompt_tags_by_line = [_split_top_level_commas(line) for line in prompt_lines]
     identity_tags = prompt_tags_by_line[0] if prompt_tags_by_line else []
     tags: dict[str, list[str]] = {}
@@ -331,10 +342,11 @@ def migrate_legacy_character_tags(
         "negative_prompt": _collect_legacy_negative_prompt(ext_lines),
         "legacy": {
             "source_file": str(tags_path),
-            "raw_lines": prompt_lines + (["="] if ext_lines else []) + ext_lines,
+            "raw_lines": raw_prompt_lines + (["="] if ext_lines else []) + ext_lines,
             "raw_sections": {
                 "prompt": prompt_lines,
                 "extension": ext_lines,
+                **({"type": type_lines} if type_lines else {}),
             },
         },
         "agent": {
@@ -731,13 +743,13 @@ def _probable_character_tags_in_action(action_tags: list[str]) -> list[str]:
         "hair",
         "eyes",
         "face",
-        "head_accessories",
+        "headwear",
         "ears",
         "tail",
         "wings",
-        "handwear",
+        "hands",
         "legwear",
-        "footwear",
+        "feet",
         "upper_clothes",
         "lower_clothes",
         "full_body_clothes",
@@ -780,13 +792,21 @@ def _split_legacy_tags_lines(path: Path) -> tuple[list[str], list[str]]:
     ext_lines: list[str] = []
     in_ext = False
     for line in lines:
-        if line == "=":
-            in_ext = True
-            continue
         if in_ext:
             ext_lines.append(line)
-        else:
-            prompt_lines.append(line)
+            continue
+        stripped = line.strip()
+        if stripped.startswith("="):
+            in_ext = True
+            inline_ext = stripped[1:].strip(" ,")
+            if inline_ext:
+                ext_lines.append(inline_ext)
+            continue
+        if any(marker in line for marker in LEGACY_INLINE_EXTENSION_MARKERS):
+            in_ext = True
+            ext_lines.append(line)
+            continue
+        prompt_lines.append(line)
     return prompt_lines, ext_lines
 
 
@@ -920,11 +940,11 @@ def _classify_legacy_character_tag(tag: str) -> str:
     normalized = tag.lower().strip().replace(" ", "_")
     if any(marker in normalized for marker in ("_hair", "hair_", "hairclip", "hairband", "ahoge")):
         if any(marker in normalized for marker in ("hairclip", "hairband", "hair_ornament", "hair_bow")):
-            return "head_accessories"
+            return "headwear"
         return "hair"
     if "_eyes" in normalized or normalized.endswith("_eye") or normalized in {"heterochromia"}:
         return "eyes"
-    if any(marker in normalized for marker in ("mouth", "smile", "fang", "scar_across_eye")):
+    if any(marker in normalized for marker in ("mouth", "smile", "fang", "scar_across_eye", "mask")):
         return "face"
     if any(
         marker in normalized
@@ -939,17 +959,41 @@ def _classify_legacy_character_tag(tag: str) -> str:
             "hairclip",
             "hair_bow",
             "crown",
+            "headphones",
+            "headset",
+            "earphones",
+            "goggles",
+            "eyewear",
+            "veil",
         )
     ):
-        return "head_accessories"
+        return "headwear"
     if "ear" in normalized:
         return "ears"
     if "tail" in normalized:
         return "tail"
     if "wing" in normalized:
         return "wings"
-    if any(marker in normalized for marker in ("glove", "mitten", "handwear")):
-        return "handwear"
+    if (
+        normalized in {"ring", "rings", "multiple_rings"}
+        or any(marker in normalized for marker in ("bracelet", "watch", "hand_jewel", "hand_ornament"))
+    ):
+        return "hands"
+    if any(
+        marker in normalized
+        for marker in (
+            "glove",
+            "mitten",
+            "handwear",
+            "armband",
+            "armlet",
+            "arm_belt",
+            "arm_warmer",
+            "sleeve",
+            "gauntlet",
+        )
+    ):
+        return "hands"
     if any(
         marker in normalized
         for marker in (
@@ -960,6 +1004,7 @@ def _classify_legacy_character_tag(tag: str) -> str:
             "legwear",
             "stocking",
             "garter",
+            "thigh_strap",
         )
     ):
         return "legwear"
@@ -973,9 +1018,11 @@ def _classify_legacy_character_tag(tag: str) -> str:
             "high_heels",
             "mary_janes",
             "footwear",
+            "sandal",
+            "anklet",
         )
     ):
-        return "footwear"
+        return "feet"
     if any(marker in normalized for marker in ("barefoot", "bare_feet", "feet", "toe", "soles")):
         return "feet"
     if any(marker in normalized for marker in ("sword", "gun", "shield", "weapon", "shirasaya", "wand")):
@@ -1012,7 +1059,19 @@ def _classify_legacy_character_tag(tag: str) -> str:
         )
     ):
         return "upper_clothes"
-    if any(marker in normalized for marker in ("breasts", "skin", "navel", "body", "thighs")):
+    if any(
+        marker in normalized
+        for marker in (
+            "breasts",
+            "skin",
+            "navel",
+            "body",
+            "thighs",
+            "third_eye",
+            "eyeball",
+            "heart_out_of_chest",
+        )
+    ):
         return "body"
     if any(marker in normalized for marker in ("necklace", "choker", "belt", "logo", "badge")):
         return "accessories"

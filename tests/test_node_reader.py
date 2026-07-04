@@ -247,7 +247,7 @@ shoes, shoes|boots|loafers
             self.assertEqual(node["tags"]["copyright"], ["angel_beats!"])
             self.assertEqual(node["tags"]["eyes"], ["yellow_eyes"])
             self.assertEqual(node["tags"]["hair"], ["grey_hair"])
-            self.assertEqual(node["tags"]["head_accessories"], ["hairband"])
+            self.assertEqual(node["tags"]["headwear"], ["hairband"])
             self.assertEqual(node["tags"]["upper_clothes"], ["blazer"])
             self.assertEqual(node["tags"]["lower_clothes"], ["pleated_skirt"])
             self.assertEqual(node["tags"]["legwear"], ["thighhighs"])

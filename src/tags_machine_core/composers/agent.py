@@ -17,6 +17,7 @@ from tags_machine_core.contracts import (
     PromptNodeRef,
     PromptText,
 )
+from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.character_scope import (
     character_material,
     resolve_character_scope,
@@ -26,6 +27,7 @@ from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 
 
 AGENT_COMPOSER_VERSION = "v1"
+logger = get_logger(__name__)
 
 
 class AgentCompositionRequired(RuntimeError):
@@ -146,6 +148,14 @@ class AgentComposer:
             "agent_model": _optional_text(agent_model),
         }
         cache_key = self._cache_key(self._task_cache_payload(payload))
+        logger.info(
+            "AgentComposer task built cache_key=%s node_count=%s scope=%s agent_model=%s",
+            cache_key,
+            len(nodes),
+            resolved_scope,
+            _optional_text(agent_model),
+        )
+        logger.trace("AgentComposer task nodes=%s", list(nodes.keys()))
         return AgentCompositionTask(cache_key=cache_key, **payload)
 
     def build_task_resolved_nodes(
@@ -183,6 +193,14 @@ class AgentComposer:
             "agent_model": _optional_text(agent_model),
         }
         cache_key = self._cache_key(self._task_cache_payload(payload))
+        logger.info(
+            "AgentComposer resolved task built cache_key=%s node_count=%s scope=%s agent_model=%s",
+            cache_key,
+            len(nodes),
+            resolved_scope,
+            _optional_text(agent_model),
+        )
+        logger.trace("AgentComposer resolved task node_keys=%s", list(nodes.keys()))
         return AgentCompositionTask(cache_key=cache_key, **payload)
 
     def compose_nodes(
@@ -214,12 +232,16 @@ class AgentComposer:
         if cache and result is None:
             cached = cache.get(task.cache_key)
             if cached:
+                logger.info("AgentComposer cache hit cache_key=%s", task.cache_key)
                 return cached
+            logger.info("AgentComposer cache miss cache_key=%s", task.cache_key)
         if result is None:
+            logger.warning("AgentComposer requires external result cache_key=%s", task.cache_key)
             raise AgentCompositionRequired(task)
         bundle = self.compose_from_result(task, result)
         if cache:
-            cache.put(bundle)
+            path = cache.put(bundle)
+            logger.info("AgentComposer cache wrote cache_key=%s path=%s", task.cache_key, path)
         return bundle
 
     def compose_resolved_nodes(
@@ -245,12 +267,16 @@ class AgentComposer:
         if cache and result is None:
             cached = cache.get(task.cache_key)
             if cached:
+                logger.info("AgentComposer cache hit cache_key=%s", task.cache_key)
                 return cached
+            logger.info("AgentComposer cache miss cache_key=%s", task.cache_key)
         if result is None:
+            logger.warning("AgentComposer requires external result cache_key=%s", task.cache_key)
             raise AgentCompositionRequired(task)
         bundle = self.compose_from_result(task, result)
         if cache:
-            cache.put(bundle)
+            path = cache.put(bundle)
+            logger.info("AgentComposer cache wrote cache_key=%s path=%s", task.cache_key, path)
         return bundle
 
     def compose_from_result(
@@ -265,6 +291,17 @@ class AgentComposer:
         )
         characters = _snapshots_by_role(task, "character")
         actions = _snapshots_by_role(task, "action")
+        logger.info(
+            "AgentComposer composing PromptBundle from result cache_key=%s positive_chars=%s",
+            task.cache_key,
+            len(agent_result.positive),
+        )
+        logger.trace(
+            "AgentComposer result character_count=%s action_count=%s notes=%s",
+            len(characters),
+            len(actions),
+            agent_result.notes,
+        )
         return PromptBundle(
             prompt=PromptText(
                 positive=agent_result.positive.strip(),
@@ -403,5 +440,5 @@ def _character_materials(
 
 
 def load_agent_result(path: str | Path) -> AgentCompositionResult:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     return AgentCompositionResult.model_validate(data)

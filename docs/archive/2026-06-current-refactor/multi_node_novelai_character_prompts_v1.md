@@ -111,19 +111,19 @@ ScriptComposer 和 AgentComposer 都可以消费多个 character 节点。输出
 Agent 模式也使用 `ResolvedNodeSet`。缓存 key 由以下内容生成：
 
 - composer version
-- 每个非 style 节点的 `id`、`kind`、content hash
+- 每个节点的 `content_hash`
 - `extra_prompt`
 - `negative`
-- `style_ref`
 - `character_scope`
-- `instructions`
 - `agent_model`
+
+`instructions` 会写入 task 供外部 agent 读取，但不进入缓存 key。
 
 如果 `run-prompt --composer agent` 携带完整 `--prompt` 或 `--prompt-file`，该 prompt 被视为外部 agent 已经拼好的结果，会写入 cache 后继续生成。
 
 如果没有完整 prompt，也没有 `agent_result`，则只返回 `requires_agent` 和 `agent_task`，不进入生图。
 
-`character_scope` 仍保留在结构里，但业务上优先来自 action 节点。它主要用于过滤角色素材，例如 foot_detail 只保留 identity/body/feet/legwear/footwear 等部分。
+`character_scope` 仍保留在结构里，但业务上优先来自 action 节点。它主要用于过滤角色素材，例如 foot_detail 只保留 identity/body/feet/legwear 等部分。
 
 ## NovelAI Character Prompts
 

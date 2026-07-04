@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import yaml
 
@@ -18,6 +22,7 @@ from tags_machine_core.config import load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
+from tags_machine_core.logging_config import configure_logging, get_logger
 from tags_machine_core.nodes import (
     NodeInput,
     NodeReader,
@@ -34,10 +39,12 @@ from tags_machine_core.nodes import (
     validate_node_tree,
 )
 from tags_machine_core.services import GenerationJsonApi, GenerationService
+from tags_machine_core.policies import PromptPolicyConfig
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_image_comparison_report,
     build_acceptance_record,
+    build_prompt_policy_acceptance_report,
     compare_render_parameters,
     load_render_parameter_source,
     normalize_render_parameters,
@@ -48,6 +55,17 @@ from tags_machine_core.verification import (
     verify_acceptance_record,
     verify_acceptance_suite,
 )
+from tags_machine_core.batch import (
+    BatchPlanner,
+    BatchRunner,
+    BatchSpec,
+    latest_manifest_entries,
+    load_batch_spec,
+    write_initial_manifest,
+)
+
+
+logger = get_logger(__name__)
 
 
 def _agent_instructions(args) -> list[str]:
@@ -58,7 +76,20 @@ def _agent_instructions(args) -> list[str]:
 
 def print_json(value, *, full: bool = False) -> None:
     data = sanitize_json_for_display(value, full=full)
-    print(json.dumps(data, ensure_ascii=False, indent=2))
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        sys.stdout.buffer.write(text.encode("utf-8"))
+        sys.stdout.buffer.write(b"\n")
+
+
+def _load_command_config(path: str | Path, args=None):
+    config = load_config(Path(path))
+    if args is None or not getattr(args, "log_level", None):
+        configure_logging(config.logging.level)
+    logger.trace("loaded config path=%s logging.level=%s", path, config.logging.level)
+    return config
 
 
 def cmd_compose(args) -> int:
@@ -158,8 +189,17 @@ def cmd_render_plan_nodes(args) -> int:
 
 def cmd_run_prompt(args) -> int:
     service = GenerationService()
+    logger.info(
+        "run-prompt start backend=%s composer=%s dry_run=%s artist=%s model=%s nt=%s",
+        getattr(args, "backend", "novelai"),
+        getattr(args, "composer", "full"),
+        args.dry_run,
+        getattr(args, "artist", None) or getattr(args, "artist_node", None),
+        args.model,
+        args.nt,
+    )
     try:
-        bundle, request = _build_novelai_prompt_artifacts(service, args)
+        bundle, request = _build_prompt_artifacts(service, args)
     except AgentCompositionRequired as exc:
         result = {
             "schema": "tags-machine-core.run-prompt-result/v1",
@@ -179,7 +219,7 @@ def cmd_run_prompt(args) -> int:
     if not args.dry_run:
         if not args.config:
             raise ValueError("run-prompt without --dry-run requires --config")
-        config = load_config(Path(args.config))
+        config = _load_command_config(args.config, args)
         result["generation_result"] = _execute_render_request(
             config,
             request,
@@ -187,13 +227,27 @@ def cmd_run_prompt(args) -> int:
             image_format=args.format,
             allow_experimental_backend=False,
         )
+        images = result["generation_result"].images
+        logger.info(
+            "run-prompt generation complete image_count=%s paths=%s",
+            len(images),
+            [str(image.path) for image in images],
+        )
     print_json(result, full=args.full)
     return 0
 
 
 def cmd_run_action(args) -> int:
     service = GenerationService()
-    bundle, request = _build_novelai_action_artifacts(service, args)
+    logger.info(
+        "run-action start backend=%s dry_run=%s artist=%s model=%s nt=%s",
+        getattr(args, "backend", "novelai"),
+        args.dry_run,
+        getattr(args, "artist", None) or getattr(args, "artist_node", None),
+        args.model,
+        args.nt,
+    )
+    bundle, request = _build_action_artifacts(service, args)
     result: dict[str, Any] = {
         "schema": "tags-machine-core.run-action-result/v1",
         "status": "ready",
@@ -204,7 +258,7 @@ def cmd_run_action(args) -> int:
     if not args.dry_run:
         if not args.config:
             raise ValueError("run-action without --dry-run requires --config")
-        config = load_config(Path(args.config))
+        config = _load_command_config(args.config, args)
         result["generation_result"] = _execute_render_request(
             config,
             request,
@@ -217,7 +271,7 @@ def cmd_run_action(args) -> int:
 
 
 def cmd_generate(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
     service = GenerationService()
     artist_ref, artist = _load_render_artist(args)
     bundle = _build_bundle(service, args)
@@ -244,7 +298,7 @@ def cmd_generate(args) -> int:
 
 
 def cmd_execute_render_request(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
     request = _load_render_request(args.request)
     result = _execute_render_request(
         config,
@@ -262,7 +316,7 @@ def cmd_execute_render_request(args) -> int:
 
 
 def cmd_inspect_artist(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
     artist = NovelAIArtistRepository(config.legacy.design_root).load_node(args.artist)
     print_json(artist, full=args.full)
     return 0
@@ -283,7 +337,7 @@ def cmd_validate_node_tree(args) -> int:
 
 
 def cmd_config(args) -> int:
-    config = load_config(Path(args.path))
+    config = _load_command_config(args.path, args)
     print_json(config, full=args.full)
     return 0
 
@@ -329,6 +383,28 @@ def cmd_compare_image_result(args) -> int:
         _write_structured_output(report, Path(args.output), output_format=args.format)
     print_json(report, full=args.full)
     return 0 if report["match"] else 2
+
+
+def cmd_verify_prompt_policy_acceptance(args) -> int:
+    report = build_prompt_policy_acceptance_report(
+        legacy_image=args.legacy_image,
+        core_run_result=args.core_run_result,
+        core_generation_result=args.core_generation_result,
+        prompt_bundle=args.prompt_bundle,
+        core_image=args.core_image,
+        visual_result=args.visual_result,
+        visual_notes=args.visual_note or [],
+        whitelist=parse_whitelist_args(args.whitelist),
+        intentional_differences=parse_intentional_difference_args(args.intentional_difference),
+        expected_profile=args.expected_profile,
+        required_rules=args.require_policy_rule or [],
+        expect_tokens=args.expect_token or [],
+        reject_tokens=args.reject_token or [],
+    )
+    if args.output:
+        _write_structured_output(report, Path(args.output), output_format=args.format)
+    print_json(report, full=args.full)
+    return 0 if report["result"] == "pass" else 2
 
 
 def cmd_create_acceptance_record(args) -> int:
@@ -670,7 +746,7 @@ def cmd_api_backend_support(args) -> int:
 
 
 def cmd_api_generate(args) -> int:
-    config = load_config(Path(args.config))
+    config = _load_command_config(args.config, args)
 
     def executor(request: RenderRequest, request_data: dict[str, Any]) -> GenerationResult:
         ensure_backend_can_execute(
@@ -696,6 +772,409 @@ def cmd_api_generate(args) -> int:
     return 0
 
 
+def cmd_api_plan_batch(args) -> int:
+    request_path = Path(args.request)
+    data = _load_json_mapping_file(request_path)
+    spec, spec_path, inline = _batch_spec_from_api_request(data, request_path)
+    run_dir = _batch_run_dir(
+        spec,
+        output_root=_optional_request_string(data, "output_root"),
+        work_root=_optional_request_string(data, "work_root"),
+        spec_path=spec_path,
+    )
+    output_dir = _batch_output_dir(
+        spec,
+        spec_path=spec_path,
+        run_dir=run_dir,
+        override=_optional_request_string(data, "output_dir"),
+    )
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    run_id = _batch_run_id(data)
+    tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+    manifest_path = write_initial_manifest(run_dir, tasks)
+    _archive_batch_spec_source(
+        run_dir,
+        spec_path=spec_path,
+        spec=spec,
+        inline=inline,
+        run_id=run_id,
+        output_dir=output_dir,
+    )
+    result = {
+        "schema": "tags-machine-core.api-plan-batch-result/v1",
+        "run_id": run_id,
+        "batch": spec.name,
+        "task_count": len(tasks),
+        "selector_summary": _batch_selector_summary(tasks),
+        "run_dir": str(run_dir),
+        "output_dir": str(output_dir),
+        "manifest_path": str(manifest_path),
+    }
+    _emit_api_result(result, args)
+    return 0
+
+
+def cmd_api_run_batch(args) -> int:
+    request_path = Path(args.request)
+    data = _load_json_mapping_file(request_path)
+    spec, spec_path, inline = _batch_spec_from_api_request(data, request_path)
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=_optional_request_bool(data, "resume"),
+        stop_on_error=_optional_request_bool(data, "stop_on_error"),
+        fresh=_optional_request_bool(data, "fresh"),
+    )
+    run_dir = _batch_run_dir(
+        spec,
+        output_root=_optional_request_string(data, "output_root"),
+        work_root=_optional_request_string(data, "work_root"),
+        spec_path=spec_path,
+    )
+    output_dir = _batch_output_dir(
+        spec,
+        spec_path=spec_path,
+        run_dir=run_dir,
+        override=_optional_request_string(data, "output_dir"),
+    )
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    run_id = _batch_run_id(data, fallback_run_dir=run_dir, fresh=spec.run.fresh)
+    tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+    config_path = _batch_config_path(
+        spec,
+        spec_path=spec_path,
+        override=_optional_request_string(data, "config"),
+    )
+    config = _load_command_config(config_path, args)
+    _archive_batch_spec_source(
+        run_dir,
+        spec_path=spec_path,
+        spec=spec,
+        inline=inline,
+        run_id=run_id,
+        output_dir=output_dir,
+    )
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=_optional_request_int(data, "limit"),
+    )
+    _emit_api_result(
+        {
+            "schema": "tags-machine-core.api-run-batch-result/v1",
+            "batch": spec.name,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "output_dir": str(output_dir),
+            **result,
+        },
+        args,
+    )
+    return 0
+
+
+def cmd_api_resume_batch(args) -> int:
+    request_path = Path(args.request)
+    data = _load_json_mapping_file(request_path)
+    run_dir_value = _optional_request_string(data, "run_dir")
+    if not run_dir_value:
+        raise ValueError("api-resume-batch request requires run_dir")
+    run_dir = Path(run_dir_value)
+    source_data = _batch_source_data(run_dir)
+    spec, spec_path, _inline = _batch_spec_from_api_request(
+        data,
+        request_path,
+        fallback_run_dir=run_dir,
+    )
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=True,
+        stop_on_error=_optional_request_bool(data, "stop_on_error"),
+    )
+    output_dir = _batch_output_dir(
+        spec,
+        spec_path=spec_path,
+        run_dir=run_dir,
+        override=_optional_request_string(data, "output_dir") or source_data.get("output_dir"),
+    )
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    run_id = _batch_run_id(data, fallback_run_dir=run_dir)
+    tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+    config_path = _batch_config_path(
+        spec,
+        spec_path=spec_path,
+        override=_optional_request_string(data, "config"),
+    )
+    config = _load_command_config(config_path, args)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=_optional_request_int(data, "limit"),
+    )
+    _emit_api_result(
+        {
+            "schema": "tags-machine-core.api-resume-batch-result/v1",
+            "batch": spec.name,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "output_dir": str(output_dir),
+            **result,
+        },
+        args,
+    )
+    return 0
+
+
+def cmd_api_inspect_batch(args) -> int:
+    data = _load_json_mapping_file(args.request)
+    run_dir_value = _optional_request_string(data, "run_dir")
+    if not run_dir_value:
+        raise ValueError("api-inspect-batch request requires run_dir")
+    run_dir = Path(run_dir_value)
+    entries = [_reconciled_manifest_entry(run_dir, entry) for entry in latest_manifest_entries(run_dir)]
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry.status] = counts.get(entry.status, 0) + 1
+    _emit_api_result(
+        {
+            "schema": "tags-machine-core.api-inspect-batch-result/v1",
+            "run_dir": str(run_dir),
+            "counts": counts,
+            "tasks": entries,
+        },
+        args,
+    )
+    return 0
+
+
+def cmd_plan_batch(args) -> int:
+    spec_path = Path(args.batch_spec)
+    spec = load_batch_spec(spec_path)
+    run_dir = _batch_run_dir(
+        spec,
+        output_root=args.output_root,
+        work_root=args.work_root,
+        spec_path=spec_path,
+    )
+    output_dir = _batch_output_dir(
+        spec,
+        spec_path=spec_path,
+        run_dir=run_dir,
+        override=args.output_dir,
+    ).resolve()
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    run_id = _batch_run_id({}, fallback_run_dir=run_dir)
+    tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+    manifest_path = write_initial_manifest(run_dir, tasks)
+    _write_batch_source(run_dir, spec_path, run_id=run_id, output_dir=output_dir)
+    _copy_batch_spec(run_dir, spec_path)
+    print_json(
+        {
+            "schema": "tags-machine-core.plan-batch-result/v1",
+            "run_id": run_id,
+            "batch": spec.name,
+            "task_count": len(tasks),
+            "selector_summary": _batch_selector_summary(tasks),
+            "run_dir": str(run_dir),
+            "output_dir": str(output_dir),
+            "manifest_path": str(manifest_path),
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def cmd_run_batch(args) -> int:
+    spec_path = Path(args.batch_spec)
+    spec = load_batch_spec(spec_path)
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=args.resume,
+        stop_on_error=args.stop_on_error,
+        fresh=args.fresh,
+    )
+    run_dir = _batch_run_dir(
+        spec,
+        output_root=args.output_root,
+        work_root=args.work_root,
+        spec_path=spec_path,
+    )
+    output_dir = _batch_output_dir(
+        spec,
+        spec_path=spec_path,
+        run_dir=run_dir,
+        override=args.output_dir,
+    ).resolve()
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    run_id = _batch_run_id({}, fallback_run_dir=run_dir, fresh=spec.run.fresh)
+    tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+    config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
+    config = _load_command_config(config_path, args)
+    _write_batch_source(run_dir, spec_path, run_id=run_id, output_dir=output_dir)
+    _copy_batch_spec(run_dir, spec_path)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=args.limit,
+    )
+    print_json(
+        {
+            "schema": "tags-machine-core.run-batch-result/v1",
+            "batch": spec.name,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "output_dir": str(output_dir),
+            **result,
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def cmd_resume_batch(args) -> int:
+    run_dir = Path(args.run_dir)
+    source_data = _batch_source_data(run_dir)
+    spec_path = Path(args.batch_spec) if args.batch_spec else _batch_source_path(run_dir)
+    spec = load_batch_spec(spec_path)
+    spec = _batch_spec_with_cli_overrides(
+        spec,
+        resume=True,
+        stop_on_error=args.stop_on_error,
+    )
+    output_dir = _batch_output_dir(
+        spec,
+        spec_path=spec_path,
+        run_dir=run_dir,
+        override=source_data.get("output_dir"),
+    )
+    planner = BatchPlanner(base_dir=spec_path.parent)
+    run_id = _batch_run_id({}, fallback_run_dir=run_dir)
+    tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+    config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
+    config = _load_command_config(config_path, args)
+    result = BatchRunner().run_tasks(
+        run_dir=run_dir,
+        tasks=tasks,
+        config=config,
+        run_config=spec.run,
+        archive_config=spec.archive,
+        report_config=spec.report,
+        limit=args.limit,
+    )
+    print_json(
+        {
+            "schema": "tags-machine-core.resume-batch-result/v1",
+            "batch": spec.name,
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "output_dir": str(output_dir),
+            **result,
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def cmd_inspect_batch(args) -> int:
+    run_dir = Path(args.run_dir)
+    entries = [_reconciled_manifest_entry(run_dir, entry) for entry in latest_manifest_entries(run_dir)]
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry.status] = counts.get(entry.status, 0) + 1
+    print_json(
+        {
+            "schema": "tags-machine-core.inspect-batch-result/v1",
+            "run_dir": str(run_dir),
+            "counts": counts,
+            "tasks": entries,
+        },
+        full=args.full,
+    )
+    return 0
+
+
+def _batch_spec_with_cli_overrides(
+    spec,
+    *,
+    resume: bool | None,
+    stop_on_error: bool | None,
+    fresh: bool | None = None,
+):
+    run_config = spec.run
+    if resume is not None:
+        run_config = run_config.model_copy(update={"resume": resume})
+    if stop_on_error is not None:
+        run_config = run_config.model_copy(update={"stop_on_error": stop_on_error})
+    if fresh is not None:
+        run_config = run_config.model_copy(update={"fresh": fresh})
+    return spec.model_copy(update={"run": run_config})
+
+
+def _reconciled_manifest_entry(run_dir: Path, entry):
+    status_path = run_dir / entry.status_path
+    if not status_path.exists():
+        return entry
+    try:
+        status_data = json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return entry
+    task_dir = (run_dir / entry.task_path).parent
+    artifact_dir = _entry_artifact_dir(run_dir, entry, task_dir=task_dir)
+    generation_result_path = entry.generation_result_path
+    generation_result = artifact_dir / "generation_result.json"
+    if generation_result_path is None and generation_result.exists():
+        try:
+            generation_result_path = str(generation_result.relative_to(run_dir))
+        except ValueError:
+            generation_result_path = str(generation_result)
+    return entry.model_copy(
+        update={
+            "status": status_data.get("status", entry.status),
+            "attempt": status_data.get("attempt", entry.attempt),
+            "generation_result_path": generation_result_path,
+            "image_paths": status_data.get("image_paths", entry.image_paths),
+            "error": status_data.get("error", entry.error),
+        }
+    )
+
+
+def _entry_artifact_dir(run_dir: Path, entry, *, task_dir: Path) -> Path:
+    task_path = task_dir / "task.json"
+    if task_path.exists():
+        try:
+            task_data = json.loads(task_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            task_data = {}
+        output = task_data.get("output") or {}
+        output_dir = output.get("output_dir")
+        if isinstance(output_dir, str) and output_dir.strip():
+            path = Path(output_dir)
+            return path if path.is_absolute() else run_dir / path
+        render = task_data.get("render") or {}
+        render_output_dir = render.get("output_dir")
+        if isinstance(render_output_dir, str) and render_output_dir.strip():
+            path = Path(render_output_dir)
+            return path if path.is_absolute() else run_dir / path
+    if entry.generation_result_path:
+        path = run_dir / entry.generation_result_path
+        return path.parent
+    fallback = run_dir / "outputs" / str(entry.task_id)
+    if fallback.exists():
+        return fallback
+    return task_dir
+
+
 def _load_json_arg(value: str | None) -> dict:
     if not value:
         return {}
@@ -706,17 +1185,271 @@ def _load_json_arg(value: str | None) -> dict:
 
 
 def _load_json_mapping_file(path: str | Path) -> dict[str, Any]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object: {path}")
     return data
 
 
+def _batch_spec_from_api_request(
+    data: dict[str, Any],
+    request_path: Path,
+    *,
+    fallback_run_dir: Path | None = None,
+) -> tuple[BatchSpec, Path, bool]:
+    inline_spec = data.get("spec") or data.get("batch")
+    if inline_spec is not None:
+        if not isinstance(inline_spec, dict):
+            raise ValueError("inline batch spec must be a JSON object")
+        return BatchSpec.model_validate(inline_spec), request_path, True
+
+    raw_path = data.get("batch_spec") or data.get("spec_path")
+    if raw_path:
+        spec_path = _resolve_request_relative_path(str(raw_path), request_path.parent)
+    elif fallback_run_dir is not None:
+        spec_path = _batch_source_path(fallback_run_dir)
+    else:
+        raise ValueError("batch API request requires batch_spec or spec")
+    return load_batch_spec(spec_path), spec_path, False
+
+
+def _resolve_request_relative_path(value: str, base_dir: Path) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    request_relative = base_dir / path
+    return request_relative if request_relative.exists() else path
+
+
+def _archive_batch_spec_source(
+    run_dir: str | Path,
+    *,
+    spec_path: Path,
+    spec: BatchSpec,
+    inline: bool,
+    run_id: str,
+    output_dir: str | Path,
+) -> None:
+    if inline:
+        root = Path(run_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "batch.yaml").write_text(
+            yaml.safe_dump(
+                spec.model_dump(by_alias=True, mode="json"),
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        _write_batch_source(
+            root,
+            spec_path,
+            run_id=run_id,
+            output_dir=output_dir,
+            source="inline_api_request",
+            request_path=spec_path,
+        )
+        return
+    _write_batch_source(run_dir, spec_path, run_id=run_id, output_dir=output_dir)
+    _copy_batch_spec(run_dir, spec_path)
+
+
+def _optional_request_string(data: dict[str, Any], key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_request_bool(data: dict[str, Any], key: str) -> bool | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{key} must be a boolean")
+
+
+def _optional_request_int(data: dict[str, Any], key: str) -> int | None:
+    value = data.get(key)
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def _emit_api_result(result: dict[str, Any], args) -> None:
+    if args.output:
+        _write_structured_output(result, Path(args.output), output_format=args.format)
+    print_json(result, full=args.full)
+
+
 def _load_render_request(path: str | Path) -> RenderRequest:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected RenderRequest JSON object: {path}")
     return RenderRequest.model_validate(data)
+
+
+def _batch_work_dir(spec, *, output_root: str | None = None, work_root: str | None = None, spec_path: Path | None = None) -> Path:
+    resolved_work_root = work_root or spec.work_root
+    if resolved_work_root:
+        return _batch_relative_path(resolved_work_root, spec_path=spec_path) / spec.name
+    if output_root:
+        return _batch_relative_path(output_root, spec_path=spec_path) / spec.name
+    if spec.output_root:
+        return _batch_relative_path(spec.output_root, spec_path=spec_path) / spec.name
+    if spec_path is not None:
+        return spec_path.parent / spec.name
+    return Path(spec.name)
+
+
+def _batch_run_dir(spec, *, output_root: str | None, work_root: str | None = None, spec_path: Path | None = None) -> Path:
+    return _batch_work_dir(spec, output_root=output_root, work_root=work_root, spec_path=spec_path)
+
+
+def _batch_output_dir(
+    spec,
+    *,
+    spec_path: Path,
+    run_dir: Path,
+    override: str | None = None,
+) -> Path:
+    raw = override or spec.output_dir
+    if raw:
+        return _batch_relative_path(raw, spec_path=spec_path)
+    return run_dir / "outputs"
+
+
+def _batch_relative_path(value: str | Path, *, spec_path: Path | None) -> Path:
+    path = Path(value)
+    if path.is_absolute() or spec_path is None:
+        return path
+    return spec_path.parent / path
+
+
+def _batch_selector_summary(tasks) -> dict[str, Any]:
+    role_counts = Counter()
+    artist_counts = Counter()
+    action_group_counts = Counter()
+    composer_counts = Counter()
+    prompt_count = 0
+    for task in tasks:
+        composer_counts[task.composer] += 1
+        if task.prompt:
+            prompt_count += 1
+        if task.render.artist:
+            artist_counts[task.render.artist] += 1
+        if task.source.get("action_group"):
+            action_group_counts[task.source["action_group"]] += 1
+        for node in task.nodes:
+            role_counts[node.role] += 1
+    return {
+        "tasks": len(tasks),
+        "composers": dict(composer_counts),
+        "node_roles": dict(role_counts),
+        "artists": dict(artist_counts),
+        "action_groups": dict(action_group_counts),
+        "prompts": prompt_count,
+    }
+
+
+def _batch_config_path(spec, *, spec_path: Path, override: str | None) -> Path:
+    if override:
+        return Path(override)
+    raw = Path(spec.config)
+    if raw.is_absolute():
+        return raw
+    if raw.exists():
+        return raw
+    return spec_path.parent / raw
+
+
+def _write_batch_source(
+    run_dir: str | Path,
+    spec_path: Path,
+    *,
+    run_id: str,
+    output_dir: str | Path,
+    source: str = "file",
+    request_path: Path | None = None,
+) -> Path:
+    root = Path(run_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    data = {
+        "schema": "tags-machine-core.batch-source/v1",
+        "source": source,
+        "spec_path": str(spec_path.resolve()),
+        "run_id": run_id,
+        "work_root": str(root.resolve()),
+        "output_dir": str(Path(output_dir).resolve()),
+    }
+    if request_path is not None:
+        data["request_path"] = str(request_path.resolve())
+    path = root / "batch_source.json"
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _batch_source_data(run_dir: str | Path) -> dict[str, Any]:
+    source_path = Path(run_dir) / "batch_source.json"
+    if not source_path.exists():
+        return {}
+    try:
+        data = json.loads(source_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _copy_batch_spec(run_dir: str | Path, spec_path: Path) -> Path:
+    target = Path(run_dir) / "batch.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(spec_path, target)
+    return target
+
+
+def _batch_source_path(run_dir: str | Path) -> Path:
+    data = _batch_source_data(run_dir)
+    value = data.get("spec_path")
+    if value:
+        return Path(value)
+    fallback = Path(run_dir) / "batch.yaml"
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(
+        f"Cannot resume batch without batch_source.json or batch.yaml under {run_dir}"
+    )
+
+
+def _batch_run_id(
+    data: dict[str, Any],
+    *,
+    fallback_run_dir: Path | None = None,
+    fresh: bool = False,
+) -> str:
+    value = data.get("run_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if fallback_run_dir is not None and not fresh:
+        source_path = Path(fallback_run_dir) / "batch_source.json"
+        if source_path.exists():
+            try:
+                source_data = json.loads(source_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                source_data = {}
+            run_id = source_data.get("run_id")
+            if isinstance(run_id, str) and run_id.strip():
+                return run_id.strip()
+    return uuid4().hex[:8]
 
 
 def _read_prompt_value(args) -> str:
@@ -729,6 +1462,7 @@ def _build_bundle(service: GenerationService, args):
     return service.compose_full_prompt(
         prompt=args.prompt,
         negative=args.negative or "",
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
     )
 
 
@@ -744,6 +1478,7 @@ def _build_bundle_from_nodes(
             negative=args.negative or "",
             character_scope=args.character_scope,
             body_scope=args.body_scope,
+            prompt_policy=_prompt_policy_from_args(args, target="script"),
         )
     character, action, background = _read_node_inputs(args)
     return service.compose_nodes(
@@ -754,7 +1489,120 @@ def _build_bundle_from_nodes(
         negative=args.negative or "",
         character_scope=args.character_scope,
         body_scope=args.body_scope,
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
     )
+
+
+def _build_prompt_artifacts(service: GenerationService, args):
+    backend = getattr(args, "backend", "novelai")
+    if backend == "novelai":
+        return _build_novelai_prompt_artifacts(service, args)
+    if getattr(args, "composer", "full") == "agent":
+        return _build_backend_agent_prompt_artifacts(service, args, backend=backend)
+
+    prompt = _read_prompt_value(args)
+    if not prompt:
+        raise ValueError("run-prompt requires --prompt or --prompt-file")
+    artist_ref, artist = _load_render_artist(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
+    bundle = service.compose_full_prompt(
+        prompt=prompt,
+        negative=args.negative or "",
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
+    )
+    params = _load_json_arg(args.params_json)
+    params["n_samples"] = args.nt
+    request = service.build_render_request(
+        bundle,
+        backend=backend,
+        seed=args.seed,
+        artist=artist,
+        resolved_nodes=resolved_nodes,
+        width=args.width,
+        height=args.height,
+        model=_backend_model_arg(args, backend=backend),
+        action=_render_action(backend),
+        params=params,
+    )
+    return bundle, request
+
+
+def _build_backend_agent_prompt_artifacts(service: GenerationService, args, *, backend: str):
+    artist_ref, artist = _load_render_artist(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
+    cache = PromptCache(args.cache_dir) if args.cache_dir else None
+    result = load_agent_result(args.agent_result) if args.agent_result else None
+    prompt = _read_prompt_value(args)
+    task_negative = args.negative or ""
+    if prompt and result is None:
+        result = {
+            "positive": prompt,
+            "negative": args.negative or "",
+            "character_scope": args.character_scope or args.body_scope,
+        }
+        task_negative = ""
+    bundle = service.compose_resolved_nodes_with_agent(
+        resolved_nodes,
+        extra_prompt=args.extra_prompt or "",
+        negative=task_negative,
+        character_scope=args.character_scope or args.body_scope,
+        instructions=_agent_instructions(args),
+        agent_model=args.agent_model,
+        result=result,
+        cache=cache,
+    )
+    params = _load_json_arg(args.params_json)
+    params["n_samples"] = args.nt
+    request = service.build_render_request(
+        bundle,
+        backend=backend,
+        seed=args.seed,
+        artist=artist,
+        resolved_nodes=resolved_nodes,
+        width=args.width,
+        height=args.height,
+        model=_backend_model_arg(args, backend=backend),
+        action=_render_action(backend),
+        params=params,
+    )
+    return bundle, request
+
+
+def _build_action_artifacts(service: GenerationService, args):
+    backend = getattr(args, "backend", "novelai")
+    if backend == "novelai":
+        return _build_novelai_action_artifacts(service, args)
+
+    artist_ref, artist = _load_render_artist(args)
+    resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
+    bundle = service.compose_resolved_nodes(
+        resolved_nodes,
+        extra_prompt=args.extra_prompt or "",
+        negative=args.negative or "",
+        character_scope=args.character_scope or args.body_scope,
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
+    )
+    params = _load_json_arg(args.params_json)
+    params["n_samples"] = args.nt
+    request = service.build_render_request(
+        bundle,
+        backend=backend,
+        seed=args.seed,
+        artist=artist,
+        resolved_nodes=resolved_nodes,
+        width=args.width,
+        height=args.height,
+        model=_backend_model_arg(args, backend=backend),
+        action=_render_action(backend),
+        params=params,
+    )
+    return bundle, request
+
+
+def _backend_model_arg(args, *, backend: str) -> str | None:
+    if backend == "novelai":
+        return args.model
+    return None
 
 
 def _build_novelai_prompt_artifacts(service: GenerationService, args):
@@ -768,6 +1616,7 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
     bundle = service.compose_full_prompt(
         prompt=prompt,
         negative=args.negative or "",
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -831,6 +1680,7 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         character_scope=args.character_scope or args.body_scope,
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -845,6 +1695,33 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
         resolved_nodes=resolved_nodes,
     )
     return bundle, request
+
+
+def _prompt_policy_from_args(args, *, target: str):
+    profile = getattr(args, "prompt_policy_profile", None)
+    enabled_rules = getattr(args, "prompt_policy_rule", None) or []
+    disabled_rules = getattr(args, "no_prompt_policy_rule", None) or []
+    if not profile and not enabled_rules and not disabled_rules:
+        config_path = getattr(args, "config", None)
+        if config_path:
+            return _load_command_config(config_path, args).prompt_policy
+        return None
+    apply_to = {
+        "script": False,
+        "agent": False,
+        "full_prompt": False,
+    }
+    apply_to[target] = True
+    return PromptPolicyConfig(
+        enabled=True,
+        profile=profile or "balanced",
+        apply_to=apply_to,
+        enabled_rules=enabled_rules,
+        disabled_rules=disabled_rules,
+        normalization={
+            "output_style": getattr(args, "prompt_policy_output_style", "underscore"),
+        },
+    )
 
 
 def _read_node_inputs(args):
@@ -894,8 +1771,11 @@ def _load_render_artist(args):
         node = NodeReader().read(args.artist_node)
         return node.id, node
     artist_ref = getattr(args, "artist", None)
+    if artist_ref and Path(artist_ref).exists():
+        node = NodeReader().read(artist_ref)
+        return artist_ref, node
     if artist_ref and getattr(args, "config", None):
-        config = load_config(Path(args.config))
+        config = _load_command_config(args.config, args)
         return artist_ref, NovelAIArtistRepository(config.legacy.design_root).load_node(artist_ref)
     return artist_ref, None
 
@@ -927,7 +1807,7 @@ def _write_structured_output(data: dict, path: Path, *, output_format: str | Non
 
 
 def _write_generated_core_artifact(data: dict, path: Path, *, overwrite: bool) -> None:
-    # 这个入口会在验收包目录里生成 core 侧产物，默认不覆盖已有人工归档。
+    # Write core acceptance artifacts without replacing existing manual archives.
     if path.exists() and not overwrite:
         raise FileExistsError(f"Output already exists, pass --overwrite to replace: {path}")
     _write_structured_output(data, path, output_format="json")
@@ -949,10 +1829,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print full JSON without truncating long image/base64 fields",
     )
+    output_parent.add_argument(
+        "--log-level",
+        choices=("trace", "info", "warning", "error"),
+        help="Write diagnostic logs to stderr; defaults to TAGS_MACHINE_CORE_LOG_LEVEL or error",
+    )
 
     compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
     compose.add_argument("--prompt", required=True)
     compose.add_argument("--negative")
+    _add_prompt_policy_arguments(compose)
     compose.set_defaults(func=cmd_compose)
 
     compose_nodes = subparsers.add_parser(
@@ -1019,7 +1905,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_prompt = subparsers.add_parser(
         "run-prompt",
         parents=[output_parent],
-        help="Run or plan a full character+action prompt with a NovelAI artist node",
+        help="Run or plan a full character+action prompt with a renderer artist node",
     )
     _add_prompt_run_arguments(
         run_prompt,
@@ -1030,7 +1916,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_prompt.add_argument(
         "--dry-run",
         action="store_true",
-        help="Only print PromptBundle and RenderRequest; do not call NovelAI",
+        help="Only print PromptBundle and RenderRequest; do not call the backend",
     )
     run_prompt.add_argument("--config", help="Load runtime config and artist nodes")
     run_prompt.set_defaults(func=cmd_run_prompt)
@@ -1038,17 +1924,116 @@ def build_parser() -> argparse.ArgumentParser:
     run_action = subparsers.add_parser(
         "run-action",
         parents=[output_parent],
-        help="Compose character/action nodes and run NovelAI",
+        help="Compose character/action nodes and run a generation backend",
     )
     _add_node_compose_arguments(run_action)
     _add_novelai_render_arguments(run_action)
+    run_action.add_argument("--backend", default="novelai", choices=RENDER_BACKENDS)
     run_action.add_argument(
         "--dry-run",
         action="store_true",
-        help="Only print PromptBundle and RenderRequest; do not call NovelAI",
+        help="Only print PromptBundle and RenderRequest; do not call the backend",
     )
     run_action.add_argument("--config", help="Load runtime config and artist nodes")
     run_action.set_defaults(func=cmd_run_action)
+
+    plan_batch = subparsers.add_parser(
+        "plan-batch",
+        parents=[output_parent],
+        help="Expand a BatchSpec into tasks without calling NovelAI",
+    )
+    plan_batch.add_argument("batch_spec")
+    plan_batch.add_argument("--output-root")
+    plan_batch.add_argument("--work-root")
+    plan_batch.add_argument("--output-dir")
+    plan_batch.set_defaults(func=cmd_plan_batch)
+
+    run_batch = subparsers.add_parser(
+        "run-batch",
+        parents=[output_parent],
+        help="Run a BatchSpec through the generation pipeline",
+    )
+    run_batch.add_argument("batch_spec")
+    run_batch.add_argument("--config", help="Override BatchSpec config")
+    run_batch.add_argument("--output-root")
+    run_batch.add_argument("--work-root")
+    run_batch.add_argument("--output-dir")
+    run_batch.add_argument("--limit", type=int)
+    run_batch.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override BatchSpec run.resume",
+    )
+    run_batch.add_argument(
+        "--stop-on-error",
+        action="store_true",
+        default=None,
+        help="Stop the batch after the first failed task",
+    )
+    run_batch.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Start from scratch and clear the existing batch run directory before planning/running",
+    )
+    run_batch.set_defaults(func=cmd_run_batch)
+
+    resume_batch = subparsers.add_parser(
+        "resume-batch",
+        parents=[output_parent],
+        help="Resume a previous batch run directory",
+    )
+    resume_batch.add_argument("run_dir")
+    resume_batch.add_argument("--batch-spec", help="Override stored source BatchSpec")
+    resume_batch.add_argument("--config", help="Override BatchSpec config")
+    resume_batch.add_argument("--limit", type=int)
+    resume_batch.add_argument(
+        "--stop-on-error",
+        action="store_true",
+        default=None,
+        help="Stop the resumed batch after the first failed task",
+    )
+    resume_batch.set_defaults(func=cmd_resume_batch)
+
+    inspect_batch = subparsers.add_parser(
+        "inspect-batch",
+        parents=[output_parent],
+        help="Inspect a batch run manifest",
+    )
+    inspect_batch.add_argument("run_dir")
+    inspect_batch.set_defaults(func=cmd_inspect_batch)
+
+    api_plan_batch = subparsers.add_parser(
+        "api-plan-batch",
+        parents=[output_parent],
+        help="Plan a BatchSpec from a JSON API request without calling NovelAI",
+    )
+    _add_api_request_arguments(api_plan_batch)
+    api_plan_batch.set_defaults(func=cmd_api_plan_batch)
+
+    api_run_batch = subparsers.add_parser(
+        "api-run-batch",
+        parents=[output_parent],
+        help="Run a BatchSpec from a JSON API request through the generation pipeline",
+    )
+    _add_api_request_arguments(api_run_batch)
+    api_run_batch.set_defaults(func=cmd_api_run_batch)
+
+    api_resume_batch = subparsers.add_parser(
+        "api-resume-batch",
+        parents=[output_parent],
+        help="Resume a batch run from a JSON API request",
+    )
+    _add_api_request_arguments(api_resume_batch)
+    api_resume_batch.set_defaults(func=cmd_api_resume_batch)
+
+    api_inspect_batch = subparsers.add_parser(
+        "api-inspect-batch",
+        parents=[output_parent],
+        help="Inspect a batch run from a JSON API request",
+    )
+    _add_api_request_arguments(api_inspect_batch)
+    api_inspect_batch.set_defaults(func=cmd_api_inspect_batch)
 
     api_compose = subparsers.add_parser(
         "api-compose",
@@ -1287,6 +2272,77 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output report file format when --output is used",
     )
     compare_image_result.set_defaults(func=cmd_compare_image_result)
+
+    prompt_policy_acceptance = subparsers.add_parser(
+        "verify-prompt-policy-acceptance",
+        parents=[output_parent],
+        help="Verify real PromptPolicyPipeline output against legacy image evidence",
+    )
+    prompt_policy_acceptance.add_argument("--legacy-image", required=True)
+    prompt_policy_acceptance.add_argument(
+        "--core-run-result",
+        help="JSON/YAML output from run-prompt containing prompt_bundle and generation_result",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--core-generation-result",
+        help="GenerationResult JSON/YAML when not using --core-run-result",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--prompt-bundle",
+        help="PromptBundle JSON/YAML when not using --core-run-result",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--core-image",
+        help="Override the core image path; defaults to GenerationResult.images[0].path",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--visual-result",
+        default="pending",
+        choices=("pending", "pass", "fail", "review"),
+        help="Manual visual check result; pass is required for acceptance",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--visual-note",
+        action="append",
+        help="Manual visual check note; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--expected-profile",
+        help="Expected PromptPolicyPipeline profile, for example balanced",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--require-policy-rule",
+        action="append",
+        help="Required policy rule id; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--expect-token",
+        action="append",
+        help="Token/text that must appear in the core PNG prompt; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--reject-token",
+        action="append",
+        help="Token/text that must not appear in the core PNG prompt; can be repeated",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--whitelist",
+        action="append",
+        help="Approved legacy-vs-core diff path with optional reason, for example $.parameters.sampler=alias",
+    )
+    prompt_policy_acceptance.add_argument(
+        "--intentional-difference",
+        action="append",
+        help="Intentional legacy-vs-core diff path with optional reason",
+    )
+    prompt_policy_acceptance.add_argument("--output", help="Write the report to JSON/YAML")
+    prompt_policy_acceptance.add_argument(
+        "--format",
+        default="auto",
+        choices=("auto", "json", "yaml"),
+        help="Output report file format when --output is used",
+    )
+    prompt_policy_acceptance.set_defaults(func=cmd_verify_prompt_policy_acceptance)
 
     create_acceptance_record = subparsers.add_parser(
         "create-acceptance-record",
@@ -1797,6 +2853,7 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--negative")
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
+    _add_prompt_policy_arguments(parser)
 
 
 def _add_prompt_run_arguments(
@@ -1813,6 +2870,7 @@ def _add_prompt_run_arguments(
             choices=("full", "agent"),
             help="Prompt composition mode; agent mode reads nodes and prompt cache",
         )
+    parser.add_argument("--backend", default="novelai", choices=RENDER_BACKENDS)
     prompt_group = parser.add_mutually_exclusive_group(required=prompt_required)
     prompt_group.add_argument("--prompt", help="Full character + action prompt / tags string")
     prompt_group.add_argument("--prompt-file", help="Read prompt from a UTF-8 text file")
@@ -1848,13 +2906,14 @@ def _add_prompt_run_arguments(
     )
     parser.add_argument("--negative")
     parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
-    parser.add_argument("--artist", help="Artist preset/ref under design/画风")
+    parser.add_argument("--artist", help="Artist preset/ref under design/鐢婚")
     parser.add_argument("--artist-node", help="Path to a structured artist node")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--height", type=int, default=1024)
     parser.add_argument("--model", default="nai-diffusion-4-5-full")
     parser.add_argument("--params-json", help="Extra NovelAI renderer params as a JSON object")
+    _add_prompt_policy_arguments(parser)
     if output_options:
         parser.add_argument("--output-dir", help="Override output directory")
         parser.add_argument(
@@ -1865,9 +2924,35 @@ def _add_prompt_run_arguments(
         )
 
 
+def _add_prompt_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--prompt-policy-profile",
+        choices=("off", "normalize_only", "balanced", "strict", "legacy_compat"),
+        help="Enable PromptPolicyPipeline with the selected profile",
+    )
+    parser.add_argument(
+        "--prompt-policy-output-style",
+        default="underscore",
+        choices=("underscore", "preserve"),
+        help="PromptPolicyPipeline output tag style when enabled",
+    )
+    parser.add_argument(
+        "--prompt-policy-rule",
+        action="append",
+        default=[],
+        help="Force-enable one prompt policy rule; can be repeated",
+    )
+    parser.add_argument(
+        "--no-prompt-policy-rule",
+        action="append",
+        default=[],
+        help="Disable one prompt policy rule; can be repeated",
+    )
+
+
 def _add_novelai_render_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--nt", type=int, default=3, help="Number of images/samples")
-    parser.add_argument("--artist", help="Artist preset/ref under design/画风")
+    parser.add_argument("--artist", help="Artist preset/ref under design/鐢婚")
     parser.add_argument("--artist-node", help="Path to a structured artist node")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--width", type=int, default=1024)
@@ -1881,7 +2966,6 @@ def _add_novelai_render_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("png", "jpg", "webp"),
         help="Output image format when NovelAI returns files without an extension",
     )
-
 
 def _add_api_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("request", help="JSON request file")
@@ -1918,7 +3002,10 @@ def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> No
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    configure_logging(getattr(args, "log_level", None))
     if not hasattr(args, "func"):
         parser.print_help()
         return 1
+    logger.trace("cli command selected command=%s", getattr(args, "command", None))
     return args.func(args)
+

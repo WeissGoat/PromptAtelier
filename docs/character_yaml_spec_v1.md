@@ -40,17 +40,16 @@ tags:
     - black_hair
   eyes:
     - purple_eyes
-  head_accessories:
+  headwear:
     - red_ribbon
   upper_clothes:
     - white_shirt
   lower_clothes:
     - purple_skirt
   full_body_clothes: []
-  handwear: []
   legwear:
     - black_thighhighs
-  footwear:
+  feet:
     - shoes
   accessories: []
   weapons:
@@ -60,7 +59,6 @@ tags:
   tail: []
   ears: []
   body: []
-  feet: []
   hands: []
   extra: []
 ```
@@ -155,27 +153,25 @@ negative_prompt:
 
 - `hair`：发色、发长、发型。
 - `eyes`：眼睛颜色、稳定眼部特征。
-- `face`：脸部稳定特征。
-- `head_accessories`：发饰、帽子、头饰、发夹。
-- `ears`：动物耳、尖耳等。
+- `face`：脸部稳定特征，以及口罩等脸部覆盖物。
+- `headwear`：发饰、帽子、头饰、发夹、耳机、面纱、戴在头上的护目镜。
+- `ears`：动物耳、尖耳、耳环、耳洞等耳部特征或耳部饰品。
 
 ### 服装与穿戴
 
 - `upper_clothes`：上衣、外套、上半身服装。
 - `lower_clothes`：裙子、裤子、下半身服装。
 - `full_body_clothes`：连衣裙、连体衣等不方便拆成上下半身的服装。
-- `handwear`：手套、袖套、腕部穿戴。
-- `legwear`：袜子、裤袜、过膝袜、腿部饰品。
-- `footwear`：鞋、靴、凉鞋、高跟鞋。
+- `legwear`：袜子、裤袜、过膝袜、腿环/腿带等腿部饰品。
 
 ### 身体、局部与道具
 
-- `body`：肤色、体型、稳定身体特征。
-- `feet`：脚部特征，例如特殊脚饰、脚部纹身、bare feet 类素材。
-- `hands`：手部特征。
+- `body`：肤色、体型、稳定身体特征，以及第三只眼、外露心脏等非服装身体特征。
+- `feet`：脚部区域的特征与穿戴，包括 bare feet、脚趾、脚底、鞋、靴、凉鞋、高跟鞋、脚链、脚部固定饰品等。
+- `hands`：手部特征，以及手套、袖套、腕部穿戴、臂章、臂环、戒指、手链、手背宝石、soul gem 等固定在手部/手臂的素材。
 - `accessories`：项链、领结、腰带、包等一般饰品。
 - `weapons`：武器。
-- `props`：非武器道具。
+- `props`：非武器独立道具。若某个物件固定佩戴在具体身体/服装位置，应优先放入对应位置 section，例如 `headwear` 或 `hands`。
 - `wings`：翅膀。
 - `tail`：尾巴。
 - `extra`：暂时不好归类但属于角色素材的 tag。
@@ -227,12 +223,11 @@ foot_detail:
     - body
     - feet
     - legwear
-    - footwear
   suppress_character_sections:
     - hair
     - eyes
     - face
-    - head_accessories
+    - headwear
     - upper_clothes
     - full_body_clothes
 ```
@@ -306,7 +301,7 @@ uv run python -m tags_machine_core migrate-character-tags `
 迁移策略：
 
 - 第一行第一个 tag 进入 `tags.character`，后续 tag 进入 `tags.copyright`。
-- 其余正向 tag 按关键词分入 `hair`、`eyes`、`head_accessories`、`upper_clothes`、`lower_clothes`、`legwear`、`footwear`、`weapons` 等 section。
+- 其余正向 tag 按关键词分入 `hair`、`eyes`、`headwear`、`upper_clothes`、`lower_clothes`、`legwear`、`feet`、`weapons` 等 section。
 - 无法稳定判断的 tag 会进入 `unclassified`，方便人工复核；composer 当前不会把 `unclassified` 纳入局部镜头策略。
 - `origin_uc`、`uc`、`negative_prompt`、`after_uc`、`after_negative_prompt` 会提升为角色级 `negative_prompt`。
 - `=` 后旧项目的 `leg_wear`、`shoes` 等替换规则只保留在 `legacy.raw_sections`，不提升为 `rules`、`profiles` 或 scope 规则。

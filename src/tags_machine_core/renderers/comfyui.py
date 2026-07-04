@@ -12,6 +12,14 @@ from tags_machine_core.renderers.common import (
     render_meta,
     renderer_artist_payload,
 )
+from tags_machine_core.renderers.comfyui_workflow import (
+    build_bound_overrides,
+    optional_input_paths,
+    output_node_ids,
+    required_input_paths,
+    validate_api_workflow,
+    workflow_hash,
+)
 
 
 class ComfyUIRenderAdapter:
@@ -46,7 +54,7 @@ class ComfyUIRenderAdapter:
             backend=self.backend,
             prompt=bundle.prompt.positive,
             negative_prompt=bundle.prompt.negative,
-            model=final_params.get("checkpoint"),
+            model=model,
             seed=final_params["seed"],
             size=RenderSize(width=width, height=height),
             params=final_params,
@@ -66,59 +74,114 @@ class ComfyUIRenderAdapter:
         artist_payload: dict[str, Any],
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        checkpoint = (
-            model
-            or params.get("checkpoint")
-            or params.get("model")
-            or artist_payload.get("checkpoint")
-            or artist_payload.get("model")
-            or "default_comfy_checkpoint"
-        )
         workflow, workflow_json = self._resolve_workflow(
             artist=artist,
             artist_payload=artist_payload,
             params=params,
         )
-        final_params: dict[str, Any] = {
-            "workflow": workflow,
-            "checkpoint": checkpoint,
+        if workflow_json is None:
+            raise ValueError(
+                "ComfyUI renderer requires renderers.comfyui.workflow_json or workflow_path"
+            )
+        validate_api_workflow(workflow_json, source=str(workflow))
+        workflow_ui_json = self._resolve_workflow_ui_json(
+            artist=artist,
+            artist_payload=artist_payload,
+            params=params,
+        )
+
+        seed_value = seed if seed is not None else params.get("seed", 0)
+        input_paths = required_input_paths(artist_payload)
+        optional_paths = optional_input_paths(artist_payload)
+        output_nodes = output_node_ids(artist_payload)
+        semantic_values = {
             "positive_prompt": bundle.prompt.positive,
             "negative_prompt": bundle.prompt.negative,
-            "seed": seed if seed is not None else params.get("seed", 0),
             "width": width,
             "height": height,
-            "steps": params.get("steps", artist_payload.get("steps", 28)),
-            "cfg": params.get("cfg", params.get("cfg_scale", artist_payload.get("cfg", 7.0))),
-            "sampler": params.get("sampler", artist_payload.get("sampler", "euler")),
-            "scheduler": params.get("scheduler", artist_payload.get("scheduler", "normal")),
-            "loras": params.get("loras", artist_payload.get("loras", [])),
-            "embeddings": params.get("embeddings", artist_payload.get("embeddings", [])),
-            "control": params.get("control", artist_payload.get("control", {})),
-            "node_overrides": params.get(
-                "node_overrides",
-                artist_payload.get("node_overrides", {}),
-            ),
+            "seed": seed_value,
         }
-        if workflow_json is not None:
-            final_params["workflow_json"] = workflow_json
-        final_params["node_overrides"] = self._resolve_node_override_templates(
-            final_params["node_overrides"],
-            final_params,
+        optional_values = self._explicit_optional_values(params)
+        template_context = {
+            **semantic_values,
+            **optional_values,
+            "workflow": workflow,
+        }
+        explicit_overrides = self._resolve_node_override_templates(
+            params.get("node_overrides", artist_payload.get("node_overrides", {})),
+            template_context,
         )
+        if not isinstance(explicit_overrides, dict):
+            raise ValueError("ComfyUI node_overrides must be a mapping")
+        node_overrides: dict[str, Any] = dict(explicit_overrides)
+        node_overrides.update(
+            build_bound_overrides(
+                inputs=input_paths,
+                values=semantic_values,
+                source="renderers.comfyui.inputs",
+            )
+        )
+        node_overrides.update(
+            build_bound_overrides(
+                inputs=optional_paths,
+                values=optional_values,
+                source="renderers.comfyui.optional_inputs",
+            )
+        )
+
+        final_params: dict[str, Any] = {
+            "workflow": workflow,
+            "workflow_json": workflow_json,
+            "workflow_hash": workflow_hash(workflow_json),
+            "positive_prompt": bundle.prompt.positive,
+            "negative_prompt": bundle.prompt.negative,
+            "seed": seed_value,
+            "width": width,
+            "height": height,
+            "node_overrides": node_overrides,
+            "comfyui_inputs": {
+                "inputs": copy.deepcopy(input_paths),
+                "optional_inputs": copy.deepcopy(optional_paths),
+            },
+        }
+        if workflow_ui_json is not None:
+            final_params["workflow_ui_json"] = workflow_ui_json
+            final_params["extra_pnginfo"] = {"workflow": workflow_ui_json}
+        if output_nodes:
+            final_params["output_nodes"] = output_nodes
+        final_params.update(optional_values)
         final_params.update(
             preserve_extra_params(
                 params,
                 reserved=set(final_params)
                 | {
+                    "checkpoint",
                     "model",
                     "cfg_scale",
+                    "inputs",
+                    "optional_inputs",
+                    "output_nodes",
+                    "node_overrides",
                     "workflow_path",
                     "workflow_template_path",
                     "workflow_template",
+                    "workflow_json",
+                    "workflow_ui_path",
+                    "workflow_ui_json",
+                    "extra_pnginfo",
                 },
             )
         )
         return final_params
+
+    def _explicit_optional_values(self, params: dict[str, Any]) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for key in ("steps", "cfg", "sampler", "scheduler"):
+            if key in params:
+                values[key] = params[key]
+        if "cfg" not in values and "cfg_scale" in params:
+            values["cfg"] = params["cfg_scale"]
+        return values
 
     def _resolve_workflow(
         self,
@@ -155,6 +218,29 @@ class ComfyUIRenderAdapter:
             path = self._resolve_workflow_path(workflow_path, artist)
             return str(workflow_label), self._load_workflow_json(path)
         return str(workflow_label), None
+
+    def _resolve_workflow_ui_json(
+        self,
+        *,
+        artist: NodeDocument | dict[str, Any] | None,
+        artist_payload: dict[str, Any],
+        params: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        inline_workflow = (
+            params["workflow_ui_json"]
+            if "workflow_ui_json" in params
+            else artist_payload.get("workflow_ui_json")
+        )
+        if inline_workflow is not None:
+            if not isinstance(inline_workflow, dict):
+                raise ValueError("ComfyUI workflow_ui_json must be a mapping")
+            return copy.deepcopy(inline_workflow)
+
+        workflow_path = params.get("workflow_ui_path") or artist_payload.get("workflow_ui_path")
+        if not workflow_path:
+            return None
+        path = self._resolve_workflow_path(workflow_path, artist)
+        return self._load_workflow_json(path)
 
     def _resolve_workflow_path(
         self,

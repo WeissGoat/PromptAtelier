@@ -1,0 +1,36 @@
+schema: tags-machine-core.node/v1
+kind: artist
+id: comfyui_cunyfunky
+description: "ComfyUI Aki cunyfunky API workflow preset."
+
+renderers:
+  comfyui:
+    workflow: cunyfunky
+    workflow_path: workflows/cunyfunky_api.json
+    workflow_ui_path: workflows/cunyfunky.json
+
+    inputs:
+      positive_prompt: "218.inputs.wildcard_text"
+      negative_prompt: "153.inputs.text"
+      width: "23.inputs.width"
+      height: "23.inputs.height"
+      seed: "202.inputs.seed"
+
+    optional_inputs:
+      steps:
+        - "3.inputs.steps"
+        - "17.inputs.steps"
+      cfg:
+        - "3.inputs.cfg"
+        - "17.inputs.cfg"
+      sampler:
+        - "3.inputs.sampler_name"
+        - "17.inputs.sampler_name"
+      scheduler:
+        - "3.inputs.scheduler"
+        - "17.inputs.scheduler"
+
+    output_nodes:
+      - "212"
+
+    node_overrides: {}

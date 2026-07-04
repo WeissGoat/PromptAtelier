@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+import json
 import time
 from typing import Any
 from urllib.parse import urlencode
@@ -52,11 +53,16 @@ class ComfyUIGenerationResult:
 class ComfyUIClient:
     base_url: str = COMFYUI_BASE_URL
     timeout: int = 120
+    retry: int = 3
+    retry_interval: float = 2.0
     http_client: Any | None = None
 
     def build_payload(self, request: RenderRequest, *, client_id: str | None = None) -> dict[str, Any]:
         workflow = self.build_workflow(request)
         payload: dict[str, Any] = {"prompt": workflow}
+        extra_pnginfo = request.params.get("extra_pnginfo")
+        if isinstance(extra_pnginfo, dict) and extra_pnginfo:
+            payload["extra_data"] = {"extra_pnginfo": copy.deepcopy(extra_pnginfo)}
         if client_id:
             payload["client_id"] = client_id
         return payload
@@ -83,7 +89,8 @@ class ComfyUIClient:
         client_id: str | None = None,
     ) -> ComfyUIPromptResult:
         payload = self.build_payload(request, client_id=client_id)
-        response = self._session().post(
+        response = self._request(
+            "post",
             f"{self.base_url.rstrip('/')}/prompt",
             json=payload,
             timeout=self.timeout,
@@ -91,7 +98,7 @@ class ComfyUIClient:
         if response.status_code >= 400:
             raise ComfyUIClientError(
                 status_code=response.status_code,
-                response_text=response.text,
+                response_text=self._error_text(response),
                 sanitized_payload=sanitize_json_for_display(payload),
             )
         response.raise_for_status()
@@ -128,18 +135,23 @@ class ComfyUIClient:
             prompt_id=queued.prompt_id,
             queue_raw=queued.raw,
             history=history,
-            images=self.download_history_images(history, prompt_id=queued.prompt_id),
+            images=self.download_history_images(
+                history,
+                prompt_id=queued.prompt_id,
+                output_nodes=request.params.get("output_nodes"),
+            ),
         )
 
     def get_history(self, prompt_id: str) -> dict[str, Any]:
-        response = self._session().get(
+        response = self._request(
+            "get",
             f"{self.base_url.rstrip('/')}/history/{prompt_id}",
             timeout=self.timeout,
         )
         if response.status_code >= 400:
             raise ComfyUIClientError(
                 status_code=response.status_code,
-                response_text=response.text,
+                response_text=self._error_text(response),
                 sanitized_payload={"prompt_id": prompt_id},
             )
         response.raise_for_status()
@@ -180,6 +192,7 @@ class ComfyUIClient:
         history: dict[str, Any],
         *,
         prompt_id: str | None = None,
+        output_nodes: list[str] | tuple[str, ...] | None = None,
     ) -> list[ComfyUIImage]:
         entry = self._history_entry(history, prompt_id)
         if entry is None:
@@ -189,7 +202,10 @@ class ComfyUIClient:
             return []
 
         images: list[ComfyUIImage] = []
+        allowed_nodes = {str(item) for item in (output_nodes or []) if str(item)}
         for node_id, output in outputs.items():
+            if allowed_nodes and str(node_id) not in allowed_nodes:
+                continue
             if not isinstance(output, dict):
                 continue
             for image in output.get("images") or []:
@@ -229,14 +245,15 @@ class ComfyUIClient:
                 "type": image_type,
             }
         )
-        response = self._session().get(
+        response = self._request(
+            "get",
             f"{self.base_url.rstrip('/')}/view?{query}",
             timeout=self.timeout,
         )
         if response.status_code >= 400:
             raise ComfyUIClientError(
                 status_code=response.status_code,
-                response_text=response.text,
+                response_text=self._error_text(response),
                 sanitized_payload={
                     "filename": filename,
                     "subfolder": subfolder,
@@ -246,8 +263,61 @@ class ComfyUIClient:
         response.raise_for_status()
         return response.content
 
+    def object_info(self) -> dict[str, Any]:
+        response = self._request(
+            "get",
+            f"{self.base_url.rstrip('/')}/object_info",
+            timeout=self.timeout,
+        )
+        if response.status_code >= 400:
+            raise ComfyUIClientError(
+                status_code=response.status_code,
+                response_text=self._error_text(response),
+                sanitized_payload={"endpoint": "object_info"},
+            )
+        response.raise_for_status()
+        data = response.json()
+        return data if isinstance(data, dict) else {"raw": data}
+
     def _session(self):
         return self.http_client or requests
+
+    def _request(self, method: str, url: str, **kwargs):
+        attempts = max(1, int(self.retry or 1))
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                func = getattr(self._session(), method)
+                response = func(url, **kwargs)
+                if response.status_code in {429, 500, 502, 503, 504} and attempt < attempts:
+                    time.sleep(max(0.0, float(self.retry_interval or 0.0)))
+                    continue
+                return response
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_exc = exc
+                if attempt >= attempts:
+                    raise
+                time.sleep(max(0.0, float(self.retry_interval or 0.0)))
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"ComfyUI request did not return a response: {method} {url}")
+
+    def _error_text(self, response: Any) -> str:
+        text = str(getattr(response, "text", "") or "")
+        try:
+            data = response.json()
+        except Exception:
+            return text
+        if not isinstance(data, dict):
+            return text
+        parts = [text] if text else []
+        error = data.get("error")
+        node_errors = data.get("node_errors")
+        if error:
+            parts.append("error=" + json_like(error))
+        if node_errors:
+            parts.append("node_errors=" + json_like(node_errors))
+        return "; ".join(parts) or json_like(data)
 
     def _history_entry(
         self,
@@ -309,3 +379,10 @@ class ComfyUIClient:
         if not isinstance(current, dict):
             raise ValueError(f"Cannot apply node override to non-mapping path: {path}")
         current[parts[-1]] = value
+
+
+def json_like(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)[:2000]
+    except TypeError:
+        return str(value)[:2000]

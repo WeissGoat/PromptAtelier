@@ -63,8 +63,7 @@ class ScriptComposerTest(unittest.TestCase):
                     "hair": ["long black hair"],
                     "eyes": ["purple eyes"],
                     "upper_clothes": ["school uniform"],
-                    "feet": ["bare soles"],
-                    "footwear": ["shoes"],
+                    "feet": ["bare soles", "shoes"],
                 },
                 "negative_prompt": ["extra toes"],
             }
@@ -87,7 +86,7 @@ class ScriptComposerTest(unittest.TestCase):
         self.assertEqual(bundle.meta.composition.character_scope, "foot_detail")
         self.assertEqual(
             bundle.meta.composition.included_character_sections,
-            ["character", "copyright", "feet", "footwear"],
+            ["character", "copyright", "feet"],
         )
         self.assertEqual(
             bundle.meta.composition.suppressed_character_sections,
@@ -138,10 +137,8 @@ class ScriptComposerTest(unittest.TestCase):
                     "character": ["akemi homura"],
                     "hair": ["long black hair"],
                     "eyes": ["purple eyes"],
-                    "hands": ["slender hands"],
-                    "handwear": ["black gloves"],
-                    "feet": ["bare soles"],
-                    "footwear": ["shoes"],
+                    "hands": ["slender hands", "black gloves"],
+                    "feet": ["bare soles", "shoes"],
                     "lower_clothes": ["black skirt"],
                 },
             }
@@ -166,9 +163,7 @@ class ScriptComposerTest(unittest.TestCase):
         self.assertNotIn("shoes", bundle.prompt.positive)
         self.assertNotIn("black skirt", bundle.prompt.positive)
         self.assertIn("hands", bundle.meta.composition.included_character_sections)
-        self.assertIn("handwear", bundle.meta.composition.included_character_sections)
         self.assertIn("feet", bundle.meta.composition.suppressed_character_sections)
-        self.assertIn("footwear", bundle.meta.composition.suppressed_character_sections)
         self.assertIn("lower_clothes", bundle.meta.composition.suppressed_character_sections)
 
     def test_legacy_scoped_prompt_fragments_remain_supported(self):

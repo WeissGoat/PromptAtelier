@@ -6,6 +6,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from tags_machine_core.policies import PromptPolicyConfig
+
 
 class LegacyConfig(BaseModel):
     tags_machine_root: Path
@@ -22,17 +24,27 @@ class DefaultsConfig(BaseModel):
     image_format: str = "png"
 
 
+class LoggingConfig(BaseModel):
+    level: str = "error"
+
+
 class NovelAIConfig(BaseModel):
     base_url: str = "https://image.novelai.net"
+    access_token: str | None = None
     access_token_env: str = "NAI_ACCESS_TOKEN"
     timeout: int = 120
     retry: int = 3
     retry_interval: float | None = None
+    request_interval: float = 0.0
 
 
 class ComfyUIConfig(BaseModel):
     base_url: str = "http://127.0.0.1:8188"
-    timeout: int = 120
+    timeout: int = 300
+    poll_interval: float = 1.0
+    max_wait_seconds: float | None = 600
+    retry: int = 3
+    retry_interval: float = 2.0
 
 
 class SDConfig(BaseModel):
@@ -44,6 +56,8 @@ class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    prompt_policy: PromptPolicyConfig = Field(default_factory=PromptPolicyConfig)
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     sd: SDConfig = Field(default_factory=SDConfig)

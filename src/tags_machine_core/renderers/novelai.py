@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
+from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
@@ -15,6 +16,8 @@ from tags_machine_core.renderers.common import (
     renderer_artist_prompt_parts,
 )
 
+
+logger = get_logger(__name__)
 
 NovelAIArtistInput = NovelAIArtist | NodeDocument | dict[str, Any] | None
 
@@ -117,6 +120,14 @@ class NovelAIRenderAdapter:
             model=model,
             resolved_nodes=resolved_nodes,
         )
+        logger.info(
+            "NovelAIRenderAdapter built parameters model=%s size=%sx%s composer=%s legacy_artist=%s",
+            model,
+            width,
+            height,
+            bundle.meta.composer_type,
+            isinstance(artist, NovelAIArtist) or bool(artist_payload.get("legacy_compat")),
+        )
         prompt = final_params["prompt"]
         negative_prompt = final_params["negative_prompt"]
         character_prompt_meta = final_params.pop("_character_prompt_meta", None)
@@ -135,6 +146,12 @@ class NovelAIRenderAdapter:
             meta.update(trace_meta)
         if character_prompt_meta:
             meta["character_prompts"] = character_prompt_meta
+            logger.info(
+                "NovelAIRenderAdapter character prompts enabled meta=%s",
+                character_prompt_meta,
+            )
+        else:
+            logger.trace("NovelAIRenderAdapter character prompts not applied")
 
         return RenderRequest(
             backend=self.backend,

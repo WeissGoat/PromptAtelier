@@ -73,6 +73,9 @@ class MultiBackendClientTest(unittest.TestCase):
                     "12": {"inputs": {"cfg": 5.0}},
                     "17": {"inputs": {"text": ""}},
                 },
+                "extra_pnginfo": {
+                    "workflow": {"nodes": [{"id": 1, "type": "KSampler"}]},
+                },
                 "node_overrides": {
                     "12.inputs.cfg": 6.5,
                     "17.inputs.text": "akemi homura",
@@ -86,6 +89,10 @@ class MultiBackendClientTest(unittest.TestCase):
         self.assertEqual(payload["client_id"], "client-1")
         self.assertEqual(payload["prompt"]["12"]["inputs"]["cfg"], 6.5)
         self.assertEqual(payload["prompt"]["17"]["inputs"]["text"], "akemi homura")
+        self.assertEqual(
+            payload["extra_data"]["extra_pnginfo"]["workflow"]["nodes"][0]["type"],
+            "KSampler",
+        )
         self.assertEqual(result.prompt_id, "abc123")
         self.assertEqual(session.calls[0]["url"], "http://comfy.local/prompt")
         self.assertEqual(session.calls[0]["timeout"], 30)

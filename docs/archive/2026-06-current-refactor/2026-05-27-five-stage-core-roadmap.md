@@ -573,12 +573,12 @@ git commit -m "test: define foot detail composer policy"
 ```python
 SCOPE_SECTION_POLICY = {
     "foot_detail": {
-        "include": {"identity", "copyright", "body", "feet", "legwear", "footwear"},
-        "suppress": {"hair", "eyes", "head_accessories", "upper_clothes"},
+        "include": {"identity", "copyright", "body", "feet", "legwear"},
+        "suppress": {"hair", "eyes", "headwear", "upper_clothes"},
     },
     "hand_detail": {
         "include": {"identity", "copyright", "body", "hands", "sleeves", "accessories"},
-        "suppress": {"feet", "footwear", "legwear"},
+        "suppress": {"feet", "legwear"},
     },
 }
 ```

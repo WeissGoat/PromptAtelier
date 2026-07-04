@@ -11,6 +11,14 @@ from tags_machine_core.nodes.models import LegacyNodeMeta, NodeDocument
 
 ARTIST_DIR_NAME = "\u753b\u98ce"
 
+LEGACY_EXTENSION_MARKERS = (
+    "after_uc",
+    "origin_uc",
+    "origin_clear",
+    "gen_json",
+    "gen_param",
+)
+
 
 class NovelAIArtist(BaseModel):
     artist_ref: str
@@ -90,15 +98,24 @@ class NovelAIArtistRepository:
         flags: set[str] = set()
         in_ext = False
         for line in lines:
-            if line == "=":
-                in_ext = True
-                continue
             if in_ext:
                 ext_lines.append(line)
-            elif self._is_type_line(line):
+                continue
+            if self._is_type_line(line):
                 flags.update(self._split_type_flags(line))
-            else:
-                prompt_lines.append(line)
+                continue
+            stripped = line.strip()
+            if stripped.startswith("="):
+                in_ext = True
+                inline_ext = stripped[1:].strip(" ,")
+                if inline_ext:
+                    ext_lines.append(inline_ext)
+                continue
+            if self._is_extension_line(line):
+                in_ext = True
+                ext_lines.append(line)
+                continue
+            prompt_lines.append(line)
 
         prompt_prefix, prompt_suffix = self._legacy_formula_prompt_parts(prompt_lines)
 
@@ -132,6 +149,9 @@ class NovelAIArtistRepository:
 
     def _is_type_line(self, line: str) -> bool:
         return line[:4] == "type"
+
+    def _is_extension_line(self, line: str) -> bool:
+        return any(marker in line for marker in LEGACY_EXTENSION_MARKERS)
 
     def _split_type_flags(self, line: str) -> set[str]:
         parts = [part.strip() for part in line.split(",") if part.strip()]

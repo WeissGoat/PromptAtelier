@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Clean prompt composition and render planning core for Tags Machine."
 requires-python = ">=3.11"
 dependencies = [
+    "Pillow>=10.0",
     "pydantic>=2.6",
     "PyYAML>=6.0",
     "requests>=2.31",

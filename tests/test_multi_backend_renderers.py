@@ -13,16 +13,15 @@ def _bundle():
     return ScriptComposer().compose_full_prompt(
         prompt="akemi homura, foot focus",
         negative="extra toes",
-        style_ref="cross_backend_style",
     )
 
 
-def _style_node() -> NodeDocument:
+def _artist_node() -> NodeDocument:
     return NodeDocument.model_validate(
         {
             "schema": "tags-machine-core.node/v1",
-            "kind": "style",
-            "id": "cross_backend_style",
+            "kind": "artist",
+            "id": "cross_backend_artist",
             "tags": {
                 "style": ["anime style"],
                 "quality": ["{best quality}"],
@@ -44,9 +43,31 @@ def _style_node() -> NodeDocument:
                 },
                 "comfyui": {
                     "workflow": "portrait_workflow",
-                    "checkpoint": "anime_comfy.safetensors",
-                    "loras": [{"name": "lineart", "weight": 0.65}],
-                    "params": {"steps": 32, "cfg": 6.5},
+                    "workflow_ui_json": {
+                        "nodes": [{"id": 1, "type": "KSampler"}],
+                        "links": [],
+                    },
+                    "workflow_json": {
+                        "3": {"class_type": "KSampler", "inputs": {"steps": 34, "cfg": 7, "scheduler": "normal"}},
+                        "17": {"class_type": "KSampler", "inputs": {"steps": 50, "cfg": 7, "scheduler": "normal"}},
+                        "23": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024}},
+                        "153": {"class_type": "CLIPTextEncode", "inputs": {"text": "old negative"}},
+                        "202": {"class_type": "CR Seed", "inputs": {"seed": 1}},
+                        "218": {"class_type": "ImpactWildcardProcessor", "inputs": {"wildcard_text": "old positive"}},
+                    },
+                    "inputs": {
+                        "positive_prompt": "218.inputs.wildcard_text",
+                        "negative_prompt": "153.inputs.text",
+                        "width": "23.inputs.width",
+                        "height": "23.inputs.height",
+                        "seed": "202.inputs.seed",
+                    },
+                    "optional_inputs": {
+                        "steps": ["3.inputs.steps", "17.inputs.steps"],
+                        "cfg": ["3.inputs.cfg", "17.inputs.cfg"],
+                        "scheduler": ["3.inputs.scheduler", "17.inputs.scheduler"],
+                    },
+                    "output_nodes": ["212"],
                 },
                 "sd": {
                     "checkpoint": "anime_sd.safetensors",
@@ -60,11 +81,11 @@ def _style_node() -> NodeDocument:
 
 
 class MultiBackendRendererTest(unittest.TestCase):
-    def test_novelai_adapter_accepts_structured_style_node(self):
+    def test_novelai_adapter_accepts_structured_artist_node(self):
         request = NovelAIRenderAdapter().build_request(
             _bundle(),
             seed=321,
-            style=_style_node(),
+            artist=_artist_node(),
         )
 
         self.assertEqual(request.backend, "novelai")
@@ -87,29 +108,36 @@ class MultiBackendRendererTest(unittest.TestCase):
             seed=123,
             width=832,
             height=1216,
-            style=_style_node(),
+            artist=_artist_node(),
             params={"scheduler": "karras"},
         )
 
         self.assertEqual(request.backend, "comfyui")
-        self.assertEqual(request.model, "anime_comfy.safetensors")
+        self.assertIsNone(request.model)
         self.assertEqual(request.seed, 123)
         self.assertEqual(request.params["workflow"], "portrait_workflow")
-        self.assertEqual(request.params["steps"], 32)
-        self.assertEqual(request.params["cfg"], 6.5)
+        self.assertEqual(request.params["workflow_hash"][:7], "sha256:")
+        self.assertEqual(request.params["extra_pnginfo"]["workflow"]["nodes"][0]["type"], "KSampler")
         self.assertEqual(request.params["scheduler"], "karras")
-        self.assertEqual(request.params["loras"], [{"name": "lineart", "weight": 0.65}])
         self.assertEqual(request.params["positive_prompt"], "akemi homura, foot focus")
         self.assertEqual(request.params["negative_prompt"], "extra toes")
+        self.assertEqual(request.params["output_nodes"], ["212"])
+        self.assertEqual(request.params["node_overrides"]["218.inputs.wildcard_text"], request.prompt)
+        self.assertEqual(request.params["node_overrides"]["153.inputs.text"], request.negative_prompt)
+        self.assertEqual(request.params["node_overrides"]["23.inputs.width"], 832)
+        self.assertEqual(request.params["node_overrides"]["23.inputs.height"], 1216)
+        self.assertEqual(request.params["node_overrides"]["202.inputs.seed"], 123)
+        self.assertEqual(request.params["node_overrides"]["3.inputs.scheduler"], "karras")
+        self.assertEqual(request.params["node_overrides"]["17.inputs.scheduler"], "karras")
         self.assertEqual(request.meta["backend"], "comfyui")
 
     def test_comfyui_adapter_uses_inline_workflow_json(self):
-        workflow = {"1": {"inputs": {"text": "before"}}}
-        style = _style_node().model_copy(deep=True)
-        style.renderers["comfyui"]["workflow"] = "inline_workflow"
-        style.renderers["comfyui"]["workflow_json"] = workflow
+        workflow = {"1": {"class_type": "CLIPTextEncode", "inputs": {"text": "before"}}}
+        artist = _artist_node().model_copy(deep=True)
+        artist.renderers["comfyui"]["workflow"] = "inline_workflow"
+        artist.renderers["comfyui"]["workflow_json"] = workflow
 
-        request = ComfyUIRenderAdapter().build_request(_bundle(), style=style)
+        request = ComfyUIRenderAdapter().build_request(_bundle(), artist=artist)
         workflow["1"]["inputs"]["text"] = "after"
 
         self.assertEqual(request.params["workflow"], "inline_workflow")
@@ -117,26 +145,27 @@ class MultiBackendRendererTest(unittest.TestCase):
 
     def test_comfyui_adapter_loads_workflow_json_relative_to_style_node(self):
         with tempfile.TemporaryDirectory() as tmp:
-            style_dir = Path(tmp) / "style"
-            workflow_dir = style_dir / "workflows"
+            artist_dir = Path(tmp) / "artist"
+            workflow_dir = artist_dir / "workflows"
             workflow_dir.mkdir(parents=True)
             workflow_path = workflow_dir / "portrait.json"
             workflow_path.write_text(
-                json.dumps({"12": {"inputs": {"cfg": 6.5}}}),
+                json.dumps({"12": {"class_type": "KSampler", "inputs": {"cfg": 6.5}}}),
                 encoding="utf-8",
             )
-            style = _style_node().model_copy(update={"path": style_dir}, deep=True)
-            style.renderers["comfyui"]["workflow"] = "portrait_workflow"
-            style.renderers["comfyui"]["workflow_path"] = "workflows/portrait.json"
+            artist = _artist_node().model_copy(update={"path": artist_dir}, deep=True)
+            artist.renderers["comfyui"]["workflow"] = "portrait_workflow"
+            artist.renderers["comfyui"].pop("workflow_json", None)
+            artist.renderers["comfyui"]["workflow_path"] = "workflows/portrait.json"
 
-            request = ComfyUIRenderAdapter().build_request(_bundle(), style=style)
+            request = ComfyUIRenderAdapter().build_request(_bundle(), artist=artist)
 
             self.assertEqual(request.params["workflow"], "portrait_workflow")
             self.assertEqual(request.params["workflow_json"]["12"]["inputs"]["cfg"], 6.5)
 
     def test_comfyui_adapter_resolves_node_override_templates(self):
-        style = _style_node().model_copy(deep=True)
-        style.renderers["comfyui"]["node_overrides"] = {
+        artist = _artist_node().model_copy(deep=True)
+        artist.renderers["comfyui"]["node_overrides"] = {
             "2.inputs.text": "{positive_prompt}",
             "3.inputs.text": "{negative_prompt}",
             "4.inputs.width": "{width}",
@@ -152,7 +181,8 @@ class MultiBackendRendererTest(unittest.TestCase):
             seed=123,
             width=832,
             height=1216,
-            style=style,
+            artist=artist,
+            params={"steps": 32, "cfg": 6.5},
         )
 
         overrides = request.params["node_overrides"]
@@ -171,7 +201,7 @@ class MultiBackendRendererTest(unittest.TestCase):
             seed=456,
             width=768,
             height=1024,
-            style=_style_node(),
+            artist=_artist_node(),
             params={"sampler": "DPM++ 2M", "clip_skip": 2},
         )
 
@@ -193,24 +223,24 @@ class MultiBackendRendererTest(unittest.TestCase):
             _bundle(),
             backend="comfyui",
             seed=1,
-            style=_style_node(),
+            artist=_artist_node(),
         )
         sd = service.build_render_request(
             _bundle(),
             backend="sd",
             seed=2,
-            style=_style_node(),
+            artist=_artist_node(),
         )
 
         self.assertEqual(comfy.backend, "comfyui")
         self.assertEqual(sd.backend, "sd")
 
-    def test_generation_service_dispatches_structured_style_to_novelai(self):
+    def test_generation_service_dispatches_structured_artist_to_novelai(self):
         request = GenerationService().build_render_request(
             _bundle(),
             backend="novelai",
             seed=3,
-            style=_style_node(),
+            artist=_artist_node(),
         )
 
         self.assertEqual(request.backend, "novelai")
@@ -223,7 +253,7 @@ class MultiBackendRendererTest(unittest.TestCase):
                 _bundle(),
                 backend="unknown",
                 seed=3,
-                style=_style_node(),
+                artist=_artist_node(),
             )
 
         self.assertIn("Unsupported backend: unknown", str(raised.exception))

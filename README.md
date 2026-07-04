@@ -35,6 +35,8 @@
 - `render-plan`：生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `render-plan-nodes`：从结构化节点生成 `RenderRequest`，不联网；当前验收主线为 NovelAI
 - `run-prompt`：输入完整角色+动作 prompt，只叠加 NovelAI 画风；可 dry-run，也可直接生图
+- `plan-batch` / `run-batch` / `resume-batch` / `inspect-batch`：按 Batch YAML 批量规划、真实跑图、断点续跑和查看结果；字段说明、使用方式和输出结构见 [批量跑图 README](docs/batch_generation_readme.md)
+- `api-plan-batch` / `api-run-batch` / `api-resume-batch` / `api-inspect-batch`：给前端或 worker 使用的批量 JSON API 入口
 - `api-compose` / `api-agent-task` / `api-compose-agent` / `api-resolve-agent` / `api-render-plan` / `api-compose-render-plan` / `api-resolve-compose-render-plan` / `api-backend-support` / `api-generate`：从 JSON 请求文件完成前端/worker 边界往返
 - `generate`：调用 NovelAI 并保存图片
 - `execute-render-request`：读取已有 `RenderRequest` 并执行；默认只执行 NovelAI，ComfyUI / SD 需要显式实验开关

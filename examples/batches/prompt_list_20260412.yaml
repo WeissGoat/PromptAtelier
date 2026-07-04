@@ -1,0 +1,26 @@
+schema: tags-machine-core.batch/v1
+name: prompt-list-20260412
+config: configs/local.example.yaml
+output_root: outputs/batches
+
+defaults:
+  composer: full
+  artist: 20260412
+  nt: 1
+  resolution: square
+  model: nai-diffusion-4-5-full
+
+select:
+  prompts:
+    - selector: prompt_list
+      items:
+        - id: standing_001
+          prompt: "akemi_homura, 1girl, standing, looking at viewer"
+        - id: foot_001
+          prompt: "akemi_homura, 1girl, bare feet, foot focus, lower body"
+
+expand:
+  mode: prompt_list
+
+run:
+  resume: true
