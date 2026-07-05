@@ -42,6 +42,32 @@ tags:
     )
 
 
+def _write_character_node(
+    path: Path,
+    *,
+    node_id: str,
+    character_id: str,
+    cp: list[str] | None = None,
+) -> None:
+    path.mkdir(parents=True)
+    relations = ""
+    if cp:
+        relations = "relations:\n  cp:\n" + "".join(f"    - {item}\n" for item in cp)
+    (path / "meta.yaml").write_text(
+        f"""
+schema: tags-machine.character/v1
+kind: character
+id: {node_id}
+character_id: {character_id}
+tags:
+  character:
+    - {character_id}
+{relations}
+""".strip(),
+        encoding="utf-8",
+    )
+
+
 class FakeExecutor:
     def __init__(self, status: str = "requires_agent"):
         self.status = status
@@ -111,6 +137,205 @@ class SuccessfulExecutor:
 
 
 class BatchGenerationTest(unittest.TestCase):
+    def test_load_batch_spec_merges_required_project_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "project"
+            project.mkdir()
+            (project / "base.yaml").write_text(
+                """
+schema: tags-machine-core.batch/v1
+name: base-name
+defaults:
+  backend: novelai
+  nt: 1
+  resolution: random_standard
+collections:
+  characters:
+    madoka_main:
+      - characters
+run:
+  retry:
+    max_attempts: 2
+""".strip(),
+                encoding="utf-8",
+            )
+            spec_path = root / "batch.yaml"
+            spec_path.write_text(
+                """
+require:
+  - project/base.yaml
+name: merged-batch
+defaults:
+  nt: 3
+collections:
+  characters:
+    madoka_main:
+      - homura
+    homura_only:
+      - homura
+run:
+  retry:
+    timeout_seconds: 1.0
+""".strip(),
+                encoding="utf-8",
+            )
+
+            spec = load_batch_spec(spec_path)
+
+            self.assertEqual(spec.name, "merged-batch")
+            self.assertEqual(spec.defaults.backend, "novelai")
+            self.assertEqual(spec.defaults.nt, 3)
+            self.assertEqual(spec.defaults.resolution, "random_standard")
+            self.assertEqual(spec.collections["characters"]["madoka_main"], ["homura"])
+            self.assertEqual(spec.collections["characters"]["homura_only"], ["homura"])
+            self.assertEqual(spec.run.retry.max_attempts, 2)
+            self.assertEqual(spec.run.retry.timeout_seconds, 1.0)
+
+    def test_load_batch_spec_rejects_circular_require(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.yaml").write_text("require: b.yaml\nname: a\n", encoding="utf-8")
+            (root / "b.yaml").write_text("require: a.yaml\nname: b\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Circular batch require"):
+                load_batch_spec(root / "a.yaml")
+
+    def test_artist_collection_returns_artist_refs(self):
+        context = SelectorContext(
+            base_dir=Path("."),
+            collections={"artists": {"nai4_common": ["20260412", "20260412_2"]}},
+        )
+        spec = SelectorSpec(selector="collection", name="nai4_common")
+
+        refs = expand_selector(role="artist", spec=spec, context=context)
+
+        self.assertEqual(refs, ["20260412", "20260412_2"])
+
+    def test_action_collection_supports_selectors_and_collection_refs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "actions" / "pn_alpha", kind="action", node_id="a1", prompt="a1")
+            _write_node(root / "actions" / "pn_beta", kind="action", node_id="b1", prompt="b1")
+            _write_node(root / "actions" / "st_other", kind="action", node_id="c1", prompt="c1")
+            context = SelectorContext(
+                base_dir=root,
+                collections={
+                    "actions": {
+                        "action_new": [
+                            {
+                                "selector": "folder",
+                                "root": "actions",
+                                "include": {"names": ["pn_*"]},
+                            }
+                        ],
+                        "action_other": ["actions/st_other"],
+                        "combined": [
+                            {"collection": "action_new"},
+                            {"collection": "action_other"},
+                        ],
+                    }
+                },
+            )
+
+            refs = expand_selector(role="action", spec=SelectorSpec(selector="collection", name="combined"), context=context)
+
+            self.assertEqual([Path(ref).name for ref in refs], ["pn_alpha", "pn_beta", "st_other"])
+
+    def test_collection_reference_rejects_cycles(self):
+        context = SelectorContext(
+            base_dir=Path("."),
+            collections={
+                "actions": {
+                    "a": [{"collection": "b"}],
+                    "b": [{"collection": "a"}],
+                }
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "Circular collection reference"):
+            expand_selector(role="action", spec=SelectorSpec(selector="collection", name="a"), context=context)
+
+    def test_batch_shorthand_plans_blackboard_rounds_from_collections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "homura", kind="character", node_id="homura", prompt="akemi_homura")
+            for action_name in ("a1", "a2"):
+                _write_node(
+                    root / "actions" / "st_rp" / action_name,
+                    kind="action",
+                    node_id=action_name,
+                    prompt=action_name,
+                )
+            (root / "project.yaml").write_text(
+                """
+schema: tags-machine-core.batch/v1
+name: project-defaults
+defaults:
+  artist: 20260412
+  composer: script
+collections:
+  characters:
+    homura_set:
+      - characters
+  actions:
+    st_rp:
+      - actions/st_rp
+""".strip(),
+                encoding="utf-8",
+            )
+            spec_path = root / "batch.yaml"
+            spec_path.write_text(
+                """
+require: project.yaml
+name: shorthand-batch
+batch:
+  characters: homura_set
+  action_groups:
+    - st_rp
+  strategy: ordered
+  auto_num: true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            spec = load_batch_spec(spec_path)
+            tasks = BatchPlanner(base_dir=root).plan(spec, run_dir=root / "run", run_id="testrun")
+
+            self.assertEqual(spec.expand.mode, "blackboard_rounds")
+            self.assertTrue(spec.expand.auto_num)
+            self.assertEqual(spec.expand.action_group_strategy, "ordered")
+            self.assertEqual(len(tasks), 2)
+            self.assertEqual([task.source["action_group"] for task in tasks], ["st_rp", "st_rp"])
+            self.assertEqual(tasks[0].render.artist, "20260412")
+
+    def test_batch_resolution_accepts_nai_const_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "homura", kind="character", node_id="homura", prompt="akemi_homura")
+            _write_node(root / "actions" / "standing", kind="action", node_id="standing", prompt="standing")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "resolution-alias",
+                    "defaults": {
+                        "composer": "script",
+                        "artist": "20260412",
+                        "resolution": "normal_landscape",
+                    },
+                    "select": {
+                        "characters": [{"selector": "explicit", "refs": [str(root / "characters" / "homura")]}],
+                        "actions": [{"selector": "explicit", "refs": [str(root / "actions" / "standing")]}],
+                    },
+                    "expand": {"mode": "product"},
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].render.width, 1216)
+            self.assertEqual(tasks[0].render.height, 832)
+
     def test_prompt_list_plan_writes_two_tasks(self):
         spec = BatchSpec.model_validate(
             {
@@ -388,6 +613,161 @@ class BatchGenerationTest(unittest.TestCase):
             self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2"])
             self.assertEqual([Path(task.source["action"]).name for task in tasks], ["a1", "a2", "b1"])
 
+    def test_character_action_group_auto_adds_cp_character_for_two_girls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_character_node(
+                root / "characters" / "homura",
+                node_id="homura",
+                character_id="akemi_homura",
+                cp=["kaname_madoka"],
+            )
+            _write_character_node(
+                root / "characters" / "madoka",
+                node_id="madoka",
+                character_id="kaname_madoka",
+            )
+            _write_node(root / "groups" / "g1" / "a1", kind="action", node_id="a1", prompt="2girls, sitting")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "auto-cp",
+                    "defaults": {"composer": "script", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [
+                                    str(root / "characters" / "homura"),
+                                    str(root / "characters" / "madoka"),
+                                ],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            }
+                        ],
+                    },
+                    "expand": {
+                        "mode": "character_action_group",
+                        "action_group_strategy": "ordered",
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 1)
+            character_nodes = [node for node in tasks[0].nodes if node.role == "character"]
+            self.assertEqual([Path(node.ref).name for node in character_nodes], ["homura", "madoka"])
+            self.assertTrue(tasks[0].source["auto_cp"])
+            self.assertEqual(tasks[0].source["required_character_count"], 2)
+
+    def test_character_action_group_skips_multi_character_action_without_cp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_character_node(
+                root / "characters" / "homura",
+                node_id="homura",
+                character_id="akemi_homura",
+            )
+            _write_node(root / "groups" / "g1" / "a1", kind="action", node_id="a1", prompt="2girls, sitting")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "auto-cp-skip",
+                    "defaults": {"composer": "script", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [str(root / "characters" / "homura")],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            }
+                        ],
+                    },
+                    "expand": {
+                        "mode": "character_action_group",
+                        "action_group_strategy": "ordered",
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(tasks, [])
+
+    def test_character_action_group_can_fill_missing_cp_from_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_character_node(
+                root / "characters" / "homura",
+                node_id="homura",
+                character_id="akemi_homura",
+                cp=["kaname_madoka"],
+            )
+            _write_character_node(
+                root / "characters" / "madoka",
+                node_id="madoka",
+                character_id="kaname_madoka",
+            )
+            _write_character_node(
+                root / "characters" / "kyoko",
+                node_id="kyoko",
+                character_id="sakura_kyoko",
+            )
+            _write_node(root / "groups" / "g1" / "a1", kind="action", node_id="a1", prompt="3girls, sitting")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "auto-cp-fill",
+                    "defaults": {"composer": "script", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [
+                                    str(root / "characters" / "homura"),
+                                    str(root / "characters" / "madoka"),
+                                    str(root / "characters" / "kyoko"),
+                                ],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            }
+                        ],
+                    },
+                    "expand": {
+                        "mode": "character_action_group",
+                        "action_group_strategy": "ordered",
+                        "allow_fill_missing_cp_from_candidates": True,
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 1)
+            character_nodes = [node for node in tasks[0].nodes if node.role == "character"]
+            self.assertEqual([Path(node.ref).name for node in character_nodes], ["homura", "madoka", "kyoko"])
+            self.assertTrue(tasks[0].source["auto_cp"])
+            self.assertTrue(tasks[0].source["cp_fallback_from_candidates"])
+            self.assertEqual(tasks[0].source["cp_fallback_count"], 1)
+            self.assertEqual(tasks[0].source["required_character_count"], 3)
+
     def test_folder_selector_uses_natural_sort(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -450,10 +830,132 @@ class BatchGenerationTest(unittest.TestCase):
 
             tasks = BatchPlanner(base_dir=root).plan(spec)
 
-            self.assertEqual(len(tasks), 4)
-            self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2", "c2"])
-            self.assertEqual([task.source["action_group"] for task in tasks], ["g1", "g1", "g2", "g2"])
-            self.assertEqual([Path(task.source["action"]).name for task in tasks], ["1_a", "2_a", "1_b", "2_b"])
+            self.assertEqual(len(tasks), 3)
+            self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2"])
+            self.assertEqual([task.source["action_group"] for task in tasks], ["g1", "g1", "g2"])
+            self.assertEqual([Path(task.source["action"]).name for task in tasks], ["1_a", "2_a", "1_b"])
+
+    def test_blackboard_rounds_auto_num_runs_one_selected_group_per_character(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "c1", kind="character", node_id="c1", prompt="homura")
+            _write_node(root / "characters" / "c2", kind="character", node_id="c2", prompt="madoka")
+            _write_node(root / "groups" / "g1" / "1_a", kind="action", node_id="a1", prompt="a1")
+            _write_node(root / "groups" / "g1" / "2_a", kind="action", node_id="a2", prompt="a2")
+            _write_node(root / "groups" / "g2" / "1_b", kind="action", node_id="b1", prompt="b1")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "blackboard-rounds-auto",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [
+                                    str(root / "characters" / "c1"),
+                                    str(root / "characters" / "c2"),
+                                ],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            },
+                            {
+                                "name": "g2",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g2"),
+                                "recursive": True,
+                            },
+                        ],
+                    },
+                    "expand": {
+                        "mode": "blackboard_rounds",
+                        "action_group_strategy": "ordered",
+                        "auto_num": True,
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 3)
+            self.assertEqual([Path(task.source["character"]).name for task in tasks], ["c1", "c1", "c2"])
+            self.assertEqual([task.source["action_group"] for task in tasks], ["g1", "g1", "g2"])
+            self.assertEqual([Path(task.source["action"]).name for task in tasks], ["1_a", "2_a", "1_b"])
+            self.assertTrue(all(task.source["auto_num"] for task in tasks))
+
+    def test_blackboard_rounds_auto_num_respects_max_tasks_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "c1", kind="character", node_id="c1", prompt="homura")
+            _write_node(root / "characters" / "c2", kind="character", node_id="c2", prompt="madoka")
+            _write_node(root / "groups" / "g1" / "1_a", kind="action", node_id="a1", prompt="a1")
+            _write_node(root / "groups" / "g1" / "2_a", kind="action", node_id="a2", prompt="a2")
+            _write_node(root / "groups" / "g2" / "1_b", kind="action", node_id="b1", prompt="b1")
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "blackboard-rounds-auto-cap",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "explicit",
+                                "refs": [
+                                    str(root / "characters" / "c1"),
+                                    str(root / "characters" / "c2"),
+                                ],
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": "g1",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g1"),
+                                "recursive": True,
+                            },
+                            {
+                                "name": "g2",
+                                "selector": "folder",
+                                "root": str(root / "groups" / "g2"),
+                                "recursive": True,
+                            },
+                        ],
+                    },
+                    "expand": {
+                        "mode": "blackboard_rounds",
+                        "action_group_strategy": "ordered",
+                        "auto_num": True,
+                        "max_tasks": 1,
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec)
+
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(Path(tasks[0].source["character"]).name, "c1")
+            self.assertEqual(tasks[0].source["action_group"], "g1")
+            self.assertEqual(Path(tasks[0].source["action"]).name, "1_a")
+
+    def test_blackboard_rounds_requires_max_tasks_or_auto_num(self):
+        spec = BatchSpec.model_validate(
+            {
+                "name": "blackboard-rounds-invalid",
+                "defaults": {"composer": "agent", "artist": "20260412"},
+                "select": {
+                    "characters": [{"selector": "explicit", "refs": ["character"]}],
+                    "action_groups": [{"name": "g1", "selector": "explicit", "refs": ["action"]}],
+                },
+                "expand": {"mode": "blackboard_rounds"},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "max_tasks or expand.auto_num"):
+            BatchPlanner(base_dir=Path(".")).plan(spec)
 
     def test_character_action_group_random_seed_is_reproducible(self):
         with tempfile.TemporaryDirectory() as tmp:

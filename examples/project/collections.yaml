@@ -1,0 +1,46 @@
+schema: tags-machine-core.batch/v1
+name: project-collections
+
+collections:
+  characters:
+    madoka_main:
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_sakura_kyoko_佐倉杏子 _魔法少女
+
+    homura_madoka:
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+      - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+
+    special_next_select:
+      - F:/my_project/new/tags_machine/design/角色/特殊_next_select
+
+  actions:
+    st_rp:
+      - selector: folder
+        root: &action_root F:/my_project/new/tags_machine/design/动作改2
+        include:
+          names:
+            - st_rp
+
+    st_sfw:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_sfw
+
+    foot_solo:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - pn_human_solo_foot_foot_focus
+            - pn_human_solo_foot_sole_focus
+
+  artists:
+    nai4_common:
+      - "20260412"
+      - "20260412_2"
+      - "20260412_3"
+      - "20260412_4"

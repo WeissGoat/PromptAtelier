@@ -148,6 +148,7 @@ class BatchSelect(BaseModel):
 class ExpandConfig(BaseModel):
     mode: ExpandMode = "product"
     max_tasks: int | None = None
+    auto_num: bool = False
     shuffle: bool = False
     action_group_strategy: ActionGroupStrategyName = "balanced_random"
     action_group_record: str | None = None
@@ -260,6 +261,7 @@ class BatchSpec(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     schema_id: str = Field(default="tags-machine-core.batch/v1", alias="schema")
+    require: list[str] = Field(default_factory=list)
     name: str
     description: str | None = None
     config: str = "configs/local.example.yaml"
@@ -267,7 +269,7 @@ class BatchSpec(BaseModel):
     output_root: str | None = None
     output_dir: str | None = None
     defaults: BatchDefaults = Field(default_factory=BatchDefaults)
-    collections: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+    collections: dict[str, dict[str, list[Any]]] = Field(default_factory=dict)
     select: BatchSelect = Field(default_factory=BatchSelect)
     expand: ExpandConfig = Field(default_factory=ExpandConfig)
     run: RunConfig = Field(default_factory=RunConfig)

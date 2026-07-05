@@ -13,7 +13,11 @@ defaults:
 collections:
   actions:
     foot:
-      - F:/my_project/new/tags_machine/design/动作改2/st_ft_bare
+      - selector: folder
+        root: F:/my_project/new/tags_machine/design/动作改2
+        include:
+          names:
+            - st_ft_bare
 
 select:
   characters:

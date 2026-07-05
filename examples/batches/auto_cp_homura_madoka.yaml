@@ -1,0 +1,47 @@
+schema: tags-machine-core.batch/v1
+name: auto-cp-homura-madoka
+config: configs/local.example.yaml
+output_root: outputs/batches
+output_dir: outputs/auto-cp-homura-madoka/images
+
+defaults:
+  composer: script
+  artist: 20260412
+  nt: 1
+  resolution: square
+  image_format: png
+  character_prompts: auto
+  add_male_caption: false
+
+select:
+  characters:
+    - selector: explicit
+      refs:
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+
+  action_groups:
+    - name: auto_cp_test
+      selector: explicit
+      refs:
+        - ../nodes/actions/two_girls_sitting
+
+expand:
+  mode: character_action_group
+  action_group_strategy: ordered
+
+run:
+  resume: true
+  stop_on_error: true
+  retry:
+    max_attempts: 1
+
+archive:
+  save_parameter_image: true
+
+report:
+  markdown: true
+  json: true
+  include_prompt_preview: true
+  include_png_params_summary: true
+  visual_check_template: true

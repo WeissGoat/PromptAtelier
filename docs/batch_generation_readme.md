@@ -351,10 +351,12 @@ while total_tasks < max_tasks:
     character = next_character()
     action_group = strategy.choose(action_groups)
     for action in action_group.actions:
+        if total_tasks >= max_tasks:
+            break
         run(character + action)
 ```
 
-`blackboard_rounds` 不会把已选中的 action group 截断；如果最后一组跑完后超过 `max_tasks`，会保留整组任务。
+`blackboard_rounds` 会在达到 `max_tasks` 后立即停止展开；如果多人动作因为角色关系不足被跳过，会继续向后选择任务，直到凑够目标数量或触发规划安全阀。
 
 `name` 会进入每个任务的 `source.action_group`，报告和日志会显示这个字段。
 
@@ -423,10 +425,12 @@ select:
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
 | `mode` | `product` | 展开模式：`product`、`zip`、`prompt_list`、`manual`、`character_action_group`、`blackboard_rounds`。 |
-| `max_tasks` | `null` | 任务数量上限或目标数量。普通模式是硬截断；`blackboard_rounds` 是目标数量，会跑完整个 selected group。 |
+| `max_tasks` | `null` | 任务数量上限或目标数量。普通模式是硬截断；`blackboard_rounds` 会持续规划到目标数量，达到后立即停止。 |
+| `auto_num` | `false` | `blackboard_rounds` 使用：不手填任务数，按角色选择动作组并跑完整组；如果同时设置 `max_tasks`，它只作为上限。 |
 | `shuffle` | `false` | 展开后是否打乱任务顺序。 |
 | `action_group_strategy` | `balanced_random` | `character_action_group` / `blackboard_rounds` 使用：`random`、`ordered`、`balanced_random`。 |
 | `action_group_record` | `null` | `balanced_random` 使用的历史记录文件。 |
+| `allow_fill_missing_cp_from_candidates` | `false` | 多人动作需要的角色数超过 `relations.cp` 可解析数量时，是否允许从本次 batch 的 `select.characters` 候选里按顺序补齐；不会重复同一路径、同一 `character_id` 或同一角色 tag。 |
 | `seed` | `null` | 固定动作组随机策略的随机种子。 |
 
 模式说明：
@@ -920,6 +924,11 @@ outputs/batches/<batch-name>/
 | `action_index_in_group` | 当前动作在组内的索引。 |
 | `action_count_in_group` | 当前动作组总动作数。 |
 | `action_group_selected_count` | `balanced_random` 选择后该组累计选中次数。 |
+| `characters` | 自动多人图最终使用的角色节点路径列表。 |
+| `auto_cp` | 是否因为多人动作启用了自动补角色。 |
+| `required_character_count` | 动作提示词推断出的目标女性角色数，例如 `2girls` / `3girls`。 |
+| `cp_fallback_from_candidates` | 是否使用了 `select.characters` 候选补齐 CP 不足的人数。 |
+| `cp_fallback_count` | 从候选角色补入的人数。 |
 
 #### `status.json`
 
@@ -1150,3 +1159,96 @@ uv run python -m tags_machine_core run-batch examples\batches\comfyui_cunyfunky_
 输出结构仍然是 `output_dir/<task_id>/*`。每个 task 目录会包含生成图片、`prompt_bundle.json`、`render_request.json`、`generation_result.json`、`png_params.json`，开启 `archive.save_parameter_image: true` 时还会有 `zz_<task_id>_parameter_details.png`。
 
 ComfyUI artist node 的字段规范见 `docs/comfyui_artist_node_spec_v1.md`，真实验收记录见 `docs/comfyui_aki_cunyfunky_business_test_20260704.md`。
+## 项目级配置与 require
+
+日常批量跑图可以把路径、默认参数、常用角色集、动作组集放进项目级配置，再由具体 batch 通过 `require` 引用。
+
+`require` 的加载规则：
+
+- 按顺序加载。
+- 后面的配置覆盖前面的配置。
+- 当前 batch 文件最后覆盖所有 `require` 文件。
+- 标量直接覆盖，对象递归合并，数组整体替换。
+- 相对路径按声明 `require` 的文件所在目录解析。
+
+示例：
+
+```yaml
+require:
+  - ../project/base.yaml
+  - ../project/collections.yaml
+
+name: blackboard-style-rounds-require
+
+batch:
+  characters: homura_madoka
+  action_groups:
+    - st_rp
+    - st_sfw
+  artist: "20260412"
+  composer: script
+  strategy: ordered
+  auto_num: true
+```
+
+其中 `homura_madoka`、`st_rp`、`st_sfw` 来自 `examples/project/collections.yaml`。读取时会展开成普通 `select.characters`、`select.action_groups` 和 `expand`，后续 `BatchPlanner`、Composer、Renderer 不需要感知这个简写。
+`auto_num: true` 表示不用手填 `max_tasks`：每个角色按策略选择一个动作组，并跑完整组。`blackboard_rounds` 会先选择一个动作组并跑完整组，再进入下一轮；如果额外设置 `max_tasks`，它只作为上限。
+真实 `run-batch` 时，进度日志会带上 `character`、`group`、`action`，方便长时间跑图时确认当前组合。
+
+可以这样预览任务：
+
+```powershell
+uv run python -m tags_machine_core plan-batch examples\batches\blackboard_style_rounds_require.yaml --full
+```
+
+更完整的字段规范见 `docs/project_batch_config_spec_v1.md`。
+
+### 旧 nai_const action group
+
+`examples/project/nai_const_action_groups.yaml` 复刻了旧 `nai_const.py` 里常用的动作组枚举。它只包含 action collection，不包含账号、vibe、旧全局运行状态。
+
+这些动作组可以用动态匹配和组合维护：
+
+```yaml
+collections:
+  actions:
+    action_new:
+      - selector: folder
+        root: F:/my_project/new/tags_machine/design/动作改2
+        include:
+          names:
+            - pn_*
+
+    action_body:
+      - collection: action_body_show
+      - collection: action_body_ero
+      - collection: action_other
+```
+
+常用名称：
+
+- `action_ft`
+- `action_body`
+- `action_mouth`
+- `action_sfw`
+- `action_sex`
+- `action_2girl`
+- `action_new`
+- `select_action`
+
+示例：
+
+```yaml
+require:
+  - ../project/base.yaml
+  - ../project/collections.yaml
+  - ../project/nai_const_action_groups.yaml
+
+batch:
+  characters: special_next_select
+  action_groups: action_sex
+  artist: "20260412"
+  auto_num: true
+```
+
+`special_next_select` 是旧 design 下的角色目录集合，已经可以通过 character collection 引用。分辨率支持 `square` / `landscape` / `portrait`，也支持旧名 `normal_square` / `normal_landscape` / `normal_portrait`；`random_standard` 会从这三种标准尺寸里随机选一个。

@@ -5,9 +5,10 @@ output_dir: G:\ai_auto\blackboard-style-rounds-400
 
 defaults:
   composer: script
-  artist: 20260412
+  artist: 109841329_03_manga_monochrome_yabuki_rance_no_vibe_latest_stable
   nt: 3
   resolution: random_standard
+  prompt_policy_profile: legacy_compat
 
 select:
   characters:
@@ -15,32 +16,33 @@ select:
       refs:
         - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
         - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
-        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_miki_sayaka_美樹さやか_魔法少女
+        - F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_sakura_kyoko_佐倉杏子 _魔法少女
 
   action_groups:
     - name: st_rp
       selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/st_rp
+      root: F:/my_project/new/tags_machine/design/动作改2/new
       recursive: true
 
-    - name: st_sfw
-      selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/st_sfw
-      recursive: true
+    # - name: st_sfw
+    #   selector: folder
+    #   root: F:/my_project/new/tags_machine/design/动作改2/st_sfw
+    #   recursive: true
 
-    - name: st_body_show
-      selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/st_body_show
-      recursive: true
+    # - name: st_body_show
+    #   selector: folder
+    #   root: F:/my_project/new/tags_machine/design/动作改2/st_body_show
+    #   recursive: true
 
-    - name: st_body_breast
-      selector: folder
-      root: F:/my_project/new/tags_machine/design/动作改2/st_body_breast
-      recursive: true
+    # - name: st_body_breast
+    #   selector: folder
+    #   root: F:/my_project/new/tags_machine/design/动作改2/st_body_breast
+    #   recursive: true
 
 expand:
   mode: blackboard_rounds
   action_group_strategy: ordered
+  allow_fill_missing_cp_from_candidates: true
   max_tasks: 400
 
 run:

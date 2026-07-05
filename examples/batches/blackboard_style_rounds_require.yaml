@@ -1,0 +1,17 @@
+require:
+  - ../project/base.yaml
+  - ../project/collections.yaml
+  - ../project/nai_const_action_groups.yaml
+
+name: blackboard-style-rounds-require
+output_dir: G:/ai_auto/blackboard-style-rounds-require
+
+batch:
+  characters: homura_madoka
+  action_groups:
+    - st_rp
+    - st_sfw
+  artist: "20260412"
+  composer: script
+  strategy: ordered
+  auto_num: true

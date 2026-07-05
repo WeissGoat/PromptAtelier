@@ -18,7 +18,7 @@ from .spec_reader import resolve_path
 @dataclass(frozen=True)
 class SelectorContext:
     base_dir: Path
-    collections: dict[str, dict[str, list[str]]]
+    collections: dict[str, dict[str, list[Any]]]
 
 
 def expand_selector(
@@ -26,6 +26,7 @@ def expand_selector(
     role: str,
     spec: SelectorSpec,
     context: SelectorContext,
+    collection_stack: tuple[str, ...] = (),
 ) -> list[Any]:
     selector = spec.selector.strip()
     if selector == "explicit":
@@ -37,7 +38,7 @@ def expand_selector(
             raise ValueError("folder selector requires root")
         return _discover_nodes(resolve_ref(spec.root, context.base_dir), spec)
     if selector == "collection":
-        return _expand_collection(role=role, spec=spec, context=context)
+        return _expand_collection(role=role, spec=spec, context=context, collection_stack=collection_stack)
     if selector == "glob":
         if not spec.pattern:
             raise ValueError("glob selector requires pattern")
@@ -61,17 +62,57 @@ def _expand_collection(
     role: str,
     spec: SelectorSpec,
     context: SelectorContext,
+    collection_stack: tuple[str, ...],
 ) -> list[str]:
     if not spec.name:
         raise ValueError("collection selector requires name")
     collection_name = f"{role}s"
-    roots = context.collections.get(collection_name, {}).get(spec.name, [])
-    if not roots:
+    collection_key = f"{collection_name}.{spec.name}"
+    if collection_key in collection_stack:
+        chain = " -> ".join([*collection_stack, collection_key])
+        raise ValueError(f"Circular collection reference detected: {chain}")
+
+    items = context.collections.get(collection_name, {}).get(spec.name, [])
+    if not items:
         raise ValueError(f"Unknown {role} collection: {spec.name}")
+    if role == "artist":
+        return _dedupe(_expand_artist_collection_items(items))
     result: list[str] = []
-    for root in roots:
-        result.extend(_discover_nodes(resolve_ref(root, context.base_dir), spec))
+    next_stack = (*collection_stack, collection_key)
+    for item in items:
+        result.extend(_expand_collection_item(role=role, item=item, base_spec=spec, context=context, stack=next_stack))
     return _dedupe(result)
+
+
+def _expand_artist_collection_items(items: list[Any]) -> list[str]:
+    result: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            raise ValueError("artist collections only support raw artist refs")
+        result.append(str(item))
+    return result
+
+
+def _expand_collection_item(
+    *,
+    role: str,
+    item: Any,
+    base_spec: SelectorSpec,
+    context: SelectorContext,
+    stack: tuple[str, ...],
+) -> list[str]:
+    if isinstance(item, dict):
+        if "collection" in item:
+            ref = str(item["collection"]).strip()
+            if not ref:
+                raise ValueError("collection reference item requires collection")
+            selector = SelectorSpec(selector="collection", name=ref)
+            return [str(value) for value in expand_selector(role=role, spec=selector, context=context, collection_stack=stack)]
+        if "selector" in item:
+            selector = SelectorSpec.model_validate(item)
+            return [str(value) for value in expand_selector(role=role, spec=selector, context=context, collection_stack=stack)]
+        raise ValueError("collection item mapping requires selector or collection")
+    return _discover_nodes(resolve_ref(str(item), context.base_dir), base_spec)
 
 
 def _discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
@@ -92,6 +133,9 @@ def _discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
             continue
         if not _included(candidate, spec):
             continue
+        if candidate != root and spec.include:
+            result.extend(_discover_nodes(candidate, _child_discovery_spec(spec)))
+            continue
         if _has_node_file(candidate, spec.node_files):
             result.append(str(candidate))
 
@@ -100,6 +144,10 @@ def _discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
     if spec.limit is not None:
         result = result[: spec.limit]
     return _dedupe(result)
+
+
+def _child_discovery_spec(spec: SelectorSpec) -> SelectorSpec:
+    return spec.model_copy(update={"include": {}, "limit": None, "shuffle": False})
 
 
 def _glob_nodes(pattern: str, base_dir: Path, spec: SelectorSpec) -> list[str]:
@@ -153,7 +201,7 @@ def _has_node_file(path: Path, node_files: list[str]) -> bool:
 
 def _excluded(path: Path, spec: SelectorSpec) -> bool:
     names = set(spec.exclude.get("names") or [])
-    if path.name in names:
+    if names and any(_name_matches(path.name, pattern) for pattern in names):
         return True
     patterns = [str(item) for item in spec.exclude.get("paths") or []]
     return any(path.match(pattern) for pattern in patterns)
@@ -163,12 +211,17 @@ def _included(path: Path, spec: SelectorSpec) -> bool:
     if not spec.include:
         return True
     names = set(spec.include.get("names") or [])
-    if names and path.name not in names:
+    if names and not any(_name_matches(path.name, pattern) for pattern in names):
         return False
     patterns = [str(item) for item in spec.include.get("paths") or []]
     if patterns and not any(path.match(pattern) for pattern in patterns):
         return False
     return True
+
+
+def _name_matches(name: str, pattern: str) -> bool:
+    pattern = str(pattern)
+    return name == pattern or Path(name).match(pattern)
 
 
 def _dedupe(values: list[str]) -> list[str]:

@@ -61,6 +61,7 @@ from tags_machine_core.batch import (
     BatchSpec,
     latest_manifest_entries,
     load_batch_spec,
+    load_batch_spec_mapping,
     write_initial_manifest,
 )
 
@@ -1205,7 +1206,7 @@ def _batch_spec_from_api_request(
     if inline_spec is not None:
         if not isinstance(inline_spec, dict):
             raise ValueError("inline batch spec must be a JSON object")
-        return BatchSpec.model_validate(inline_spec), request_path, True
+        return load_batch_spec_mapping(inline_spec, base_path=request_path), request_path, True
 
     raw_path = data.get("batch_spec") or data.get("spec_path")
     if raw_path:

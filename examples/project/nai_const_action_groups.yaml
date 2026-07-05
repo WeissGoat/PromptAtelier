@@ -1,0 +1,244 @@
+schema: tags-machine-core.batch/v1
+name: nai-const-action-groups
+
+collections:
+  actions:
+    action_ft:
+      - selector: folder
+        root: &action_root F:/my_project/new/tags_machine/design/动作改2
+        include:
+          names:
+            - st_ft_bare
+            - st_ft_cs
+            - st_ft_cm
+            - st_ft_j
+            - st_ft_jhu
+            - st_ft_leg
+            - st_ft_legwar
+            - st_ft_bare_total
+            - st_select_ft_bare
+            - st_ft_shoes
+
+    action_body_show:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_body_nsfw
+            - st_body_show
+            - st_body_ye
+            - st_body_bath
+
+    action_body_ero:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_body_neco
+            - st_select_neco
+            - st_body_breast
+            - st_body_cm
+            - st_other_1_bg
+            - st_body_oninashi
+            - st_body_tj
+
+    action_mouth:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_body_mouth
+            - st_body_mouth_cm
+            - st_body_mouth_body
+            - st_body_mouth_cute
+            - st_body_mouth_bed
+            - st_body_mouth_rp
+            - st_body_mouth_show
+            - st_body_mouth_kiss
+
+    action_dress:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_clothes
+            - st_clothes_2
+
+    action_emjoy:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_body_face
+            - st_表情包_act
+
+    action_sfw:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_sfw
+            - st_body_nsfw
+            - st_body_show
+            - st_body_face
+            - st_表情包_act
+
+    action_sex_type:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_sex_love_new
+            - st_sex_love_fc
+            - st_sex_love_ntr
+            - st_rp
+            - st_sex_sit
+
+    action_sex_stand:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_stand_hug
+            - st_stand_sex_lift
+            - st_stand_sex_focus
+            - st_stand_st_sex_love_new
+
+    action_sex_new_type:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_sex_love_love_st_sex_love_yaowei
+            - st_sex_love_st_sex_high_many_comic
+            - st_sex_love_st_sex_love_blank
+            - st_rp_mp_fc
+            - st_rp_mp_rd
+            - st_rp_mf
+            - st_rp_tj
+            - st_rp_bound_4
+            - st_sex_high_resolution
+            - st_stand_st_sex_love_love_st_sex_love_yaowei
+            - st_stand_st_sex_love_st_sex_high_many_comic
+            - st_stand_st_sex_love_st_sex_love_blank
+            - st_stand_st_sex_high_resolution
+            - st_sex_love_new_st_select
+            - st_sex_love_fc_st_select
+            - st_sex_love_ntr_st_select
+            - st_rp_st_select
+            - st_stand_st_sex_love_new_st_select
+            - st_sex_love_st_sex_high_many_comic_st_select
+            - st_rp_mp_rd_st_select
+
+    action_sex_story:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_rp_sleep_cm
+            - st_rp_sleep_cm_2
+            - st_rp_bound_6
+            - st_rp_bound_room
+            - st_rp_sleep_4
+            - st_rp_bound_new
+            - st_rp_zhua_bed
+            - st_rp_bed_2
+            - st_rp_goblin
+            - st_rp_bound_rp
+            - st_rp_sleep_cm_fc
+
+    action_sex_old_story:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_sex_sea
+            - st_rp_tree
+
+    action_sex_misc:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_触手
+            - st_rp_sleep
+            - st_rp_down
+            - st_rp_bound_rp_tj
+            - st_rp_bound_rp_tj_2
+
+    action_2girl:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_2girls_yuri
+            - st_2girls
+            - st_2girl_yuri_2
+            - st_2girls_sex
+
+    action_emoji:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_表情包_act
+            - st_body_face
+
+    action_other:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_other*
+        exclude:
+          names:
+            - "*_st_bad"
+
+    action_prepare:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_prepare*
+        exclude:
+          names:
+            - "*_st_bad"
+
+    action_dress_topic:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - st_clothes_topic*
+        exclude:
+          names:
+            - "*_st_bad"
+
+    action_new:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - pn_*
+        exclude:
+          names:
+            - "*_st_bad"
+
+    action_body:
+      - collection: action_body_show
+      - collection: action_body_ero
+      - collection: action_other
+
+    action_sex:
+      - collection: action_prepare
+      - collection: action_sex_misc
+      - collection: action_sex_type
+      - collection: action_sex_stand
+      - collection: action_sex_new_type
+      - collection: action_sex_story
+
+    select_action:
+      - collection: action_ft
+      - collection: action_body_show
+      - collection: action_sex
+      - collection: action_prepare

@@ -112,6 +112,10 @@ class BatchRunner:
                 entry = self._record_skipped(run_dir=root, task=task)
                 entries.append(entry)
                 logger.info("batch task skipped task_id=%s source=%s", task.id, _source_log(task))
+                _emit_progress(
+                    "[batch] task "
+                    f"{position}/{total_selected} skipped task_id={task.id} {_source_text(task)}"
+                )
                 continue
 
             run_task = _task_with_image_budget(task, image_budget)
@@ -130,6 +134,7 @@ class BatchRunner:
             _emit_progress(
                 "[batch] task "
                 f"{position}/{total_selected} started task_id={run_task.id} "
+                f"{_source_text(run_task)} "
                 f"artist={run_task.render.artist or '-'} "
                 f"resolution={run_task.render.width}x{run_task.render.height}"
             )
@@ -145,6 +150,7 @@ class BatchRunner:
             _emit_progress(
                 "[batch] task "
                 f"{position}/{total_selected} {result['status']} task_id={run_task.id} "
+                f"{_source_text(run_task)} "
                 f"attempt={result['attempt']} images={len(result.get('image_paths') or [])}"
                 + (f" error={result['error']}" if result.get("error") else ""),
                 level=progress_level,
@@ -152,7 +158,11 @@ class BatchRunner:
             if result["status"] == "succeeded" and image_budget is not None:
                 image_budget -= max(1, len(result.get("image_paths") or []))
             if result["status"] == "failed" and run_config.stop_on_error:
-                logger.warning("batch stopped on failed task task_id=%s", result["task_id"])
+                logger.warning(
+                    "batch stopped on failed task task_id=%s source=%s",
+                    result["task_id"],
+                    _source_log(run_task),
+                )
                 _emit_progress(f"[batch] stopped_on_error task_id={result['task_id']}", level="warning")
                 break
 
@@ -220,6 +230,14 @@ class BatchRunner:
                 }
                 if attempt >= max_attempts or not _retryable(exc, run_config.retry.retry_on):
                     retry_records.append(retry_record)
+                    logger.error(
+                        "batch task failed after retry task_id=%s attempt=%s/%s source=%s error=%s",
+                        task.id,
+                        attempt,
+                        max_attempts,
+                        _source_log(task),
+                        last_error,
+                    )
                     entry = self._record(
                         run_dir=root,
                         task=task,
@@ -234,11 +252,12 @@ class BatchRunner:
                 retry_record["delay_seconds"] = delay
                 retry_records.append(retry_record)
                 logger.warning(
-                    "batch task retry scheduled task_id=%s attempt=%s/%s delay=%s error=%s",
+                    "batch task retry scheduled task_id=%s attempt=%s/%s delay=%s source=%s error=%s",
                     task.id,
                     attempt,
                     max_attempts,
                     delay,
+                    _source_log(task),
                     last_error,
                 )
                 self.archive.write_status(
@@ -277,7 +296,12 @@ class BatchRunner:
                 error=None,
             )
         if result.status != "succeeded":
-            logger.error("batch task failed task_id=%s error=%s", task.id, result.error)
+            logger.error(
+                "batch task failed task_id=%s source=%s error=%s",
+                task.id,
+                _source_log(task),
+                result.error,
+            )
             return self._record(
                 run_dir=root,
                 task=task,
@@ -287,7 +311,11 @@ class BatchRunner:
                 error=result.error or f"unexpected status: {result.status}",
             )
         if result.prompt_bundle is None or result.render_request is None or result.generation_result is None:
-            logger.error("batch task failed incomplete artifacts task_id=%s", task.id)
+            logger.error(
+                "batch task failed incomplete artifacts task_id=%s source=%s",
+                task.id,
+                _source_log(task),
+            )
             return self._record(
                 run_dir=root,
                 task=task,
@@ -297,7 +325,11 @@ class BatchRunner:
                 error="executor returned incomplete success artifacts",
             )
         if not result.generation_result.png_info:
-            logger.error("batch task failed missing png_info task_id=%s", task.id)
+            logger.error(
+                "batch task failed missing png_info task_id=%s source=%s",
+                task.id,
+                _source_log(task),
+            )
             return self._record(
                 run_dir=root,
                 task=task,
@@ -458,6 +490,16 @@ def _source_log(task: BatchTask) -> dict[str, Any]:
         "action": _basename(source.get("action")),
         "artist": source.get("artist") or task.render.artist,
     }
+
+
+def _source_text(task: BatchTask) -> str:
+    source = _source_log(task)
+    parts = [
+        f"character={source['character'] or '-'}",
+        f"group={source['action_group'] or '-'}",
+        f"action={source['action'] or '-'}",
+    ]
+    return " ".join(parts)
 
 
 def _basename(value: Any) -> Any:

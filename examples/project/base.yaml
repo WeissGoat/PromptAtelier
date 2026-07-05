@@ -1,0 +1,43 @@
+schema: tags-machine-core.batch/v1
+name: project-base
+config: configs/local.example.yaml
+
+defaults:
+  backend: novelai
+  composer: script
+  nt: 1
+  resolution: random_standard
+  model: nai-diffusion-4-5-full
+  prompt_policy_profile: legacy_compat
+  character_prompts: auto
+  add_male_caption: true
+
+expand:
+  action_group_strategy: balanced_random
+  allow_fill_missing_cp_from_candidates: true
+
+run:
+  resume: true
+  stop_on_error: false
+  retry:
+    max_attempts: 3
+    retry_on:
+      - "429"
+      - "500"
+      - "502"
+      - "503"
+      - "504"
+      - timeout
+
+archive:
+  save_prompt_bundle: true
+  save_render_request: true
+  save_generation_result: true
+  save_png_params: true
+
+report:
+  markdown: true
+  json: true
+  include_prompt_preview: true
+  include_png_params_summary: true
+  visual_check_template: true

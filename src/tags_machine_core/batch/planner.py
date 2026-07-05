@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from tags_machine_core.logging_config import get_logger
+from tags_machine_core.nodes.reader import NodeReader
 
 from .action_groups import (
     ActionGroupRecord,
@@ -17,6 +18,7 @@ from .action_groups import (
     resolve_action_groups,
     resolve_record_path,
 )
+from .character_relations import detect_required_girl_count, resolve_cp_character_refs
 from .models import (
     AgentOptions,
     BatchSpec,
@@ -35,6 +37,9 @@ STANDARD_RESOLUTIONS: dict[str, tuple[int, int]] = {
     "square": (1024, 1024),
     "landscape": (1216, 832),
     "portrait": (832, 1216),
+    "normal_square": (1024, 1024),
+    "normal_landscape": (1216, 832),
+    "normal_portrait": (832, 1216),
 }
 
 
@@ -48,8 +53,9 @@ class SelectionSet:
 
 
 class BatchPlanner:
-    def __init__(self, *, base_dir: str | Path):
+    def __init__(self, *, base_dir: str | Path, node_reader: NodeReader | None = None):
         self.base_dir = Path(base_dir)
+        self.node_reader = node_reader or NodeReader()
 
     def plan(
         self,
@@ -154,8 +160,12 @@ class BatchPlanner:
                     f"{spec.expand.mode} expand mode uses select.action_groups and "
                     "does not allow select.actions"
                 )
-            if spec.expand.mode == "blackboard_rounds" and not spec.expand.max_tasks:
-                raise ValueError("blackboard_rounds expand mode requires expand.max_tasks")
+            if (
+                spec.expand.mode == "blackboard_rounds"
+                and not spec.expand.max_tasks
+                and not spec.expand.auto_num
+            ):
+                raise ValueError("blackboard_rounds expand mode requires expand.max_tasks or expand.auto_num")
             return
         if spec.select.action_groups:
             raise ValueError(
@@ -352,9 +362,17 @@ class BatchPlanner:
                 selected_count,
             )
             for action_index, action in enumerate(group.actions):
+                character_refs, character_source = self._character_refs_for_action(
+                    spec,
+                    character=character,
+                    action=action,
+                    candidate_characters=selections.characters,
+                )
+                if character_refs is None:
+                    continue
                 for artist, background in itertools.product(artists, backgrounds):
                     nodes = _node_refs(
-                        character=character,
+                        characters=character_refs,
                         action=action,
                         artist=artist,
                         background=background,
@@ -382,6 +400,7 @@ class BatchPlanner:
                                 "action": action,
                                 "artist": artist,
                                 "background": background,
+                                **character_source,
                                 "run_id": run_id,
                                 "action_group": group.name,
                                 "action_group_strategy": spec.expand.action_group_strategy,
@@ -417,16 +436,49 @@ class BatchPlanner:
         rng = random.Random(spec.expand.seed)
         task_target = spec.expand.max_tasks or 0
         tasks: list[BatchTask] = []
+        max_planning_rounds = max(
+            task_target * max(len(selections.characters), 1) * max(len(groups), 1),
+            max(len(selections.characters), 1) * max(len(groups), 1) * 2,
+        )
 
         logger.info(
-            "batch plan blackboard_rounds groups=%s characters=%s strategy=%s max_tasks=%s",
+            "batch plan blackboard_rounds groups=%s characters=%s strategy=%s max_tasks=%s auto_num=%s",
             len(groups),
             len(selections.characters),
             spec.expand.action_group_strategy,
             task_target,
+            spec.expand.auto_num,
         )
+        if spec.expand.auto_num:
+            auto_tasks = self._plan_blackboard_auto_rounds(
+                spec,
+                selections,
+                groups=groups,
+                group_indices=group_indices,
+                record=record,
+                record_path=record_path,
+                rng=rng,
+                artists=artists,
+                backgrounds=backgrounds,
+                run_dir=run_dir,
+                output_dir=output_dir,
+                run_id=run_id,
+                task_target=task_target,
+            )
+            logger.info(
+                "batch plan blackboard_rounds auto_num planned task_count=%s max_tasks=%s",
+                len(auto_tasks),
+                task_target or "auto",
+            )
+            return auto_tasks
         round_index = 0
         while len(tasks) < task_target:
+            if round_index >= max_planning_rounds:
+                raise ValueError(
+                    "blackboard_rounds could not reach expand.max_tasks; "
+                    f"created={len(tasks)} target={task_target} rounds={round_index}. "
+                    "Check action filters and character relations.cp for multi-character actions."
+                )
             character = selections.characters[round_index % len(selections.characters)]
             group, selected_count = choose_action_group(
                 groups,
@@ -446,9 +498,17 @@ class BatchPlanner:
                 selected_count,
             )
             for action_index, action in enumerate(group.actions):
+                character_refs, character_source = self._character_refs_for_action(
+                    spec,
+                    character=character,
+                    action=action,
+                    candidate_characters=selections.characters,
+                )
+                if character_refs is None:
+                    continue
                 for artist, background in itertools.product(artists, backgrounds):
                     nodes = _node_refs(
-                        character=character,
+                        characters=character_refs,
                         action=action,
                         artist=artist,
                         background=background,
@@ -478,6 +538,7 @@ class BatchPlanner:
                                 "action": action,
                                 "artist": artist,
                                 "background": background,
+                                **character_source,
                                 "run_id": run_id,
                                 "round_index": round_index,
                                 "action_group": group.name,
@@ -493,7 +554,117 @@ class BatchPlanner:
                             run_id=run_id,
                         )
                     )
+                    if len(tasks) >= task_target:
+                        logger.info(
+                            "blackboard round reached max_tasks task_count=%s target=%s",
+                            len(tasks),
+                            task_target,
+                        )
+                        return tasks
             round_index += 1
+        return tasks
+
+    def _plan_blackboard_auto_rounds(
+        self,
+        spec: BatchSpec,
+        selections: SelectionSet,
+        *,
+        groups,
+        group_indices: dict[str, int],
+        record: ActionGroupRecord,
+        record_path: Path | None,
+        rng: random.Random,
+        artists: list[str | None],
+        backgrounds: list[str | None],
+        run_dir: Path,
+        output_dir: Path,
+        run_id: str,
+        task_target: int = 0,
+    ) -> list[BatchTask]:
+        tasks: list[BatchTask] = []
+        for round_index, character in enumerate(selections.characters):
+            group, selected_count = choose_action_group(
+                groups,
+                strategy=spec.expand.action_group_strategy,
+                character_index=round_index,
+                rng=rng,
+                record=record,
+            )
+            if spec.expand.action_group_strategy == "balanced_random":
+                record.save(record_path)
+            logger.info(
+                "blackboard auto_num round selected round=%s character=%s group=%s action_count=%s selected_count=%s",
+                round_index,
+                Path(character).name,
+                group.name,
+                len(group.actions),
+                selected_count,
+            )
+            for action_index, action in enumerate(group.actions):
+                character_refs, character_source = self._character_refs_for_action(
+                    spec,
+                    character=character,
+                    action=action,
+                    candidate_characters=selections.characters,
+                )
+                if character_refs is None:
+                    continue
+                for artist, background in itertools.product(artists, backgrounds):
+                    nodes = _node_refs(
+                        characters=character_refs,
+                        action=action,
+                        artist=artist,
+                        background=background,
+                    )
+                    task_id = _task_id(
+                        run_id,
+                        len(tasks),
+                        round_index,
+                        action_index,
+                        character,
+                        group.name,
+                        action,
+                        artist,
+                        background,
+                        spec.defaults.composer,
+                    )
+                    tasks.append(
+                        self._task(
+                            spec,
+                            task_id=task_id,
+                            index=len(tasks),
+                            composer=spec.defaults.composer,
+                            nodes=nodes,
+                            artist=artist,
+                            source={
+                                "character": character,
+                                "action": action,
+                                "artist": artist,
+                                "background": background,
+                                **character_source,
+                                "run_id": run_id,
+                                "round_index": round_index,
+                                "auto_num": True,
+                                "action_group": group.name,
+                                "action_group_strategy": spec.expand.action_group_strategy,
+                                "action_group_record": str(record_path) if record_path else None,
+                                "action_group_index": group_indices[group.name],
+                                "action_index_in_group": action_index,
+                                "action_count_in_group": len(group.actions),
+                                "action_group_selected_count": selected_count,
+                            },
+                            run_dir=run_dir,
+                            output_dir=output_dir,
+                            run_id=run_id,
+                        )
+                    )
+                    if task_target and len(tasks) >= task_target:
+                        logger.info(
+                            "blackboard auto_num reached max_tasks task_count=%s target=%s",
+                            len(tasks),
+                            task_target,
+                        )
+                        return tasks
         return tasks
 
     def _plan_manual(self, spec: BatchSpec, *, run_dir: Path, output_dir: Path, run_id: str) -> list[BatchTask]:
@@ -587,17 +758,62 @@ class BatchPlanner:
             source=source or {},
         )
 
+    def _character_refs_for_action(
+        self,
+        spec: BatchSpec,
+        *,
+        character: str,
+        action: str,
+        candidate_characters: list[str],
+    ) -> tuple[list[str] | None, dict[str, Any]]:
+        action_node = self.node_reader.read(action)
+        required_count = detect_required_girl_count(action_node)
+        if required_count <= 1:
+            return [character], {}
+
+        main_character = self.node_reader.read(character)
+        character_refs = resolve_cp_character_refs(
+            main_ref=character,
+            main_character=main_character,
+            candidate_refs=candidate_characters,
+            reader=self.node_reader,
+            required_count=required_count,
+            allow_fill_missing_from_candidates=spec.expand.allow_fill_missing_cp_from_candidates,
+        )
+        if character_refs is None:
+            logger.warning(
+                "skip multi-character task character=%s action=%s required=%s reason=missing_cp",
+                Path(character).name,
+                Path(action).name,
+                required_count,
+            )
+            return None, {
+                "auto_cp": False,
+                "required_character_count": required_count,
+                "skip_reason": "missing_cp",
+            }
+        resolved_refs, relation_source = character_refs
+        return resolved_refs, {
+            "characters": resolved_refs,
+            "auto_cp": True,
+            "required_character_count": required_count,
+            **relation_source,
+        }
+
 
 def _node_refs(
     *,
-    character: str | None,
-    action: str | None,
-    artist: str | None,
-    background: str | None,
+    character: str | None = None,
+    characters: list[str] | None = None,
+    action: str | None = None,
+    artist: str | None = None,
+    background: str | None = None,
 ) -> list[NodeRef]:
     nodes: list[NodeRef] = []
+    for value in characters or ([character] if character else []):
+        if value:
+            nodes.append(NodeRef(role="character", ref=value, index=_role_index(nodes, "character")))
     for role, value in (
-        ("character", character),
         ("action", action),
         ("artist", artist),
         ("background", background),

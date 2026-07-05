@@ -26,7 +26,7 @@ from .manifest import (
 from .planner import BatchPlanner, STANDARD_RESOLUTIONS
 from .runner import BatchRunner
 from .selectors import SelectorContext, expand_selector
-from .spec_reader import load_batch_spec
+from .spec_reader import load_batch_spec, load_batch_spec_mapping
 
 __all__ = [
     "AgentOptions",
@@ -56,6 +56,7 @@ __all__ = [
     "expand_selector",
     "latest_manifest_entries",
     "load_batch_spec",
+    "load_batch_spec_mapping",
     "resolve_action_groups",
     "task_already_succeeded",
     "write_initial_manifest",
