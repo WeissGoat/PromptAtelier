@@ -254,7 +254,7 @@ class CharacterExtensionPolicyRule:
         elif operation.name == "replace":
             self._replace(context, operation, rule, character, mode="replace", fuzzy=False)
         elif operation.name == "fuzzy_replace":
-            self._replace(context, operation, rule, character, mode="fuzzy_replace", fuzzy=True)
+            self._fuzzy_replace(context, operation, rule, character)
         elif operation.name == "add":
             self._add(context, operation.args, rule, character)
         elif operation.name == "add_after":
@@ -349,6 +349,40 @@ class CharacterExtensionPolicyRule:
             new_tokens.append(token)
         if replaced:
             context.positive_tokens = new_tokens
+
+    def _fuzzy_replace(
+        self,
+        context: PromptRuleContext,
+        operation: ExtensionOperation,
+        rule: ExtensionRuleLine,
+        character: NodeDocument,
+    ) -> None:
+        if len(operation.args) < 2:
+            return
+        target = operation.args[-1]
+        matchers = operation.args[:-1]
+        target_key = canonicalize_tag(target)
+        if not target_key:
+            return
+        result: list[PromptToken] = []
+        matched = False
+        for token in context.positive_tokens:
+            result.append(token)
+            if matched or not _token_matches_any(token, matchers, fuzzy=True):
+                continue
+            if not _has_canonical(result, target):
+                result.append(parse_prompt_token(target))
+                context.add_trace(
+                    rule=f"{self.id}@{self.version}",
+                    action="fuzzy_replace",
+                    from_value=token.render("underscore"),
+                    to_value=target_key,
+                    reason=f"{character.id}:{rule.legacy_name}",
+                    mode=rule.slot,
+                )
+            matched = True
+        if matched:
+            context.positive_tokens = result
 
     def _add(
         self,

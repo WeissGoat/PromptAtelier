@@ -54,7 +54,7 @@ class CharacterExtensionPolicyTest(unittest.TestCase):
         action = NodeDocument(
             kind="action",
             id="leg_weapon",
-            tags={"action": ["black pantyhose, weapon, lower body"]},
+            tags={"action": ["black pantyhose, panties under pantyhose, weapon, lower body"]},
         )
 
         bundle = _compose(character, action)
@@ -62,6 +62,7 @@ class CharacterExtensionPolicyTest(unittest.TestCase):
         self.assertIn("akemi_homura", bundle.prompt.positive)
         self.assertIn("mahou_shoujo_madoka_magica", bundle.prompt.positive)
         self.assertIn("black_pantyhose", bundle.prompt.positive)
+        self.assertIn("panties_under_black_pantyhose", bundle.prompt.positive)
         self.assertIn("argyle_legwear", bundle.prompt.positive)
         self.assertIn("gun", bundle.prompt.positive)
         self.assertIn("shield", bundle.prompt.positive)
@@ -70,6 +71,55 @@ class CharacterExtensionPolicyTest(unittest.TestCase):
         self.assertTrue(any(item["rule"].startswith("character_extension@") for item in trace))
         self.assertTrue(any(item["action"] == "include_replace" for item in trace))
         self.assertTrue(any(item["action"] == "add_material" for item in trace))
+
+    def test_add_operation_appends_missing_tags(self):
+        character = _character(
+            [
+                "weapon, weapon, add|shield|soul_gem",
+            ]
+        )
+        action = NodeDocument(kind="action", id="weapon", tags={"action": ["weapon"]})
+
+        bundle = _compose(character, action)
+
+        self.assertIn("shield", bundle.prompt.positive)
+        self.assertIn("soul_gem", bundle.prompt.positive)
+        trace = bundle.meta.extra["policy_trace"]
+        self.assertTrue(any(item["action"] == "add" and item["token"] == "shield" for item in trace))
+
+    def test_replace_operation_replaces_matching_token(self):
+        character = _character(
+            [
+                "weapon, weapon, replace|old_weapon|new_weapon",
+            ]
+        )
+        action = NodeDocument(kind="action", id="weapon", tags={"action": ["weapon, old weapon"]})
+
+        bundle = _compose(character, action)
+
+        self.assertIn("new_weapon", bundle.prompt.positive)
+        self.assertNotIn("old_weapon", bundle.prompt.positive)
+        trace = bundle.meta.extra["policy_trace"]
+        self.assertTrue(any(item["action"] == "replace" for item in trace))
+
+    def test_fuzzy_replace_preserves_matched_token_and_adds_target(self):
+        character = _character(
+            [
+                "extend_func_pant, underwear, fuzzy_replace|panties|covered_panties",
+            ]
+        )
+        action = NodeDocument(
+            kind="action",
+            id="underwear",
+            tags={"action": ["underwear, striped panties"]},
+        )
+
+        bundle = _compose(character, action)
+
+        self.assertIn("striped_panties", bundle.prompt.positive)
+        self.assertIn("covered_panties", bundle.prompt.positive)
+        trace = bundle.meta.extra["policy_trace"]
+        self.assertTrue(any(item["action"] == "fuzzy_replace" for item in trace))
 
     def test_add_after_uses_legacy_last_argument_as_anchor(self):
         character = _character(
