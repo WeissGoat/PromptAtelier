@@ -718,3 +718,313 @@ prompt_policy:
 ```
 
 这样既能复用旧 character `tags.txt`，又不会把“通用触发规则”继续散落在每个角色节点里。
+
+## 2026-07-05 最终修订：触发词全集与 character operation 边界
+
+本节覆盖前文手写的示例 registry。实现时以本节的扫描全集为准。
+
+### 扫描范围
+
+扫描范围：
+
+```text
+design/角色/**/tags.txt
+```
+
+扫描规则：
+
+- 只统计 `=` 后的 legacy extension section。
+- `after_uc`、`origin_uc`、`origin_clear`、`gen_param`、`gen_json` 这类 inline extension 也会识别。
+- 以 `#`、`-`、`--` 开头的行归入 disabled，不进入 active registry。
+- 只有一个字段且不是已知 extension 形态的行归入 loose，不自动执行。
+
+### Active Extension Types 全量
+
+以下是 character extension section 中真实出现的 active 类型全集：
+
+| 类型 | 次数 | 归类 | 第一版处理 |
+| --- | ---: | --- | --- |
+| `leg_wear` | 366 | positive slot rule | 接入 `legwear` slot |
+| `shoes` | 359 | positive slot rule | 接入 `shoes` slot |
+| `weapon` | 316 | positive slot rule | 接入 `weapon` slot |
+| `extend_func_pant` | 44 | positive operation rule | 接入 `pant` slot |
+| `after_uc` | 33 | negative prompt extension | 第一版不接入 character positive extension |
+| `barefoot` | 27 | positive slot rule | 接入 `legwear` slot |
+| `blocking_story` | 8 | action filter | 第一版不接入 prompt 改写 |
+| `extend_func_barefoot` | 7 | positive operation rule | 接入 `barefoot` slot |
+| `extend_func_pantyhose` | 7 | positive operation rule | 接入 `pantyhose` slot |
+| `extend_func_nipple` | 4 | positive operation rule | 接入 `nipple` slot |
+| `extend_func_boy` | 3 | positive operation rule | 接入 `boy` slot |
+
+素材声明类型全集：
+
+| 类型 | 次数 | 归类 | 第一版处理 |
+| --- | ---: | --- | --- |
+| `ext_legwear` | 323 | material declaration | 接入 `legwear` slot materials |
+| `ext_shoes` | 306 | material declaration | 接入 `shoes` slot materials |
+| `ext_weapon` | 286 | material declaration | 接入 `weapon` slot materials |
+| `ext_background` | 218 | material declaration | 第一版不接入；后续给 background selector |
+| `ext_item` | 114 | material declaration | 接入 `item` materials，并可被 `weapon` slot 使用 |
+
+disabled 类型全集：
+
+```text
+leg_wear
+ext_weapon
+black fingerless gloves
+stomach_tattoo magical sapphire
+white gloves
+aura
+multiple_rings
+teddy_bear
+extend_func_pant
+purple_armor
+extend_func_nipple
+bat_(animal)
+hooded_cloak
+```
+
+loose 行全集：
+
+```text
+neck ribbon
+```
+
+disabled 和 loose 默认都不执行，只写 trace 或 warning。
+
+### 触发词全集
+
+后续实现里，触发词只从 registry 读取。character 上的 legacy rule 行只提供 operation，不再决定 trigger。
+
+扫描得到的触发词全集如下。
+
+`legwear` slot 合并 `leg_wear` 和 `barefoot`：
+
+```yaml
+legwear:
+  legacy_rule_names:
+    - leg_wear
+    - barefoot
+  declaration_names:
+    - ext_legwear
+  triggers:
+    any:
+      - ankle socks
+      - argyle_legwear
+      - barefoot
+      - black socks
+      - black thighhighs
+      - black_pantyhose
+      - black_thighhighs
+      - bobby_socks
+      - brown_thighhighs
+      - fishnet_pantyhose
+      - frilled_socks
+      - garter straps
+      - kneehighs
+      - loose socks
+      - loose_socks
+      - pantyhose
+      - pink thighhighs
+      - purple thighhighs
+      - purple_thighhighs
+      - single_thighhigh
+      - socks
+      - stirrup legwear
+      - thighhighs
+      - toeless legwear
+      - white kneehighs
+      - white socks
+      - white_pantyhose
+      - white_socks
+      - white_thighhighs
+```
+
+`shoes` slot：
+
+```yaml
+shoes:
+  legacy_rule_names:
+    - shoes
+  declaration_names:
+    - ext_shoes
+  triggers:
+    any:
+      - armored shoes
+      - armored_boots
+      - barefoot
+      - black footwear
+      - black_footwear
+      - boots
+      - crocs
+      - crosslaced_footwear
+      - footwear
+      - gladiator_sandals
+      - high heels
+      - high_heels
+      - highleg
+      - loafers
+      - mary janes
+      - mary_janes
+      - okobo
+      - sandals
+      - shoes
+      - sneakers
+      - slippers
+      - thigh boot
+      - thigh boots
+      - thigh_boots
+      - uwabaki
+      - winged_footwear
+```
+
+`weapon` slot：
+
+```yaml
+weapon:
+  legacy_rule_names:
+    - weapon
+  declaration_names:
+    - ext_weapon
+    - ext_item
+  triggers:
+    any:
+      - sword
+      - weapon
+```
+
+`pant` slot：
+
+```yaml
+pant:
+  legacy_rule_names:
+    - extend_func_pant
+  declaration_names: []
+  triggers:
+    any:
+      - breasts out
+      - lactation
+      - leg_wear
+      - nipples
+      - off shoulder
+      - pant
+      - pussy
+      - sex
+      - underwear
+      - virgin
+    not_any:
+      - nude
+      - pantyhose
+```
+
+`pantyhose` slot：
+
+```yaml
+pantyhose:
+  legacy_rule_names:
+    - extend_func_pantyhose
+  declaration_names: []
+  triggers:
+    any:
+      - pantyhose
+```
+
+`barefoot` operation slot：
+
+```yaml
+barefoot:
+  legacy_rule_names:
+    - extend_func_barefoot
+  declaration_names: []
+  triggers:
+    any:
+      - barefoot
+```
+
+`nipple` slot：
+
+```yaml
+nipple:
+  legacy_rule_names:
+    - extend_func_nipple
+  declaration_names: []
+  triggers:
+    any:
+      - nipple
+```
+
+`boy` slot：
+
+```yaml
+boy:
+  legacy_rule_names:
+    - extend_func_boy
+  declaration_names: []
+  triggers:
+    any:
+      - 1boy
+```
+
+### Character Operation 边界
+
+最终边界如下：
+
+```text
+系统负责：
+  - extension type 识别
+  - slot 归类
+  - 触发词全集
+  - disabled / loose 行过滤
+
+character 负责：
+  - ext_* material declaration
+  - legacy rule line 上的 operation
+```
+
+也就是说，后续实现时：
+
+- `leg_wear, <legacy triggers>, include_replace|..., add|...`
+- `shoes, <legacy triggers>, include_replace|..., add_after|..., add|...`
+- `weapon, <legacy triggers>, include_replace|..., add_after|..., add|...`
+
+这些行中的 `<legacy triggers>` 默认不再用于判断是否触发；只保留后续 operation。
+
+如果需要旧 formula 对比，可通过配置切换：
+
+```yaml
+trigger_mode: legacy
+```
+
+但生产默认必须是：
+
+```yaml
+trigger_mode: fixed
+```
+
+### Operation 全量
+
+扫描得到的 operation 类型全集：
+
+| operation | 次数 | 第一版处理 |
+| --- | ---: | --- |
+| `include_replace` | 1779 | 支持 |
+| `add` | 1049 | 支持 |
+| `add_after` | 1037 | 支持 |
+| `fuzzy_replace` | 44 | 支持 |
+| `replace` | 26 | 支持 |
+| `add_if_not_exist` | 7 | 支持 |
+| `{{braid}}` | 7 | 来自 `after_uc`，不作为 positive operation |
+| `red skirt` | 6 | 来自 `after_uc`，不作为 positive operation |
+
+第一版真正需要实现的 positive operations：
+
+```text
+include_replace
+add
+add_after
+fuzzy_replace
+replace
+add_if_not_exist
+```
+
+`add_before`、`remove` 在当前 active 扫描中没有出现，可以作为兼容旧 `extend_ext_param` 的可选增强，不作为第一版必需项。
