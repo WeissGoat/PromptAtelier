@@ -473,3 +473,248 @@ composition:
 
 该结构只是角色素材声明，规则仍然由 PromptPolicyPipeline 统一解释。
 
+## 2026-07-05 扫描补充：Extension Slot Registry
+
+对 `design/角色/**/tags.txt` 做统计后，需要修正上一版 `Extension Type` 设计。真实 character 节点里 extension 很多，而且明显分成两层：一层是角色素材声明，另一层是通用触发规则。
+
+### 扫描结果
+
+素材声明主要是 `ext_*`：
+
+| 类型 | 出现次数 | 语义 |
+| --- | ---: | --- |
+| `ext_legwear` | 323 | 角色默认腿部/袜类素材，例如 `black_thighhighs`、`white socks` |
+| `ext_shoes` | 306 | 角色默认鞋类素材，例如 `loafers`、`boots`、`high_heels` |
+| `ext_weapon` | 286 | 角色默认武器/道具素材，例如 `greatsword`、`mage_staff` |
+| `ext_background` | 218 | 角色关联背景素材，例如 `outdoors`、`sky`、`indoors` |
+| `ext_item` | 114 | 角色关联小物件素材，例如 `flower`、`book`、`controller` |
+
+触发规则主要是：
+
+| 类型 | 出现次数 | 说明 |
+| --- | ---: | --- |
+| `leg_wear` | 366 | 腿部/袜类规则 |
+| `shoes` | 359 | 鞋类规则 |
+| `weapon` | 316 | 武器/道具规则 |
+| `barefoot` | 27 | 赤脚规则 |
+| `extend_func_pant` | 44 | 裤袜/内衣/连体衣相关修正规则 |
+| `extend_func_pantyhose` | 7 | 连裤袜相关修正规则 |
+| `extend_func_barefoot` | 7 | 赤脚相关修正规则 |
+| `extend_func_nipple` | 4 | 胸甲/乳首冲突修正规则 |
+| `extend_func_boy` | 3 | 男性角色/路人男性补充规则 |
+| `after_uc` | 33 | 负面提示词追加，不归入正向 character extension |
+| `blocking_story` | 8 | 动作分类过滤，不归入 prompt 改写 |
+
+因此，上一版中“每条 legacy rule 自带 trigger 列表”的设计过于生硬。新的规范应改成：每个 extension slot 的触发词由系统统一维护；character 节点主要声明本角色在该 slot 下应该使用的素材。
+
+### 新模型
+
+新增内部概念：
+
+```text
+ExtensionSlotRegistry
+  -> slot: legwear / shoes / weapon / item
+  -> fixed triggers
+  -> legacy rule names
+  -> declaration names
+
+CharacterExtensionMaterial
+  -> character ref
+  -> slot
+  -> material tags from ext_*
+
+LegacyExtensionRule
+  -> optional operation override from legacy rule lines
+```
+
+也就是说，`ext_legwear/ext_shoes/ext_weapon/ext_item` 是素材声明，不是 operation；`leg_wear/shoes/weapon/barefoot/extend_func_*` 是旧 rule 行，可以提供兼容 operation。
+
+### 固定触发词
+
+第一版内置固定 slot：
+
+```yaml
+legwear:
+  legacy_rule_names: ["leg_wear", "barefoot"]
+  declaration_names: ["ext_legwear"]
+  triggers:
+    any:
+      - pantyhose
+      - thighhighs
+      - socks
+      - sock
+      - kneehighs
+      - legwear
+      - stirrup legwear
+      - toeless legwear
+      - barefoot
+      - bare feet
+
+shoes:
+  legacy_rule_names: ["shoes"]
+  declaration_names: ["ext_shoes"]
+  triggers:
+    any:
+      - shoes
+      - footwear
+      - boots
+      - high heels
+      - sneakers
+      - loafers
+      - mary janes
+      - sandals
+      - thigh boots
+      - armored boots
+
+weapon:
+  legacy_rule_names: ["weapon"]
+  declaration_names: ["ext_weapon", "ext_item"]
+  triggers:
+    any:
+      - weapon
+      - sword
+      - gun
+      - rifle
+      - staff
+      - wand
+      - bow
+      - shield
+      - spear
+      - holding weapon
+```
+
+`ext_background` 暂时不接入 `character_extension`。它更像背景选择素材，后续应交给 background selector 或 batch planner 规则。
+
+`after_uc` 暂时不接入正向 prompt 改写。它应作为独立的 negative prompt extension 规则处理。
+
+`blocking_story` 暂时不接入 prompt 改写。它对应旧版 `TagsMachine.default_filter_func` 的动作分类过滤，应放在 batch planner 或 task filter 层。
+
+### Character Material Declaration
+
+character 的 `tags.txt` 中，`ext_*` 行优先作为素材声明读取。
+
+示例：
+
+```text
+ext_legwear,black_thighhighs,{single_thighhigh}
+ext_shoes,boots
+ext_weapon,mage_staff,witch_hat
+```
+
+归一化后：
+
+```yaml
+materials:
+  legwear:
+    - black_thighhighs
+    - "{single_thighhigh}"
+  shoes:
+    - boots
+  weapon:
+    - mage_staff
+    - witch_hat
+```
+
+当 prompt 命中 slot 固定触发词时，规则优先使用该角色对应 slot 的 materials。
+
+### Legacy Rule Lines
+
+旧 character 节点里也有完整 rule 行，例如：
+
+```text
+leg_wear, pantyhose|thighhighs|socks, include_replace|thighhighs|pantyhose|black_thighhighs, add|black_thighhighs
+shoes, shoes|boots|high_heels, include_replace|boots|high_heels|boots, add_after|boots|shoes, add|boots
+weapon, weapon|sword, include_replace|weapon|sword|mage_staff, add_after|mage_staff|weapon, add|mage_staff
+```
+
+这些行的 operation 可以继续兼容，但触发判断默认不再使用第二段 legacy trigger。触发词应该来自 slot registry。
+
+兼容策略：
+
+| 模式 | 行为 | 用途 |
+| --- | --- | --- |
+| `fixed` | 只使用 slot 固定触发词 | 默认模式，长期推荐 |
+| `fixed_plus_legacy` | 固定触发词和 legacy trigger 取并集 | 过渡期排查差异 |
+| `legacy` | 只使用 legacy rule 第二段 trigger | 旧 formula 对比 |
+
+### Operation 支持范围修订
+
+扫描后，第一版 operation 需要支持：
+
+```text
+include_replace|old_a|old_b|target
+replace|old_a|old_b|target
+add|tag_a|tag_b
+add_before|tag_a|target
+add_after|tag_a|target
+remove|match_a|match_b
+exact_replace|old|new
+fuzzy_replace|match|new
+add_if_not_exist|target|match_a|match_b
+```
+
+其中 `include_replace` 是最重要的兼容操作，真实素材中出现超过一千次，主要用于 `leg_wear/shoes/weapon` 的同类替换。
+
+### Disabled And Loose Lines
+
+扫描发现存在明显禁用行：
+
+```text
+#leg_wear,...
+-leg_wear,...
+--leg_wear,...
+#ext_weapon,...
+```
+
+也有少量松散行：
+
+```text
+neck ribbon
+```
+
+第一版处理方式：
+
+- 以 `#`、`-`、`--` 开头的 extension 行默认忽略。
+- 无法解析成 `slot, ...` 或 `ext_*, ...` 的松散行默认忽略并写 warning trace。
+- 不把松散行自动追加到 prompt，避免历史注释或误写内容变成生图参数。
+
+### 配置修订
+
+`character_extension` 增加配置：
+
+```yaml
+prompt_policy:
+  rules:
+    character_extension:
+      enabled: true
+      source: legacy_tags_txt
+      include_default_extensions: true
+      include_declaration_materials: true
+      trigger_mode: fixed
+      ignore_disabled_lines: true
+      enabled_slots:
+        - legwear
+        - shoes
+        - weapon
+```
+
+字段含义：
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `include_declaration_materials` | `true` | 是否读取 `ext_legwear/ext_shoes/ext_weapon/ext_item` 作为角色素材 |
+| `trigger_mode` | `fixed` | extension slot 触发词来源：`fixed`、`fixed_plus_legacy`、`legacy` |
+| `ignore_disabled_lines` | `true` | 是否忽略 `#`、`-`、`--` 开头的 legacy extension 行 |
+| `enabled_slots` | `["legwear", "shoes", "weapon"]` | 启用哪些 slot；`background` 不在第一版范围 |
+
+### 设计结论
+
+最终推荐模型是：
+
+```text
+固定触发词由 ExtensionSlotRegistry 管
+角色具体素材由 ext_* 声明
+旧 rule 行只作为 operation 兼容层
+```
+
+这样既能复用旧 character `tags.txt`，又不会把“通用触发规则”继续散落在每个角色节点里。
