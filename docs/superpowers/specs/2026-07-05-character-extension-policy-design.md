@@ -1028,3 +1028,177 @@ add_if_not_exist
 ```
 
 `add_before`、`remove` 在当前 active 扫描中没有出现，可以作为兼容旧 `extend_ext_param` 的可选增强，不作为第一版必需项。
+
+## 2026-07-05 验收 Case：旧 formula 对比
+
+第一版实现完成后，必须设计一个真实旧版对比 case。目标不是像素完全一致，而是确认旧 formula 的 character extension 效果被新规则复刻到同一视觉语义。
+
+### Case: Homura Legwear And Weapon Extension
+
+选择该 case 的原因：
+
+- character 节点真实存在多种 extension：`ext_legwear`、`ext_weapon`、`ext_shoes`、`leg_wear`、`weapon`、`extend_func_pantyhose`、`extend_func_barefoot`。
+- action 节点里明确包含 `pantyhose` 和 `weapon`，能稳定触发 `legwear` 和 `weapon` slot。
+- 视觉上容易人工检查：腿袜、武器、角色身份都比较明显。
+
+节点：
+
+```yaml
+artist: 20260412
+character: F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+action: F:/my_project/new/tags_machine/design/动作改2/st_ft_leg/22_20240506_1715007679
+composer: script
+render_params:
+  seed: 1775456908
+  n_samples: 1
+  resolution: normal_portrait
+  sampler: k_euler_ancestral
+  steps: 28
+  scale: 5.0
+  nt: 3
+prompt_policy:
+  rules:
+    character_extension:
+      enabled: true
+      trigger_mode: fixed
+      include_declaration_materials: true
+```
+
+该 character 的关键 extension：
+
+```text
+ext_legwear,argyle_legwear,pantyhose
+ext_weapon,shield,dark_orb_(madoka_magica),soul_gem,
+ext_shoes,high_heels
+leg_wear, ..., include_replace|pantyhose|black_pantyhose, ..., add|argyle_legwear
+weapon, weapon|sword, include_replace|weapon|sword|gun, add_after|gun|weapon, add|gun|shield
+extend_func_pantyhose, pantyhose, add_if_not_exist|no shoes|high_heels
+```
+
+该 action 的关键触发词：
+
+```text
+pantyhose
+weapon
+black pantyhose
+```
+
+新规则的 PromptBundle 预期：
+
+- 正向 prompt 中保留 Homura 身份：`akemi_homura`、`mahou_shoujo_madoka_magica`、`black_hair`、`purple_eyes`。
+- `legwear` slot 被触发。
+- `weapon` slot 被触发。
+- trace 中至少出现：
+  - `legwear` 相关 `include_replace` 或 `add`。
+  - `weapon` 相关 `include_replace` 或 `add_after`。
+- 正向 prompt 中应能看到下列语义中的主要项：
+  - `black_pantyhose` 或 `pantyhose`
+  - `argyle_legwear`
+  - `gun`
+  - `shield`
+
+### 旧版生成
+
+旧版使用 `tags_machine` 原 formula 链路生成基准图。可以通过旧项目已有 `run_action` / `run_actions` 能力跑，也可以增加一个只用于验收的最小脚本，但必须经过：
+
+```text
+CustomDirInput
+-> TagsMachine
+-> formula_update / formula_update_nai4
+-> extend_character_in_the_end
+-> NovelAI
+```
+
+旧版生成时必须使用和新版一致的 `artist`、`character`、`action`、`seed`、`n_samples`、尺寸、sampler、steps、scale、nt。若旧版内部参数名不同，对比报告中记录映射关系。
+
+旧版输出需要保存：
+
+```text
+acceptance_compare/character_extension_homura_legwear_weapon/legacy/
+  image.png
+  png_params.json
+  prompt.txt
+  render_params.json
+  run_meta.json
+```
+
+### 新版生成
+
+新版使用 refactor 的 batch 或 compose/generate 链路生成对照图，必须经过：
+
+```text
+BatchTask or CLI
+-> ScriptComposer
+-> PromptPolicyPipeline(character_extension)
+-> NovelAI Renderer
+-> NovelAI
+```
+
+新版输出需要保存：
+
+```text
+acceptance_compare/character_extension_homura_legwear_weapon/core/
+  image.png
+  prompt_bundle.json
+  render_request.json
+  generation_result.json
+  png_params.json
+  render_params.json
+```
+
+### 对比报告
+
+对比报告保存：
+
+```text
+acceptance_compare/character_extension_homura_legwear_weapon/report.md
+```
+
+报告必须包含：
+
+| 字段 | 要求 |
+| --- | --- |
+| `legacy_image` | 旧版图片路径 |
+| `core_image` | 新版图片路径 |
+| `legacy_prompt_keywords` | 从旧图 PNG 参数中提取的关键 tag |
+| `core_prompt_keywords` | 从新版 PromptBundle/PNG 参数中提取的关键 tag |
+| `render_param_diff` | 旧版和新版实际生成参数 diff |
+| `policy_trace` | 新版 `character_extension` trace 摘要 |
+| `visual_result` | `pass` 或 `fail` |
+| `visual_notes` | 人工说明 |
+
+### 通过条件
+
+参数层面：
+
+- 旧图和新图都能读取 PNG 参数。
+- 新版 `GenerationResult.request_body` 与新版 PNG 参数一致。
+- 旧版和新版实际生成参数应尽量一致；若存在无法对齐的字段，必须在 `render_param_diff` 中解释。
+- 新版 PromptBundle trace 能解释 `legwear` 和 `weapon` 相关改动。
+- 新版 prompt 没有出现明显的无关大改动，例如丢失角色身份、丢失 action 主体。
+
+视觉层面：
+
+- 两张图都应表现为 Homura 或明显 Homura 语义角色。
+- 两张图都应保留腿部/腿袜主题。
+- 两张图都应出现武器或武器语义道具；具体是枪、盾、暗色宝石等细节可以不同。
+- 两张图的动作和镜头主题应接近：腿部/下半身/足腿方向的构图，而不是完全变成无关半身肖像。
+- 允许构图、衣服细节、武器具体形态、背景和表情不同。
+
+通过结论写法：
+
+```yaml
+visual_result: pass
+reason: >
+  旧版和新版都保留 Homura 身份、腿袜主题和武器语义；
+  新版细节不完全一致，但 character extension 的主要视觉效果一致。
+```
+
+失败结论示例：
+
+```yaml
+visual_result: fail
+reason: >
+  新版未出现 legwear/weapon 相关语义，或角色身份被破坏，
+  说明 character_extension 没有正确复刻旧 formula 的核心效果。
+```
