@@ -15,4 +15,8 @@ local.yaml
 .env.*
 !.env.example
 *.log
+
+# 批量跑图/验收运行产物，只保留 YAML 配置和源码。
+examples/batches/*/
+acceptance_compare*/
 参考项目/

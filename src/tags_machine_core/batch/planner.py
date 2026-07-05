@@ -55,7 +55,7 @@ class SelectionSet:
 class BatchPlanner:
     def __init__(self, *, base_dir: str | Path, node_reader: NodeReader | None = None):
         self.base_dir = Path(base_dir)
-        self.node_reader = node_reader or NodeReader()
+        self.node_reader = _CachedNodeReader(node_reader or NodeReader())
 
     def plan(
         self,
@@ -116,7 +116,7 @@ class BatchPlanner:
                     "index": index,
                     "output": TaskOutput(
                         task_dir=str(resolved_run_dir / "tasks" / task.id),
-                        output_dir=str((resolved_output_dir / task.id).resolve()),
+                        output_dir=str(resolved_output_dir / task.id),
                     ),
                 }
             )
@@ -735,7 +735,7 @@ class BatchPlanner:
             seed=spec.defaults.seed,
             model=spec.defaults.model if spec.defaults.backend == "novelai" else None,
             image_format=spec.defaults.image_format,
-            output_dir=str((output_dir / task_id).resolve()),
+            output_dir=str(output_dir / task_id),
             params=render_params,
         )
         return BatchTask(
@@ -753,7 +753,7 @@ class BatchPlanner:
             policy=_policy_config(spec.defaults.prompt_policy_profile, composer=composer),
             output={
                 "task_dir": str(run_dir / "tasks" / task_id),
-                "output_dir": str((output_dir / task_id).resolve()),
+                "output_dir": str(output_dir / task_id),
             },
             source=source or {},
         )
@@ -821,6 +821,20 @@ def _node_refs(
         if value:
             nodes.append(NodeRef(role=role, ref=value, index=_role_index(nodes, role)))
     return nodes
+
+
+class _CachedNodeReader:
+    def __init__(self, reader: NodeReader):
+        self.reader = reader
+        self.cache: dict[str, Any] = {}
+
+    def read(self, path: str | Path):
+        key = str(Path(path))
+        node = self.cache.get(key)
+        if node is None:
+            node = self.reader.read(path)
+            self.cache[key] = node
+        return node
 
 
 def _reindex_nodes(nodes: list[NodeRef]) -> list[NodeRef]:

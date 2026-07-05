@@ -1,0 +1,18 @@
+require:
+  - ../project/base.yaml
+  - ../project/collections.yaml
+  - ../project/nai_const_action_groups.yaml
+
+name: blackboard-action-new-manga-monochrome
+description: 参考旧 blackboard.py:run_tags_machine 的 ACTION_NEW + 特殊_next_select 批量跑图配置。
+output_dir: G:/ai_auto/blackboard-action-new-manga-monochrome
+
+batch:
+  characters: special_next_select
+  action_groups:
+    - action_new
+  artist: "109841329_03_manga_monochrome_yabuki_rance_no_vibe_latest_stable"
+  composer: script
+  auto_num: true
+  max_tasks: 1
+  nt: 3
