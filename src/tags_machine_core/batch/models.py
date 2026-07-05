@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 ComposerMode = Literal["full", "agent", "script"]
+ExecutionMode = Literal["real", "mock"]
 ExpandMode = Literal[
     "product",
     "zip",
@@ -48,6 +49,7 @@ class RetryConfig(BaseModel):
 class RunConfig(BaseModel):
     resume: bool = True
     stop_on_error: bool = False
+    execution_mode: ExecutionMode = "real"
     max_images: int | None = None
     execute_requires_agent: bool = False
     fresh: bool = False
@@ -149,6 +151,7 @@ class ExpandConfig(BaseModel):
     shuffle: bool = False
     action_group_strategy: ActionGroupStrategyName = "balanced_random"
     action_group_record: str | None = None
+    allow_fill_missing_cp_from_candidates: bool = False
     seed: int | None = None
 
 

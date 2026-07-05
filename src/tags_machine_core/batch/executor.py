@@ -9,7 +9,7 @@ from tags_machine_core.composers import AgentCompositionRequired, load_agent_res
 from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
-from tags_machine_core.execution import execute_render_request
+from tags_machine_core.execution import execute_mock_generation, execute_render_request
 from tags_machine_core.nodes import NodeReader, NovelAIArtistRepository, ResolvedNode, ResolvedNodeSet
 from tags_machine_core.services import GenerationService
 
@@ -42,6 +42,7 @@ class BatchExecutor:
         *,
         config: AppConfig,
         output_dir: str | Path | None = None,
+        mock: bool = False,
     ) -> BatchExecutionResult:
         resolved_nodes = self._resolved_nodes(task, config=config)
         try:
@@ -63,13 +64,20 @@ class BatchExecutor:
             action="generate" if task.render.backend == "novelai" else "render-plan",
             params=render_params,
         )
-        generation = execute_render_request(
-            config,
-            request,
-            output_dir=output_dir or task.render.output_dir,
-            image_format=task.render.image_format,
-            allow_experimental_backend=False,
-        )
+        if mock:
+            generation = execute_mock_generation(
+                request,
+                output_dir=output_dir or task.render.output_dir,
+                image_format=task.render.image_format,
+            )
+        else:
+            generation = execute_render_request(
+                config,
+                request,
+                output_dir=output_dir or task.render.output_dir,
+                image_format=task.render.image_format,
+                allow_experimental_backend=False,
+            )
         return BatchExecutionResult(
             status="succeeded",
             prompt_bundle=bundle,

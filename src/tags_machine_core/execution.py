@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
@@ -9,8 +10,10 @@ from typing import Any
 from uuid import uuid4
 import zlib
 
+from PIL import Image
+
 from tags_machine_core.backends import ensure_backend_can_execute
-from tags_machine_core.clients import ComfyUIClient, NovelAIClient, SDClient
+from tags_machine_core.clients import ComfyUIClient, NovelAIClient, NovelAIImage, SDClient
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.logging_config import get_logger
@@ -281,6 +284,142 @@ def execute_novelai_generation(
         png_info={"images": png_records},
         cache_hit=False,
     )
+
+
+def execute_mock_generation(
+    request: RenderRequest,
+    *,
+    output_dir: str | Path | None,
+    image_format: str,
+) -> GenerationResult:
+    output_path = Path(output_dir or ".")
+    default_format = image_format or "png"
+    requests = split_novelai_samples(request) if request.backend == "novelai" else [request]
+    if len(requests) == 1:
+        effective_request = requests[0]
+        request_body = _mock_request_body(effective_request)
+        images = save_generated_images(
+            [
+                NovelAIImage(
+                    filename=f"mock.{default_format}",
+                    content=_mock_png_bytes(effective_request),
+                )
+            ],
+            output_dir=output_path,
+            request=effective_request,
+            default_format=default_format,
+        )
+        _write_mock_png_parameters(images, request_body)
+        png_info = collect_png_info(images)
+        png_info["mock"] = {
+            "enabled": True,
+            "reason": "batch execution_mode=mock",
+        }
+        return GenerationResult(
+            backend=request.backend,
+            images=images,
+            request_body=request_body,
+            png_info=png_info,
+            cache_hit=False,
+        )
+
+    images: list[GeneratedImage] = []
+    png_records: list[dict[str, Any]] = []
+    request_bodies: list[dict[str, Any]] = []
+    for index, split_request in enumerate(requests):
+        request_body = _mock_request_body(split_request)
+        generated = save_generated_images(
+            [
+                NovelAIImage(
+                    filename=f"mock.{default_format}",
+                    content=_mock_png_bytes(split_request),
+                )
+            ],
+            output_dir=output_path,
+            request=split_request,
+            default_format=default_format,
+        )
+        _write_mock_png_parameters(generated, request_body)
+        images.extend(
+            image.model_copy(
+                update={
+                    "meta": {
+                        **image.meta,
+                        "split_request_index": index,
+                    }
+                }
+            )
+            for image in generated
+        )
+        request_bodies.append(request_body)
+        png_info = collect_png_info(generated)
+        for record in png_info.get("images", []):
+            if isinstance(record, dict):
+                record["split_request_index"] = index
+                png_records.append(record)
+
+    return GenerationResult(
+        backend=request.backend,
+        images=images,
+        request_body={
+            "split_batch": True,
+            "reason": "force_n_samples_1",
+            "requests": request_bodies,
+        },
+        png_info={
+            "images": png_records,
+            "mock": {
+                "enabled": True,
+                "reason": "batch execution_mode=mock",
+                "split_batch": True,
+            },
+        },
+        cache_hit=False,
+    )
+
+
+def _mock_request_body(request: RenderRequest) -> dict[str, Any]:
+    if request.backend == "novelai":
+        return NovelAIClient(access_token="mock").build_payload(request)
+    return {
+        "backend": request.backend,
+        "model": request.model,
+        "prompt": request.prompt,
+        "negative_prompt": request.negative_prompt,
+        "seed": request.seed,
+        "size": request.size.model_dump(mode="json"),
+        "params": request.params,
+    }
+
+
+def _write_mock_png_parameters(images: list[GeneratedImage], request_body: dict[str, Any]) -> None:
+    parameters = _mock_png_parameters(request_body)
+    text = json.dumps(parameters, ensure_ascii=False)
+    for image in images:
+        write_png_text_chunks(Path(image.path), {"Comment": text})
+
+
+def _mock_png_parameters(request_body: dict[str, Any]) -> dict[str, Any]:
+    parameters = dict(request_body.get("parameters") or {})
+    if request_body.get("input"):
+        parameters.setdefault("prompt", request_body["input"])
+    if request_body.get("model"):
+        parameters.setdefault("model", request_body["model"])
+    if request_body.get("action"):
+        parameters.setdefault("action", request_body["action"])
+    negative = parameters.get("negative_prompt")
+    if negative is not None:
+        parameters.setdefault("uc", negative)
+    return parameters
+
+
+def _mock_png_bytes(request: RenderRequest) -> bytes:
+    width = max(32, min(256, int(request.size.width or 1024) // 8))
+    height = max(32, min(256, int(request.size.height or 1024) // 8))
+    image = Image.new("RGB", (width, height), color=(36, 40, 48))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _generate_novelai_images(

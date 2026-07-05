@@ -999,6 +999,7 @@ def cmd_run_batch(args) -> int:
         resume=args.resume,
         stop_on_error=args.stop_on_error,
         fresh=args.fresh,
+        execution_mode="mock" if args.mock_client else None,
     )
     run_dir = _batch_run_dir(
         spec,
@@ -1110,6 +1111,7 @@ def _batch_spec_with_cli_overrides(
     resume: bool | None,
     stop_on_error: bool | None,
     fresh: bool | None = None,
+    execution_mode: str | None = None,
 ):
     run_config = spec.run
     if resume is not None:
@@ -1118,6 +1120,8 @@ def _batch_spec_with_cli_overrides(
         run_config = run_config.model_copy(update={"stop_on_error": stop_on_error})
     if fresh is not None:
         run_config = run_config.model_copy(update={"fresh": fresh})
+    if execution_mode is not None:
+        run_config = run_config.model_copy(update={"execution_mode": execution_mode})
     return spec.model_copy(update={"run": run_config})
 
 
@@ -1975,6 +1979,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--fresh",
         action="store_true",
         help="Start from scratch and clear the existing batch run directory before planning/running",
+    )
+    run_batch.add_argument(
+        "--mock-client",
+        action="store_true",
+        help="Run the full batch pipeline but replace backend API calls with local mock images and payload archives",
     )
     run_batch.set_defaults(func=cmd_run_batch)
 

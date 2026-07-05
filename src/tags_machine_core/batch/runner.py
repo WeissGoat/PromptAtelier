@@ -86,17 +86,18 @@ class BatchRunner:
         if not (run_config.resume and (root / "manifest.jsonl").exists()):
             write_initial_manifest(root, tasks)
         logger.info(
-            "batch run started run_dir=%s task_count=%s limit=%s resume=%s max_images=%s",
+            "batch run started run_dir=%s task_count=%s limit=%s resume=%s max_images=%s execution_mode=%s",
             root,
             len(tasks),
             limit,
             run_config.resume,
             run_config.max_images,
+            run_config.execution_mode,
         )
         _emit_progress(
             "[batch] started "
             f"run_dir={root} task_count={len(tasks)} limit={limit or 'all'} "
-            f"resume={run_config.resume} fresh={run_config.fresh}"
+            f"resume={run_config.resume} fresh={run_config.fresh} mode={run_config.execution_mode}"
         )
 
         entries: list[dict[str, Any]] = []
@@ -194,7 +195,13 @@ class BatchRunner:
             )
             try:
                 output_dir = Path(task.output.output_dir or task.render.output_dir or task.output.task_dir)
-                result = self.executor.execute(task, config=config, output_dir=output_dir)
+                result = _execute_task(
+                    self.executor,
+                    task,
+                    config=config,
+                    output_dir=output_dir,
+                    mock=run_config.execution_mode == "mock",
+                )
                 entry = self._handle_execution_result(
                     root=root,
                     task=task,
@@ -392,6 +399,20 @@ def _task_with_image_budget(task: BatchTask, image_budget: int | None) -> BatchT
         deep=True,
         update={"render": task.render.model_copy(update={"nt": max(1, image_budget)})},
     )
+
+
+def _execute_task(
+    executor,
+    task: BatchTask,
+    *,
+    config: AppConfig,
+    output_dir: Path,
+    mock: bool,
+) -> BatchExecutionResult:
+    parameters = inspect.signature(executor.execute).parameters
+    if "mock" in parameters:
+        return executor.execute(task, config=config, output_dir=output_dir, mock=mock)
+    return executor.execute(task, config=config, output_dir=output_dir)
 
 
 def _resume_task_snapshot(task: BatchTask) -> BatchTask:
