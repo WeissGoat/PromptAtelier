@@ -51,6 +51,7 @@ class NodeReader:
         data.setdefault("id", node_dir.name)
         data.setdefault("path", node_dir)
         node = NodeDocument.model_validate(data)
+        node = self._attach_legacy_tags_txt(node, node_dir)
         return self._attach_action_profile(node, node_dir)
 
     def _normalize_yaml_data(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -95,6 +96,31 @@ class NodeReader:
             ),
         )
         return self._attach_action_profile(node, node_dir)
+
+    def _attach_legacy_tags_txt(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
+        tags_txt = node_dir / "tags.txt"
+        if not tags_txt.exists():
+            return node
+        lines = [
+            line.strip()
+            for line in tags_txt.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        prompt_lines, type_lines, ext_lines = self._split_legacy_cnode_lines(lines)
+        raw_sections = dict(node.legacy.raw_sections)
+        raw_sections.setdefault("prompt", prompt_lines)
+        if type_lines:
+            raw_sections.setdefault("type", type_lines)
+        if ext_lines:
+            raw_sections.setdefault("extension", ext_lines)
+        legacy = node.legacy.model_copy(
+            update={
+                "source_file": node.legacy.source_file or str(tags_txt),
+                "raw_lines": node.legacy.raw_lines or lines,
+                "raw_sections": raw_sections,
+            }
+        )
+        return node.model_copy(update={"legacy": legacy})
 
     def _attach_action_profile(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
         profile = load_action_profile(node_dir)

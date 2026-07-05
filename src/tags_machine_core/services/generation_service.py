@@ -13,7 +13,7 @@ from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import PromptBundle, RenderRequest
 from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.nodes.resolved import ResolvedNodeSet
+from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.policies import PromptPolicyConfig, PromptPolicyPipeline
 from tags_machine_core.renderers import ComfyUIRenderAdapter, NovelAIRenderAdapter, SDRenderAdapter
@@ -88,8 +88,21 @@ class GenerationService:
             bundle.meta.composer_type,
             len(bundle.meta.nodes),
         )
+        resolved_nodes = ResolvedNodeSet(
+            [
+                ResolvedNode(role=role, ref=node.source_ref(), index=0, node=node)
+                for role, node in (
+                    ("character", character),
+                    ("action", action),
+                    ("background", background),
+                    ("artist", artist),
+                )
+                if node is not None
+            ]
+        )
         return self.policy_pipeline.apply(
             bundle,
+            resolved_nodes=resolved_nodes,
             config=prompt_policy,
             target="script",
         )

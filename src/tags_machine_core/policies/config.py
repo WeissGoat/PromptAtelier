@@ -31,6 +31,7 @@ PROFILE_RULES: dict[str, list[str]] = {
     "legacy_compat": [
         "tag_normalize",
         "dedupe",
+        "character_extension",
         "tag_conflict",
         "character_count",
         "clothing_policy",

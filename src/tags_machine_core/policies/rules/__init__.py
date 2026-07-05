@@ -1,4 +1,5 @@
 from .base import PromptRule, RulePhase
+from .character_extension import CharacterExtensionPolicyRule
 from .character_count import CharacterCountRule
 from .clothing import ClothingPolicyRule
 from .dedupe import DedupeRule
@@ -9,6 +10,7 @@ from .visibility import VisibilityPolicyRule
 DEFAULT_RULES: list[PromptRule] = [
     TagNormalizeRule(),
     DedupeRule(),
+    CharacterExtensionPolicyRule(),
     TagConflictRule(),
     CharacterCountRule(),
     ClothingPolicyRule(),
@@ -17,6 +19,7 @@ DEFAULT_RULES: list[PromptRule] = [
 
 __all__ = [
     "CharacterCountRule",
+    "CharacterExtensionPolicyRule",
     "ClothingPolicyRule",
     "DEFAULT_RULES",
     "DedupeRule",
