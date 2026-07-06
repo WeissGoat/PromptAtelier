@@ -5,8 +5,11 @@ from typing import Any
 from tags_machine_core.nodes.models import NodeDocument
 
 
-CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | None]] = {
-    "default": {"include": None},
+IDENTITY_MINIMAL_SECTIONS = ["character", "role"]
+IDENTITY_MINIMAL_POLICY = "__identity_minimal__"
+
+CHARACTER_SCOPE_POLICY: dict[str, dict[str, list[str] | str | None]] = {
+    "default": {"include": IDENTITY_MINIMAL_POLICY},
     "full_body": {"include": None},
     "upper_body": {
         "include": [
@@ -152,7 +155,7 @@ def character_positive(
         return texts, dedupe(included_roles), dedupe(suppressed_roles)
 
     sections = list(node.tags.keys())
-    include_sections = included_character_sections(sections, character_scope)
+    include_sections = included_character_sections(sections, character_scope, node=node)
     include_set = set(include_sections)
     suppressed_sections = [section for section in sections if section not in include_set]
     texts: list[str] = []
@@ -171,6 +174,7 @@ def character_positive_with_selected_keys(
     normalized_keys = [str(key).strip() for key in selected_keys or [] if str(key).strip()]
     if not normalized_keys:
         return character_positive(node, character_scope)
+    normalized_keys = dedupe(identity_minimal_sections(node) + normalized_keys)
     if node.prompt.positive:
         return _character_prompt_fragments_by_selected_keys(node, normalized_keys)
     sections = list(node.tags.keys())
@@ -248,16 +252,25 @@ def character_material(
 def included_character_sections(
     sections: list[str],
     character_scope: str | None,
+    *,
+    node: NodeDocument | None = None,
 ) -> list[str]:
-    policy = CHARACTER_SCOPE_POLICY.get(
-        character_scope or "default",
-        CHARACTER_SCOPE_POLICY["default"],
-    )
+    policy = CHARACTER_SCOPE_POLICY.get(character_scope or "default")
+    if policy is None:
+        policy = CHARACTER_SCOPE_POLICY["default"]
     include = policy.get("include")
+    if include == IDENTITY_MINIMAL_POLICY:
+        include = identity_minimal_sections(node)
     if include is None:
         return sections
     include_set = set(include)
     return [section for section in sections if section in include_set]
+
+
+def identity_minimal_sections(node: NodeDocument | None) -> list[str]:
+    if node is not None and node.identity_minimal:
+        return node.identity_minimal
+    return IDENTITY_MINIMAL_SECTIONS
 
 
 def dedupe(items: list[str]) -> list[str]:

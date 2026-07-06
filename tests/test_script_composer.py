@@ -38,7 +38,7 @@ class ScriptComposerTest(unittest.TestCase):
             ]
         )
 
-        bundle = ScriptComposer().compose_resolved_nodes(nodes, style_ref="20260412_2")
+        bundle = ScriptComposer().compose_resolved_nodes(nodes)
 
         self.assertIn("akemi homura", bundle.prompt.positive)
         self.assertIn("kaname madoka", bundle.prompt.positive)
@@ -47,9 +47,11 @@ class ScriptComposerTest(unittest.TestCase):
         self.assertEqual([item["ref"] for item in materials], ["homura", "madoka"])
         self.assertEqual(
             materials[0]["positive_tags"],
-            ["akemi homura", "black hair", "bare feet"],
+            ["akemi homura"],
         )
-        self.assertEqual(bundle.meta.extra["node_refs"][1]["ref"], "madoka")
+        self.assertEqual(bundle.meta.nodes[1].ref, "madoka")
+        self.assertNotIn("black hair", bundle.prompt.positive)
+        self.assertNotIn("bare feet", bundle.prompt.positive)
 
     def test_compose_nodes_filters_character_sections_by_action_scope(self):
         character = NodeDocument.model_validate(
@@ -101,8 +103,8 @@ class ScriptComposerTest(unittest.TestCase):
         self.assertNotIn("school uniform", bundle.prompt.positive)
         self.assertIn("extra toes", bundle.prompt.negative)
         self.assertIn("face focus", bundle.prompt.negative)
-        self.assertEqual(bundle.meta.character_ref, "homura")
-        self.assertEqual(bundle.meta.action_ref, "foot_closeup")
+        self.assertEqual(bundle.meta.nodes[0].ref, "homura")
+        self.assertEqual(bundle.meta.nodes[1].ref, "foot_closeup")
 
     def test_compose_nodes_can_override_character_scope(self):
         character = NodeDocument.model_validate(
@@ -213,8 +215,9 @@ class ScriptComposerTest(unittest.TestCase):
         bundle = ScriptComposer().compose_nodes(character=character, action=action)
 
         self.assertEqual(bundle.meta.composition.character_scope, "default")
-        self.assertIn("purple eyes", bundle.prompt.positive)
-        self.assertIn("bare soles", bundle.prompt.positive)
+        self.assertIn("akemi homura", bundle.prompt.positive)
+        self.assertNotIn("purple eyes", bundle.prompt.positive)
+        self.assertNotIn("bare soles", bundle.prompt.positive)
 
 
 if __name__ == "__main__":

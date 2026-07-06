@@ -72,6 +72,59 @@ class CharacterExtensionPolicyTest(unittest.TestCase):
         self.assertTrue(any(item["action"] == "include_replace" for item in trace))
         self.assertTrue(any(item["action"] == "add_material" for item in trace))
 
+    def test_include_replace_does_not_rewrite_other_character_declared_materials(self):
+        homura = _character(
+            [
+                "ext_legwear,argyle_legwear,pantyhose",
+                "leg_wear, pantyhose|thighhighs|socks, include_replace|pantyhose|socks|black_pantyhose",
+            ]
+        )
+        madoka = NodeDocument(
+            kind="character",
+            id="madoka",
+            identity_minimal=["character"],
+            tags={"character": ["kaname madoka"]},
+            legacy=LegacyNodeMeta(
+                raw_sections={
+                    "extension": [
+                        "ext_legwear,white_frilled_socks",
+                        "ext_shoes,red_mary_janes",
+                        "leg_wear, pantyhose|thighhighs|socks, include_replace|pantyhose|socks|white_frilled_socks",
+                        "shoes, shoes|high_heels|mary_janes, include_replace|high_heels|mary_janes|red_mary_janes",
+                    ],
+                }
+            ),
+        )
+        action = NodeDocument(
+            kind="action",
+            id="legwear",
+            tags={"action": ["panties under pantyhose, socks, high heels"]},
+        )
+        nodes = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="character", ref="madoka", index=1, node=madoka),
+                ResolvedNode(role="action", ref=action.id, index=0, node=action),
+            ]
+        )
+
+        bundle = GenerationService().compose_resolved_nodes(
+            nodes,
+            prompt_policy={
+                "enabled": True,
+                "profile": "off",
+                "enabled_rules": ["character_extension"],
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertIn("panties_under_black_pantyhose", bundle.prompt.positive)
+        self.assertIn("white_frilled_socks", bundle.prompt.positive)
+        self.assertIn("red_mary_janes", bundle.prompt.positive)
+        self.assertNotIn("white_frilled_black", bundle.prompt.positive)
+        self.assertNotIn("white_frilled_white_frilled", bundle.prompt.positive)
+        self.assertNotIn("red_red", bundle.prompt.positive)
+
     def test_add_operation_appends_missing_tags(self):
         character = _character(
             [

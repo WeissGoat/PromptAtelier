@@ -87,6 +87,8 @@ class NodeDocument(BaseModel):
     character_id: str | None = None
     variant: str | None = None
     character_scope: str | None = None
+    identity_minimal: list[str] = Field(default_factory=list)
+    relations: dict[str, list[str]] = Field(default_factory=dict)
     path: Path | None = None
     tags: dict[str, list[str]] = Field(default_factory=dict)
     negative_prompt: list[str] = Field(default_factory=list)
@@ -95,6 +97,7 @@ class NodeDocument(BaseModel):
     generation: dict[str, Any] = Field(default_factory=dict)
     renderers: dict[str, Any] = Field(default_factory=dict)
     composition: dict[str, Any] = Field(default_factory=dict)
+    clothing: dict[str, Any] = Field(default_factory=dict)
     agent: dict[str, Any] = Field(default_factory=dict)
     legacy: LegacyNodeMeta = Field(default_factory=LegacyNodeMeta)
 
@@ -108,6 +111,39 @@ class NodeDocument(BaseModel):
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         return [str(value).strip()] if str(value).strip() else []
+
+    @field_validator("identity_minimal", mode="before")
+    @classmethod
+    def normalize_identity_minimal(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()] if str(value).strip() else []
+
+    @field_validator("relations", mode="before")
+    @classmethod
+    def normalize_relations(cls, value: Any) -> dict[str, list[str]]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, list[str]] = {}
+        for key, items in value.items():
+            relation_key = str(key).strip()
+            if not relation_key:
+                continue
+            if isinstance(items, str):
+                normalized = [items.strip()] if items.strip() else []
+            elif isinstance(items, list):
+                normalized = [str(item).strip() for item in items if str(item).strip()]
+            else:
+                normalized = [str(items).strip()] if str(items).strip() else []
+            if normalized:
+                result[relation_key] = normalized
+        return result
 
     def all_tags(self) -> list[str]:
         items: list[str] = []

@@ -75,6 +75,20 @@ def _legacy_prompt_tags(text: str) -> list[str]:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
+def _dedupe_prompt_tags(values: Any) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    if not isinstance(values, list):
+        return result
+    for item in values:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        result.append(tag)
+    return result
+
+
 def _rejoin_prompt_tags(tags: list[str], *, legacy_artist: bool) -> str:
     if legacy_artist:
         return _join_legacy_prompt_parts(tags)
@@ -390,16 +404,8 @@ class NovelAIRenderAdapter:
         male_caption_added = False
 
         for material in materials[:max_characters]:
-            candidate_positive_tags = [
-                str(item).strip()
-                for item in material.get("positive_tags", [])
-                if str(item).strip()
-            ]
-            candidate_negative_tags = [
-                str(item).strip()
-                for item in material.get("negative_tags", [])
-                if str(item).strip()
-            ]
+            candidate_positive_tags = _dedupe_prompt_tags(material.get("positive_tags", []))
+            candidate_negative_tags = _dedupe_prompt_tags(material.get("negative_tags", []))
             matched_positive_tags: list[str] = []
             matched_negative_tags: list[str] = []
             for tag in candidate_positive_tags:
@@ -481,6 +487,9 @@ class NovelAIRenderAdapter:
         bundle: PromptBundle,
         resolved_nodes: ResolvedNodeSet | None,
     ) -> list[dict[str, Any]]:
+        materials = bundle.meta.extra.get("character_materials")
+        if isinstance(materials, list) and materials:
+            return [item for item in materials if isinstance(item, dict)]
         if resolved_nodes:
             return [
                 _raw_character_material(
@@ -490,9 +499,6 @@ class NovelAIRenderAdapter:
                 )
                 for item in resolved_nodes.characters()
             ]
-        materials = bundle.meta.extra.get("character_materials")
-        if isinstance(materials, list) and materials:
-            return [item for item in materials if isinstance(item, dict)]
         return []
 
     def _node_trace_meta(

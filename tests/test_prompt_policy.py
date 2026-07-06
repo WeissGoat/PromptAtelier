@@ -128,6 +128,157 @@ class PromptPolicyPipelineTest(unittest.TestCase):
         self.assertNotIn("long_black_hair", bundle.prompt.positive)
         self.assertNotIn("school_uniform", bundle.prompt.positive)
 
+    def test_clothing_policy_action_outfit_removes_character_clothes_only(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi homura"],
+                "upper_clothes": ["school uniform"],
+                "lower_clothes": ["pleated skirt"],
+            },
+        )
+        action = NodeDocument(
+            kind="action",
+            id="kimono_action",
+            tags={"action": ["kimono, wide sleeves, school uniform, standing"]},
+            character_scope="full_body",
+            clothing={
+                "state": "specific_outfit",
+                "action_outfit": True,
+            },
+        )
+
+        bundle = GenerationService().compose_nodes(
+            character=character,
+            action=action,
+            prompt_policy={
+                "enabled": True,
+                "profile": "strict",
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertIn("akemi_homura", bundle.prompt.positive)
+        self.assertIn("kimono", bundle.prompt.positive)
+        self.assertIn("wide_sleeves", bundle.prompt.positive)
+        self.assertIn("school_uniform", bundle.prompt.positive)
+        self.assertNotIn("pleated_skirt", bundle.prompt.positive)
+        trace = bundle.meta.extra["policy_trace"]
+        clothing_trace = [item for item in trace if item["rule"].startswith("clothing_policy")]
+        self.assertEqual(
+            [item["token"] for item in clothing_trace if item["action"] == "remove"],
+            ["school_uniform", "pleated_skirt"],
+        )
+
+    def test_clothing_policy_nude_removes_character_default_clothes(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi homura"],
+                "upper_clothes": ["school uniform"],
+                "lower_clothes": ["pleated skirt"],
+            },
+        )
+        action = NodeDocument(
+            kind="action",
+            id="nude_action",
+            tags={"action": ["nude, standing"]},
+            character_scope="full_body",
+            clothing={
+                "state": "nude",
+                "action_outfit": False,
+            },
+        )
+
+        bundle = GenerationService().compose_nodes(
+            character=character,
+            action=action,
+            prompt_policy={
+                "enabled": True,
+                "profile": "strict",
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertIn("nude", bundle.prompt.positive)
+        self.assertNotIn("school_uniform", bundle.prompt.positive)
+        self.assertNotIn("pleated_skirt", bundle.prompt.positive)
+
+    def test_clothing_policy_clothed_state_is_noop(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi homura"],
+                "upper_clothes": ["school uniform"],
+            },
+        )
+        action = NodeDocument(
+            kind="action",
+            id="clothed_action",
+            tags={"action": ["standing"]},
+            character_scope="full_body",
+            clothing={
+                "state": "clothed",
+                "action_outfit": False,
+            },
+        )
+
+        bundle = GenerationService().compose_nodes(
+            character=character,
+            action=action,
+            prompt_policy={
+                "enabled": True,
+                "profile": "strict",
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertIn("school_uniform", bundle.prompt.positive)
+        self.assertFalse(
+            any(
+                item["rule"].startswith("clothing_policy")
+                for item in bundle.meta.extra["policy_trace"]
+            )
+        )
+
+    def test_clothing_policy_removes_character_prompt_fragments_by_role(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            prompt={
+                "positive": [
+                    {"text": "akemi homura", "role": "character"},
+                    {"text": "school uniform", "role": "upper_clothes"},
+                ]
+            },
+        )
+        action = NodeDocument(
+            kind="action",
+            id="nude_action",
+            tags={"action": ["nude, standing"]},
+            character_scope="full_body",
+            clothing={
+                "state": "nude",
+                "action_outfit": False,
+            },
+        )
+
+        bundle = GenerationService().compose_nodes(
+            character=character,
+            action=action,
+            prompt_policy={
+                "enabled": True,
+                "profile": "strict",
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertIn("akemi_homura", bundle.prompt.positive)
+        self.assertNotIn("school_uniform", bundle.prompt.positive)
+
     def test_agent_composer_is_unchanged_by_default(self):
         character = NodeDocument(kind="character", id="homura", tags={"character": ["akemi homura"]})
         action = NodeDocument(kind="action", id="foot", tags={"action": ["bare feet, high heels"]})

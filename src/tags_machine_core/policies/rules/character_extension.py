@@ -152,6 +152,20 @@ SUPPORTED_OPERATIONS = {
     "add_after",
     "add_if_not_exist",
 }
+SAFE_INCLUDE_REPLACE_PREFIXES = {
+    "panties_under",
+    "panty_under",
+    "underwear_under",
+    "torn",
+    "ripped",
+    "partially_torn",
+}
+SAFE_INCLUDE_REPLACE_SUFFIXES = {
+    "pull",
+    "pulled_down",
+    "around_one_leg",
+    "around_ankle",
+}
 
 
 class CharacterExtensionPolicyRule:
@@ -172,9 +186,16 @@ class CharacterExtensionPolicyRule:
         include_materials = bool(options.get("include_declaration_materials", True))
         ignore_disabled = bool(options.get("ignore_disabled_lines", True))
         enabled_slots = _enabled_slots(options.get("enabled_slots"))
+        parsed_by_character = [
+            (character, _parse_character_extensions(character, ignore_disabled=ignore_disabled))
+            for character in characters
+        ]
+        protected_materials = _declared_material_keys(
+            (parsed for _, parsed in parsed_by_character),
+            enabled_slots=enabled_slots,
+        )
 
-        for character in characters:
-            parsed = _parse_character_extensions(character, ignore_disabled=ignore_disabled)
+        for character, parsed in parsed_by_character:
             triggered_slots = self._triggered_slots(
                 context.positive_tokens,
                 parsed.rules,
@@ -194,7 +215,13 @@ class CharacterExtensionPolicyRule:
                 if rule.slot not in triggered_slots:
                     continue
                 for operation in rule.operations:
-                    self._apply_operation(context, operation, rule, character)
+                    self._apply_operation(
+                        context,
+                        operation,
+                        rule,
+                        character,
+                        protected_materials=protected_materials,
+                    )
         return context
 
     def _triggered_slots(
@@ -248,9 +275,17 @@ class CharacterExtensionPolicyRule:
         operation: ExtensionOperation,
         rule: ExtensionRuleLine,
         character: NodeDocument,
+        *,
+        protected_materials: set[str],
     ) -> None:
         if operation.name == "include_replace":
-            self._include_replace(context, operation, rule, character)
+            self._include_replace(
+                context,
+                operation,
+                rule,
+                character,
+                protected_materials=protected_materials,
+            )
         elif operation.name == "replace":
             self._replace(context, operation, rule, character, mode="replace", fuzzy=False)
         elif operation.name == "fuzzy_replace":
@@ -275,6 +310,8 @@ class CharacterExtensionPolicyRule:
         operation: ExtensionOperation,
         rule: ExtensionRuleLine,
         character: NodeDocument,
+        *,
+        protected_materials: set[str],
     ) -> None:
         if len(operation.args) < 2:
             return
@@ -293,10 +330,12 @@ class CharacterExtensionPolicyRule:
         changed = False
         new_tokens: list[PromptToken] = []
         for token in context.positive_tokens:
-            new_body = token.canonical
-            for matcher in matchers:
-                if matcher and matcher in new_body:
-                    new_body = new_body.replace(matcher, target_key)
+            new_body = _include_replace_body(
+                token.canonical,
+                matchers,
+                target_key,
+                protected_materials=protected_materials,
+            )
             if new_body != token.canonical:
                 new_tokens.append(token.with_body(new_body))
                 changed = True
@@ -511,6 +550,69 @@ def _parse_character_extensions(
             )
         )
     return ParsedCharacterExtensions(declarations=declarations, rules=rules)
+
+
+def _declared_material_keys(
+    parsed_items: Iterable[ParsedCharacterExtensions],
+    *,
+    enabled_slots: set[str],
+) -> set[str]:
+    keys: set[str] = set()
+    for parsed in parsed_items:
+        for declaration in parsed.declarations:
+            if declaration.slot not in enabled_slots:
+                continue
+            for material in declaration.materials:
+                key = canonicalize_tag(material)
+                if key:
+                    keys.add(key)
+    return keys
+
+
+def _include_replace_body(
+    token_key: str,
+    matchers: Iterable[str],
+    target_key: str,
+    *,
+    protected_materials: set[str],
+) -> str:
+    if not token_key or token_key == target_key:
+        return token_key
+    if token_key in protected_materials:
+        return token_key
+    if "_" in target_key and _ends_with_phrase(token_key, target_key):
+        return token_key
+
+    for matcher in sorted((item for item in matchers if item), key=len, reverse=True):
+        if token_key == matcher:
+            return target_key
+        if _can_replace_prefix(token_key, matcher, target_key):
+            return target_key + token_key[len(matcher) :]
+        if _can_replace_suffix(token_key, matcher, target_key):
+            return token_key[: -(len(matcher) + 1)] + "_" + target_key
+    return token_key
+
+
+def _can_replace_prefix(token_key: str, matcher: str, target_key: str) -> bool:
+    if not token_key.startswith(f"{matcher}_"):
+        return False
+    suffix = token_key[len(matcher) + 1 :]
+    if not suffix or suffix in target_key:
+        return False
+    return suffix in SAFE_INCLUDE_REPLACE_SUFFIXES
+
+
+def _can_replace_suffix(token_key: str, matcher: str, target_key: str) -> bool:
+    if not token_key.endswith(f"_{matcher}"):
+        return False
+    prefix = token_key[: -(len(matcher) + 1)]
+    if not prefix or prefix in target_key:
+        return False
+    return prefix in SAFE_INCLUDE_REPLACE_PREFIXES
+
+
+def _ends_with_phrase(token_key: str, phrase: str) -> bool:
+    return token_key == phrase or token_key.endswith(f"_{phrase}")
 
 
 def _parse_operation(value: str) -> ExtensionOperation | None:

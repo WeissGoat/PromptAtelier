@@ -99,6 +99,121 @@ def test_selected_keys_apply_per_character_index():
     assert bundle.meta.extra["character_materials"][1]["used_sections"] == ["character", "feet"]
 
 
+def test_selected_keys_always_include_identity_minimal_sections():
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        tags={
+            "character": ["akemi homura"],
+            "role": ["magical girl"],
+            "hair": ["black hair"],
+            "eyes": ["purple eyes"],
+            "upper_clothes": ["school uniform"],
+        },
+    )
+    action = NodeDocument(
+        kind="action",
+        id="nude_action",
+        tags={"action": ["nude"]},
+        composition={
+            "character_selection": {
+                "source": "run-prompt-prompt.md",
+                "characters": [
+                    {"selected_keys": ["hair", "eyes"]}
+                ],
+            }
+        },
+    )
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert "akemi homura" in bundle.prompt.positive
+    assert "magical girl" in bundle.prompt.positive
+    assert "black hair" in bundle.prompt.positive
+    assert "purple eyes" in bundle.prompt.positive
+    assert "school uniform" not in bundle.prompt.positive
+    assert bundle.meta.composition.included_character_sections == [
+        "character",
+        "role",
+        "hair",
+        "eyes",
+    ]
+
+
+def test_selected_keys_use_character_identity_minimal_override():
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        identity_minimal=["character", "copyright"],
+        tags={
+            "character": ["akemi homura"],
+            "copyright": ["puella magi madoka magica"],
+            "role": ["magical girl"],
+            "hair": ["black hair"],
+        },
+    )
+    action = NodeDocument(
+        kind="action",
+        id="nude_action",
+        tags={"action": ["nude"]},
+        composition={
+            "character_selection": {
+                "characters": [
+                    {"selected_keys": ["hair"]}
+                ],
+            }
+        },
+    )
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert "akemi homura" in bundle.prompt.positive
+    assert "puella magi madoka magica" in bundle.prompt.positive
+    assert "black hair" in bundle.prompt.positive
+    assert "magical girl" not in bundle.prompt.positive
+    assert bundle.meta.composition.included_character_sections == [
+        "character",
+        "copyright",
+        "hair",
+    ]
+
+
+def test_selected_keys_include_identity_minimal_prompt_fragment_roles():
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        prompt={
+            "positive": [
+                {"text": "akemi homura", "role": "character"},
+                {"text": "magical girl", "role": "role"},
+                {"text": "black hair", "role": "hair"},
+                {"text": "purple eyes", "role": "eyes"},
+                {"text": "school uniform", "role": "upper_clothes"},
+            ],
+        },
+    )
+    action = NodeDocument(
+        kind="action",
+        id="nude_action",
+        tags={"action": ["nude"]},
+        composition={
+            "character_selection": {
+                "characters": [
+                    {"selected_keys": ["hair", "eyes"]}
+                ],
+            }
+        },
+    )
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert "akemi homura" in bundle.prompt.positive
+    assert "magical girl" in bundle.prompt.positive
+    assert "black hair" in bundle.prompt.positive
+    assert "purple eyes" in bundle.prompt.positive
+    assert "school uniform" not in bundle.prompt.positive
+
+
 def test_character_scope_still_applies_without_selected_keys():
     character = NodeDocument(
         kind="character",
@@ -123,3 +238,62 @@ def test_character_scope_still_applies_without_selected_keys():
     assert "black shoes" in bundle.prompt.positive
     assert "black hair" not in bundle.prompt.positive
     assert "purple eyes" not in bundle.prompt.positive
+
+
+def test_default_scope_uses_identity_minimal_instead_of_all_character_tags():
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        tags={
+            "character": ["akemi homura"],
+            "role": ["magical girl"],
+            "hair": ["black hair"],
+            "eyes": ["purple eyes"],
+            "feet": ["black shoes"],
+        },
+    )
+    action = NodeDocument(
+        kind="action",
+        id="standing",
+        tags={"action": ["standing"]},
+    )
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert bundle.meta.composition.character_scope == "default"
+    assert bundle.meta.composition.included_character_sections == ["character", "role"]
+    assert "akemi homura" in bundle.prompt.positive
+    assert "magical girl" in bundle.prompt.positive
+    assert "standing" in bundle.prompt.positive
+    assert "black hair" not in bundle.prompt.positive
+    assert "purple eyes" not in bundle.prompt.positive
+    assert "black shoes" not in bundle.prompt.positive
+
+
+def test_character_identity_minimal_overrides_default_sections():
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        identity_minimal=["character", "copyright"],
+        tags={
+            "character": ["akemi homura"],
+            "copyright": ["puella magi madoka magica"],
+            "role": ["magical girl"],
+            "hair": ["black hair"],
+        },
+    )
+    action = NodeDocument(
+        kind="action",
+        id="unknown_scope_action",
+        character_scope="unknown_scope",
+        tags={"action": ["standing"]},
+    )
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert bundle.meta.composition.character_scope == "unknown_scope"
+    assert bundle.meta.composition.included_character_sections == ["character", "copyright"]
+    assert "akemi homura" in bundle.prompt.positive
+    assert "puella magi madoka magica" in bundle.prompt.positive
+    assert "magical girl" not in bundle.prompt.positive
+    assert "black hair" not in bundle.prompt.positive

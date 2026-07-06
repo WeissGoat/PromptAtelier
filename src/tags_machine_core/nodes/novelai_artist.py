@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from typing import Any
@@ -127,7 +128,7 @@ class NovelAIArtistRepository:
             flags=flags,
         )
 
-        gen_json_seen = False
+        params_seen = False
         for line in ext_lines:
             key, value = self._split_ext_line(line)
             if not key:
@@ -136,10 +137,10 @@ class NovelAIArtistRepository:
                 artist.negative_prompt = value
             elif key == "after_uc":
                 artist.after_negative_prompt = value
-            elif key == "gen_json":
-                if not gen_json_seen:
+            elif key in {"gen_json", "gen_param"}:
+                if not params_seen:
                     artist.params.update(self._parse_json_value(value, tags_path))
-                    gen_json_seen = True
+                    params_seen = True
             elif key in {"not_quailty_prompts", "not_quality_prompts"}:
                 artist.flags.add(key)
             else:
@@ -173,10 +174,18 @@ class NovelAIArtistRepository:
         return key.strip(), value.strip()
 
     def _parse_json_value(self, value: str, source: Path) -> dict[str, Any]:
+        stripped = value.strip()
+        if not stripped.startswith("{"):
+            stripped = "{" + stripped + "}"
         try:
-            data = json.loads(value)
+            data = json.loads(stripped)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid gen_json in {source}: {exc}") from exc
+            try:
+                # 旧 tags_machine 的 gen_param 使用 Python 字面量片段：
+                # 'model': 'nai-diffusion-4-5-full', 'dynamic_thresholding': False
+                data = ast.literal_eval(stripped)
+            except (SyntaxError, ValueError) as py_exc:
+                raise ValueError(f"Invalid gen_json/gen_param in {source}: {exc}") from py_exc
         if not isinstance(data, dict):
-            raise ValueError(f"gen_json must be a JSON object in {source}")
+            raise ValueError(f"gen_json/gen_param must be an object in {source}")
         return data

@@ -1,19 +1,16 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from tags_machine_core.policies.context import PromptRuleContext
-from tags_machine_core.policies.tokens import PromptToken, parse_prompt_token
+from tags_machine_core.policies.tokens import PromptToken, canonicalize_tag
 
 
-NUDE_KEYS = {"nude", "naked", "completely_nude"}
-CLOTHING_CONTROL_KEYS = {
-    "st_clothes",
-    "st_clothes_2",
-    "st_clothes_3",
-    "clothing_control",
-    "changing_clothes",
-}
-OUTFIT_KEYS = {
+OUTFIT_SECTION_KEYS = {
     "clothes",
+    "upper_clothes",
+    "lower_clothes",
+    "full_body_clothes",
     "outfit",
     "uniform",
     "dress",
@@ -21,22 +18,21 @@ OUTFIT_KEYS = {
     "skirt",
     "jacket",
     "capelet",
-    "upper_clothes",
-    "full_body_clothes",
+    "legwear",
+    "shoes",
 }
-FOOT_DETAIL_SCOPES = {"foot_detail", "lower_body"}
 
 
 class ClothingPolicyRule:
     id = "clothing_policy"
-    version = "v1"
+    version = "v2"
     phase = "compose_selection"
     default_enabled = False
 
     def apply(self, context: PromptRuleContext) -> PromptRuleContext:
         options = context.config.options_for(self.id)
         mode = str(options.get("mode") or _default_mode(context))
-        reasons = self._reasons(context)
+        reasons = self._reasons_from_action_clothing(context)
         if not reasons:
             return context
         if mode == "advisory":
@@ -49,39 +45,78 @@ class ClothingPolicyRule:
                 )
             return context
 
-        context.positive_tokens = self._filter_outfit_tokens(context.positive_tokens, context, reasons)
-        if "clothing_control" in reasons and not _has_token(context.positive_tokens, "alternative_clothing"):
-            context.positive_tokens.append(parse_prompt_token("{{alternative_clothing}}"))
+        remove_counts = self._character_outfit_token_counts(context)
+        if not remove_counts:
             context.add_trace(
                 rule=f"{self.id}@{self.version}",
-                action="add",
-                token="{{alternative_clothing}}",
-                reason="clothing_control",
+                action="skip",
+                reason=";".join(reasons),
                 mode=mode,
             )
+            return context
+        context.positive_tokens = self._filter_character_outfit_tokens(
+            context.positive_tokens,
+            context,
+            reasons,
+            remove_counts,
+        )
         return context
 
-    def _reasons(self, context: PromptRuleContext) -> list[str]:
-        token_keys = {token.canonical for token in context.positive_tokens}
+    def _reasons_from_action_clothing(self, context: PromptRuleContext) -> list[str]:
         reasons: list[str] = []
-        if any(key in token_keys for key in NUDE_KEYS):
-            reasons.append("nude_prompt")
-        if any(key in token_keys for key in CLOTHING_CONTROL_KEYS):
-            reasons.append("clothing_control")
-        scope = context.bundle.meta.composition.character_scope
-        if scope in FOOT_DETAIL_SCOPES:
-            reasons.append(f"scope_{scope}")
+        if context.resolved_nodes is None:
+            return reasons
+        for item in context.resolved_nodes.actions():
+            clothing = item.node.clothing or {}
+            if not isinstance(clothing, dict):
+                continue
+            state = str(clothing.get("state") or "").strip()
+            action_outfit = bool(clothing.get("action_outfit"))
+            if action_outfit:
+                reasons.append(f"action_outfit:{item.node.id}")
+            if state == "nude":
+                reasons.append(f"state_nude:{item.node.id}")
         return reasons
 
-    def _filter_outfit_tokens(
+    def _character_outfit_token_counts(self, context: PromptRuleContext) -> Counter[str]:
+        counts: Counter[str] = Counter()
+        if context.resolved_nodes is None:
+            return counts
+        included_sections = set(context.bundle.meta.composition.included_character_sections)
+        for item in context.resolved_nodes.characters():
+            if item.node.prompt.positive:
+                for fragment in item.node.prompt.positive:
+                    role = fragment.role or "prompt"
+                    if role not in OUTFIT_SECTION_KEYS:
+                        continue
+                    if included_sections and role not in included_sections:
+                        continue
+                    canonical = canonicalize_tag(fragment.text)
+                    if canonical:
+                        counts[canonical] += 1
+                continue
+            for section, values in item.node.tags.items():
+                if section not in OUTFIT_SECTION_KEYS:
+                    continue
+                if included_sections and section not in included_sections:
+                    continue
+                for value in values:
+                    canonical = canonicalize_tag(value)
+                    if canonical:
+                        counts[canonical] += 1
+        return counts
+
+    def _filter_character_outfit_tokens(
         self,
         tokens: list[PromptToken],
         context: PromptRuleContext,
         reasons: list[str],
+        remove_counts: Counter[str],
     ) -> list[PromptToken]:
         result: list[PromptToken] = []
         for token in tokens:
-            if _is_outfit_token(token):
+            if remove_counts[token.canonical] > 0:
+                remove_counts[token.canonical] -= 1
                 context.add_trace(
                     rule=f"{self.id}@{self.version}",
                     action="remove",
@@ -98,12 +133,3 @@ def _default_mode(context: PromptRuleContext) -> str:
     if context.target == "agent":
         return "advisory"
     return "enforce"
-
-
-def _is_outfit_token(token: PromptToken) -> bool:
-    key = token.canonical
-    return any(part in key for part in OUTFIT_KEYS)
-
-
-def _has_token(tokens: list[PromptToken], canonical: str) -> bool:
-    return any(token.canonical == canonical for token in tokens)

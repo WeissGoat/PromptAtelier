@@ -27,6 +27,30 @@ gen_json, {"sampler": "k_dpmpp_2m", "steps": 40, "reference_strength_multiple": 
             self.assertEqual(artist.params["steps"], 28)
             self.assertEqual(artist.params["reference_strength_multiple"], [0.16])
 
+    def test_runtime_loader_reads_legacy_gen_param(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            artist_dir = design_root / "\u753b\u98ce" / "legacy_param_artist"
+            artist_dir.mkdir(parents=True)
+            (artist_dir / "tags.txt").write_text(
+                """
+artist prefix,
+=
+gen_param, 'model': 'nai-diffusion-4-5-full', 'sampler': 'k_dpmpp_2m', 'steps': 26, 'scale': 7.0, 'cfg_rescale': 0.3, 'dynamic_thresholding': False, 'reference_image_multiple': ['abc']
+""".strip(),
+                encoding="utf-8",
+            )
+
+            artist = NovelAIArtistRepository(design_root).load("legacy_param_artist")
+
+            self.assertEqual(artist.params["model"], "nai-diffusion-4-5-full")
+            self.assertEqual(artist.params["sampler"], "k_dpmpp_2m")
+            self.assertEqual(artist.params["steps"], 26)
+            self.assertEqual(artist.params["scale"], 7.0)
+            self.assertEqual(artist.params["cfg_rescale"], 0.3)
+            self.assertIs(artist.params["dynamic_thresholding"], False)
+            self.assertEqual(artist.params["reference_image_multiple"], ["abc"])
+
     def test_runtime_loader_filters_legacy_extension_params_without_equals_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             design_root = Path(tmp) / "design"

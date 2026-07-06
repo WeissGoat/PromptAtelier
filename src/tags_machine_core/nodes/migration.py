@@ -370,6 +370,9 @@ def migrate_legacy_action_tags(
     tags_path = _resolve_tags_path(source)
     action_dir = tags_path.parent
     prompt_lines, ext_lines = _split_legacy_tags_lines(tags_path)
+    raw_prompt_lines = list(prompt_lines)
+    type_lines = [line for line in raw_prompt_lines if line[:4] == "type"]
+    prompt_lines, _type_flags = _extract_legacy_type_flags(prompt_lines)
     action_tags = _split_legacy_prompt_tags(prompt_lines)
     resolved_scope = character_scope or _infer_action_character_scope(action_tags, tags_path)
     scope_source = "override" if character_scope else "inferred"
@@ -385,9 +388,10 @@ def migrate_legacy_action_tags(
         "character_scope": resolved_scope,
         "legacy": {
             "source_file": str(tags_path),
-            "raw_lines": prompt_lines + (["="] if ext_lines else []) + ext_lines,
+            "raw_lines": raw_prompt_lines + (["="] if ext_lines else []) + ext_lines,
             "raw_sections": {
                 "prompt": prompt_lines,
+                **({"type": type_lines} if type_lines else {}),
                 "extension": ext_lines,
             },
         },

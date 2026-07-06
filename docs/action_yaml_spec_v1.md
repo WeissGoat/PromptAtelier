@@ -495,3 +495,68 @@ action v1 校验重点：
 - action 不写 `meta.shot` / `constraints`。
 - action 不写 style、quality、artist、generation、renderer、backend 参数。
 - PromptBundle 才保存最终 prompt 和本次 composer 的实际选择结果。
+
+## clothing
+
+`clothing` 是 action 自身的服装事实元数据，用来告诉后续 composer policy：
+
+- 这个 action 的画面状态大致是裸露、穿衣，还是 action 自己携带了特殊服装。
+- 这个 action 是否应该优先使用 action prompt 里的服装描述，而不是角色默认衣装。
+
+它不是规则字段。比如“如果 `action_outfit: true` 就移除哪些 character sections”，仍然属于 `PromptPolicyPipeline` / `ClothingPolicyRule` 的职责，不写进每个 action。
+
+推荐结构：
+
+```yaml
+clothing:
+  state: specific_outfit
+  action_outfit: true
+  source:
+    classify: classify.yaml
+    type_dress: true
+    type_no_dress: false
+    type_tokens:
+      - dress
+```
+
+字段含义：
+
+| 字段 | 必填 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `clothing.state` | 否 | `nude` / `clothed` / `specific_outfit` / `null` | 来自 `classify.yaml.clothing` 的动作服装分类。未知或非法值不写入合法状态。 |
+| `clothing.action_outfit` | 是 | bool | 表示 action 是否自带服装/换装语义。后续 clothing policy 可用它决定是否清理角色默认衣装。 |
+| `clothing.source.classify` | 否 | string / null | 状态来源。当前通常是 `classify.yaml`。 |
+| `clothing.source.type_dress` | 是 | bool | 旧 `tags.txt` 中是否出现 `type,dress`。 |
+| `clothing.source.type_no_dress` | 是 | bool | 旧 `tags.txt` 中是否出现 `type,no dress` / `type,no_dress`。它优先级高于 `type,dress`。 |
+| `clothing.source.type_tokens` | 是 | list[string] | 从旧 `type,...` 行读取到的原始 type token，便于审计。 |
+
+当前迁移约定：
+
+- `state` 优先来自 `classify.yaml.clothing`。
+- `classify.yaml.clothing == specific_outfit` 时，`action_outfit: true`。
+- `tags.txt` 出现 `type,dress` 时，`action_outfit: true`。
+- `tags.txt` 出现 `type,no dress` / `type,no_dress` 时，`action_outfit: false`，优先级最高。
+- 如果 `state: nude` 同时出现 `type,dress`，迁移报告会标记 `nude_with_type_dress`，但仍保留事实来源，交给人工复核。
+
+批量填充脚本：
+
+```powershell
+uv run python scripts/fill_action_meta_clothing.py F:\my_project\new\tags_machine\design\动作改2 --report outputs\action_clothing_scan.json
+
+uv run python scripts/fill_action_meta_clothing.py F:\my_project\new\tags_machine\design\动作改2 --write --backup --report outputs\action_clothing_fill.json
+```
+
+默认不写文件，只输出报告。加 `--write` 后才会创建或更新 action `meta.yaml`。
+
+### clothing policy 消费约定
+
+`ClothingPolicyRule v2` 只消费 action node 的 `clothing` 元数据，不再通过 prompt 里的 `nude`、`st_clothes` 或 `foot_detail` 等 token 猜测是否清理服装。
+
+当前支持两种触发：
+
+- `clothing.action_outfit: true`：清理角色节点提供的默认衣装 sections，保留 action prompt 自己携带的服装 token。
+- `clothing.state: nude`：清理角色节点提供的默认衣装 sections。
+
+`clothing.state: clothed` 默认不处理。
+
+清理范围只包含 character 节点中实际参与本次拼接的衣装 sections，例如 `upper_clothes`、`lower_clothes`、`full_body_clothes`、`legwear`、`shoes` 等。action 自己的 token 不按词面全局删除，所以 action 中的 `kimono`、`long sleeves`、`school uniform` 等特殊服装描述会保留。

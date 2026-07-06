@@ -14,5 +14,7 @@ batch:
   artist: "109841329_03_manga_monochrome_yabuki_rance_no_vibe_latest_stable"
   composer: script
   auto_num: true
-  max_tasks: 1
   nt: 3
+
+archive:
+  save_parameter_image: true

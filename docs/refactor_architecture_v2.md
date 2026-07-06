@@ -402,10 +402,11 @@ ScriptComposer 的 character section 选择优先级：
 characters[index].selected_keys
 > default_selected_keys
 > character_scope policy
-> default all character tags
+> identity_minimal
 ```
 
 `character_scope` 现在是兼容 fallback，不再作为新规则扩展入口。
+`identity_minimal` 是最后兜底，默认只取 `character` 和 `role`；如果 character `meta.yaml` 显式配置了 `identity_minimal`，则以节点配置为准。ScriptComposer 不再在兜底时取角色全部 tags。
 AgentComposer 不经过该规则，避免影响当前稳定的 agent prompt cache 和外部 agent 拼接链路。
 
 ## 14. 功能验收门禁

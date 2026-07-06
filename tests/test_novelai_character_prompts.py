@@ -47,11 +47,11 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
             caption["char_captions"],
             [
                 {
-                    "char_caption": "girl, akemi homura, black hair",
+                    "char_caption": "girl, akemi homura",
                     "centers": [{"x": 0.5, "y": 0.5}],
                 },
                 {
-                    "char_caption": "girl, kaname madoka, pink hair",
+                    "char_caption": "girl, kaname madoka",
                     "centers": [{"x": 0.5, "y": 0.5}],
                 },
             ],
@@ -62,13 +62,13 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
             request.params["characterPrompts"],
             [
                 {
-                    "prompt": "girl, akemi homura, black hair",
+                    "prompt": "girl, akemi homura",
                     "uc": "",
                     "center": {"x": 0.5, "y": 0.5},
                     "enabled": True,
                 },
                 {
-                    "prompt": "girl, kaname madoka, pink hair",
+                    "prompt": "girl, kaname madoka",
                     "uc": "",
                     "center": {"x": 0.5, "y": 0.5},
                     "enabled": True,
@@ -123,6 +123,44 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         )
         self.assertEqual(caption["base_caption"], "2girls, standing side by side")
         self.assertNotIn("white dress", caption["base_caption"])
+
+    def test_script_composer_character_materials_prevent_duplicate_character_caption_tags(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi_homura"],
+                "role": ["magical_girl"],
+                "upper_clothes": ["magical_girl", "purple_capelet"],
+            },
+        )
+        action = NodeDocument(
+            kind="action",
+            id="action",
+            tags={"action": ["1girl, standing"]},
+        )
+        resolved = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="action", ref="action", index=0, node=action),
+            ]
+        )
+        bundle = ScriptComposer().compose_resolved_nodes(resolved)
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(
+            caption["char_captions"][0]["char_caption"],
+            "girl, akemi_homura, magical_girl",
+        )
+        self.assertNotIn("purple_capelet", caption["char_captions"][0]["char_caption"])
+        self.assertEqual(caption["base_caption"], "1girl, standing")
 
     def test_male_prompt_adds_extra_boy_character_caption_by_default(self):
         homura = NodeDocument(

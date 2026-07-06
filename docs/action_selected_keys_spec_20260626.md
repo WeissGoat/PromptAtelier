@@ -59,10 +59,12 @@ ScriptComposer 的 character section 选择优先级：
 characters[index].selected_keys
 > default_selected_keys
 > character_scope policy
-> default all character tags
+> identity_minimal
 ```
 
 `character_scope` 保留为兼容字段，不继续作为新规则扩展入口。
+
+`identity_minimal` 是最后兜底，不再默认取角色全部 tags。默认 section 为 `character`、`role`；如果 character `meta.yaml` 显式配置了 `identity_minimal`，则使用该角色自己的 section 列表。缺失的 section 会被跳过，不报错。
 
 ## PromptBundle 记录
 

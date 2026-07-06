@@ -10,6 +10,8 @@
 - schema：`tags-machine.character/v1`
 - 正向素材字段：`tags`
 - 负向素材字段：`negative_prompt`
+- 可选最小身份字段：`identity_minimal`
+- 可选角色关系字段：`relations`
 - 不写 `rules`
 - 不写 `profiles`
 - 不写 `prompt.positive`
@@ -28,6 +30,12 @@ id: danbooru_akemi_homura_暁美ほむら_魔法少女
 character_id: akemi_homura
 variant: 魔法少女
 negative_prompt: []
+identity_minimal:
+  - character
+  - copyright
+relations:
+  cp:
+    - kaname_madoka
 
 tags:
   character:
@@ -140,6 +148,48 @@ negative_prompt:
 ```
 
 当前阶段保留这个字段名，不改成 `negative_tags`，因为它已经在 `design` 中落地，并且对 agent 和生图工作流都足够直观。
+
+### `identity_minimal`
+
+可选字段，用来声明“这个角色在缺少明确动作裁剪规则时，最少需要哪些 `tags` section 才能被稳定识别”。
+
+它不是 prompt 文本，而是 section 名列表：
+
+```yaml
+identity_minimal:
+  - character
+  - copyright
+```
+
+如果角色节点没有显式配置，ScriptComposer 使用内置默认：
+
+```yaml
+identity_minimal:
+  - character
+  - role
+```
+
+字段不存在时不会报错。例如默认包含 `role`，但某个角色没有 `tags.role`，composer 会直接跳过这个 section。
+
+`identity_minimal` 只替代默认最小身份 section，不改变 `foot_detail`、`hand_detail`、`upper_body` 等明确 `character_scope` 的规则；这些镜头裁剪仍由 composer policy 统一维护。
+
+### `relations`
+
+可选字段，用来记录角色之间的稳定关系。当前正式使用的是 `relations.cp`，用于 batch 多人图自动补角色。
+
+```yaml
+relations:
+  cp:
+    - kaname_madoka
+```
+
+`relations.cp` 写的是可解析的角色引用标识，推荐优先写对方角色的 `character_id` 或主角色 tag，例如 `kaname_madoka`。后续 batch 自动补角色时，会用它在当前可用角色集合里匹配对应 character node。
+
+旧 `tags.txt` 里的 `type,cp|...` 不由运行时兼容读取。需要迁移时，使用一次性脚本把旧字段转写进 `meta.yaml`：
+
+```powershell
+uv run python scripts\sync_character_cp_relations.py ..\design\角色 --write
+```
 
 ## 推荐 tags section
 

@@ -1,0 +1,13 @@
+schema: tags-machine.action/v1
+kind: action
+id: two_girls_sitting
+description: 两个女角色并排坐着的自动 CP 测试动作。
+
+tags:
+  action: >-
+    2girls, sitting side by side, looking at viewer, smile, upper body,
+    simple background
+
+negative_prompt: []
+
+character_scope: upper_body
