@@ -13,7 +13,13 @@ import zlib
 from PIL import Image
 
 from tags_machine_core.backends import ensure_backend_can_execute
-from tags_machine_core.clients import ComfyUIClient, NovelAIClient, NovelAIImage, SDClient
+from tags_machine_core.clients import (
+    ComfyUIClient,
+    GatewayNovelAIRawClient,
+    NovelAIClient,
+    NovelAIImage,
+    SDClient,
+)
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.logging_config import get_logger
@@ -206,13 +212,7 @@ def execute_novelai_generation(
             "Missing NovelAI token: set novelai.access_token in config or "
             f"environment variable {config.novelai.access_token_env}"
         )
-    client = NovelAIClient(
-        access_token=access_token,
-        base_url=config.novelai.base_url,
-        timeout=config.novelai.timeout,
-        retry=config.novelai.retry,
-        retry_interval=config.novelai.retry_interval,
-    )
+    client = _novelai_executor_client(config, access_token)
     output_path = Path(output_dir or config.runtime.output_dir)
     requests = split_novelai_samples(request)
     logger.info(
@@ -233,17 +233,20 @@ def execute_novelai_generation(
             request=effective_request,
             default_format=image_format,
         )
+        png_info = collect_png_info(images)
+        _attach_gateway_retry_records(png_info, client)
         return GenerationResult(
             backend="novelai",
             images=images,
             request_body=client.build_payload(effective_request),
-            png_info=collect_png_info(images),
+            png_info=png_info,
             cache_hit=False,
         )
 
     images: list[GeneratedImage] = []
     png_records: list[dict[str, Any]] = []
     request_bodies: list[dict[str, Any]] = []
+    gateway_records: list[dict[str, Any]] = []
     for index, split_request in enumerate(requests):
         generated = save_generated_images(
             _generate_novelai_images(
@@ -268,10 +271,12 @@ def execute_novelai_generation(
         )
         request_bodies.append(client.build_payload(split_request))
         png_info = collect_png_info(generated)
+        _attach_gateway_retry_records(png_info, client, split_request_index=index)
         for record in png_info.get("images", []):
             if isinstance(record, dict):
                 record["split_request_index"] = index
                 png_records.append(record)
+        gateway_records.extend(png_info.get("ai_image_gateway", []))
 
     return GenerationResult(
         backend="novelai",
@@ -281,9 +286,50 @@ def execute_novelai_generation(
             "reason": "force_n_samples_1",
             "requests": request_bodies,
         },
-        png_info={"images": png_records},
+        png_info={
+            key: value
+            for key, value in {
+                "images": png_records,
+                "ai_image_gateway": gateway_records,
+            }.items()
+            if value
+        },
         cache_hit=False,
     )
+
+
+def _novelai_executor_client(config: AppConfig, access_token: str):
+    executor = str(config.generation.executor or "core_novelai_client")
+    kwargs = {
+        "access_token": access_token,
+        "base_url": config.novelai.base_url,
+        "timeout": config.novelai.timeout,
+        "retry": config.novelai.retry,
+        "retry_interval": config.novelai.retry_interval,
+    }
+    if executor == "core_novelai_client":
+        return NovelAIClient(**kwargs)
+    if executor == "ai_image_gateway_raw":
+        return GatewayNovelAIRawClient(**kwargs)
+    raise ValueError(
+        "Unsupported generation.executor for NovelAI: "
+        f"{executor!r}. Expected 'core_novelai_client' or 'ai_image_gateway_raw'."
+    )
+
+
+def _attach_gateway_retry_records(
+    png_info: dict[str, Any],
+    client: Any,
+    *,
+    split_request_index: int | None = None,
+) -> None:
+    retry_records = getattr(client, "last_retry_records", None)
+    if not retry_records:
+        return
+    record: dict[str, Any] = {"retry_records": retry_records}
+    if split_request_index is not None:
+        record["split_request_index"] = split_request_index
+    png_info.setdefault("ai_image_gateway", []).append(record)
 
 
 def execute_mock_generation(
@@ -326,6 +372,7 @@ def execute_mock_generation(
     images: list[GeneratedImage] = []
     png_records: list[dict[str, Any]] = []
     request_bodies: list[dict[str, Any]] = []
+    gateway_records: list[dict[str, Any]] = []
     for index, split_request in enumerate(requests):
         request_body = _mock_request_body(split_request)
         generated = save_generated_images(

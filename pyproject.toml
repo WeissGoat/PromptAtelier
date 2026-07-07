@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Clean prompt composition and render planning core for Tags Machine."
 requires-python = ">=3.11"
 dependencies = [
+    "ai-image-gateway",
     "Pillow>=10.0",
     "pydantic>=2.6",
     "PyYAML>=6.0",
@@ -19,6 +20,9 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+ai-image-gateway = { path = "vendor/ai-image-gateway", editable = true }
 
 [tool.ruff]
 line-length = 100

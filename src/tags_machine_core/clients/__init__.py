@@ -6,6 +6,7 @@ from .comfyui import (
     ComfyUIPromptResult,
 )
 from .novelai import NovelAIClient, NovelAIClientError, NovelAIImage
+from .gateway_novelai import GatewayNovelAIRawClient
 from .sd import SDClient, SDClientError, SDImage
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "NovelAIClient",
     "NovelAIClientError",
     "NovelAIImage",
+    "GatewayNovelAIRawClient",
     "SDClient",
     "SDClientError",
     "SDImage",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -22,6 +22,10 @@ class RuntimeConfig(BaseModel):
 class DefaultsConfig(BaseModel):
     backend: str = "novelai"
     image_format: str = "png"
+
+
+class GenerationConfig(BaseModel):
+    executor: Literal["core_novelai_client", "ai_image_gateway_raw"] = "core_novelai_client"
 
 
 class LoggingConfig(BaseModel):
@@ -56,6 +60,7 @@ class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     prompt_policy: PromptPolicyConfig = Field(default_factory=PromptPolicyConfig)
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)

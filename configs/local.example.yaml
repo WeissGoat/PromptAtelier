@@ -10,15 +10,25 @@ defaults:
   backend: "novelai"
   image_format: "png"
 
+generation:
+  executor: "ai_image_gateway_raw"
+
 novelai:
   base_url: "https://image.novelai.net"
+  access_token: null
   access_token_env: "NAI_ACCESS_TOKEN"
   timeout: 120
   retry: 3
+  retry_interval: 8
+  request_interval: 3
 
 comfyui:
   base_url: "http://127.0.0.1:8188"
-  timeout: 120
+  timeout: 300
+  poll_interval: 1.0
+  max_wait_seconds: 600
+  retry: 3
+  retry_interval: 2.0
 
 sd:
   base_url: "http://127.0.0.1:7860"

@@ -1,0 +1,3 @@
+[submodule "vendor/ai-image-gateway"]
+	path = vendor/ai-image-gateway
+	url = git@github.com:WeissGoat/ai-image-gateway.git

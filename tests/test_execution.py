@@ -286,6 +286,67 @@ class ExecutionTest(unittest.TestCase):
                 retry_interval=None,
             )
 
+    def test_execute_novelai_generation_can_use_gateway_raw_executor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base_config = _app_config(root)
+            config = base_config.model_copy(
+                update={
+                    "generation": base_config.generation.model_copy(
+                        update={"executor": "ai_image_gateway_raw"}
+                    )
+                }
+            )
+            request = RenderRequest(
+                backend="novelai",
+                prompt="akemi homura",
+                model="nai-diffusion-4-5-full",
+                seed=333,
+                params={"seed": 333, "n_samples": 1},
+            )
+
+            with (
+                patch.dict("os.environ", {"NAI_ACCESS_TOKEN": "token"}),
+                patch("tags_machine_core.execution.GatewayNovelAIRawClient") as client_cls,
+                patch("tags_machine_core.execution.NovelAIClient") as legacy_client_cls,
+            ):
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="gateway.png", content=_png_bytes_with_text({}))
+                ]
+                client.last_retry_records = [
+                    {"attempt": 1, "status_code": 200, "retryable": False},
+                ]
+                client.build_payload.side_effect = lambda split_request: {
+                    "input": split_request.prompt,
+                    "model": split_request.model,
+                    "action": "generate",
+                    "parameters": dict(split_request.params),
+                }
+
+                result = execute_novelai_generation(
+                    config,
+                    request,
+                    output_dir=None,
+                    image_format="png",
+                )
+
+            client_cls.assert_called_once_with(
+                access_token="token",
+                base_url="http://novelai.local",
+                timeout=30,
+                retry=1,
+                retry_interval=None,
+            )
+            legacy_client_cls.assert_not_called()
+            self.assertEqual(client.generate_images.call_count, 1)
+            self.assertEqual(result.request_body["parameters"]["seed"], 333)
+            self.assertEqual(
+                result.png_info["ai_image_gateway"][0]["retry_records"][0]["status_code"],
+                200,
+            )
+            self.assertEqual(len(result.images), 1)
+
     def test_execute_novelai_generation_requires_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
