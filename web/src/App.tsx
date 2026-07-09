@@ -1,25 +1,20 @@
 import { useState } from "react";
 
 import { Layout, type PageKey } from "./components/Layout";
+import { BatchStudio } from "./pages/BatchStudio";
+import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
+import { ResultsGallery } from "./pages/ResultsGallery";
 import "./styles.css";
-
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <main className="page-panel">
-      <section className="panel">
-        <div className="panel-title">
-          <h2>{title}</h2>
-        </div>
-      </section>
-    </main>
-  );
-}
 
 export function App() {
   const [page, setPage] = useState<PageKey>("custom");
-  const content =
-    page === "custom" ? <CustomStudio /> : <PlaceholderPage title={`${page[0].toUpperCase()}${page.slice(1)}`} />;
+  const content = {
+    custom: <CustomStudio />,
+    compare: <CompareStudio />,
+    batch: <BatchStudio />,
+    results: <ResultsGallery />,
+  }[page];
 
   return (
     <Layout onPageChange={setPage} page={page}>

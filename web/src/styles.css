@@ -92,6 +92,9 @@ button {
 }
 
 .page-panel {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(320px, 420px) minmax(360px, 1fr);
   min-width: 0;
   padding: 12px;
 }
@@ -191,6 +194,51 @@ button {
   gap: 8px;
 }
 
+.toggle-row {
+  align-items: center;
+  color: #363c46;
+  display: inline-flex;
+  font-size: 13px;
+  gap: 7px;
+}
+
+.inline-button {
+  align-items: center;
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid #d0d4dc;
+  border-radius: 6px;
+  color: #202124;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 7px;
+  padding: 8px 10px;
+}
+
+.run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-list button {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #d0d4dc;
+  border-radius: 6px;
+  color: #202124;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.run-list small {
+  color: #687182;
+}
+
 .status-pill {
   background: #edf2f7;
   border: 1px solid #d4dce8;
@@ -215,6 +263,10 @@ button {
   }
 
   .studio-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-panel {
     grid-template-columns: 1fr;
   }
 }
