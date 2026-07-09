@@ -28,10 +28,10 @@
 - Consumes: `RenderRequest`, `NovelAIImage`, `ai_image_gateway.providers.novelai.NovelAIProvider`
 - Produces: `GatewayNovelAIRawClient.build_payload(request)`, `GatewayNovelAIRawClient.generate_images(request)`, `GatewayNovelAIRawClient.last_retry_records`
 
-- [ ] 梳理 `GatewayNovelAIRawClient` 的最小接口，确认只暴露 execution 需要的三个能力
-- [ ] 校正 `config.py` 中 `generation.executor` 的默认值与可选值文案
-- [ ] 确认 `clients.__init__` 只导出当前分支真正需要的 gateway client
-- [ ] 自查 `gateway_novelai.py` 是否只依赖 gateway 公共 API，不触碰子模块生成产物
+- [x] 梳理 `GatewayNovelAIRawClient` 的最小接口，确认只暴露 execution 需要的三个能力
+- [x] 校正 `config.py` 中 `generation.executor` 的默认值与可选值文案
+- [x] 确认 `clients.__init__` 只导出当前分支真正需要的 gateway client
+- [x] 自查 `gateway_novelai.py` 是否只依赖 gateway 公共 API，不触碰子模块生成产物
 
 ### Task 2: 接入 NovelAI execution 切换逻辑
 
@@ -43,10 +43,10 @@
 - Consumes: `AppConfig.generation.executor`, `GatewayNovelAIRawClient`
 - Produces: `_novelai_executor_client(config, access_token)`, `png_info.ai_image_gateway.retry_records`
 
-- [ ] 检查 `execute_novelai_generation()` 单请求与 split 请求路径都能挂上 gateway retry records
-- [ ] 确认 `build_payload()` 仍由 `core` 语义生成，避免 request body 结构漂移
-- [ ] 补齐/修正 `tests/test_execution.py` 中 gateway raw executor 场景
-- [ ] 复查 `core_novelai_client` 分支没有被误改
+- [x] 检查 `execute_novelai_generation()` 单请求与 split 请求路径都能挂上 gateway retry records
+- [x] 确认 `build_payload()` 仍由 `core` 语义生成，避免 request body 结构漂移
+- [x] 补齐/修正 `tests/test_execution.py` 中 gateway raw executor 场景
+- [x] 复查 `core_novelai_client` 分支没有被误改
 
 ### Task 3: 清理配置与依赖接入细节
 
@@ -60,10 +60,10 @@
 - Consumes: `uv` editable source config, git submodule config
 - Produces: 可安装的 `ai-image-gateway` 依赖声明、干净的示例配置
 
-- [ ] 从 `local.example.yaml` 中移除真实 token，仅保留 env/config 占位方式
-- [ ] 复核 `pyproject.toml` 的 editable source 指向 `vendor/ai-image-gateway`
-- [ ] 确认 `uv.lock` 只包含本次依赖接入带来的必要变化
-- [ ] 复查 `.gitmodules` 指向是否正确
+- [x] 从 `local.example.yaml` 中移除真实 token，仅保留 env/config 占位方式
+- [x] 复核 `pyproject.toml` 的 editable source 指向 `vendor/ai-image-gateway`
+- [x] 确认 `uv.lock` 只包含本次依赖接入带来的必要变化
+- [x] 复查 `.gitmodules` 指向是否正确
 
 ### Task 4: 跑接入验证
 
@@ -74,8 +74,17 @@
 - Consumes: `uv run pytest ...`, `generation.executor=ai_image_gateway_raw`
 - Produces: 测试结果、必要时的修正提交
 
-- [ ] 运行 `tests/test_execution.py`
-- [ ] 运行与 `NovelAI` 执行链路直接相关的测试子集
-- [ ] 如条件允许，跑一次 `generation.executor=ai_image_gateway_raw` 的真实 NovelAI 出图
-- [ ] 记录结果，确认 PNG 文本与 retry records 仍可读
+- [x] 运行 `tests/test_execution.py`
+- [x] 运行与 `NovelAI` 执行链路直接相关的测试子集
+- [x] 如条件允许，跑一次 `generation.executor=ai_image_gateway_raw` 的真实 NovelAI 出图
+- [x] 记录结果，确认 PNG 文本与 retry records 仍可读
 
+## 验收记录
+
+- 实现提交：`9c1fb22 feat: integrate ai-image-gateway raw novelai executor`
+- 业务验证报告：`docs/superpowers/reports/2026-07-10-gateway-run-prompt-batch-validation.md`
+- 验证覆盖：
+  - 父项目 `prompt_preset_service.py run-prompt` 单图真实出图。
+  - 父项目 `prompt_preset_service.py run-prompt --nt 3` 拆成 3 次 `n_samples=1` 请求。
+  - `refactor run-batch` mock 链路。
+  - `refactor run-batch` 真实 NovelAI 链路，PNG 参数中可读 `tags_machine_core` 元信息与 `ai_image_gateway.retry_records`。

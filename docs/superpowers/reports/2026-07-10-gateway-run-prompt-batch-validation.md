@@ -14,7 +14,8 @@
 - 父项目目录：`F:\my_project\new\tags_machine`
 - refactor 子模块目录：`F:\my_project\new\tags_machine\refactor`
 - refactor 分支：`codex/refactor-core-gateway-integration`
-- refactor 提交：`9c1fb22 feat: integrate ai-image-gateway raw novelai executor`
+- refactor 实现提交：`9c1fb22 feat: integrate ai-image-gateway raw novelai executor`
+- refactor 验证报告提交：`2e18a09 docs: record gateway business validation`
 - 父项目分支：`dev`
 - 父项目提交：`85d4bfe feat: route run-prompt through gateway-backed refactor`
 - NovelAI executor 配置：`generation.executor: ai_image_gateway_raw`
