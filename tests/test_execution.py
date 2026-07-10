@@ -247,6 +247,46 @@ class ExecutionTest(unittest.TestCase):
             self.assertIn("Not a PNG file", result.png_info["images"][0]["error"])
             self.assertEqual(result.png_info["images"][1]["split_request_index"], 1)
 
+    def test_execute_novelai_generation_can_use_legacy_token_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_novelai = root / "legacy" / "novelai"
+            legacy_novelai.mkdir(parents=True)
+            (legacy_novelai / "client.py").write_text(
+                'def get_access_token():\n    return "legacy-token"\n',
+                encoding="utf-8",
+            )
+            config = _app_config(root)
+            request = RenderRequest(
+                backend="novelai",
+                prompt="akemi homura",
+            )
+
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                patch("tags_machine_core.execution.NovelAIClient") as client_cls,
+            ):
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="nai_result", content=b"image-bytes")
+                ]
+                client.build_payload.return_value = {"input": request.prompt, "model": request.model, "parameters": {}}
+
+                execute_novelai_generation(
+                    config,
+                    request,
+                    output_dir=None,
+                    image_format="png",
+                )
+
+            client_cls.assert_called_once_with(
+                access_token="legacy-token",
+                base_url="http://novelai.local",
+                timeout=30,
+                retry=1,
+                retry_interval=None,
+            )
+
     def test_execute_novelai_generation_prefers_config_access_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -350,7 +390,14 @@ class ExecutionTest(unittest.TestCase):
     def test_execute_novelai_generation_requires_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = _app_config(root)
+            base_config = _app_config(root)
+            config = base_config.model_copy(
+                update={
+                    "novelai": base_config.novelai.model_copy(
+                        update={"legacy_token_fallback": False}
+                    )
+                }
+            )
             request = RenderRequest(
                 backend="novelai",
                 prompt="akemi homura",
