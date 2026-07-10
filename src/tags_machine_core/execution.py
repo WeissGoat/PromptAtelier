@@ -4,7 +4,6 @@ import io
 import json
 import os
 from pathlib import Path
-import re
 import struct
 import time
 from typing import Any
@@ -207,7 +206,7 @@ def execute_novelai_generation(
     output_dir: str | Path | None,
     image_format: str,
 ) -> GenerationResult:
-    access_token = _resolve_novelai_access_token(config)
+    access_token = config.novelai.access_token or os.environ.get(config.novelai.access_token_env)
     if not access_token:
         raise RuntimeError(
             "Missing NovelAI token: set novelai.access_token in config or "
@@ -297,40 +296,6 @@ def execute_novelai_generation(
         },
         cache_hit=False,
     )
-
-
-def _resolve_novelai_access_token(config: AppConfig) -> str | None:
-    configured = _clean_token(config.novelai.access_token)
-    if configured:
-        return configured
-    env_token = _clean_token(os.environ.get(config.novelai.access_token_env))
-    if env_token:
-        return env_token
-    if not config.novelai.legacy_token_fallback:
-        return None
-    return _read_legacy_novelai_token(config.legacy.tags_machine_root)
-
-
-def _clean_token(value: str | None) -> str | None:
-    if not value:
-        return None
-    value = str(value).strip()
-    return value or None
-
-
-def _read_legacy_novelai_token(tags_machine_root: Path) -> str | None:
-    client_path = tags_machine_root / "novelai" / "client.py"
-    if not client_path.exists():
-        return None
-    try:
-        text = client_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    match = re.search(r"return\s+['\"]([^'\"]+)['\"]", text)
-    if not match:
-        return None
-    # 兼容旧 tags_machine 的本地 token 写法，但不把 token 写入 refactor 配置。
-    return _clean_token(match.group(1))
 
 
 def _novelai_executor_client(config: AppConfig, access_token: str):

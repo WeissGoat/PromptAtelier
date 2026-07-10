@@ -17,7 +17,6 @@ novelai:
   base_url: "https://image.novelai.net"
   access_token: null
   access_token_env: "NAI_ACCESS_TOKEN"
-  legacy_token_fallback: true
   timeout: 120
   retry: 3
   retry_interval: 8

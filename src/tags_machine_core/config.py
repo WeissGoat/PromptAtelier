@@ -36,7 +36,6 @@ class NovelAIConfig(BaseModel):
     base_url: str = "https://image.novelai.net"
     access_token: str | None = None
     access_token_env: str = "NAI_ACCESS_TOKEN"
-    legacy_token_fallback: bool = True
     timeout: int = 120
     retry: int = 3
     retry_interval: float | None = None
