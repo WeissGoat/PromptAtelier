@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord } from "../api/types";
-import { NodeEditorDrawer } from "../components/NodeEditorDrawer";
 import { NodeRoleGroup } from "../components/NodeRoleGroup";
+import { editorHasChanges, NodeWorkspaceEditor } from "../components/NodeWorkspaceEditor";
 import { PromptPreview } from "../components/PromptPreview";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
 import { hasUsablePositivePrompt, nodeSlotStatus, serializeNodeSlot } from "../nodes/temporaryNodes";
@@ -84,7 +84,6 @@ export function CustomStudio() {
   const [preview, setPreview] = useState<ComposePreviewResponse | null>(null);
   const [previewRevision, setPreviewRevision] = useState<number | null>(null);
   const [job, setJob] = useState<JobRecord | null>(null);
-  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -202,6 +201,17 @@ export function CustomStudio() {
     setRenderRevision((current) => current + 1);
   }
 
+  function openNodeEditor(slotId: string) {
+    const editor = workspace.state.editor;
+    if (
+      editor.slotId
+      && editor.slotId !== slotId
+      && editorHasChanges(editor.draftNode, editor.baselineNode)
+      && !window.confirm("当前节点编辑尚未应用，切换后会丢失这些修改。是否继续？")
+    ) return;
+    workspace.openEditor(slotId);
+  }
+
   function validationError(): string | null {
     const hasCharacterOrAction = [slots.character, slots.action].some((slot) => slot.draftNode);
     if (!hasCharacterOrAction) {
@@ -313,9 +323,9 @@ export function CustomStudio() {
         <div className="panel-title">
           <h2>Nodes</h2>
         </div>
-        <NodeRoleGroup onEditSlot={setEditingSlotId} role="artist" />
-        <NodeRoleGroup onEditSlot={setEditingSlotId} role="character" />
-        <NodeRoleGroup onEditSlot={setEditingSlotId} role="action" />
+        <NodeRoleGroup onEditSlot={openNodeEditor} role="artist" />
+        <NodeRoleGroup onEditSlot={openNodeEditor} role="character" />
+        <NodeRoleGroup onEditSlot={openNodeEditor} role="action" />
         <label className="field compact">
           <span>Negative</span>
           <textarea
@@ -335,6 +345,8 @@ export function CustomStudio() {
           width={width}
         />
       </section>
+
+      <NodeWorkspaceEditor />
 
       <section className="panel preview-panel">
         <div className="panel-title">
@@ -385,20 +397,6 @@ export function CustomStudio() {
         </div>
       </section>
 
-      <NodeEditorDrawer
-        onApply={(_, node) => {
-          if (editingSlotId) workspace.updateDraft(editingSlotId, node);
-        }}
-        onClose={() => setEditingSlotId(null)}
-        onRestore={() => {
-          if (editingSlotId) workspace.restoreSlot(editingSlotId);
-        }}
-        onSaved={(_, ref, node) => {
-          if (editingSlotId) workspace.selectNode(editingSlotId, ref, node);
-        }}
-        open={editingSlotId !== null}
-        slot={editingSlotId ? workspace.findSlot(editingSlotId) : null}
-      />
     </main>
   );
 }
