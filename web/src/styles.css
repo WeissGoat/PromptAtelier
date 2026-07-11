@@ -629,6 +629,10 @@ button {
   overflow-y: auto;
 }
 
+.generation-panel .preview-stack {
+  flex: 0 0 auto;
+}
+
 .ordinary-generate-actions {
   border-bottom: 1px solid #e4e7ec;
   padding-bottom: 10px;
