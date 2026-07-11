@@ -20,7 +20,7 @@ function group(role: NodeRole, count: number): RoleNodeGroup {
 }
 
 describe("useCompareRunController", () => {
-  it("runs at most two combinations concurrently and previews before generate", async () => {
+  it("runs NovelAI combinations serially and previews before generate", async () => {
     let activePreviews = 0;
     let maxActivePreviews = 0;
     const previewed = new Set<string>();
@@ -46,7 +46,7 @@ describe("useCompareRunController", () => {
 
     await act(async () => { await result.current.start(groups, params); });
 
-    expect(maxActivePreviews).toBe(2);
+    expect(maxActivePreviews).toBe(1);
     expect(result.current.summary.succeeded).toBe(4);
     expect(generated).toHaveLength(4);
   });

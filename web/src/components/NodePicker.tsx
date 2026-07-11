@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeListResponse, NodeSummary } from "../api/types";
@@ -15,6 +15,8 @@ type NodePickerProps = {
 };
 
 export function NodePicker({ label, role, value, placeholder, onSelect, onClear }: NodePickerProps) {
+  const pickerId = useId().replace(/:/g, "");
+  const resultsId = `${role}-node-results-${pickerId}`;
   const rootRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
   const [nodes, setNodes] = useState<NodeSummary[]>([]);
@@ -90,7 +92,7 @@ export function NodePicker({ label, role, value, placeholder, onSelect, onClear 
       <span>{label}</span>
       <div className="node-picker-row">
         <input
-          aria-controls={`${role}-node-results`}
+          aria-controls={resultsId}
           aria-expanded={open}
           aria-label={label}
           autoComplete="off"
@@ -119,7 +121,7 @@ export function NodePicker({ label, role, value, placeholder, onSelect, onClear 
         </button>
       </div>
       {open ? (
-        <div aria-label={`${label}节点搜索结果`} className="node-picker-results" id={`${role}-node-results`} role="listbox">
+        <div aria-label={`${label}节点搜索结果`} className="node-picker-results" id={resultsId} role="listbox">
           {loading ? <div className="node-picker-message">正在搜索...</div> : null}
           {!loading && error ? <div className="node-picker-message field-error">{error}</div> : null}
           {!loading && !error && nodes.length === 0 ? <div className="node-picker-message">没有匹配节点</div> : null}

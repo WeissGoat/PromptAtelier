@@ -74,6 +74,15 @@ describe("NodeWorkspaceEditor", () => {
     expect(screen.getByRole("alert").textContent).toContain("JSON 格式无效");
   });
 
+  it("does not replace the form draft with structurally invalid JSON", () => {
+    renderEditor();
+    fireEvent.click(screen.getByRole("tab", { name: /JSON/ }));
+    fireEvent.change(screen.getByLabelText("Node JSON"), { target: { value: JSON.stringify({ id: "broken", kind: "character" }) } });
+    expect(screen.getByRole("alert").textContent).toContain("prompt.positive");
+    fireEvent.click(screen.getByRole("tab", { name: /Form/ }));
+    expect((screen.getByLabelText("Node ID") as HTMLInputElement).value).toBe("homura");
+  });
+
   it("writes to the node library only after explicit Save", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(response({ node }))

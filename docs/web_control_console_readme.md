@@ -1,184 +1,143 @@
-# Web Control Console
+# PromptAtelier Web 使用说明
 
-PromptAtelier Web Control Console 是本地 Web 控制台。前端负责节点选择、编辑、预览和提交任务；提示词生成、节点读取、batch 展开、渲染请求构建和真实出图都由 `tags_machine_core` 后端完成。
+PromptAtelier Web 是 `tags_machine_core` 的本地控制台。前端负责节点选择、临时编辑、提示词预览、单张生成和 Compare 矩阵编排；节点读取、Composer、NovelAI Renderer、任务执行和结果归档仍由后端完成。
 
-## 推荐启动方式
+## 启动
 
-在 `refactor` 目录执行一个命令即可同时启动后端和前端：
-
-```powershell
-cd F:\my_project\new\tags_machine\refactor
-uv run python scripts\dev_web.py
-```
-
-默认地址：
-
-```text
-Frontend: http://127.0.0.1:53173
-Backend : http://127.0.0.1:8765/api
-```
-
-脚本会做三件事：
-
-- 启动 `tags_machine_core.web` 后端。
-- 启动 Vite 前端，并自动设置 `VITE_API_ROOT=http://127.0.0.1:8765/api`。
-- 如果 `web/node_modules` 不存在，先执行一次 `npm install`。
-
-常用参数：
+在 `refactor` 目录执行：
 
 ```powershell
-uv run python scripts\dev_web.py --config configs\local.yaml
-uv run python scripts\dev_web.py --backend-port 8766 --frontend-port 53174
-uv run python scripts\dev_web.py --reload-backend
-uv run python scripts\dev_web.py --no-install
+uv run python scripts\dev_web.py --backend-port 8877
 ```
 
-按 `Ctrl+C` 会同时停止前后端。
+启动后终端会打印前端地址。当前机器的 `8765` 位于 Windows 保留端口范围内，推荐固定使用 `8877`。
 
-## 本地配置
+配置读取顺序：
 
-Web 后端默认按这个顺序读取配置：
-
-1. 命令行 `--config`。
-2. 环境变量 `TAGS_MACHINE_CONFIG`。
+1. `--config` 指定的文件。
+2. `TAGS_MACHINE_CONFIG` 环境变量。
 3. `configs/local.yaml`。
 4. `configs/local.example.yaml`。
 
-`configs/local.yaml` 用来保存本机私有配置，例如 NovelAI token。这个文件已被 `.gitignore` 忽略，不应该提交。
-
-首次配置可以复制示例文件：
-
-```powershell
-Copy-Item configs\local.example.yaml configs\local.yaml
-```
-
-然后在 `configs/local.yaml` 中填写：
+NovelAI token、旧提示词库路径和输出目录建议放在不会提交的 `configs/local.yaml`：
 
 ```yaml
+legacy:
+  design_root: "F:/my_project/new/tags_machine/design"
+
 novelai:
-  base_url: "https://image.novelai.net"
-  access_token: "你的 NovelAI token"
-  access_token_env: "NAI_ACCESS_TOKEN"
+  access_token: "你的 token"
   timeout: 120
   retry: 3
-  retry_interval: 8
-  request_interval: 3
+
+defaults:
+  output_dir: "outputs"
 ```
 
-如果 `access_token` 为空，后端会继续读取 `access_token_env` 指定的环境变量，默认是 `NAI_ACCESS_TOKEN`。
+## Custom 工作台
 
-## 分开启动
+Custom 页由三列组成：
 
-后端：
+- `Nodes`：选择 Artist、Character、Action，管理主节点和 Compare 节点，设置 Negative 与生图参数。
+- `Node Editor`：以 Form 或 JSON 编辑当前节点草稿。
+- `Prompt & Generate`：预览最终提示词和参数，执行普通或 Compare 生图并查看结果。
 
-```powershell
-cd F:\my_project\new\tags_machine\refactor
-uv run python -m tags_machine_core.web --config configs\local.yaml
+页面输入保存在浏览器 `localStorage` 的 `promptatelier.custom-workspace/v1` 中。切换到 Batch/Results 或刷新浏览器不会清空节点、临时草稿和参数。运行中的 Compare Job 不写入 localStorage。
+
+### 节点搜索
+
+聚焦 Artist、Character 或 Action 搜索框后，会显示最多 6 个候选。输入关键字后等待约 300ms 即可缩小范围。界面只显示节点文件夹名，内部请求仍使用精确 `ref`，不会因为同名节点而读错路径。
+
+每种节点都有一个 `Primary` 槽位。点击角色标题右侧的加号可增加任意数量的 `Compare` 槽位；Compare 槽位可单独删除。
+
+### 节点编辑
+
+选择节点后点击铅笔按钮，节点会在中间栏展开：
+
+- `Form`：编辑基础字段、Prompt、Negative Prompt、Tags 和扩展字段。
+- `JSON`：编辑完整 `NodeDocument`；与 Form 共用同一份草稿。
+- `应用到本次运行`：校验节点后更新当前工作台草稿，不修改磁盘文件。
+- `保存节点`：显式调用 `/api/nodes/save`，写入节点库的 `meta.yaml`。
+- `还原`：恢复到节点库中读入的原始内容。
+
+关闭或切换节点时，如果存在尚未应用的修改，界面会先确认。新建空白节点与编辑已有节点使用同一套临时草稿机制；空白节点保存前需要填写节点库内的目标 `ref`。
+
+### NodeDocument 字段
+
+核心字段：
+
+| 字段 | 必填 | 含义 |
+| --- | --- | --- |
+| `schema` | 是 | 当前为 `tags-machine-core.node/v1`。 |
+| `kind` | 是 | 节点类型，如 `artist`、`character`、`action`。必须与槽位类型一致。 |
+| `id` | 是 | 节点稳定标识，不能为空。 |
+| `name` | 否 | 界面显示名；为空时回退到 `id`。 |
+| `description` | 否 | 节点说明，不直接参与提示词拼接。 |
+| `prompt.positive[]` | 是 | 正向提示词片段，每项至少包含 `text`。 |
+| `prompt.negative[]` | 是 | 负向提示词片段。 |
+| `tags` | 否 | 结构化标签组，供 ScriptComposer 或规则读取。 |
+
+Prompt 片段可选字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `text` | 实际提示词文本。 |
+| `role` | 语义角色，例如 `hair`、`upper_clothes`。 |
+| `weight` | 结构化权重信息。 |
+| `include_scopes` / `exclude_scopes` | ScriptComposer 的通用作用域条件。 |
+| `notes` | 维护备注。 |
+
+除核心字段外，`legacy`、`agent`、`composition`、`generation`、`clothing` 等扩展对象会在 Form/JSON 切换和保存时原样保留。
+
+### 普通 Generate
+
+普通 `Preview` 和 `Generate` 只使用三个 Primary 节点：
+
+1. 前端构造节点输入和生图参数。
+2. `/api/compose-preview` 经过 Composer、NovelAI Renderer/Adapter，返回完整提示词与 `render_request`。
+3. `Generate` 把 `render_request` 提交到 `/api/generate`。
+4. 前端轮询 Job，并显示状态、图片、seed 和输出路径。
+
+普通 Generate 使用界面中的 `NT`。`Negative` 默认是空字符串，`Seed=-1` 表示不固定种子。
+
+### Compare Generate
+
+Compare 使用每种角色下所有非空的 Primary 和 Compare 节点，展开笛卡尔积：
+
+```text
+图片数 = Artist 数量 × Character 数量 × Action 数量
 ```
 
-前端：
+某类节点完全为空时按一个 `null` 因子计算，但 Character 和 Action 至少要有一类存在。空白 Compare 槽位不会进入矩阵。
 
-```powershell
-cd F:\my_project\new\tags_machine\refactor\web
-npm install
-npm run dev
+例如配置 2 个 Artist、1 个 Character、2 个 Action，按钮会显示：
+
+```text
+Artist 2 × Character 1 × Action 2 = 4
 ```
 
-`npm run dev` 默认使用 `127.0.0.1:53173`。如果需要临时指定端口：
-
-```powershell
-npm run dev -- --port 53174
-```
-
-## Custom
-
-Custom 页面用于单张或少量图片的自定义生成。
-
-常用字段：
-
-- `Artist`：画风节点 ref，通常来自旧 `design/画风`。
-- `Character`：角色节点路径或 ref，可为空。
-- `Action`：动作节点路径或 ref，可为空。
-- `Full Prompt`：完整角色 + 动作 prompt；填写后后端不会再用角色/动作节点二次拼接。
-- `Negative`：负面提示词。
-- `Width` / `Height`：输出尺寸。
-- `NT`：生成张数；后端会按现有规则拆成多次 `n_samples=1` 请求。
-- `Seed`：种子，`-1` 表示随机。
-
-按钮：
-
-- `Preview`：调用 `/api/compose-preview`，只生成 `PromptBundle` 和 `RenderRequest`，不出图。
-- `Generate`：调用 `/api/generate`，创建后台 job 并真实出图。
-
-### 临时节点工作流
-
-1. 在 `Artist`、`Character` 或 `Action` 槽位中搜索并选择节点。选择后会读取节点库中的原始内容；也可以点击文件加号按钮 `新建空白...节点`，创建一个不关联节点库的空白临时节点。
-2. 点击铅笔按钮 `编辑...节点`，在 JSON 编辑器中修改 prompt，并点击 `应用到本次运行`。这个操作只更新当前 Custom 页面内的草稿，不写入源节点文件；原始节点的 `meta.yaml` 和 Git 状态应保持不变。
-3. `应用到本次运行` 与 `保存到节点库` 的区别：前者把当前草稿作为本次 Preview/Generate 的输入；后者会覆盖所选节点库中的原始节点，需要先选择已有节点，并在确认后调用 `/api/nodes/save`。空白临时节点没有 `sourceRef`，不能直接保存到节点库。
-4. `Preview` 和 `Generate` 都使用当前草稿。`Generate` 会在草稿、负面 prompt、尺寸、张数或 seed 变化后重新 Preview，避免使用过期结果；它不会因为生成而自动保存节点。
-
-节点槽位顶部的状态标签表示当前来源：
-
-- `原始节点`：草稿与已选择的节点库内容相同，Preview/Generate 可按节点 ref 使用。
-- `临时修改`：已有节点被编辑，草稿会以内联 `node` 发送，本次运行使用修改后的内容。
-- `空白临时节点`：通过 `新建空白...节点` 创建的节点，草稿 ref 形如 `web-temporary:action:temporary-action`；填写有效 positive prompt 后才能 Preview/Generate。
-- `未选择`：该槽位没有节点。
-
-点击垃圾桶清除槽位，或点击刷新重新载入页面，都会清除尚未保存的临时草稿。需要保留修改时，应先使用 `保存到节点库`；还原按钮则把已有节点的草稿恢复为原始内容。
+点击一次 `Compare Generate · 4` 会生成 4 个独立 Job。每个组合固定 `n_samples=1`，并针对 NovelAI 串行提交，避免同一账号并发生图触发 `429`；某个组合失败不会中止其他组合。结果卡会显示 Artist、Character、Action、Job 状态、seed、图片和错误信息。
 
 ## Batch
 
-Batch 页面用于批量任务预览和运行。
-
-模式：
-
-- `Inline draft` 开启：界面字段会组成临时 batch spec。
-- `Inline draft` 关闭：直接使用 `Batch YAML` 路径。
-
-常用字段：
-
-- `Characters`：角色集合名，例如 `special_next_select`。
-- `Action Groups`：动作组集合名，多个用英文逗号分隔，例如 `action_new,action_sfw`。
-- `Artist`：画风节点 ref。
-- `Max Tasks`：写入 batch spec 的最大规划任务数，适合试跑。
-- `NT`：每个任务生成张数。
-
-按钮：
-
-- `Plan Preview`：调用 `/api/batches/preview`，使用真实 `BatchPlanner` 展开任务，但不出图。
-- `Run Batch`：调用 `/api/batches/run`，创建后台 job 并真实执行。
-
-注意：`limit` 是执行阶段限制；如果 YAML 本身会展开很多任务，预览仍会完整规划。快速试跑建议设置 `Max Tasks=1` 或在 YAML 中设置 `batch.max_tasks: 1`。
-
-## Compare
-
-Compare 页面是对比模式的第一版：保留共享 prompt，同时分别编辑 base/variant artist。后续会接入 Custom 当前状态镜像、锁定节点和批量生成对比组。
+Batch 页继续使用现有 BatchPlanner 和 BatchExecutor。可以编辑 inline batch 参数，也可以指定 Batch YAML；`Plan Preview` 与真实运行使用同一套规划链路。
 
 ## Results
 
-Results 页面调用 `/api/results/runs` 扫描输出目录，展示 run 列表和任务数量。后续可以继续扩展为图片缩略图、PNG 参数和 task artifact 浏览。
+Results 页读取后端结果索引。单次生成的 `GenerationResult` 通常包含：
 
-## 结果结构
+- `images[]`：图片路径、文件名和图片级 meta。
+- `request_body`：实际发送到 NovelAI 的请求参数。
+- `png_info`：写入或读取到的 PNG 参数。
 
-单次生成 job 成功后，`job.result` 是 `GenerationResult`：
+Batch 结果还包含 `run_dir`、`output_dir`、任务状态、`prompt_bundle.json`、`render_request.json`、`generation_result.json` 和参数图等归档文件。
 
-- `images[]`：图片路径和文件名。
-- `request_body`：实际发送给模型后端的请求体。
-- `png_info`：从生成图片读取回来的 PNG 参数。
+## 验证命令
 
-Batch job 成功后，`job.result` 包含：
+```powershell
+uv run python -m unittest tests.test_web_app tests.test_web_jobs tests.test_web_nodes tests.test_web_compose tests.test_web_results tests.test_web_batch tests.test_novelai_artist_dedup -v
 
-- `run_dir`：工作目录，保存 task/status/report。
-- `output_dir`：图片和 artifact 输出目录。
-- `counts`：任务状态统计。
-- `entries[]`：每个任务的状态、图片路径、错误信息和 source。
-
-每个成功的 batch task 输出目录通常包含：
-
-- `*.png`
-- `prompt_bundle.json`
-- `render_request.json`
-- `generation_result.json`
-- `png_params.json`
-- `images.json`
-- `zz_*_parameter_details.png`：当 `archive.save_parameter_image: true` 时生成。
+cd web
+npm run test
+npm run build
+```

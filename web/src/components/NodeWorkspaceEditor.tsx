@@ -24,6 +24,22 @@ function promptFragment(value = ""): PromptFragment {
   return { text: value };
 }
 
+function parseEditorNode(text: string): NodeDocument {
+  const parsed: unknown = JSON.parse(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("节点必须是 JSON 对象。");
+  const node = parsed as Partial<NodeDocument>;
+  if (typeof node.id !== "string" || typeof node.kind !== "string") throw new Error("节点必须包含字符串类型的 id 和 kind。");
+  if (!node.prompt || !Array.isArray(node.prompt.positive) || !Array.isArray(node.prompt.negative)) {
+    throw new Error("节点必须包含 prompt.positive 和 prompt.negative 数组。");
+  }
+  for (const fragment of [...node.prompt.positive, ...node.prompt.negative]) {
+    if (!fragment || typeof fragment !== "object" || typeof fragment.text !== "string") {
+      throw new Error("Prompt 数组中的每一项都必须包含 text 字符串。");
+    }
+  }
+  return parsed as NodeDocument;
+}
+
 export function editorHasChanges(draft: NodeDocument | null, baseline: NodeDocument | null, jsonError = ""): boolean {
   return Boolean(jsonError) || !sameValue(draft, baseline);
 }
@@ -205,8 +221,7 @@ export function NodeWorkspaceEditor() {
                 const text = event.target.value;
                 setJsonText(text);
                 try {
-                  const parsed = JSON.parse(text) as NodeDocument;
-                  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("节点必须是 JSON 对象。");
+                  const parsed = parseEditorNode(text);
                   workspace.setEditorDraft(parsed);
                   setJsonError("");
                 } catch (parseError) {

@@ -120,7 +120,8 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
       }
     }
 
-    await Promise.all(Array.from({ length: Math.min(2, matrix.length) }, () => worker()));
+    // NovelAI 同一账号并发请求时，一组会稳定触发 429；Compare 按单 worker 串行提交。
+    await worker();
     if (runToken.current === token) setRunning(false);
   }, [pollJob, post, updateResult]);
 

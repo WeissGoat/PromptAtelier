@@ -82,6 +82,7 @@ export function CustomGeneratePanel() {
   const compare = workspace.compareRun;
   const preview = workspace.state.preview;
   const previewCurrent = previewSignature === signature;
+  const displayPreview = previewCurrent ? preview : null;
 
   useEffect(() => () => { pollToken.current += 1; }, []);
 
@@ -168,9 +169,9 @@ export function CustomGeneratePanel() {
       </div>
       {error ? <div className="alert error-alert" role="alert">{error}</div> : null}
       <PromptPreview
-        negative={preview?.prompt_bundle?.prompt.negative ?? params.negative}
-        prompt={preview?.prompt_bundle?.prompt.positive ?? ""}
-        renderRequest={preview?.render_request}
+        negative={displayPreview?.prompt_bundle?.prompt.negative ?? params.negative}
+        prompt={displayPreview?.prompt_bundle?.prompt.positive ?? ""}
+        renderRequest={displayPreview?.render_request}
       />
       <div className="button-row ordinary-generate-actions">
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>
