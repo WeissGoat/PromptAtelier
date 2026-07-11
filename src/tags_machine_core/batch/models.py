@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tags_machine_core.policies import PromptPolicyConfig, PromptPolicySource
+
 
 ComposerMode = Literal["full", "agent", "script"]
 ExecutionMode = Literal["real", "mock"]
@@ -87,7 +89,7 @@ class BatchDefaults(BaseModel):
     seed: int | None = None
     image_format: str = "png"
     model: str | None = "nai-diffusion-4-5-full"
-    prompt_policy_profile: str | None = None
+    prompt_policy: PromptPolicySource | None = None
     agent_model: str | None = None
     cache_dir: str | None = None
     add_male_caption: bool = True
@@ -223,7 +225,7 @@ class BatchTask(BaseModel):
     extra_prompt: str = ""
     render: RenderOptions
     agent: AgentOptions = Field(default_factory=AgentOptions)
-    policy: dict[str, Any] = Field(default_factory=dict)
+    policy: PromptPolicyConfig | None = None
     output: TaskOutput
     source: dict[str, Any] = Field(default_factory=dict)
 

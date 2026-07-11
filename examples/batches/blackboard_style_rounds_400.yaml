@@ -8,7 +8,8 @@ defaults:
   artist: 109841329_03_manga_monochrome_yabuki_rance_no_vibe_latest_stable
   nt: 3
   resolution: random_standard
-  prompt_policy_profile: legacy_compat
+  prompt_policy:
+    require: legacy_compat
 
 select:
   characters:

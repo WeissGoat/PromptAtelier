@@ -1,8 +1,7 @@
 schema: tags-machine-core.batch/v1
-name: character-extension-homura-legwear-weapon
+name: character-weight-real
 config: configs/local.example.yaml
-output_root: acceptance_compare
-output_dir: acceptance_compare/character_extension_homura_legwear_weapon/core/images
+output_dir: acceptance_compare/character_weight_real/images
 
 defaults:
   backend: novelai
@@ -11,16 +10,9 @@ defaults:
   model: nai-diffusion-4-5-full
   nt: 1
   resolution: portrait
-  seed: 1775456908
-  image_format: png
   character_prompts: auto
-  add_male_caption: false
   prompt_policy:
-    require: legacy_compat
-  params:
-    sampler: k_euler_ancestral
-    steps: 28
-    scale: 5.0
+    require: ../prompt_policies/character_weight.yaml
 
 select:
   characters:
@@ -31,28 +23,27 @@ select:
   actions:
     - selector: explicit
       refs:
-        - F:/my_project/new/tags_machine/design/动作改2/st_ft_leg/22_20240506_1715007679
+        - F:/my_project/new/tags_machine/design/动作改2/pn_human_solo_body_display_standing/00_start_20260523_比基尼站姿露肩
 
 expand:
   mode: product
-  max_tasks: 1
 
 run:
-  resume: true
-  stop_on_error: true
+  execution_mode: real
+  fresh: true
+  max_images: 1
   retry:
-    max_attempts: 1
+    max_attempts: 3
+    retry_on:
+      - "429"
+      - "500"
+      - "502"
+      - "503"
+      - "504"
+      - timeout
 
 archive:
   save_prompt_bundle: true
   save_render_request: true
   save_generation_result: true
   save_png_params: true
-  save_parameter_image: true
-
-report:
-  markdown: true
-  json: true
-  include_prompt_preview: true
-  include_png_params_summary: true
-  visual_check_template: true

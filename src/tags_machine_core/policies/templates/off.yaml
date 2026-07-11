@@ -1,0 +1,12 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: "off"
+enabled: false
+apply_to:
+  script: true
+  agent: false
+  full_prompt: false
+normalization:
+  output_style: underscore
+enabled_rules: []
+disabled_rules: []
+rules: {}

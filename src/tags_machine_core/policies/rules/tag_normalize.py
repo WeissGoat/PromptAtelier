@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tags_machine_core.policies.context import PromptRule, PromptRuleContext
+from tags_machine_core.policies.context import PromptRuleContext
 
 
 class TagNormalizeRule:

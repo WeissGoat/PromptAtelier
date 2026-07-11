@@ -49,7 +49,7 @@ class PromptPolicyPipelineTest(unittest.TestCase):
         )
 
         self.assertEqual(bundle.prompt.positive, "high_heels, 2.0::akemi_homura::")
-        self.assertEqual(bundle.meta.extra["policy"]["profile"], "normalize_only")
+        self.assertTrue(bundle.meta.extra["policy"]["template"].endswith("normalize_only"))
         self.assertTrue(bundle.meta.extra["policy_trace"])
 
     def test_tag_conflict_removes_footwear_for_barefoot(self):
@@ -298,7 +298,7 @@ class PromptPolicyPipelineTest(unittest.TestCase):
                 "prompt": "bare feet, high heels",
                 "prompt_policy": {
                     "enabled": True,
-                    "profile": "balanced",
+                    "require": "balanced",
                     "apply_to": {"full_prompt": True},
                 },
             }
@@ -370,7 +370,7 @@ class PromptPolicyPipelineTest(unittest.TestCase):
         )
 
         self.assertEqual(result["prompt"]["positive"], "1girl, bare_feet")
-        self.assertEqual(result["meta"]["extra"]["policy"]["profile"], "balanced")
+        self.assertTrue(result["meta"]["extra"]["policy"]["template"].endswith("balanced"))
 
     def test_cli_policy_args_build_enabled_config(self):
         from argparse import Namespace
@@ -386,12 +386,12 @@ class PromptPolicyPipelineTest(unittest.TestCase):
             target="full_prompt",
         )
 
-        self.assertTrue(config.enabled)
-        self.assertTrue(config.apply_to.full_prompt)
-        self.assertFalse(config.apply_to.script)
-        self.assertEqual(config.profile, "normalize_only")
-        self.assertEqual(config.disabled_rules, ["dedupe"])
-        self.assertEqual(config.normalization.output_style, "preserve")
+        self.assertTrue(config["enabled"])
+        self.assertTrue(config["apply_to"]["full_prompt"])
+        self.assertFalse(config["apply_to"]["script"])
+        self.assertEqual(config["require"], "normalize_only")
+        self.assertEqual(config["disabled_rules"], ["dedupe"])
+        self.assertEqual(config["normalization"]["output_style"], "preserve")
 
 
 if __name__ == "__main__":

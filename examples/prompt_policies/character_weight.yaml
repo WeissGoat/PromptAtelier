@@ -1,0 +1,16 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: character_weight
+require: default
+
+rules:
+  character_weight:
+    enabled: true
+    options:
+      style: numeric
+      level: 2
+      numeric_weight: 2.0
+      existing_weight: replace
+      missing_identity: ignore
+    order:
+      after:
+        - dedupe

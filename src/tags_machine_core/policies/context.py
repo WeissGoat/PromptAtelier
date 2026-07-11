@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any
 
 from tags_machine_core.contracts import PromptBundle
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
 from tags_machine_core.policies.config import PromptPolicyConfig
 from tags_machine_core.policies.tokens import PromptToken
-
-RulePhase = Literal["normalize_input", "compose_selection", "post_compose_cleanup", "trace_finalize"]
 
 
 @dataclass
@@ -66,13 +64,3 @@ class PromptRuleContext:
                 mode=mode,
             )
         )
-
-
-class PromptRule(Protocol):
-    id: str
-    version: str
-    phase: RulePhase
-    default_enabled: bool
-
-    def apply(self, context: PromptRuleContext) -> PromptRuleContext:
-        ...

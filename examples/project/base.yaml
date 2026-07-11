@@ -8,7 +8,8 @@ defaults:
   nt: 1
   resolution: random_standard
   model: nai-diffusion-4-5-full
-  prompt_policy_profile: legacy_compat
+  prompt_policy:
+    require: legacy_compat
   character_prompts: auto
   add_male_caption: true
 

@@ -11,6 +11,7 @@ from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
+from tags_machine_core.policies.tokens import parse_prompt_token
 from tags_machine_core.renderers.common import (
     renderer_artist_payload,
     renderer_artist_prompt_parts,
@@ -409,15 +410,17 @@ class NovelAIRenderAdapter:
             matched_positive_tags: list[str] = []
             matched_negative_tags: list[str] = []
             for tag in candidate_positive_tags:
-                if tag in base_tags:
-                    matched_positive_tags.append(tag)
-                    removed_positive_tags.append(tag)
-                    matched_positive_tag_set.add(tag)
+                matched_tag = _find_prompt_tag(tag, base_tags)
+                if matched_tag is not None:
+                    matched_positive_tags.append(matched_tag)
+                    removed_positive_tags.append(matched_tag)
+                    matched_positive_tag_set.add(matched_tag)
             for tag in candidate_negative_tags:
-                if tag in negative_tags:
-                    matched_negative_tags.append(tag)
-                    removed_negative_tags.append(tag)
-                    matched_negative_tag_set.add(tag)
+                matched_tag = _find_prompt_tag(tag, negative_tags)
+                if matched_tag is not None:
+                    matched_negative_tags.append(matched_tag)
+                    removed_negative_tags.append(matched_tag)
+                    matched_negative_tag_set.add(matched_tag)
 
             if matched_positive_tags:
                 caption_parts = (
@@ -883,6 +886,16 @@ def _normalize_character_prompt_tag(value: str) -> str:
     text = re.sub(r"^[\[\]{}()]+|[\[\]{}()]+$", "", text)
     text = text.replace("_", " ").replace("-", " ")
     return re.sub(r"\s+", " ", text).strip(" ,")
+
+
+def _find_prompt_tag(candidate: str, prompt_tags: list[str]) -> str | None:
+    candidate_key = parse_prompt_token(str(candidate).strip()).canonical
+    if not candidate_key:
+        return None
+    for prompt_tag in prompt_tags:
+        if parse_prompt_token(str(prompt_tag).strip()).canonical == candidate_key:
+            return prompt_tag
+    return None
 
 
 def _pad_negative_character_captions(

@@ -1,0 +1,46 @@
+schema: tags-machine-core.batch/v1
+name: character-weight-mock
+config: configs/local.example.yaml
+output_dir: acceptance_compare/character_weight_mock/images
+
+defaults:
+  backend: novelai
+  composer: script
+  artist: 20260412
+  model: nai-diffusion-4-5-full
+  nt: 1
+  resolution: portrait
+  character_prompts: auto
+  prompt_policy:
+    require: ../prompt_policies/character_weight.yaml
+
+expand:
+  mode: manual
+
+tasks:
+  - id: homura_single
+    nodes:
+      - role: character
+        ref: F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+      - role: action
+        ref: F:/my_project/new/tags_machine/design/动作改2/pn_human_solo_body_display_standing/00_start_20260523_比基尼站姿露肩
+
+  - id: homura_madoka_pair
+    nodes:
+      - role: character
+        ref: F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_akemi_homura_暁美ほむら _魔法少女
+      - role: character
+        ref: F:/my_project/new/tags_machine/design/角色/danbooru_mahou_shoujo_madoka_magica/danbooru_kaname_madoka_鹿目まどか_魔法少女
+      - role: action
+        ref: F:/my_project/new/tags_machine/design/动作改2/pn_human_2girls_yuri_yuri_touch_standing/00_start_双魔女乳贴贴_1star
+
+run:
+  execution_mode: mock
+  fresh: true
+  max_images: 2
+
+archive:
+  save_prompt_bundle: true
+  save_render_request: true
+  save_generation_result: true
+  save_png_params: true

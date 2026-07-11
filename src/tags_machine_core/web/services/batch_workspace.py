@@ -16,7 +16,7 @@ from tags_machine_core.batch import (
     load_batch_spec,
     load_batch_spec_mapping,
 )
-from tags_machine_core.config import load_config
+from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.web.services.job_manager import JobContext
 
@@ -30,7 +30,14 @@ class BatchWorkspace:
         run_id = self._run_id(data)
         run_dir = self._run_dir(spec, data=data, spec_path=spec_path)
         output_dir = self._output_dir(spec, data=data, spec_path=spec_path, run_dir=run_dir)
-        tasks = self._plan_tasks(spec, spec_path=spec_path, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+        tasks = self._plan_tasks(
+            spec,
+            spec_path=spec_path,
+            run_dir=run_dir,
+            output_dir=output_dir,
+            run_id=run_id,
+            config_override=_optional_string(data, "config"),
+        )
         sample_limit = _optional_int(data, "sample_limit") or 100
         return {
             "schema": "tags-machine-core.web.batch-preview/v1",
@@ -56,7 +63,14 @@ class BatchWorkspace:
         run_dir = self._run_dir(spec, data=data, spec_path=spec_path)
         run_id = self._run_id(data, fallback_run_dir=run_dir, fresh=spec.run.fresh)
         output_dir = self._output_dir(spec, data=data, spec_path=spec_path, run_dir=run_dir)
-        tasks = self._plan_tasks(spec, spec_path=spec_path, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
+        tasks = self._plan_tasks(
+            spec,
+            spec_path=spec_path,
+            run_dir=run_dir,
+            output_dir=output_dir,
+            run_id=run_id,
+            config_override=_optional_string(data, "config"),
+        )
         limit = _optional_int(data, "limit")
         config_path = self._config_path(spec, spec_path=spec_path, override=_optional_string(data, "config"))
         config = load_config(config_path)
@@ -127,8 +141,19 @@ class BatchWorkspace:
         run_dir: Path,
         output_dir: Path,
         run_id: str,
+        config_override: str | None,
     ):
-        return BatchPlanner(base_dir=spec_path.parent).plan(
+        config_path = self._config_path(
+            spec,
+            spec_path=spec_path,
+            override=config_override,
+        )
+        config = load_config(config_path)
+        provider = build_prompt_policy_provider(config, config_path=config_path)
+        return BatchPlanner(
+            base_dir=spec_path.parent,
+            policy_provider=provider,
+        ).plan(
             spec,
             run_dir=run_dir,
             output_dir=output_dir,

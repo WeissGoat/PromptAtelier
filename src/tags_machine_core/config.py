@@ -6,7 +6,11 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field
 
-from tags_machine_core.policies import PromptPolicyConfig
+from tags_machine_core.policies import (
+    PromptPolicyProvider,
+    PromptPolicySource,
+    PromptPolicyTemplateResolver,
+)
 
 
 class LegacyConfig(BaseModel):
@@ -62,7 +66,10 @@ class AppConfig(BaseModel):
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    prompt_policy: PromptPolicyConfig = Field(default_factory=PromptPolicyConfig)
+    prompt_policy_template_root: Path | None = None
+    prompt_policy: PromptPolicySource = Field(
+        default_factory=lambda: PromptPolicySource(require="default")
+    )
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     sd: SDConfig = Field(default_factory=SDConfig)
@@ -80,3 +87,20 @@ def load_config(path: str | Path) -> AppConfig:
     path = Path(path)
     data = load_yaml(path)
     return AppConfig.model_validate(data)
+
+
+def build_prompt_policy_provider(
+    config: AppConfig,
+    *,
+    config_path: str | Path | None = None,
+) -> PromptPolicyProvider:
+    relative_to = Path(config_path).resolve().parent if config_path else None
+    template_root = config.prompt_policy_template_root
+    if template_root is not None and not template_root.is_absolute() and relative_to is not None:
+        template_root = (relative_to / template_root).resolve()
+    resolver = PromptPolicyTemplateResolver(template_root=template_root)
+    return PromptPolicyProvider(
+        template_resolver=resolver,
+        project_default_source=config.prompt_policy,
+        relative_to=relative_to,
+    )

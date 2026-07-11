@@ -316,5 +316,6 @@ uv run python -m tags_machine_core verify-core
 - [Node YAML 规范](docs/node_yaml_spec_v1.md)
 - [Character YAML 规范](docs/character_yaml_spec_v1.md)
 - [Action YAML 规范](docs/action_yaml_spec_v1.md)
+- [PromptPolicy 配置与使用](docs/prompt_policy_configuration.md)
 - [Style YAML 规范](docs/style_yaml_spec_v1.md)
 - [Background YAML 规范](docs/background_yaml_spec_v1.md)

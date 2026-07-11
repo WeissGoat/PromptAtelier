@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from tags_machine_core.logging_config import get_logger
 from tags_machine_core.nodes.reader import NodeReader
+from tags_machine_core.policies import PromptPolicyProvider
 
 from .action_groups import (
     ActionGroupRecord,
@@ -53,9 +54,16 @@ class SelectionSet:
 
 
 class BatchPlanner:
-    def __init__(self, *, base_dir: str | Path, node_reader: NodeReader | None = None):
+    def __init__(
+        self,
+        *,
+        base_dir: str | Path,
+        node_reader: NodeReader | None = None,
+        policy_provider: PromptPolicyProvider | None = None,
+    ):
         self.base_dir = Path(base_dir)
         self.node_reader = _CachedNodeReader(node_reader or NodeReader())
+        self.policy_provider = policy_provider or PromptPolicyProvider.with_builtin_defaults()
 
     def plan(
         self,
@@ -750,7 +758,10 @@ class BatchPlanner:
                 agent_model=spec.defaults.agent_model,
                 cache_dir=spec.defaults.cache_dir,
             ),
-            policy=_policy_config(spec.defaults.prompt_policy_profile, composer=composer),
+            policy=self.policy_provider.resolve(
+                spec.defaults.prompt_policy,
+                relative_to=self.base_dir,
+            ),
             output={
                 "task_dir": str(run_dir / "tasks" / task_id),
                 "output_dir": str(output_dir / task_id),
@@ -855,20 +866,6 @@ def _zip_item(values: list[str | None], index: int) -> str | None:
     if not values:
         return None
     return values[index % len(values)]
-
-
-def _policy_config(profile: str | None, *, composer: str) -> dict[str, Any]:
-    if not profile or profile == "off":
-        return {}
-    return {
-        "enabled": True,
-        "profile": profile,
-        "apply_to": {
-            "script": composer == "script",
-            "agent": False,
-            "full_prompt": composer == "full",
-        },
-    }
 
 
 def _resolve_dimensions(

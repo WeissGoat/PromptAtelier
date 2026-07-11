@@ -1,0 +1,17 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: balanced
+require: "off"
+enabled: true
+rules:
+  tag_normalize:
+    enabled: true
+  dedupe:
+    enabled: true
+  tag_conflict:
+    enabled: true
+  character_count:
+    enabled: true
+  clothing_policy:
+    enabled: true
+  visibility_policy:
+    enabled: true

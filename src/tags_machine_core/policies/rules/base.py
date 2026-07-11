@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
-from tags_machine_core.policies.context import PromptRuleContext
+if TYPE_CHECKING:
+    from tags_machine_core.policies.context import PromptRuleContext
 
 
 RulePhase = Literal[
@@ -18,6 +19,7 @@ class PromptRule(Protocol):
     version: str
     phase: RulePhase
     default_enabled: bool
+    options_model: object
 
-    def apply(self, context: PromptRuleContext) -> PromptRuleContext:
+    def apply(self, context: "PromptRuleContext") -> "PromptRuleContext":
         ...

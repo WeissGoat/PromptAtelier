@@ -335,12 +335,24 @@ def _policy_evidence(
     required_rule_ids = {_rule_id(value) for value in required_rules}
     missing_rules = sorted(required_rule_ids - enabled_rule_ids)
     profile = policy.get("profile")
-    profile_matches = True if expected_profile is None else profile == expected_profile
+    template = policy.get("template")
+    selected_config = template or profile
+    selected_names = {
+        item.strip()
+        for item in str(selected_config or "").split("->")
+        if item.strip()
+    }
+    profile_matches = (
+        True
+        if expected_profile is None
+        else expected_profile in selected_names
+    )
     return {
         "bundle_schema": bundle.get("schema"),
         "bundle_schema_valid": bundle.get("schema") == PROMPT_BUNDLE_SCHEMA,
         "enabled": bool(policy.get("enabled")),
         "profile": profile,
+        "template": template,
         "expected_profile": expected_profile,
         "profile_matches": profile_matches,
         "target": policy.get("target"),

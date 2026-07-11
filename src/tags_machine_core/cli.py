@@ -18,7 +18,7 @@ from tags_machine_core.backends import (
 )
 from tags_machine_core.composers import AgentCompositionRequired, load_agent_result
 from tags_machine_core.composers.cache import PromptCache
-from tags_machine_core.config import load_config
+from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
@@ -39,7 +39,6 @@ from tags_machine_core.nodes import (
     validate_node_tree,
 )
 from tags_machine_core.services import GenerationJsonApi, GenerationService
-from tags_machine_core.policies import PromptPolicyConfig
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_image_comparison_report,
@@ -91,6 +90,11 @@ def _load_command_config(path: str | Path, args=None):
         configure_logging(config.logging.level)
     logger.trace("loaded config path=%s logging.level=%s", path, config.logging.level)
     return config
+
+
+def _policy_provider_from_config(path: str | Path, args=None):
+    config = _load_command_config(path, args)
+    return build_prompt_policy_provider(config, config_path=path)
 
 
 def cmd_compose(args) -> int:
@@ -789,7 +793,12 @@ def cmd_api_plan_batch(args) -> int:
         run_dir=run_dir,
         override=_optional_request_string(data, "output_dir"),
     )
-    planner = BatchPlanner(base_dir=spec_path.parent)
+    planner = _build_batch_planner(
+        spec,
+        spec_path=spec_path,
+        config_override=_optional_request_string(data, "config"),
+        args=args,
+    )
     run_id = _batch_run_id(data)
     tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
     manifest_path = write_initial_manifest(run_dir, tasks)
@@ -837,7 +846,12 @@ def cmd_api_run_batch(args) -> int:
         run_dir=run_dir,
         override=_optional_request_string(data, "output_dir"),
     )
-    planner = BatchPlanner(base_dir=spec_path.parent)
+    planner = _build_batch_planner(
+        spec,
+        spec_path=spec_path,
+        config_override=_optional_request_string(data, "config"),
+        args=args,
+    )
     run_id = _batch_run_id(data, fallback_run_dir=run_dir, fresh=spec.run.fresh)
     tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
     config_path = _batch_config_path(
@@ -901,7 +915,12 @@ def cmd_api_resume_batch(args) -> int:
         run_dir=run_dir,
         override=_optional_request_string(data, "output_dir") or source_data.get("output_dir"),
     )
-    planner = BatchPlanner(base_dir=spec_path.parent)
+    planner = _build_batch_planner(
+        spec,
+        spec_path=spec_path,
+        config_override=_optional_request_string(data, "config"),
+        args=args,
+    )
     run_id = _batch_run_id(data, fallback_run_dir=run_dir)
     tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
     config_path = _batch_config_path(
@@ -970,7 +989,12 @@ def cmd_plan_batch(args) -> int:
         run_dir=run_dir,
         override=args.output_dir,
     ).resolve()
-    planner = BatchPlanner(base_dir=spec_path.parent)
+    planner = _build_batch_planner(
+        spec,
+        spec_path=spec_path,
+        config_override=getattr(args, "config", None),
+        args=args,
+    )
     run_id = _batch_run_id({}, fallback_run_dir=run_dir)
     tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
     manifest_path = write_initial_manifest(run_dir, tasks)
@@ -1014,7 +1038,12 @@ def cmd_run_batch(args) -> int:
         run_dir=run_dir,
         override=args.output_dir,
     ).resolve()
-    planner = BatchPlanner(base_dir=spec_path.parent)
+    planner = _build_batch_planner(
+        spec,
+        spec_path=spec_path,
+        config_override=args.config,
+        args=args,
+    )
     run_id = _batch_run_id({}, fallback_run_dir=run_dir, fresh=spec.run.fresh)
     tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
     config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
@@ -1060,7 +1089,12 @@ def cmd_resume_batch(args) -> int:
         run_dir=run_dir,
         override=source_data.get("output_dir"),
     )
-    planner = BatchPlanner(base_dir=spec_path.parent)
+    planner = _build_batch_planner(
+        spec,
+        spec_path=spec_path,
+        config_override=args.config,
+        args=args,
+    )
     run_id = _batch_run_id({}, fallback_run_dir=run_dir)
     tasks = planner.plan(spec, run_dir=run_dir, output_dir=output_dir, run_id=run_id)
     config_path = _batch_config_path(spec, spec_path=spec_path, override=args.config)
@@ -1373,6 +1407,21 @@ def _batch_config_path(spec, *, spec_path: Path, override: str | None) -> Path:
     if raw.exists():
         return _prefer_local_config_path(raw)
     return _prefer_local_config_path(spec_path.parent / raw)
+
+
+def _build_batch_planner(
+    spec,
+    *,
+    spec_path: Path,
+    config_override: str | None,
+    args=None,
+) -> BatchPlanner:
+    config_path = _batch_config_path(spec, spec_path=spec_path, override=config_override)
+    policy_provider = _policy_provider_from_config(config_path, args)
+    return BatchPlanner(
+        base_dir=spec_path.parent,
+        policy_provider=policy_provider,
+    )
 
 
 def _prefer_local_config_path(path: Path) -> Path:
@@ -1718,7 +1767,7 @@ def _prompt_policy_from_args(args, *, target: str):
     if not profile and not enabled_rules and not disabled_rules:
         config_path = getattr(args, "config", None)
         if config_path:
-            return _load_command_config(config_path, args).prompt_policy
+            return _policy_provider_from_config(config_path, args).default_config
         return None
     apply_to = {
         "script": False,
@@ -1726,16 +1775,16 @@ def _prompt_policy_from_args(args, *, target: str):
         "full_prompt": False,
     }
     apply_to[target] = True
-    return PromptPolicyConfig(
-        enabled=True,
-        profile=profile or "balanced",
-        apply_to=apply_to,
-        enabled_rules=enabled_rules,
-        disabled_rules=disabled_rules,
-        normalization={
+    return {
+        "require": profile or "balanced",
+        "enabled": True,
+        "apply_to": apply_to,
+        "enabled_rules": enabled_rules,
+        "disabled_rules": disabled_rules,
+        "normalization": {
             "output_style": getattr(args, "prompt_policy_output_style", "underscore"),
         },
-    )
+    }
 
 
 def _read_node_inputs(args):

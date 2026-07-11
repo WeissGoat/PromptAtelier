@@ -1,0 +1,3 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: strict
+require: balanced

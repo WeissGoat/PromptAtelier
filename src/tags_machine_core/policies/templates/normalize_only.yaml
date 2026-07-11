@@ -1,0 +1,9 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: normalize_only
+require: "off"
+enabled: true
+rules:
+  tag_normalize:
+    enabled: true
+  dedupe:
+    enabled: true
