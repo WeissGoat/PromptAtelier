@@ -79,6 +79,103 @@ class WebNodesTest(TestCase):
             self.assertEqual(actions[0]["name"], "圆神足部闻香")
             self.assertEqual(actions[0]["relative"], "st_foot/圆神足部闻香")
 
+    def test_nodes_http_recursively_lists_nested_nodes_and_honors_limit(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            _write_meta(
+                design / "characters" / "series-a" / "alpha",
+                kind="character",
+                node_id="alpha",
+                prompt="alpha",
+            )
+            _write_meta(
+                design / "characters" / "series-b" / "beta",
+                kind="character",
+                node_id="beta",
+                prompt="beta",
+            )
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+
+            response = client.get(
+                "/api/nodes",
+                params={"role": "character", "q": "series", "limit": 1},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            nodes = response.json()["nodes"]
+            self.assertEqual(len(nodes), 1)
+            self.assertIn(nodes[0]["relative"], {"series-a/alpha", "series-b/beta"})
+
+    def test_save_node_accepts_relative_and_in_root_absolute_targets(self):
+        import tempfile
+
+        node = {
+            "kind": "character",
+            "id": "draft",
+            "prompt": {"positive": ["draft_tag"]},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            workspace = NodeWorkspace(design_root=design)
+
+            relative = workspace.save_node("characters/new-relative", node)
+            absolute_target = design / "characters" / "new-absolute"
+            absolute = workspace.save_node(absolute_target, node)
+
+            self.assertEqual(
+                Path(relative["ref"]),
+                (design / "characters" / "new-relative").resolve(),
+            )
+            self.assertEqual(Path(absolute["ref"]), absolute_target.resolve())
+            self.assertTrue((design / "characters" / "new-relative" / "meta.yaml").exists())
+            self.assertTrue((absolute_target / "meta.yaml").exists())
+
+    def test_save_node_rejects_targets_outside_design_root(self):
+        import tempfile
+
+        node = {
+            "kind": "character",
+            "id": "draft",
+            "prompt": {"positive": ["draft_tag"]},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design = root / "design"
+            workspace = NodeWorkspace(design_root=design)
+
+            with self.assertRaises(ValueError):
+                workspace.save_node("../escaped", node)
+            with self.assertRaises(ValueError):
+                workspace.save_node(root / "outside", node)
+
+            self.assertFalse((root / "escaped" / "meta.yaml").exists())
+            self.assertFalse((root / "outside" / "meta.yaml").exists())
+
+    def test_save_node_http_returns_json_error_for_target_outside_design_root(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = NodeWorkspace(design_root=root / "design")
+            client = TestClient(create_app(node_workspace=workspace))
+
+            response = client.put(
+                "/api/nodes/save",
+                json={
+                    "ref": str(root / "outside"),
+                    "node": {
+                        "kind": "character",
+                        "id": "draft",
+                        "prompt": {"positive": ["draft_tag"]},
+                    },
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["error"]["code"], "invalid_node")
+
     def test_preview_node_returns_normalized_node(self):
         import tempfile
 

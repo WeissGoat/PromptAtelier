@@ -50,5 +50,5 @@ def save_node(data: dict, request: Request) -> dict:
         raise ApiError(code="invalid_node", message="nodes/save requires ref and node", status_code=400)
     try:
         return _workspace(request).save_node(ref, node)
-    except ValidationError as exc:
+    except (ValidationError, ValueError) as exc:
         raise ApiError(code="invalid_node", message=str(exc), status_code=400) from exc

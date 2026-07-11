@@ -371,15 +371,17 @@ describe("CustomStudio", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(callsFor(fetchMock, "/generate")).toHaveLength(0);
 
+    const latestRenderRequest = { backend: "novelai", prompt: "current prompt", seed: 42 };
     secondPreview.resolve(response({
       status: "ready",
       prompt_bundle: { prompt: { positive: "current prompt", negative: "lowres" } },
-      render_request: { backend: "novelai", prompt: "current prompt" },
+      render_request: latestRenderRequest,
     }));
     await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
     await waitFor(() => expect(screen.getByText("Job job-1: queued")).toBeTruthy());
     expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(JSON.parse(String(callsFor(fetchMock, "/generate")[0][1]?.body)).render_request).toEqual(latestRenderRequest);
   });
 
   it.each([
@@ -514,5 +516,65 @@ describe("CustomStudio", () => {
     await waitFor(() => expect(screen.getByText("Job job-2")).toBeTruthy());
     expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(0);
     expect(callsFor(fetchMock, "/jobs/job-2")).toHaveLength(1);
+  });
+  it("ignores an in-flight response from the previous job", async () => {
+    const oldPoll = deferred<Response>();
+    let generation = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/nodes/preview")) return Promise.resolve(response({ node: JSON.parse(String(init?.body)).node }));
+      if (url.includes("/compose-preview")) return Promise.resolve(response({
+        status: "ready",
+        prompt_bundle: { prompt: { positive: "prompt", negative: "lowres" } },
+        render_request: { backend: "novelai", prompt: "prompt" },
+      }));
+      if (url.includes("/generate")) {
+        generation += 1;
+        return Promise.resolve(response({ id: `job-${generation}`, name: "generate", status: "queued" }));
+      }
+      if (url.includes("/jobs/job-1")) return oldPoll.promise;
+      if (url.includes("/jobs/job-2")) return Promise.resolve(response({ id: "job-2", name: "generate", status: "succeeded", result: { images: [] } }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(1), { timeout: 1_500 });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(screen.getByText("Job job-2")).toBeTruthy());
+
+    oldPoll.resolve(response({ id: "job-1", name: "generate", status: "failed", error: "stale failure" }));
+    await oldPoll.promise;
+    await Promise.resolve();
+    expect(screen.getByText("Job job-2")).toBeTruthy();
+    expect(screen.queryByText("stale failure")).toBeNull();
+  });
+
+  it("does not continue an in-flight poll after unmount", async () => {
+    const pendingPoll = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/nodes/preview")) return Promise.resolve(response({ node: JSON.parse(String(init?.body)).node }));
+      if (url.includes("/compose-preview")) return Promise.resolve(response({
+        status: "ready",
+        prompt_bundle: { prompt: { positive: "prompt", negative: "lowres" } },
+        render_request: { backend: "novelai", prompt: "prompt" },
+      }));
+      if (url.includes("/generate")) return Promise.resolve(response({ id: "job-1", name: "generate", status: "queued" }));
+      if (url.includes("/jobs/job-1")) return pendingPoll.promise;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const { unmount } = render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(1), { timeout: 1_500 });
+    unmount();
+    pendingPoll.resolve(response({ id: "job-1", name: "generate", status: "running" }));
+    await pendingPoll.promise;
+    await new Promise((resolve) => window.setTimeout(resolve, 600));
+
+    expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(1);
   });
 });

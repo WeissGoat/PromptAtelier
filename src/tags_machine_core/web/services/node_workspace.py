@@ -19,23 +19,38 @@ ROLE_DIRS = {
 
 class NodeWorkspace:
     def __init__(self, *, design_root: str | Path, reader: NodeReader | None = None):
-        self.design_root = Path(design_root)
+        self.design_root = Path(design_root).resolve()
         self.reader = reader or NodeReader()
 
-    def list_nodes(self, role: str, query: str | None = None) -> list[dict[str, Any]]:
+    def list_nodes(
+        self,
+        role: str,
+        query: str | None = None,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         roots = [self.design_root / item for item in ROLE_DIRS.get(role, [role])]
         result: list[dict[str, Any]] = []
         needle = (query or "").strip().lower()
+        limit = max(1, min(limit, 500))
         for root in roots:
             if not root.exists():
                 continue
-            for item in sorted(root.iterdir(), key=lambda path: path.name):
-                if not item.is_dir():
+            for item in self._iter_node_dirs(root):
+                relative = item.relative_to(root).as_posix()
+                searchable = f"{item.name} {relative}".lower()
+                if needle and needle not in searchable:
                     continue
-                if needle and needle not in item.name.lower():
-                    continue
-                if self._has_node_file(item):
-                    result.append({"role": role, "name": item.name, "ref": str(item)})
+                result.append(
+                    {
+                        "role": role,
+                        "name": item.name,
+                        "ref": str(item),
+                        "relative": relative,
+                    }
+                )
+                if len(result) >= limit:
+                    return result
         return result
 
     def read_node(self, ref: str | Path) -> dict[str, Any]:
@@ -58,15 +73,26 @@ class NodeWorkspace:
         }
 
     def save_node(self, ref: str | Path, node_data: dict[str, Any]) -> dict[str, Any]:
-        path = Path(ref)
-        path.mkdir(parents=True, exist_ok=True)
+        path = self._resolve_save_path(ref)
         node = NodeDocument.model_validate(node_data)
+        path.mkdir(parents=True, exist_ok=True)
         target = path / "meta.yaml"
         target.write_text(
             yaml.safe_dump(node.model_dump(mode="json"), allow_unicode=True, sort_keys=False),
             encoding="utf-8",
         )
         return self.read_node(path)
+
+    def _resolve_save_path(self, ref: str | Path) -> Path:
+        candidate = Path(ref)
+        if not candidate.is_absolute():
+            candidate = self.design_root / candidate
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(self.design_root)
+        except ValueError as exc:
+            raise ValueError("node save target must be inside design_root") from exc
+        return resolved
 
     def to_form(self, node: NodeDocument) -> dict[str, Any]:
         return {
@@ -85,6 +111,23 @@ class NodeWorkspace:
 
     def _has_node_file(self, path: Path) -> bool:
         return any((path / name).exists() for name in ("meta.yaml", "node.yaml", "tags.txt"))
+
+    def _iter_node_dirs(self, root: Path):
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            if current != root and self._has_node_file(current):
+                yield current
+                continue
+            try:
+                children = sorted(
+                    [item for item in current.iterdir() if item.is_dir()],
+                    key=lambda path: path.name,
+                    reverse=True,
+                )
+            except OSError:
+                continue
+            stack.extend(children)
 
     def _raw_file(self, path: Path) -> dict[str, str] | None:
         for name in ("meta.yaml", "node.yaml", "tags.txt"):

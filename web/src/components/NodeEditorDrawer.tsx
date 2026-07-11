@@ -52,12 +52,17 @@ function requiresRestoreConfirmation(slot: NodeSlotState): boolean {
 
 export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSaved }: NodeEditorDrawerProps) {
   const [text, setText] = useState("");
+  const [baselineText, setBaselineText] = useState("");
+  const [targetRef, setTargetRef] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setText(formatNode(slot?.draftNode ?? null));
+      const nextText = formatNode(slot?.draftNode ?? null);
+      setText(nextText);
+      setBaselineText(nextText);
+      setTargetRef(slot?.sourceRef ?? "");
       setError("");
     }
   }, [open, slot]);
@@ -71,11 +76,25 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
     return response.node;
   }
 
+  function updateBaseline(node: NodeDocument) {
+    const nextBaseline = formatNode(node);
+    setText(nextBaseline);
+    setBaselineText(nextBaseline);
+  }
+
+  function requestClose() {
+    if (text !== baselineText && !window.confirm("当前 JSON 修改尚未应用或保存，是否关闭？")) {
+      return;
+    }
+    onClose();
+  }
+
   async function handleApply() {
     setBusy(true);
     setError("");
     try {
       const node = await validateNode();
+      updateBaseline(node);
       onApply(activeSlot.role, node);
       onClose();
     } catch (err) {
@@ -86,23 +105,33 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
   }
 
   async function handleSave() {
-    if (!activeSlot.sourceRef) {
-      setError("请先选择节点后再保存到节点库。");
+    const saveRef = (activeSlot.sourceRef ?? targetRef).trim();
+    if (!saveRef) {
+      setError("请输入节点库内的目标 ref。");
       return;
     }
-    if (!window.confirm("将覆盖节点库中的原始节点，是否继续？")) return;
+
+    let node: NodeDocument;
+    try {
+      node = parseNode(text, activeSlot.role);
+    } catch (err) {
+      setError(errorMessage(err));
+      return;
+    }
+    if (!window.confirm(`将保存节点到 ${saveRef}，是否继续？`)) return;
 
     setBusy(true);
     setError("");
     try {
-      const node = parseNode(text, activeSlot.role);
       const response = await fetch(`${apiRoot}/nodes/save`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ref: activeSlot.sourceRef, node }),
+        body: JSON.stringify({ ref: saveRef, node }),
       });
       if (!response.ok) throw new Error(await response.text());
       const saved = await response.json() as NodeReadResponse;
+      updateBaseline(saved.node);
+      setTargetRef(saved.ref);
       onSaved(activeSlot.role, saved.ref, saved.node);
       onClose();
     } catch (err) {
@@ -118,18 +147,31 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
     }
   }
 
+  const saveRef = (slot.sourceRef ?? targetRef).trim();
+
   return (
-    <div className="drawer-backdrop" onMouseDown={onClose} role="presentation">
+    <div className="drawer-backdrop" onMouseDown={requestClose} role="presentation">
       <aside aria-label="节点编辑器" className="node-editor-drawer" onMouseDown={(event) => event.stopPropagation()}>
         <div className="drawer-header">
           <div>
             <h2>编辑节点</h2>
             <small>{slot.sourceRef ?? "临时节点"}</small>
           </div>
-          <button aria-label="关闭节点编辑器" className="icon-button" onClick={onClose} title="关闭" type="button">
+          <button aria-label="关闭节点编辑器" className="icon-button" onClick={requestClose} title="关闭" type="button">
             <X size={18} />
           </button>
         </div>
+        {!slot.sourceRef ? (
+          <label className="field compact drawer-target">
+            <span>Target ref</span>
+            <input
+              aria-label="Target ref"
+              onChange={(event) => setTargetRef(event.target.value)}
+              placeholder="characters/new-node"
+              value={targetRef}
+            />
+          </label>
+        ) : null}
         <label className="field drawer-editor">
           <span>节点 JSON</span>
           <textarea aria-label="节点 JSON" onChange={(event) => setText(event.target.value)} spellCheck={false} value={text} />
@@ -139,7 +181,7 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
           <button disabled={busy} onClick={handleRestore} type="button">还原原始节点</button>
           <span />
           <button disabled={busy} onClick={() => void handleApply()} type="button">应用到本次运行</button>
-          <button disabled={busy || !slot.sourceRef} onClick={() => void handleSave()} title={slot.sourceRef ? "保存并覆盖节点库" : "请先选择节点"} type="button">保存到节点库</button>
+          <button disabled={busy || !saveRef} onClick={() => void handleSave()} title={slot.sourceRef ? "保存并覆盖节点库" : "保存为新节点"} type="button">保存到节点库</button>
         </div>
       </aside>
     </div>

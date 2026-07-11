@@ -1,5 +1,5 @@
 import { FilePlus2, Pencil, RotateCcw, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeReadResponse, NodeSummary } from "../api/types";
@@ -55,6 +55,10 @@ export function NodeSlot({
     readRequestId.current += 1;
     setLoading(false);
   }
+
+  useEffect(() => {
+    invalidatePendingRead();
+  }, [slot.sourceRef, slot.sourceNode, slot.draftNode]);
 
   async function handleSelect(node: NodeSummary) {
     if (requiresConfirmation(slot) && !window.confirm("当前临时修改将被替换，是否继续？")) {

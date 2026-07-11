@@ -203,4 +203,60 @@ describe("NodeSlot", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(selectNode).not.toHaveBeenCalled();
   });
+  it("invalidates a pending read when Drawer Apply changes the slot", async () => {
+    const read = deferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ schema: "list", role: "character", nodes: [{ role: "character", name: "A", ref: "F:/nodes/a" }] }))
+      .mockReturnValueOnce(read.promise);
+    const props = {
+      label: "Character",
+      role: "character" as const,
+      slot: baseSlot,
+      placeholder: "Search nodes",
+      selectNode: vi.fn(),
+      createBlank: vi.fn(),
+      restore: vi.fn(),
+      clear: vi.fn(),
+      onEdit: vi.fn(),
+    };
+    const { rerender } = render(<NodeSlot {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Load Character nodes" }));
+    await screen.findByRole("option", { name: "A F:/nodes/a" });
+    fireEvent.click(screen.getByRole("option", { name: "A F:/nodes/a" }));
+    rerender(<NodeSlot {...props} slot={{ ...baseSlot, draftNode: { ...sourceNode, id: "applied" } }} />);
+    read.resolve(response({ schema: "node", ref: "F:/nodes/a", node: { ...sourceNode, id: "a" }, form: {} }));
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(props.selectNode).not.toHaveBeenCalled();
+  });
+
+  it("invalidates a pending read when Drawer Save replaces the slot", async () => {
+    const read = deferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ schema: "list", role: "character", nodes: [{ role: "character", name: "A", ref: "F:/nodes/a" }] }))
+      .mockReturnValueOnce(read.promise);
+    const props = {
+      label: "Character",
+      role: "character" as const,
+      slot: baseSlot,
+      placeholder: "Search nodes",
+      selectNode: vi.fn(),
+      createBlank: vi.fn(),
+      restore: vi.fn(),
+      clear: vi.fn(),
+      onEdit: vi.fn(),
+    };
+    const { rerender } = render(<NodeSlot {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Load Character nodes" }));
+    await screen.findByRole("option", { name: "A F:/nodes/a" });
+    fireEvent.click(screen.getByRole("option", { name: "A F:/nodes/a" }));
+    const saved = { ...sourceNode, id: "saved" };
+    rerender(<NodeSlot {...props} slot={{ role: "character", sourceRef: "F:/nodes/saved", sourceNode: saved, draftNode: saved }} />);
+    read.resolve(response({ schema: "node", ref: "F:/nodes/a", node: { ...sourceNode, id: "a" }, form: {} }));
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(props.selectNode).not.toHaveBeenCalled();
+  });
 });
