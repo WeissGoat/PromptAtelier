@@ -1,8 +1,8 @@
 import { Eye, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { apiPost, errorMessage } from "../api/client";
-import type { ComposePreviewResponse, JobRecord } from "../api/types";
+import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
+import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord } from "../api/types";
 import { NodeEditorDrawer } from "../components/NodeEditorDrawer";
 import { NodeSlot } from "../components/NodeSlot";
 import { PromptPreview } from "../components/PromptPreview";
@@ -30,6 +30,40 @@ type PreviewOutcome =
   | { attempt: PreviewAttempt; result: ComposePreviewResponse }
   | { attempt: PreviewAttempt; error: unknown };
 
+const JOB_POLL_INTERVAL_MS = 500;
+const terminalJobStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
+
+function isTerminalJob(job: JobRecord): boolean {
+  return terminalJobStatuses.has(job.status);
+}
+
+function jobProgress(job: JobRecord): string {
+  const event = job.events?.[job.events.length - 1];
+  return event?.type ?? job.status;
+}
+
+function seedForImage(image: GenerationImage, result: GenerationResult | undefined): string | null {
+  const imageSeed = image.meta?.seed;
+  if (typeof imageSeed === "string" || typeof imageSeed === "number") return String(imageSeed);
+
+  const requestBody = result?.request_body;
+  if (!requestBody) return null;
+  const candidates: Array<Record<string, unknown>> = [requestBody];
+  if (Array.isArray(requestBody.requests)) {
+    const splitIndex = image.meta?.split_request_index;
+    const request = typeof splitIndex === "number" ? requestBody.requests[splitIndex] : requestBody.requests[0];
+    if (request && typeof request === "object") candidates.push(request as Record<string, unknown>);
+  }
+  for (const request of candidates) {
+    const parameters = request.parameters;
+    const seed = request.seed ?? (parameters && typeof parameters === "object"
+      ? (parameters as Record<string, unknown>).seed
+      : undefined);
+    if (typeof seed === "string" || typeof seed === "number") return String(seed);
+  }
+  return null;
+}
+
 export function CustomStudio() {
   const {
     slots,
@@ -56,6 +90,10 @@ export function CustomStudio() {
   const [busy, setBusy] = useState(false);
   const previewRequestId = useRef(0);
   const activePreview = useRef<PreviewAttempt | null>(null);
+  const jobPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const jobPollRequestId = useRef(0);
+  const jobStartedAt = useRef<number | null>(null);
+  const [jobElapsedSeconds, setJobElapsedSeconds] = useState(0);
 
   const revision = nodeRevision + renderRevision;
   const previewIsCurrent = previewRevision === revision;
@@ -91,6 +129,57 @@ export function CustomStudio() {
   function isCurrentPreview(attempt: PreviewAttempt): boolean {
     return previewRequestId.current === attempt.id && previewSignatureRef.current === attempt.signature;
   }
+
+  function stopJobPolling() {
+    jobPollRequestId.current += 1;
+    if (jobPollTimer.current !== null) {
+      clearTimeout(jobPollTimer.current);
+      jobPollTimer.current = null;
+    }
+  }
+
+  function updateJobElapsed(nextJob: JobRecord) {
+    const startedAt = nextJob.created_at ? nextJob.created_at * 1000 : jobStartedAt.current;
+    if (startedAt !== null) {
+      setJobElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }
+  }
+
+  function watchJob(initialJob: JobRecord) {
+    stopJobPolling();
+    const pollRequestId = jobPollRequestId.current;
+    jobStartedAt.current = initialJob.created_at ? initialJob.created_at * 1000 : Date.now();
+    setJobElapsedSeconds(0);
+    setJob(initialJob);
+    setStatus(`Job ${initialJob.id}: ${initialJob.status}`);
+
+    const poll = async () => {
+      try {
+        const nextJob = await apiGet<JobRecord>(`/jobs/${encodeURIComponent(initialJob.id)}`);
+        if (jobPollRequestId.current !== pollRequestId) return;
+        setJob(nextJob);
+        updateJobElapsed(nextJob);
+        setStatus(`Job ${nextJob.id}: ${nextJob.status}`);
+        if (isTerminalJob(nextJob)) {
+          if (nextJob.status === "failed") setError(nextJob.error || "Generation failed");
+          stopJobPolling();
+          return;
+        }
+        jobPollTimer.current = setTimeout(() => void poll(), JOB_POLL_INTERVAL_MS);
+      } catch (pollError) {
+        if (jobPollRequestId.current !== pollRequestId) return;
+        setStatus(`Job ${initialJob.id}: polling failed`);
+        setError(errorMessage(pollError));
+        stopJobPolling();
+      }
+    };
+
+    if (!isTerminalJob(initialJob)) {
+      jobPollTimer.current = setTimeout(() => void poll(), JOB_POLL_INTERVAL_MS);
+    }
+  }
+
+  useEffect(() => () => stopJobPolling(), []);
 
   useEffect(() => {
     const active = activePreview.current;
@@ -206,8 +295,7 @@ export function CustomStudio() {
       const result = await apiPost<JobRecord>("/generate", {
         render_request: readyPreview.render_request,
       });
-      setJob(result);
-      setStatus(`Job ${result.id}: ${result.status}`);
+      watchJob(result);
     } catch (err) {
       if (previewSignatureRef.current !== generationSignature) return;
       setStatus("Generate failed");
@@ -287,7 +375,36 @@ export function CustomStudio() {
         </div>
         {error ? <div className="alert error-alert" role="alert">{error}</div> : null}
         <PromptPreview negative={previewNegative} prompt={previewPrompt} renderRequest={renderRequest} />
-        {job ? <pre className="json-preview compact-json">{JSON.stringify(job, null, 2)}</pre> : null}
+        {job ? (
+          <section className="job-result" aria-live="polite">
+            <div className="job-summary">
+              <strong>Job {job.id}</strong>
+              <span>Status: {job.status}</span>
+              <span>Progress: {jobProgress(job)}</span>
+              <span>Elapsed: {jobElapsedSeconds}s</span>
+            </div>
+            {job.status === "succeeded" && job.result?.images?.length ? (
+              <div className="generated-image-grid">
+                {job.result.images.map((image, index) => {
+                  const seed = seedForImage(image, job.result);
+                  return (
+                    <figure className="generated-image" key={`${image.path}-${index}`}>
+                      <img alt={`Generated image ${index + 1}`} src={apiUrl(`/results/image?path=${encodeURIComponent(image.path)}`)} />
+                      <figcaption>
+                        <code>{image.path}</code>
+                        {seed ? <span>Seed: {seed}</span> : null}
+                      </figcaption>
+                    </figure>
+                  );
+                })}
+              </div>
+            ) : null}
+            <details>
+              <summary>Raw job details</summary>
+              <pre className="json-preview compact-json">{JSON.stringify(job, null, 2)}</pre>
+            </details>
+          </section>
+        ) : null}
         <div className="button-row">
           <button disabled={busy} onClick={() => void runPreview()} type="button">
             <Eye size={16} />

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { JobRecord } from "../api/types";
 import type { NodeDocument, NodeRole } from "../nodes/types";
 import { CustomStudio } from "./CustomStudio";
 
@@ -69,6 +70,39 @@ function callsFor(fetchMock: ReturnType<typeof mockApi>, path: string) {
   return fetchMock.mock.calls.filter(([input]) => String(input).includes(path));
 }
 
+type JobSequence = {
+  initial: JobRecord;
+  polls: JobRecord[];
+};
+
+function mockGenerationApi(sequences: JobSequence[]) {
+  let generationIndex = 0;
+  const pollIndexes = new Map<string, number>();
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/nodes/preview")) {
+      return response({ node: JSON.parse(String(init?.body)).node });
+    }
+    if (url.includes("/compose-preview")) {
+      return response({
+        status: "ready",
+        prompt_bundle: { prompt: { positive: "composed prompt", negative: "lowres" } },
+        render_request: { backend: "novelai", prompt: "composed prompt", negative_prompt: "lowres" },
+      });
+    }
+    if (url.includes("/generate")) {
+      return response(sequences[generationIndex++].initial);
+    }
+    const sequence = sequences.find(({ initial }) => url.includes(`/jobs/${initial.id}`));
+    if (sequence) {
+      const pollIndex = pollIndexes.get(sequence.initial.id) ?? 0;
+      pollIndexes.set(sequence.initial.id, pollIndex + 1);
+      return response(sequence.polls[Math.min(pollIndex, sequence.polls.length - 1)]);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+}
+
 async function applyTemporaryNode(role: NodeRole, draft: NodeDocument) {
   fireEvent.click(screen.getByRole("button", { name: `新建空白${role === "character" ? "Character" : role === "action" ? "Action" : "Artist"}节点` }));
   fireEvent.click(screen.getByRole("button", { name: `编辑${role === "character" ? "Character" : role === "action" ? "Action" : "Artist"}节点` }));
@@ -81,6 +115,8 @@ async function applyTemporaryNode(role: NodeRole, draft: NodeDocument) {
 describe("CustomStudio", () => {
   afterEach(() => {
     cleanup();
+    vi.clearAllTimers();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -402,5 +438,81 @@ describe("CustomStudio", () => {
 
     expect(callsFor(fetchMock, "/nodes/save")).toHaveLength(0);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+  });
+
+  it("polls a queued job through success and shows generated images", async () => {
+    const fetchMock = mockGenerationApi([{
+      initial: { id: "job-1", name: "generate", status: "queued" },
+      polls: [
+        { id: "job-1", name: "generate", status: "running", events: [{ type: "generation_started" }] },
+        {
+          id: "job-1",
+          name: "generate",
+          status: "succeeded",
+          events: [{ type: "generation_finished" }],
+          result: {
+            images: [{ path: "outputs/57128511_0_01.png" }],
+            request_body: { parameters: { seed: 42 } },
+          },
+        },
+      ],
+    }]);
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
+    expect(screen.getByText("Job job-1")).toBeTruthy();
+    expect(screen.getByText("Status: queued")).toBeTruthy();
+    expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(0);
+
+    await waitFor(() => expect(screen.getByText("Status: running")).toBeTruthy(), { timeout: 1_500 });
+    const image = await screen.findByRole("img", { name: "Generated image 1" }, { timeout: 1_500 });
+
+    expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(2);
+    expect(image.getAttribute("src")).toContain("/results/image?path=outputs%2F57128511_0_01.png");
+    expect(screen.getByText("Seed: 42")).toBeTruthy();
+    expect(screen.getByText("Progress: generation_finished")).toBeTruthy();
+  });
+
+  it("shows a failed job error after polling", async () => {
+    const fetchMock = mockGenerationApi([{
+      initial: { id: "job-1", name: "generate", status: "queued" },
+      polls: [{ id: "job-1", name: "generate", status: "failed", error: "NovelAI request rejected" }],
+    }]);
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
+
+    expect((await screen.findByRole("alert", {}, { timeout: 1_500 })).textContent).toContain("NovelAI request rejected");
+    expect(screen.getByText("Status: failed")).toBeTruthy();
+  });
+
+  it("stops polling the previous job when a new job is submitted", async () => {
+    const fetchMock = mockGenerationApi([
+      {
+        initial: { id: "job-1", name: "generate", status: "queued" },
+        polls: [{ id: "job-1", name: "generate", status: "running" }],
+      },
+      {
+        initial: { id: "job-2", name: "generate", status: "queued" },
+        polls: [{ id: "job-2", name: "generate", status: "succeeded", result: { images: [] } }],
+      },
+    ]);
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(2));
+
+    await waitFor(() => expect(callsFor(fetchMock, "/jobs/job-2")).toHaveLength(1), { timeout: 1_500 });
+    await waitFor(() => expect(screen.getByText("Job job-2")).toBeTruthy());
+    expect(callsFor(fetchMock, "/jobs/job-1")).toHaveLength(0);
+    expect(callsFor(fetchMock, "/jobs/job-2")).toHaveLength(1);
   });
 });

@@ -41,6 +41,40 @@ class WebResultsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ok": True})
 
+    def test_results_http_serves_rooted_image_and_rejects_unsafe_paths(self):
+        root = self.tmp_path / "outputs"
+        image = root / "demo" / "tasks" / "task_1" / "generated.png"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"png-bytes")
+        outside = self.tmp_path / "outside.png"
+        outside.write_bytes(b"outside")
+        (root / "demo" / "notes.txt").write_text("not an image", encoding="utf-8")
+        (root / "demo" / "folder.png").mkdir()
+        client = TestClient(create_app(result_index=ResultIndex(roots=[root])))
+
+        response = client.get(
+            "/api/results/image",
+            params={"path": "demo/tasks/task_1/generated.png"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"png-bytes")
+        prefixed_response = client.get(
+            "/api/results/image",
+            params={"path": "outputs/demo/tasks/task_1/generated.png"},
+        )
+        self.assertEqual(prefixed_response.status_code, 200)
+        self.assertEqual(prefixed_response.content, b"png-bytes")
+        for unsafe_path in (
+            "../outside.png",
+            str(outside),
+            "demo/notes.txt",
+            "demo/folder.png",
+        ):
+            with self.subTest(path=unsafe_path):
+                rejected = client.get("/api/results/image", params={"path": unsafe_path})
+                self.assertEqual(rejected.status_code, 404)
+
     def setUp(self):
         import tempfile
         from pathlib import Path

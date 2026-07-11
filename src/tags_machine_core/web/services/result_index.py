@@ -7,7 +7,7 @@ from typing import Any
 
 class ResultIndex:
     def __init__(self, *, roots: list[str | Path]):
-        self.roots = [Path(root) for root in roots]
+        self.roots = [Path(root).resolve() for root in roots]
 
     def list_runs(self) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = []
@@ -59,6 +59,22 @@ class ResultIndex:
             "path": str(target),
             "text": target.read_text(encoding="utf-8", errors="ignore"),
         }
+
+    def resolve_image(self, path: str | Path) -> Path:
+        requested = Path(path)
+        candidates = [requested.resolve()]
+        if not requested.is_absolute():
+            for root in self.roots:
+                candidates.extend(((root / requested).resolve(), (root.parent / requested).resolve()))
+
+        for target in candidates:
+            if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                continue
+            if not target.is_file():
+                continue
+            if any(target.is_relative_to(root) for root in self.roots):
+                return target
+        raise FileNotFoundError(str(path))
 
     def _task_count(self, run: Path) -> int:
         tasks = run / "tasks"

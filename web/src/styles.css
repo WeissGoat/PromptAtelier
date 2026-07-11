@@ -361,6 +361,63 @@ button {
   max-height: 120px;
 }
 
+.job-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  color: #4c535f;
+  font-size: 12px;
+}
+
+.job-summary strong {
+  color: #202124;
+}
+
+.generated-image-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.generated-image {
+  border: 1px solid #d0d4dc;
+  border-radius: 6px;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.generated-image img {
+  aspect-ratio: 1;
+  background: #edf2f7;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.generated-image figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 8px;
+}
+
+.generated-image code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.generated-image figcaption span {
+  color: #687182;
+  font-size: 12px;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

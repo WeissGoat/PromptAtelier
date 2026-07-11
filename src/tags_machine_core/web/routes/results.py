@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
 
 from tags_machine_core.web.errors import ApiError
 from tags_machine_core.web.services.result_index import ResultIndex
@@ -34,5 +35,17 @@ def read_file(path: str, request: Request):
         raise ApiError(
             code="result_file_not_found",
             message=f"Result file not found: {path}",
+            status_code=404,
+        ) from exc
+
+
+@router.get("/results/image")
+def read_image(path: str, request: Request) -> FileResponse:
+    try:
+        return FileResponse(_index(request).resolve_image(path))
+    except FileNotFoundError as exc:
+        raise ApiError(
+            code="result_image_not_found",
+            message=f"Result image not found: {path}",
             status_code=404,
         ) from exc

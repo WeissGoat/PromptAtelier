@@ -37,8 +37,28 @@ export type JobRecord = {
   id: string;
   name: string;
   status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
-  result?: unknown;
+  created_at?: number;
+  updated_at?: number;
+  result?: GenerationResult;
   error?: string | null;
+  events?: JobEvent[];
+};
+
+export type JobEvent = {
+  type: string;
+  [key: string]: unknown;
+};
+
+export type GenerationImage = {
+  path: string;
+  filename?: string;
+  meta?: Record<string, unknown>;
+};
+
+export type GenerationResult = {
+  images?: GenerationImage[];
+  request_body?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type BatchPreviewResponse = {
