@@ -34,12 +34,21 @@ Batch YAML
 cd F:\my_project\new\tags_machine\refactor
 ```
 
-如果本机没有设置 `NAI_ACCESS_TOKEN`，可以临时从旧项目 token 读取：
+`configs/local.example.yaml` 只作为模板，不保存真实 token。真实跑图推荐复制成本机私有配置：
 
 ```powershell
-$tokenText = Get-Content -Path 'F:\my_project\new\tags_machine\novelai\client.py' -Raw
-$env:NAI_ACCESS_TOKEN = [regex]::Match($tokenText, 'return\s+"([^"]+)"').Groups[1].Value
+Copy-Item configs\local.example.yaml configs\local.yaml
 ```
+
+然后在 `configs/local.yaml` 里填写 `novelai.access_token`，或者不写 token，改用环境变量：
+
+```powershell
+$env:NAI_ACCESS_TOKEN="你的 NovelAI token"
+```
+
+`configs/local.yaml` 已加入 `.gitignore`，不会提交到仓库。Batch YAML 里如果写的是 `configs/local.example.yaml`，真实运行时会优先使用同目录的 `configs/local.yaml`；没有本机配置时才使用 example 模板，并在缺 token 时提示创建 `local.yaml` 或设置环境变量。
+
+`ai-image-gateway` 自己的 `config.yaml` 只用于它独立运行、examples、smoke test。通过 `refactor` batch / run-prompt 嵌入调用 gateway 时，只读取 `refactor` 的配置，再由 `refactor` 构造 gateway 的 provider 配置。
 
 先规划，不真实生图：
 

@@ -210,7 +210,9 @@ def execute_novelai_generation(
     if not access_token:
         raise RuntimeError(
             "Missing NovelAI token: set novelai.access_token in config or "
-            f"environment variable {config.novelai.access_token_env}"
+            f"environment variable {config.novelai.access_token_env}. "
+            "For local runs, copy configs/local.example.yaml to configs/local.yaml "
+            "and set novelai.access_token there, or set the environment variable."
         )
     client = _novelai_executor_client(config, access_token)
     output_path = Path(output_dir or config.runtime.output_dir)

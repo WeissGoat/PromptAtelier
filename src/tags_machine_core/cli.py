@@ -1369,10 +1369,19 @@ def _batch_config_path(spec, *, spec_path: Path, override: str | None) -> Path:
         return Path(override)
     raw = Path(spec.config)
     if raw.is_absolute():
-        return raw
+        return _prefer_local_config_path(raw)
     if raw.exists():
-        return raw
-    return spec_path.parent / raw
+        return _prefer_local_config_path(raw)
+    return _prefer_local_config_path(spec_path.parent / raw)
+
+
+def _prefer_local_config_path(path: Path) -> Path:
+    if path.name != "local.example.yaml":
+        return path
+    local_path = path.with_name("local.yaml")
+    if local_path.exists():
+        return local_path
+    return path
 
 
 def _write_batch_source(

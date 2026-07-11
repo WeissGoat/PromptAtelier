@@ -13,6 +13,7 @@ outputs/
 cache/
 acceptance_compare/
 local.yaml
+configs/local.yaml
 .env
 .env.*
 !.env.example
