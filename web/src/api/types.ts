@@ -1,7 +1,24 @@
+import type { NodeDocument } from "../nodes/types";
+
 export type NodeSummary = {
   role: string;
   name: string;
   ref: string;
+  relative?: string;
+};
+
+export type NodeReadResponse = {
+  schema: "tags-machine-core.web.node/v1";
+  ref: string;
+  node: NodeDocument;
+  form: Record<string, unknown>;
+  raw?: { filename: string; text: string } | null;
+};
+
+export type NodeListResponse = {
+  schema: string;
+  role: string;
+  nodes: NodeSummary[];
 };
 
 export type ComposePreviewResponse = {
