@@ -50,6 +50,18 @@ $env:NAI_ACCESS_TOKEN="你的 NovelAI token"
 
 `ai-image-gateway` 自己的 `config.yaml` 只用于它独立运行、examples、smoke test。通过 `refactor` batch / run-prompt 嵌入调用 gateway 时，只读取 `refactor` 的配置，再由 `refactor` 构造 gateway 的 provider 配置。
 
+NovelAI 生图执行器由 `configs/local.yaml` 的 `generation.executor` 切换：
+
+```yaml
+generation:
+  executor: "ai_image_gateway_raw"
+```
+
+- `ai_image_gateway_raw`：使用 ai-image-gateway 的 NovelAI raw client。
+- `core_novelai_client`：使用 refactor 原有 NovelAI client。
+
+该配置只切换最终 HTTP 执行器，不影响 Batch、Composer、PromptPolicyPipeline、Renderer 或 artist/vibe 参数解析。
+
 先规划，不真实生图：
 
 ```powershell

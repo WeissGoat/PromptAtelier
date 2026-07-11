@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tags_machine_core.clients import GatewayNovelAIRawClient, NovelAIClient
+from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, RenderRequest
 from tags_machine_core.execution import (
@@ -17,6 +19,8 @@ from tags_machine_core.execution import (
     execute_sd_generation,
     save_generated_images,
 )
+from tags_machine_core.nodes import NovelAIArtistRepository
+from tags_machine_core.renderers import NovelAIRenderAdapter
 from tags_machine_core.verification import read_png_text_chunks
 
 
@@ -67,6 +71,70 @@ def _app_config(root: Path) -> AppConfig:
 
 
 class ExecutionTest(unittest.TestCase):
+    def test_novelai_executors_build_identical_vibe_payloads(self):
+        request = RenderRequest(
+            backend="novelai",
+            prompt="1girl",
+            negative_prompt="lowres",
+            model="nai-diffusion-4-5-full",
+            params={
+                "width": 832,
+                "height": 1216,
+                "reference_image_multiple": ["vibe-a", "vibe-b"],
+                "reference_strength_multiple": [0.13, 0.14],
+                "reference_information_extracted_multiple": [],
+            },
+        )
+
+        core_payload = NovelAIClient(access_token="test").build_payload(request)
+        gateway_payload = GatewayNovelAIRawClient(
+            access_token="test",
+            base_url="https://example.invalid",
+        ).build_payload(request)
+
+        self.assertEqual(gateway_payload, core_payload)
+        self.assertEqual(
+            gateway_payload["parameters"]["reference_image_multiple"],
+            ["vibe-a", "vibe-b"],
+        )
+        self.assertEqual(
+            gateway_payload["parameters"]["reference_strength_multiple"],
+            [0.13, 0.14],
+        )
+
+    def test_artist_gen_json_vibe_reaches_both_executor_payloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            artist_dir = design_root / "\u753b\u98ce" / "vibe_artist"
+            artist_dir.mkdir(parents=True)
+            (artist_dir / "tags.txt").write_text(
+                """
+style prefix,
+=
+gen_param, 'model': 'nai-diffusion-4-5-full', 'reference_strength_multiple': [0.13, 0.14]
+gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a","vibe-b"],"reference_strength_multiple":[0.13,0.14],"reference_information_extracted_multiple":[0.8,0.7]}
+""".strip(),
+                encoding="utf-8",
+            )
+            artist = NovelAIArtistRepository(design_root).load_node("vibe_artist")
+            bundle = ScriptComposer().compose_full_prompt(prompt="1girl")
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, artist=artist)
+
+            core_payload = NovelAIClient(access_token="test").build_payload(request)
+            gateway_payload = GatewayNovelAIRawClient(
+                access_token="test",
+                base_url="https://example.invalid",
+            ).build_payload(request)
+
+            self.assertEqual(gateway_payload, core_payload)
+            params = gateway_payload["parameters"]
+            self.assertEqual(params["reference_image_multiple"], ["vibe-a", "vibe-b"])
+            self.assertEqual(params["reference_strength_multiple"], [0.13, 0.14])
+            self.assertEqual(
+                params["reference_information_extracted_multiple"],
+                [0.8, 0.7],
+            )
+
     def test_save_generated_images_writes_files_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

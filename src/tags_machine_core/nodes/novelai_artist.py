@@ -128,7 +128,8 @@ class NovelAIArtistRepository:
             flags=flags,
         )
 
-        params_seen = False
+        gen_json_value: str | None = None
+        gen_param_value: str | None = None
         for line in ext_lines:
             key, value = self._split_ext_line(line)
             if not key:
@@ -137,15 +138,20 @@ class NovelAIArtistRepository:
                 artist.negative_prompt = value
             elif key == "after_uc":
                 artist.after_negative_prompt = value
-            elif key in {"gen_json", "gen_param"}:
-                if not params_seen:
-                    artist.params.update(self._parse_json_value(value, tags_path))
-                    params_seen = True
+            elif key == "gen_json":
+                if gen_json_value is None:
+                    gen_json_value = value
+            elif key == "gen_param":
+                if gen_param_value is None:
+                    gen_param_value = value
             elif key in {"not_quailty_prompts", "not_quality_prompts"}:
                 artist.flags.add(key)
             else:
                 artist.flags.add(key)
 
+        selected_params = gen_json_value if gen_json_value is not None else gen_param_value
+        if selected_params is not None:
+            artist.params.update(self._parse_json_value(selected_params, tags_path))
         return artist
 
     def _is_type_line(self, line: str) -> bool:

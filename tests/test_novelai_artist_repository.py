@@ -51,6 +51,26 @@ gen_param, 'model': 'nai-diffusion-4-5-full', 'sampler': 'k_dpmpp_2m', 'steps': 
             self.assertIs(artist.params["dynamic_thresholding"], False)
             self.assertEqual(artist.params["reference_image_multiple"], ["abc"])
 
+    def test_runtime_loader_prefers_first_gen_json_over_gen_param(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            artist_dir = design_root / "\u753b\u98ce" / "vibe_artist"
+            artist_dir.mkdir(parents=True)
+            (artist_dir / "tags.txt").write_text(
+                """
+artist prefix,
+=
+gen_param, 'model': 'nai-diffusion-4-5-full', 'reference_strength_multiple': [0.13, 0.14]
+gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a","vibe-b"],"reference_strength_multiple":[0.13,0.14]}
+""".strip(),
+                encoding="utf-8",
+            )
+
+            artist = NovelAIArtistRepository(design_root).load("vibe_artist")
+
+            self.assertEqual(artist.params["reference_image_multiple"], ["vibe-a", "vibe-b"])
+            self.assertEqual(artist.params["reference_strength_multiple"], [0.13, 0.14])
+
     def test_runtime_loader_filters_legacy_extension_params_without_equals_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             design_root = Path(tmp) / "design"
@@ -123,6 +143,45 @@ gen_json, {"sampler": "k_dpmpp_2m", "steps": 40, "reference_strength_multiple": 
             self.assertEqual(params["sampler"], "k_euler")
             self.assertEqual(params["steps"], 28)
             self.assertEqual(params["reference_strength_multiple"], [0.16])
+
+    def test_migration_prefers_gen_json_over_gen_param(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artist_dir = Path(tmp) / "vibe_artist"
+            artist_dir.mkdir()
+            (artist_dir / "tags.txt").write_text(
+                """
+artist prefix,
+=
+gen_param, 'model': 'nai-diffusion-4-5-full', 'reference_strength_multiple': [0.13, 0.14]
+gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a","vibe-b"],"reference_strength_multiple":[0.13,0.14]}
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_artist_tags(artist_dir)
+            params = node["renderers"]["novelai"]["params"]
+
+            self.assertEqual(params["reference_image_multiple"], ["vibe-a", "vibe-b"])
+            self.assertEqual(params["reference_strength_multiple"], [0.13, 0.14])
+
+    def test_migration_falls_back_to_gen_param(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artist_dir = Path(tmp) / "legacy_param_artist"
+            artist_dir.mkdir()
+            (artist_dir / "tags.txt").write_text(
+                """
+artist prefix,
+=
+gen_param, 'model': 'nai-diffusion-4-5-full', 'sampler': 'k_dpmpp_2m'
+""".strip(),
+                encoding="utf-8",
+            )
+
+            node = migrate_legacy_artist_tags(artist_dir)
+            params = node["renderers"]["novelai"]["params"]
+
+            self.assertEqual(params["model"], "nai-diffusion-4-5-full")
+            self.assertEqual(params["sampler"], "k_dpmpp_2m")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from typing import Any
@@ -251,7 +252,8 @@ def migrate_legacy_artist_tags(
     flags: list[str] = list(type_flags)
     legacy_extensions: dict[str, str] = {}
 
-    gen_json_seen = False
+    gen_json_value: str | None = None
+    gen_param_value: str | None = None
     for line in ext_lines:
         key, value = _split_ext_line(line)
         if not key:
@@ -263,9 +265,11 @@ def migrate_legacy_artist_tags(
             if value:
                 novelai["after_negative_prompt"] = [value]
         elif key == "gen_json":
-            if not gen_json_seen:
-                novelai["params"].update(_parse_json_value(value, tags_path))
-                gen_json_seen = True
+            if gen_json_value is None:
+                gen_json_value = value
+        elif key == "gen_param":
+            if gen_param_value is None:
+                gen_param_value = value
         elif key in {"not_quailty_prompts", "not_quality_prompts"}:
             flags.append(key)
         else:
@@ -273,6 +277,9 @@ def migrate_legacy_artist_tags(
             if value:
                 legacy_extensions[key] = value
 
+    selected_params = gen_json_value if gen_json_value is not None else gen_param_value
+    if selected_params is not None:
+        novelai["params"].update(_parse_generation_value(selected_params, tags_path))
     if flags:
         novelai["flags"] = sorted(set(flags))
     if legacy_extensions:
@@ -1089,4 +1096,20 @@ def _parse_json_value(value: str, source: Path) -> dict[str, Any]:
         raise ValueError(f"Invalid gen_json in {source}: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"gen_json must be a JSON object in {source}")
+    return data
+
+
+def _parse_generation_value(value: str, source: Path) -> dict[str, Any]:
+    stripped = value.strip()
+    if not stripped.startswith("{"):
+        stripped = "{" + stripped + "}"
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        try:
+            data = ast.literal_eval(stripped)
+        except (SyntaxError, ValueError) as py_exc:
+            raise ValueError(f"Invalid gen_json/gen_param in {source}: {exc}") from py_exc
+    if not isinstance(data, dict):
+        raise ValueError(f"gen_json/gen_param must be an object in {source}")
     return data
