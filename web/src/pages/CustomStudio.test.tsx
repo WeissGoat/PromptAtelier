@@ -11,6 +11,14 @@ function response(body: unknown, status = 200): Response {
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function node(role: NodeRole, positive: string): NodeDocument {
   return {
     schema: "tags-machine-core.node/v1",
@@ -169,6 +177,76 @@ describe("CustomStudio", () => {
     await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
     const request = JSON.parse(String(callsFor(fetchMock, "/compose-preview")[1][1]?.body));
     expect(request.compose.nodes[0].node.prompt.positive).toEqual([{ text: "1boy" }]);
+  });
+
+  it("re-previews before generate after negative prompt changes", async () => {
+    const fetchMock = mockApi();
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText("Negative prompt"), { target: { value: "new negative" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(2));
+    await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
+    const request = JSON.parse(String(callsFor(fetchMock, "/compose-preview")[1][1]?.body));
+    expect(request.compose.negative).toBe("new negative");
+  });
+
+  it("ignores a delayed preview after a render parameter changes", async () => {
+    const pendingPreview = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/nodes/preview")) {
+        return Promise.resolve(response({ node: JSON.parse(String(init?.body)).node }));
+      }
+      if (url.includes("/compose-preview")) return pendingPreview.promise;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText("Negative prompt"), { target: { value: "new negative" } });
+    pendingPreview.resolve(response({
+      status: "ready",
+      prompt_bundle: { prompt: { positive: "stale prompt", negative: "stale negative" } },
+      render_request: { backend: "novelai", prompt: "stale prompt" },
+    }));
+
+    await waitFor(() => expect(screen.getByText("Preview stale")).toBeTruthy());
+    expect((screen.getByLabelText("Positive preview") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("Negative preview") as HTMLTextAreaElement).value).toBe("new negative");
+  });
+
+  it("does not generate from a stale automatic preview", async () => {
+    const pendingPreview = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/nodes/preview")) {
+        return Promise.resolve(response({ node: JSON.parse(String(init?.body)).node }));
+      }
+      if (url.includes("/compose-preview")) return pendingPreview.promise;
+      if (url.includes("/generate")) return Promise.resolve(response({ id: "job-1", name: "job-1", status: "queued" }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
+    pendingPreview.resolve(response({
+      status: "ready",
+      prompt_bundle: { prompt: { positive: "stale prompt", negative: "lowres" } },
+      render_request: { backend: "novelai", prompt: "stale prompt" },
+    }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("输入已变化，请重新生成"));
+    expect(callsFor(fetchMock, "/generate")).toHaveLength(0);
   });
 
   it("blocks generation for a fully empty temporary node", () => {

@@ -1,5 +1,5 @@
 import { Eye, Play } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiPost, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
@@ -16,6 +16,19 @@ const slotLabels: Record<NodeRole, string> = {
   character: "Character",
   action: "Action",
 };
+
+type PreviewIntent = "preview" | "generate";
+
+type PreviewAttempt = {
+  id: number;
+  intent: PreviewIntent;
+  revision: number;
+  signature: string;
+};
+
+type PreviewOutcome =
+  | { attempt: PreviewAttempt; result: ComposePreviewResponse }
+  | { attempt: PreviewAttempt; error: unknown };
 
 export function CustomStudio() {
   const {
@@ -41,6 +54,8 @@ export function CustomStudio() {
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const previewRequestId = useRef(0);
+  const activePreview = useRef<PreviewAttempt | null>(null);
 
   const revision = nodeRevision + renderRevision;
   const previewIsCurrent = previewRevision === revision;
@@ -69,6 +84,29 @@ export function CustomStudio() {
       },
     };
   }, [artistIsInline, artistSlot.sourceRef, composeNodes, height, negative, nt, seed, width]);
+  const previewSignature = useMemo(() => JSON.stringify(requestBody), [requestBody]);
+  const previewSignatureRef = useRef(previewSignature);
+  previewSignatureRef.current = previewSignature;
+
+  function isCurrentPreview(attempt: PreviewAttempt): boolean {
+    return previewRequestId.current === attempt.id && previewSignatureRef.current === attempt.signature;
+  }
+
+  useEffect(() => {
+    const active = activePreview.current;
+    if (!active || active.signature === previewSignature) return;
+
+    previewRequestId.current += 1;
+    activePreview.current = null;
+    setBusy(false);
+    if (active.intent === "generate") {
+      setStatus("Generate blocked");
+      setError("输入已变化，请重新生成。");
+    } else {
+      setStatus("Preview stale");
+      setError("");
+    }
+  }, [previewSignature]);
 
   function updateRenderParameter<T>(setter: (value: T) => void, value: T) {
     setter(value);
@@ -89,13 +127,31 @@ export function CustomStudio() {
     return emptyDraft ? `${slotLabels[emptyDraft.role]} 节点的临时 prompt 不能为空。` : null;
   }
 
-  async function composePreview(): Promise<ComposePreviewResponse> {
-    const result = await apiPost<ComposePreviewResponse>("/compose-preview", requestBody);
-    setPreview(result);
-    if (result.render_request) {
-      setPreviewRevision(revision);
+  async function composePreview(intent: PreviewIntent): Promise<PreviewOutcome | null> {
+    const attempt: PreviewAttempt = {
+      id: ++previewRequestId.current,
+      intent,
+      revision,
+      signature: previewSignature,
+    };
+    activePreview.current = attempt;
+    try {
+      const result = await apiPost<ComposePreviewResponse>("/compose-preview", requestBody);
+      if (!isCurrentPreview(attempt)) return null;
+      setPreview(result);
+      if (result.render_request) {
+        setPreviewRevision(attempt.revision);
+      }
+      return { attempt, result };
+    } catch (requestError) {
+      if (!isCurrentPreview(attempt)) return null;
+      return { attempt, error: requestError };
+    } finally {
+      if (isCurrentPreview(attempt)) {
+        activePreview.current = null;
+        if (intent === "preview") setBusy(false);
+      }
     }
-    return result;
   }
 
   async function runPreview() {
@@ -109,15 +165,14 @@ export function CustomStudio() {
     setBusy(true);
     setError("");
     setStatus("Previewing");
-    try {
-      const result = await composePreview();
-      setStatus(result.status === "ready" ? "Preview ready" : "Agent required");
-    } catch (err) {
+    const outcome = await composePreview("preview");
+    if (!outcome || !isCurrentPreview(outcome.attempt)) return;
+    if ("error" in outcome) {
       setStatus("Preview failed");
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
+      setError(errorMessage(outcome.error));
+      return;
     }
+    setStatus(outcome.result.status === "ready" ? "Preview ready" : "Agent required");
   }
 
   async function generate() {
@@ -131,10 +186,19 @@ export function CustomStudio() {
     setBusy(true);
     setError("");
     setStatus("Generating");
+    const generationSignature = previewSignature;
     try {
-      const readyPreview = previewIsCurrent && preview?.render_request
-        ? preview
-        : await composePreview();
+      let readyPreview = previewIsCurrent && preview?.render_request ? preview : null;
+      if (!readyPreview) {
+        const outcome = await composePreview("generate");
+        if (!outcome || !isCurrentPreview(outcome.attempt)) return;
+        if ("error" in outcome) {
+          setStatus("Generate failed");
+          setError(errorMessage(outcome.error));
+          return;
+        }
+        readyPreview = outcome.result;
+      }
       if (!readyPreview.render_request) {
         setStatus("Agent required");
         return;
@@ -145,10 +209,13 @@ export function CustomStudio() {
       setJob(result);
       setStatus(`Job ${result.id}: ${result.status}`);
     } catch (err) {
+      if (previewSignatureRef.current !== generationSignature) return;
       setStatus("Generate failed");
       setError(errorMessage(err));
     } finally {
-      setBusy(false);
+      if (previewSignatureRef.current === generationSignature && !activePreview.current) {
+        setBusy(false);
+      }
     }
   }
 
