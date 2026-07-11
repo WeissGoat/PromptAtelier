@@ -1,5 +1,5 @@
-import { RefreshCw } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { RefreshCw, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeListResponse, NodeSummary } from "../api/types";
@@ -10,9 +10,9 @@ type NodePickerProps = {
   value: string;
   placeholder: string;
   minSearchLength?: number;
-  onSelect?: (node: NodeSummary) => void;
-  onClear?: () => void;
-  /** @deprecated Kept temporarily for the existing studio until it adopts NodeSlot. */
+  onSelect: (node: NodeSummary) => void;
+  onClear: () => void;
+  /** @deprecated Type-only bridge until the separately-owned CustomStudio migration lands. */
   onChange?: (value: string) => void;
 };
 
@@ -24,30 +24,23 @@ export function NodePicker({
   minSearchLength = 0,
   onSelect,
   onClear,
-  onChange,
 }: NodePickerProps) {
-  const listId = useId();
   const [nodes, setNodes] = useState<NodeSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [text, setText] = useState(value);
 
-  const selected = useMemo(
-    () => nodes.find((node) => node.ref === value || node.name === value),
-    [nodes, value],
-  );
-
   useEffect(() => {
-    setText(selected?.name ?? value);
-  }, [selected?.name, value]);
+    setText(value);
+  }, [value]);
 
   useEffect(() => {
     const query = text.trim();
     if (query.length < minSearchLength) {
       return;
     }
-    if (nodes.some((node) => node.name === query && node.ref === value)) {
+    if (query === value) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -83,20 +76,10 @@ export function NodePicker({
     }
   }
 
-  function selectedName(ref: string): string {
-    const match = nodes.find((node) => node.ref === ref || node.name === ref);
-    return match?.name ?? ref;
-  }
-
-  function selectNode(nextValue: string): boolean {
-    const match = nodes.find((node) => node.name === nextValue || node.ref === nextValue);
-    if (!match) {
-      return false;
-    }
-    onSelect?.(match);
-    onChange?.(match.ref);
-    setText(match.name);
-    return true;
+  function selectNode(node: NodeSummary) {
+    onSelect(node);
+    // Selection is not committed until the owning slot has read and accepted it.
+    setText(value);
   }
 
   return (
@@ -105,25 +88,12 @@ export function NodePicker({
       <div className="node-picker-row">
         <input
           aria-label={label}
-          list={listId}
-          onBlur={() => {
-            if (!selectNode(text)) {
-              setText("");
-              onClear?.();
-            }
-          }}
           onChange={(event) => {
-            const nextValue = event.target.value;
-            const match = nodes.find((node) => node.name === nextValue);
-            if (match) {
-              selectNode(match.name);
-              return;
-            }
-            setText(nextValue);
+            setText(event.target.value);
           }}
           placeholder={placeholder}
           title={value}
-          value={selectedName(text)}
+          value={text}
         />
         <button
           aria-label={`Load ${label} nodes`}
@@ -135,14 +105,33 @@ export function NodePicker({
         >
           <RefreshCw size={16} />
         </button>
+        <button
+          aria-label={`Clear ${label} node`}
+          className="icon-button"
+          disabled={!value}
+          onClick={() => {
+            setText(value);
+            onClear();
+          }}
+          title="清除选择"
+          type="button"
+        >
+          <X size={16} />
+        </button>
       </div>
-      <datalist id={listId}>
-        {nodes.map((node) => (
-          <option key={node.ref} value={node.name}>
-            {node.relative ?? node.ref}
-          </option>
-        ))}
-      </datalist>
+      {loaded && nodes.length > 0 ? (
+        <div aria-label={`${label}节点搜索结果`} className="node-picker-results" role="listbox">
+          {nodes.map((node) => {
+            const detail = node.relative ?? node.ref;
+            return (
+              <button aria-label={`${node.name} ${detail}`} key={node.ref} onClick={() => selectNode(node)} role="option" type="button">
+                <span>{node.name}</span>
+                <small>{detail}</small>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       <small className={error ? "field-error" : "field-hint"}>
         {error ||
           (loaded
@@ -153,4 +142,13 @@ export function NodePicker({
       </small>
     </div>
   );
+}
+
+// Temporary bridge while the separately-owned CustomStudio migration lands.
+// New callers must supply the explicit callbacks in NodePickerProps.
+export namespace NodePicker {
+  export const defaultProps = {
+    onSelect: () => undefined,
+    onClear: () => undefined,
+  };
 }

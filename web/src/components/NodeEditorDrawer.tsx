@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { apiPost, errorMessage } from "../api/client";
 import type { NodeReadResponse } from "../api/types";
+import { nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeDocument, NodeRole, NodeSlotState } from "../nodes/types";
 
 type NodePreviewResponse = {
@@ -42,6 +43,11 @@ function parseNode(text: string, role: NodeRole): NodeDocument {
     throw new Error("节点 id 不能为空。");
   }
   return node;
+}
+
+function requiresRestoreConfirmation(slot: NodeSlotState): boolean {
+  const status = nodeSlotStatus(slot);
+  return status === "modified" || status === "temporary";
 }
 
 export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSaved }: NodeEditorDrawerProps) {
@@ -106,6 +112,12 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
     }
   }
 
+  function handleRestore() {
+    if (!requiresRestoreConfirmation(activeSlot) || window.confirm("当前临时修改将被还原，是否继续？")) {
+      onRestore(activeSlot.role);
+    }
+  }
+
   return (
     <div className="drawer-backdrop" onMouseDown={onClose} role="presentation">
       <aside aria-label="节点编辑器" className="node-editor-drawer" onMouseDown={(event) => event.stopPropagation()}>
@@ -124,7 +136,7 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
         </label>
         {error ? <div className="alert error-alert" role="alert">{error}</div> : null}
         <div className="drawer-actions">
-          <button disabled={busy} onClick={() => onRestore(slot.role)} type="button">还原原始节点</button>
+          <button disabled={busy} onClick={handleRestore} type="button">还原原始节点</button>
           <span />
           <button disabled={busy} onClick={() => void handleApply()} type="button">应用到本次运行</button>
           <button disabled={busy || !slot.sourceRef} onClick={() => void handleSave()} title={slot.sourceRef ? "保存并覆盖节点库" : "请先选择节点"} type="button">保存到节点库</button>

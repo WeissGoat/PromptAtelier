@@ -66,6 +66,16 @@ describe("NodeEditorDrawer", () => {
     expect(onRestore).toHaveBeenCalledWith("character");
   });
 
+  it("does not restore a modified draft when confirmation is cancelled", () => {
+    const modifiedSlot: NodeSlotState = { ...slot, draftNode: { ...node, id: "draft" } };
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { onRestore } = renderDrawer({ slot: modifiedSlot });
+    fireEvent.click(screen.getByRole("button", { name: "还原原始节点" }));
+
+    expect(confirmMock).toHaveBeenCalled();
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
   it("does not call save while applying a temporary edit", async () => {
     const temporarySlot: NodeSlotState = { ...slot, sourceRef: null, sourceNode: null };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ node }), { status: 200 }));

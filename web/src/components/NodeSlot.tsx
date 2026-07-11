@@ -78,6 +78,12 @@ export function NodeSlot({
     }
   }
 
+  function handleRestore() {
+    if (!requiresConfirmation(slot) || window.confirm("当前临时修改将被还原，是否继续？")) {
+      restore(role);
+    }
+  }
+
   return (
     <section className="node-slot">
       <div className="node-slot-header">
@@ -89,7 +95,7 @@ export function NodeSlot({
           <button aria-label={`新建空白${label}节点`} className="icon-button" onClick={handleCreateBlank} title="新建空白临时节点" type="button">
             <FilePlus2 size={16} />
           </button>
-          <button aria-label={`还原${label}节点`} className="icon-button" disabled={!slot.sourceNode} onClick={() => restore(role)} title="还原原始节点" type="button">
+          <button aria-label={`还原${label}节点`} className="icon-button" disabled={!slot.sourceNode} onClick={handleRestore} title="还原原始节点" type="button">
             <RotateCcw size={16} />
           </button>
           <button aria-label={`清除${label}节点`} className="icon-button" disabled={!slot.draftNode} onClick={handleClear} title="清除节点" type="button">
@@ -100,7 +106,7 @@ export function NodeSlot({
       <NodePicker
         label={label}
         minSearchLength={minSearchLength}
-        onClear={() => undefined}
+        onClear={handleClear}
         onSelect={(node) => void handleSelect(node)}
         placeholder={placeholder}
         role={role}

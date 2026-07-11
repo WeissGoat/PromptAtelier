@@ -150,7 +150,39 @@ button {
 .node-picker-row {
   display: grid;
   gap: 6px;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
+}
+
+.node-picker-results {
+  border: 1px solid #d9dde5;
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.node-picker-results button {
+  align-items: flex-start;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #edf0f4;
+  color: #202124;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.node-picker-results button:hover {
+  background: #f4f7fb;
+}
+
+.node-picker-results small {
+  color: #687182;
+  overflow-wrap: anywhere;
 }
 
 .icon-button {
