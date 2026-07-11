@@ -1,114 +1,115 @@
-import { RefreshCw, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeListResponse, NodeSummary } from "../api/types";
+import type { NodeRole } from "../nodes/types";
 
 type NodePickerProps = {
   label: string;
-  role: "artist" | "character" | "action";
+  role: NodeRole;
   value: string;
   placeholder: string;
-  minSearchLength?: number;
   onSelect: (node: NodeSummary) => void;
   onClear: () => void;
 };
 
-export function NodePicker({
-  label,
-  role,
-  value,
-  placeholder,
-  minSearchLength = 0,
-  onSelect,
-  onClear,
-}: NodePickerProps) {
+export function NodePicker({ label, role, value, placeholder, onSelect, onClear }: NodePickerProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const requestId = useRef(0);
   const [nodes, setNodes] = useState<NodeSummary[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [text, setText] = useState(value);
 
-  useEffect(() => {
-    setText(value);
-  }, [value]);
+  useEffect(() => setText(value), [value]);
 
   useEffect(() => {
-    const query = text.trim();
-    if (query.length < minSearchLength) {
-      return;
-    }
-    if (query === value) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void loadNodes(query);
-    }, 300);
+    if (!open) return;
+    const query = text === value ? "" : text.trim();
+    const timer = window.setTimeout(() => void loadNodes(query), 300);
     return () => window.clearTimeout(timer);
-    // loadNodes is intentionally omitted so typing only controls the debounce.
+    // loadNodes only depends on role and requestId, which are stable for this component.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, minSearchLength]);
+  }, [open, role, text, value]);
 
-  async function loadNodes(query = "") {
-    const normalizedQuery = query.trim();
-    if (normalizedQuery.length < minSearchLength) {
-      setLoaded(false);
-      setError(`输入至少 ${minSearchLength} 个字再搜索`);
-      return;
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) closeResults();
     }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeResults();
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  function closeResults() {
+    requestId.current += 1;
+    setOpen(false);
+    setLoading(false);
+    setError("");
+  }
+
+  async function loadNodes(query: string) {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError("");
     try {
-      const search = new URLSearchParams({ role });
-      search.set("limit", "80");
-      if (normalizedQuery) {
-        search.set("q", normalizedQuery);
-      }
+      const search = new URLSearchParams({ role, limit: "6" });
+      if (query) search.set("q", query);
       const result = await apiGet<NodeListResponse>(`/nodes?${search.toString()}`);
-      setNodes(result.nodes);
-      setLoaded(true);
-    } catch (err) {
-      setError(errorMessage(err));
+      if (currentRequest !== requestId.current) return;
+      setNodes(result.nodes.slice(0, 6));
+    } catch (requestError) {
+      if (currentRequest !== requestId.current) return;
+      setNodes([]);
+      setError(errorMessage(requestError));
     } finally {
-      setLoading(false);
+      if (currentRequest === requestId.current) setLoading(false);
     }
   }
 
   function selectNode(node: NodeSummary) {
+    requestId.current += 1;
+    setText(node.name);
+    setOpen(false);
+    setLoading(false);
+    setError("");
     onSelect(node);
-    // Selection is not committed until the owning slot has read and accepted it.
-    setText(value);
   }
 
   return (
-    <div className="field node-picker">
+    <div className="field node-picker" ref={rootRef}>
       <span>{label}</span>
       <div className="node-picker-row">
         <input
+          aria-controls={`${role}-node-results`}
+          aria-expanded={open}
           aria-label={label}
+          autoComplete="off"
           onChange={(event) => {
             setText(event.target.value);
+            setOpen(true);
           }}
+          onFocus={() => setOpen(true)}
           placeholder={placeholder}
-          title={value}
+          role="combobox"
           value={text}
         />
-        <button
-          aria-label={`Load ${label} nodes`}
-          className="icon-button"
-          disabled={loading}
-          onClick={() => void loadNodes(text)}
-          title={`Load ${label} nodes`}
-          type="button"
-        >
-          <RefreshCw size={16} />
-        </button>
         <button
           aria-label={`Clear ${label} node`}
           className="icon-button"
           disabled={!value}
           onClick={() => {
-            setText(value);
+            closeResults();
+            setText("");
             onClear();
           }}
           title="清除选择"
@@ -117,27 +118,27 @@ export function NodePicker({
           <X size={16} />
         </button>
       </div>
-      {loaded && nodes.length > 0 ? (
-        <div aria-label={`${label}节点搜索结果`} className="node-picker-results" role="listbox">
-          {nodes.map((node) => {
-            const detail = node.relative ?? node.ref;
-            return (
-              <button aria-label={`${node.name} ${detail}`} key={node.ref} onClick={() => selectNode(node)} role="option" type="button">
-                <span>{node.name}</span>
-                <small>{detail}</small>
-              </button>
-            );
-          })}
+      {open ? (
+        <div aria-label={`${label}节点搜索结果`} className="node-picker-results" id={`${role}-node-results`} role="listbox">
+          {loading ? <div className="node-picker-message">正在搜索...</div> : null}
+          {!loading && error ? <div className="node-picker-message field-error">{error}</div> : null}
+          {!loading && !error && nodes.length === 0 ? <div className="node-picker-message">没有匹配节点</div> : null}
+          {!loading && !error ? nodes.map((node) => (
+            <button
+              aria-label={node.name}
+              key={node.ref}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                selectNode(node);
+              }}
+              role="option"
+              type="button"
+            >
+              <span>{node.name}</span>
+            </button>
+          )) : null}
         </div>
       ) : null}
-      <small className={error ? "field-error" : "field-hint"}>
-        {error ||
-          (loaded
-            ? `${nodes.length} nodes loaded`
-            : minSearchLength > 0
-              ? `输入至少 ${minSearchLength} 个字搜索`
-              : "Type directly or load from design")}
-      </small>
     </div>
   );
 }

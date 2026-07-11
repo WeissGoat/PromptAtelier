@@ -150,15 +150,26 @@ button {
 .node-picker-row {
   display: grid;
   gap: 6px;
-  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  grid-template-columns: minmax(0, 1fr) 36px;
+}
+
+.node-picker {
+  position: relative;
 }
 
 .node-picker-results {
+  background: #fff;
   border: 1px solid #d9dde5;
+  box-shadow: 0 8px 18px rgb(32 33 36 / 14%);
   display: flex;
   flex-direction: column;
+  left: 0;
   max-height: 180px;
   overflow-y: auto;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
 }
 
 .node-picker-results button {
@@ -180,9 +191,10 @@ button {
   background: #f4f7fb;
 }
 
-.node-picker-results small {
+.node-picker-message {
   color: #687182;
-  overflow-wrap: anywhere;
+  font-size: 12px;
+  padding: 9px;
 }
 
 .icon-button {
@@ -218,6 +230,41 @@ button {
 .node-slot-header,
 .drawer-header {
   justify-content: space-between;
+}
+
+.node-slot-labels,
+.node-role-title {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.node-role-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.node-role-title {
+  justify-content: space-between;
+}
+
+.node-role-title h3 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.compare-node-slot {
+  border-left: 3px solid #7b8da8;
+}
+
+.compare-badge {
+  background: #eef3f8;
+  border: 1px solid #cbd6e3;
+  border-radius: 4px;
+  color: #41546b;
+  font-size: 11px;
+  padding: 2px 5px;
 }
 
 .node-slot-actions .icon-button {

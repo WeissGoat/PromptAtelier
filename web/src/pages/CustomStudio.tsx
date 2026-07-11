@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord } from "../api/types";
 import { NodeEditorDrawer } from "../components/NodeEditorDrawer";
-import { NodeSlot } from "../components/NodeSlot";
+import { NodeRoleGroup } from "../components/NodeRoleGroup";
 import { PromptPreview } from "../components/PromptPreview";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
-import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
+import { hasUsablePositivePrompt, nodeSlotStatus, serializeNodeSlot } from "../nodes/temporaryNodes";
 import type { NodeRole, NodeSlotState } from "../nodes/types";
-import { useTemporaryNodes } from "../nodes/useTemporaryNodes";
+import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 
 const slotLabels: Record<NodeRole, string> = {
   artist: "Artist",
@@ -65,17 +65,17 @@ function seedForImage(image: GenerationImage, result: GenerationResult | undefin
 }
 
 export function CustomStudio() {
-  const {
-    slots,
-    selectNode,
-    createBlank,
-    updateDraft,
-    restore,
-    clear,
-    composeNodes,
-    revision: nodeRevision,
-  } = useTemporaryNodes();
-  const [negative, setNegative] = useState("lowres");
+  const workspace = useCustomWorkspace();
+  const slots = useMemo(() => ({
+    artist: workspace.state.groups.artist.primary,
+    character: workspace.state.groups.character.primary,
+    action: workspace.state.groups.action.primary,
+  }), [workspace.state.groups]);
+  const composeNodes = useMemo(() => ([slots.artist, slots.character, slots.action]
+    .map((slot) => serializeNodeSlot(slot))
+    .filter((slot): slot is NonNullable<typeof slot> => Boolean(slot))), [slots]);
+  const nodeRevision = workspace.state.revision;
+  const [negative, setNegative] = useState("");
   const [width, setWidth] = useState(1024);
   const [height, setHeight] = useState(1024);
   const [nt, setNt] = useState(1);
@@ -84,7 +84,7 @@ export function CustomStudio() {
   const [preview, setPreview] = useState<ComposePreviewResponse | null>(null);
   const [previewRevision, setPreviewRevision] = useState<number | null>(null);
   const [job, setJob] = useState<JobRecord | null>(null);
-  const [editingRole, setEditingRole] = useState<NodeRole | null>(null);
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -313,41 +313,9 @@ export function CustomStudio() {
         <div className="panel-title">
           <h2>Nodes</h2>
         </div>
-        <NodeSlot
-          clear={clear}
-          createBlank={createBlank}
-          label="Artist"
-          onEdit={(slot) => setEditingRole(slot.role)}
-          placeholder="artist ref"
-          restore={restore}
-          role="artist"
-          selectNode={selectNode}
-          slot={slots.artist}
-        />
-        <NodeSlot
-          clear={clear}
-          createBlank={createBlank}
-          label="Character"
-          minSearchLength={2}
-          onEdit={(slot) => setEditingRole(slot.role)}
-          placeholder="type 2+ chars to search"
-          restore={restore}
-          role="character"
-          selectNode={selectNode}
-          slot={slots.character}
-        />
-        <NodeSlot
-          clear={clear}
-          createBlank={createBlank}
-          label="Action"
-          minSearchLength={2}
-          onEdit={(slot) => setEditingRole(slot.role)}
-          placeholder="type 2+ chars to search"
-          restore={restore}
-          role="action"
-          selectNode={selectNode}
-          slot={slots.action}
-        />
+        <NodeRoleGroup onEditSlot={setEditingSlotId} role="artist" />
+        <NodeRoleGroup onEditSlot={setEditingSlotId} role="character" />
+        <NodeRoleGroup onEditSlot={setEditingSlotId} role="action" />
         <label className="field compact">
           <span>Negative</span>
           <textarea
@@ -418,12 +386,18 @@ export function CustomStudio() {
       </section>
 
       <NodeEditorDrawer
-        onApply={updateDraft}
-        onClose={() => setEditingRole(null)}
-        onRestore={restore}
-        onSaved={selectNode}
-        open={editingRole !== null}
-        slot={editingRole ? slots[editingRole] : null}
+        onApply={(_, node) => {
+          if (editingSlotId) workspace.updateDraft(editingSlotId, node);
+        }}
+        onClose={() => setEditingSlotId(null)}
+        onRestore={() => {
+          if (editingSlotId) workspace.restoreSlot(editingSlotId);
+        }}
+        onSaved={(_, ref, node) => {
+          if (editingSlotId) workspace.selectNode(editingSlotId, ref, node);
+        }}
+        open={editingSlotId !== null}
+        slot={editingSlotId ? workspace.findSlot(editingSlotId) : null}
       />
     </main>
   );
