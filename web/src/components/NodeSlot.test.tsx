@@ -149,4 +149,58 @@ describe("NodeSlot", () => {
     expect(selectNode).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[2][0])).toContain(encodeURIComponent("F:/nodes/b"));
   });
+
+  it("does not restore a late read after clearing the slot", async () => {
+    const read = deferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ schema: "list", role: "character", nodes: [{ role: "character", name: "A", ref: "F:/nodes/a" }] }))
+      .mockReturnValueOnce(read.promise);
+    const { clear, selectNode } = renderSlot();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load 角色 nodes" }));
+    await screen.findByRole("option", { name: "A F:/nodes/a" });
+    fireEvent.click(screen.getByRole("option", { name: "A F:/nodes/a" }));
+    fireEvent.click(screen.getByRole("button", { name: "清除角色节点" }));
+    read.resolve(response({ schema: "node", ref: "F:/nodes/a", node: { ...sourceNode, id: "a" }, form: {} }));
+
+    await waitFor(() => expect(clear).toHaveBeenCalledWith("character"));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(selectNode).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a new blank draft with a late read", async () => {
+    const read = deferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ schema: "list", role: "character", nodes: [{ role: "character", name: "A", ref: "F:/nodes/a" }] }))
+      .mockReturnValueOnce(read.promise);
+    const { createBlank, selectNode } = renderSlot();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load 角色 nodes" }));
+    await screen.findByRole("option", { name: "A F:/nodes/a" });
+    fireEvent.click(screen.getByRole("option", { name: "A F:/nodes/a" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建空白角色节点" }));
+    read.resolve(response({ schema: "node", ref: "F:/nodes/a", node: { ...sourceNode, id: "a" }, form: {} }));
+
+    await waitFor(() => expect(createBlank).toHaveBeenCalledWith("character"));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(selectNode).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a restored source with a late read", async () => {
+    const read = deferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ schema: "list", role: "character", nodes: [{ role: "character", name: "A", ref: "F:/nodes/a" }] }))
+      .mockReturnValueOnce(read.promise);
+    const { restore, selectNode } = renderSlot();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load 角色 nodes" }));
+    await screen.findByRole("option", { name: "A F:/nodes/a" });
+    fireEvent.click(screen.getByRole("option", { name: "A F:/nodes/a" }));
+    fireEvent.click(screen.getByRole("button", { name: "还原角色节点" }));
+    read.resolve(response({ schema: "node", ref: "F:/nodes/a", node: { ...sourceNode, id: "a" }, form: {} }));
+
+    await waitFor(() => expect(restore).toHaveBeenCalledWith("character"));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(selectNode).not.toHaveBeenCalled();
+  });
 });

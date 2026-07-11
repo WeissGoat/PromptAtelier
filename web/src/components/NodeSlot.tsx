@@ -51,6 +51,11 @@ export function NodeSlot({
   const [loading, setLoading] = useState(false);
   const readRequestId = useRef(0);
 
+  function invalidatePendingRead() {
+    readRequestId.current += 1;
+    setLoading(false);
+  }
+
   async function handleSelect(node: NodeSummary) {
     if (requiresConfirmation(slot) && !window.confirm("当前临时修改将被替换，是否继续？")) {
       return;
@@ -72,18 +77,21 @@ export function NodeSlot({
 
   function handleCreateBlank() {
     if (!requiresConfirmation(slot) || window.confirm("当前临时修改将被替换，是否继续？")) {
+      invalidatePendingRead();
       createBlank(role);
     }
   }
 
   function handleClear() {
     if (!requiresConfirmation(slot) || window.confirm("当前临时修改将被清除，是否继续？")) {
+      invalidatePendingRead();
       clear(role);
     }
   }
 
   function handleRestore() {
     if (!requiresConfirmation(slot) || window.confirm("当前临时修改将被还原，是否继续？")) {
+      invalidatePendingRead();
       restore(role);
     }
   }
