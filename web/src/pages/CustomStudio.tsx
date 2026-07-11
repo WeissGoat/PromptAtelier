@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 
 import { apiPost } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
-import { NodeEditor } from "../components/NodeEditor";
 import { NodePicker } from "../components/NodePicker";
 import { PromptPreview } from "../components/PromptPreview";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
@@ -80,9 +79,32 @@ export function CustomStudio() {
         <div className="panel-title">
           <h2>Nodes</h2>
         </div>
-        <NodePicker label="Artist" onChange={setArtist} placeholder="artist ref" value={artist} />
-        <NodePicker label="Character" onChange={setCharacter} placeholder="character path or ref" value={character} />
-        <NodePicker label="Action" onChange={setAction} placeholder="action path or ref" value={action} />
+        <NodePicker
+          label="Artist"
+          onClear={() => setArtist("")}
+          onSelect={(node) => setArtist(node.ref)}
+          placeholder="artist ref"
+          role="artist"
+          value={artist}
+        />
+        <NodePicker
+          label="Character"
+          minSearchLength={2}
+          onClear={() => setCharacter("")}
+          onSelect={(node) => setCharacter(node.ref)}
+          placeholder="type 2+ chars to search"
+          role="character"
+          value={character}
+        />
+        <NodePicker
+          label="Action"
+          minSearchLength={2}
+          onClear={() => setAction("")}
+          onSelect={(node) => setAction(node.ref)}
+          placeholder="type 2+ chars to search"
+          role="action"
+          value={action}
+        />
         <label className="field">
           <span>Full Prompt</span>
           <textarea aria-label="Full prompt" onChange={(event) => setPrompt(event.target.value)} value={prompt} />
@@ -102,8 +124,6 @@ export function CustomStudio() {
           width={width}
         />
       </section>
-
-      <NodeEditor onChange={setNodeDraft} value={nodeDraft} />
 
       <section className="panel preview-panel">
         <div className="panel-title">

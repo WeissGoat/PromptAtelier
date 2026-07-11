@@ -1,5 +1,5 @@
 import { FilePlus2, Pencil, RotateCcw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeReadResponse, NodeSummary } from "../api/types";
@@ -49,20 +49,24 @@ export function NodeSlot({
 }: NodeSlotProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const readRequestId = useRef(0);
 
   async function handleSelect(node: NodeSummary) {
     if (requiresConfirmation(slot) && !window.confirm("当前临时修改将被替换，是否继续？")) {
       return;
     }
+    const requestId = ++readRequestId.current;
     setLoading(true);
     setError("");
     try {
       const response = await apiGet<NodeReadResponse>(`/nodes/read?${new URLSearchParams({ ref: node.ref })}`);
+      if (requestId !== readRequestId.current) return;
       selectNode(role, response.ref, response.node);
     } catch (err) {
+      if (requestId !== readRequestId.current) return;
       setError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (requestId === readRequestId.current) setLoading(false);
     }
   }
 

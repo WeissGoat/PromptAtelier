@@ -12,8 +12,6 @@ type NodePickerProps = {
   minSearchLength?: number;
   onSelect: (node: NodeSummary) => void;
   onClear: () => void;
-  /** @deprecated Type-only bridge until the separately-owned CustomStudio migration lands. */
-  onChange?: (value: string) => void;
 };
 
 export function NodePicker({
@@ -142,13 +140,4 @@ export function NodePicker({
       </small>
     </div>
   );
-}
-
-// Temporary bridge while the separately-owned CustomStudio migration lands.
-// New callers must supply the explicit callbacks in NodePickerProps.
-export namespace NodePicker {
-  export const defaultProps = {
-    onSelect: () => undefined,
-    onClear: () => undefined,
-  };
 }

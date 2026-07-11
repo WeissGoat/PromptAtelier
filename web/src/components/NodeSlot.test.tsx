@@ -38,6 +38,14 @@ function response(data: unknown): Response {
   return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("NodeSlot", () => {
   afterEach(() => {
     cleanup();
@@ -114,5 +122,31 @@ describe("NodeSlot", () => {
 
     await waitFor(() => expect(screen.getByText("read failed")).toBeTruthy());
     expect((screen.getByLabelText("角色") as HTMLInputElement).value).toBe(baseSlot.sourceRef);
+  });
+
+  it("ignores a stale read response when a newer node is selected", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ schema: "list", role: "character", nodes: [
+        { role: "character", name: "A", ref: "F:/nodes/a" },
+        { role: "character", name: "B", ref: "F:/nodes/b" },
+      ] }))
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { selectNode } = renderSlot();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load 角色 nodes" }));
+    await screen.findByRole("option", { name: "A F:/nodes/a" });
+    fireEvent.click(screen.getByRole("option", { name: "A F:/nodes/a" }));
+    fireEvent.click(screen.getByRole("option", { name: "B F:/nodes/b" }));
+
+    second.resolve(response({ schema: "node", ref: "F:/nodes/b", node: { ...sourceNode, id: "b" }, form: {} }));
+    await waitFor(() => expect(selectNode).toHaveBeenCalledWith("character", "F:/nodes/b", expect.objectContaining({ id: "b" })));
+
+    first.resolve(response({ schema: "node", ref: "F:/nodes/a", node: { ...sourceNode, id: "a" }, form: {} }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(selectNode).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[2][0])).toContain(encodeURIComponent("F:/nodes/b"));
   });
 });
