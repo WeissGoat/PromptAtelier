@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ComposePreviewResponse } from "../api/types";
+import { useCompareRunController, type CompareRunController } from "../compare/useCompareRunController";
 import { cloneNode, createTemporaryNode } from "../nodes/temporaryNodes";
 import type { NodeDocument, NodeRole } from "../nodes/types";
 import {
@@ -15,6 +16,7 @@ import type { CustomWorkspaceState, NodeVariantSlot, RenderWorkspaceParams } fro
 type CustomWorkspaceContextValue = {
   state: CustomWorkspaceState;
   storageWarning: string;
+  compareRun: CompareRunController;
   findSlot(slotId: string): NodeVariantSlot | null;
   selectNode(slotId: string, ref: string, node: NodeDocument): void;
   createBlank(slotId: string): void;
@@ -77,6 +79,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
   const [storageWarning, setStorageWarning] = useState(initial.status === "invalid" ? initial.message : "");
   const persistenceBlocked = useRef(initial.status === "invalid");
   const skipNextPersist = useRef(false);
+  const compareRun = useCompareRunController();
 
   useEffect(() => {
     if (persistenceBlocked.current) return;
@@ -97,6 +100,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<CustomWorkspaceContextValue>(() => ({
     state,
     storageWarning,
+    compareRun,
     findSlot: (slotId) => findSlotInState(state, slotId),
     selectNode: (slotId, ref, node) => setState((current) => mapSlot(current, slotId, (slot) => {
       const sourceNode = cloneNode(node);
@@ -185,7 +189,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       setStorageWarning("");
       setState(createEmptyWorkspace());
     },
-  }), [state, storageWarning]);
+  }), [compareRun, state, storageWarning]);
 
   return <CustomWorkspaceContext.Provider value={value}>{children}</CustomWorkspaceContext.Provider>;
 }
