@@ -30,6 +30,23 @@ npm run build
 # PASS: TypeScript and Vite production build
 ```
 
+## Stale Preview Cleanup Isolation Review
+
+- Reworked manual stale-reject coverage so the first pending Preview is invalidated, a second Preview remains pending, and the first rejection is observed before asserting the second request still shows `Previewing`, keeps Preview disabled, and leaves the alert empty. The second response then resolves and verifies `Preview ready` cleanup.
+- Reworked automatic stale-reject coverage the same way for Generate. The first rejection cannot replace `Generating`, clear busy while the second preview is pending, create an old alert, or post `/generate`; resolving the second preview verifies the job completes and Generate is re-enabled.
+- Retained parameterized `width`, `height`, and `nt` re-preview coverage.
+
+### Review Verification
+
+```powershell
+cd web
+npm run test -- src/pages/CustomStudio.test.tsx
+# PASS: 1 test file, 15 tests
+
+npm run build
+# PASS: TypeScript and Vite production build
+```
+
 Additional renderer-context check passed with an inline modified Artist and no `render.artist` source ref:
 
 ```text
