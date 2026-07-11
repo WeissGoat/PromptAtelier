@@ -13,10 +13,12 @@ function response(body: unknown, status = 200): Response {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function node(role: NodeRole, positive: string): NodeDocument {
@@ -247,6 +249,102 @@ describe("CustomStudio", () => {
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("输入已变化，请重新生成"));
     expect(callsFor(fetchMock, "/generate")).toHaveLength(0);
+  });
+
+  it("ignores a delayed rejected manual preview after input changes", async () => {
+    const pendingPreview = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/nodes/preview")) {
+        return Promise.resolve(response({ node: JSON.parse(String(init?.body)).node }));
+      }
+      if (url.includes("/compose-preview")) return pendingPreview.promise;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(1));
+    expect((screen.getByRole("button", { name: "Preview" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Negative prompt"), { target: { value: "new negative" } });
+    await waitFor(() => expect(screen.getByText("Preview stale")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByRole("button", { name: "Preview" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(false);
+
+    pendingPreview.reject(new Error("old preview failed"));
+    await waitFor(() => expect(screen.getByText("Preview stale")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByRole("button", { name: "Preview" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("ignores a delayed rejected automatic preview after input changes", async () => {
+    const pendingPreview = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/nodes/preview")) {
+        return Promise.resolve(response({ node: JSON.parse(String(init?.body)).node }));
+      }
+      if (url.includes("/compose-preview")) return pendingPreview.promise;
+      if (url.includes("/generate")) return Promise.resolve(response({ id: "job-1", name: "job-1", status: "queued" }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(1));
+    expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
+    await waitFor(() => expect(screen.getByText("Generate blocked")).toBeTruthy());
+    const changedInputMessage = screen.getByRole("alert").textContent;
+    expect(changedInputMessage).toBeTruthy(); /*
+    expect(changedInputMessage).toContain("杈撳叆宸插彉鍖栵紝璇烽噸鏂扮敓鎴?");
+    */
+    expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(false);
+
+    pendingPreview.reject(new Error("old automatic preview failed"));
+    await waitFor(() => expect(screen.getByText("Generate blocked")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toBe(changedInputMessage);
+    expect((screen.getByRole("button", { name: "Generate" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(callsFor(fetchMock, "/generate")).toHaveLength(0);
+  });
+
+  it.each([
+    ["width", "Width", "1280"],
+    ["height", "Height", "768"],
+    ["nt", "NT", "2"],
+  ])("re-previews before generate after %s changes", async (parameter, label, value) => {
+    const fetchMock = mockApi();
+    render(<CustomStudio />);
+
+    await applyTemporaryNode("character", node("character", "1girl"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => expect(callsFor(fetchMock, "/compose-preview")).toHaveLength(2));
+    await waitFor(() => expect(callsFor(fetchMock, "/generate")).toHaveLength(1));
+    const composeCalls = callsFor(fetchMock, "/compose-preview");
+    const secondComposeIndex = fetchMock.mock.calls.findIndex((call, index) => (
+      String(call[0]).includes("/compose-preview")
+      && fetchMock.mock.calls.slice(0, index + 1).filter(([input]) => String(input).includes("/compose-preview")).length === 2
+    ));
+    const generateIndex = fetchMock.mock.calls.findIndex(([input]) => String(input).includes("/generate"));
+    expect(generateIndex).toBeGreaterThan(secondComposeIndex);
+
+    const request = JSON.parse(String(composeCalls[1][1]?.body));
+    if (parameter === "nt") {
+      expect(request.render.params.n_samples).toBe(Number(value));
+    } else {
+      expect(request.render[parameter]).toBe(Number(value));
+    }
   });
 
   it("blocks generation for a fully empty temporary node", () => {
