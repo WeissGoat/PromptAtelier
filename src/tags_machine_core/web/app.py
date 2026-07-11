@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -9,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.config import load_config
 from tags_machine_core.execution import execute_render_request
+from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.services.json_api import GenerationExecutor
 
@@ -20,6 +22,23 @@ from .services.node_workspace import NodeWorkspace
 from .services.result_index import ResultIndex
 
 
+DEFAULT_LOCAL_CONFIG = Path("configs/local.yaml")
+DEFAULT_EXAMPLE_CONFIG = Path("configs/local.example.yaml")
+CONFIG_ENV_VAR = "TAGS_MACHINE_CONFIG"
+
+
+def resolve_web_config_path(config_path: str | Path | None = None) -> Path:
+    """解析 Web 默认配置路径：显式参数 > 环境变量 > 本地配置 > 示例配置。"""
+    if config_path:
+        return Path(config_path)
+    env_path = os.environ.get(CONFIG_ENV_VAR)
+    if env_path:
+        return Path(env_path)
+    if DEFAULT_LOCAL_CONFIG.exists():
+        return DEFAULT_LOCAL_CONFIG
+    return DEFAULT_EXAMPLE_CONFIG
+
+
 def create_app(
     *,
     job_manager: JobManager | None = None,
@@ -27,23 +46,27 @@ def create_app(
     result_index: ResultIndex | None = None,
     batch_workspace: BatchWorkspace | None = None,
     generation_executor: GenerationExecutor | None = None,
-    config_path: str | Path = "configs/local.example.yaml",
+    config_path: str | Path | None = None,
 ) -> FastAPI:
-    config = load_config(config_path)
+    resolved_config_path = resolve_web_config_path(config_path)
+    config = load_config(resolved_config_path)
     app = FastAPI(title="PromptAtelier Web Console", version="0.1.0")
     app.state.job_manager = job_manager or JobManager()
     app.state.config = config
+    app.state.config_path = resolved_config_path
     app.state.node_workspace = node_workspace or NodeWorkspace(design_root=config.legacy.design_root)
     app.state.result_index = result_index or ResultIndex(
         roots=[config.runtime.output_dir, "outputs", "examples/batches/outputs"],
     )
     app.state.batch_workspace = batch_workspace or BatchWorkspace(base_dir=Path.cwd())
     app.state.generation_api = GenerationJsonApi(
+        artist_loader=NovelAIArtistRepository(config.legacy.design_root).load_node,
         generation_executor=generation_executor or _default_generation_executor(config),
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=[],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):\d+$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

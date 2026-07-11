@@ -21,6 +21,7 @@ from tags_machine_core.services.json_api_models import (
 )
 
 GenerationExecutor = Callable[[RenderRequest, Mapping[str, Any]], GenerationResult | Mapping[str, Any]]
+ArtistLoader = Callable[[str], NodeDocument]
 
 
 class GenerationJsonApi:
@@ -32,10 +33,12 @@ class GenerationJsonApi:
         service: GenerationService | None = None,
         node_reader: NodeReader | None = None,
         generation_executor: GenerationExecutor | None = None,
+        artist_loader: ArtistLoader | None = None,
     ):
         self.service = service or GenerationService()
         self.node_reader = node_reader or NodeReader()
         self.generation_executor = generation_executor
+        self.artist_loader = artist_loader
 
     def backend_support(self, request: Mapping[str, Any] | None = None) -> dict[str, Any]:
         if request is not None:
@@ -136,7 +139,7 @@ class GenerationJsonApi:
             raise ValueError("render-plan request must include prompt_bundle")
         bundle = PromptBundle.model_validate(bundle_data)
         backend = str(data.get("backend") or "novelai")
-        artist = self._load_optional_node(data.get("artist") or data.get("artist_node"))
+        artist = self._load_optional_artist_node(data.get("artist") or data.get("artist_node"))
         resolved_nodes = self._load_resolved_nodes(data)
         request_model = self.service.build_render_request(
             bundle,
@@ -239,6 +242,13 @@ class GenerationJsonApi:
             return NodeDocument.model_validate(value)
         raise ValueError(f"Expected node path or node mapping, got: {type(value).__name__}")
 
+    def _load_optional_artist_node(self, value: Any) -> NodeDocument | None:
+        if value is None or value == "":
+            return None
+        if self.artist_loader is not None and isinstance(value, (str, Path)):
+            return self.artist_loader(str(value))
+        return self._load_optional_node(value)
+
     def _load_resolved_nodes(self, data: Mapping[str, Any]) -> ResolvedNodeSet:
         items: list[tuple[str, str, NodeDocument]] = []
         nodes_value = data.get("nodes")
@@ -249,7 +259,7 @@ class GenerationJsonApi:
                 ref = str(item.get("ref") or item.get("path") or "").strip()
                 if not role or not ref:
                     raise ValueError("node list items require role and ref")
-                node = self._load_optional_node(item.get("node") or ref)
+                node = self._load_node_for_role(role, item.get("node") or ref)
                 if node is None:
                     raise ValueError("node list item resolved to empty node")
                 items.append((role, ref, node))
@@ -257,7 +267,7 @@ class GenerationJsonApi:
             nodes = _mapping(nodes_value or {}, "compose request nodes")
             for role in ("character", "action", "background", "artist"):
                 value = nodes.get(role) or data.get(role)
-                for ref, node in self._load_node_values(value):
+                for ref, node in self._load_node_values(value, role=role):
                     items.append((role, ref, node))
 
         role_counts: dict[str, int] = {}
@@ -268,21 +278,26 @@ class GenerationJsonApi:
             resolved.append(ResolvedNode(role=role, ref=ref, index=index, node=node))
         return ResolvedNodeSet(resolved)
 
-    def _load_node_values(self, value: Any) -> list[tuple[str, NodeDocument]]:
+    def _load_node_for_role(self, role: str, value: Any) -> NodeDocument | None:
+        if role == "artist":
+            return self._load_optional_artist_node(value)
+        return self._load_optional_node(value)
+
+    def _load_node_values(self, value: Any, *, role: str) -> list[tuple[str, NodeDocument]]:
         if value is None or value == "":
             return []
         if isinstance(value, list):
             items: list[tuple[str, NodeDocument]] = []
             for item in value:
-                items.extend(self._load_node_values(item))
+                items.extend(self._load_node_values(item, role=role))
             return items
         if isinstance(value, Mapping) and ("ref" in value or "path" in value or "node" in value):
             ref = str(value.get("ref") or value.get("path") or "").strip()
-            node = self._load_optional_node(value.get("node") or ref or value)
+            node = self._load_node_for_role(role, value.get("node") or ref or value)
             if node is None:
                 return []
             return [(ref or node.source_ref(), node)]
-        node = self._load_optional_node(value)
+        node = self._load_node_for_role(role, value)
         if node is None:
             return []
         return [(str(value), node)]

@@ -52,3 +52,36 @@ Focused 业务测试通过：`ScriptComposer.compose_resolved_nodes()` 的最终
 ## 范围说明
 
 未处理或纳入任何外部 prompt policy、batch、artist vibe、配置示例或其他任务外 dirty 文件。
+
+## Final Artist Loading Fix
+
+### Root Cause And Fix
+
+`GenerationJsonApi._load_optional_artist_node()` previously called the generic `NodeReader` first. For an existing legacy `tags.txt` path, that generic representation duplicated the same artist material across common tags and prompt fields before the renderer assembled its final prompt.
+
+The loader now follows the runtime ownership contract:
+
+- string and `Path` artist references use the configured `artist_loader` first;
+- inline `NodeDocument` and Mapping values continue through generic node validation;
+- bare refs and existing absolute paths both resolve through `NovelAIArtistRepository` in Web runtime.
+
+### Runtime Dependency Files Included
+
+- `src/tags_machine_core/services/json_api.py`
+- `src/tags_machine_core/web/app.py`
+- `src/tags_machine_core/web/__main__.py`
+- `src/tags_machine_core/web/routes/compose.py`
+- `tests/test_json_api.py`
+- `tests/test_web_app.py`
+- `tests/test_web_compose.py`
+- `web/package.json`
+
+These preserve the existing Web config priority, `NovelAIArtistRepository` injection, CORS behavior, CLI host/port/config options, compose JSON error mapping, and frontend development port configuration.
+
+### Verification
+
+- Focused Artist loader tests: 4 passed, including bare ref, existing absolute `Path`, inline Mapping bypass, and real legacy explicit/resolved prompt deduplication.
+- Clean-worktree Web suite plus `tests.test_novelai_artist_dedup`: 23 passed.
+- Current-worktree frontend suite: 46 passed.
+- Current-worktree TypeScript/Vite production build: passed, 1594 modules transformed.
+- Full `tests.test_json_api` was run as requested. The current HEAD baseline reports 16 failures and 20 errors in pre-existing v1/v2 schema, CLI option, ComfyUI, and example-contract assertions outside this fix scope. The four Artist loading tests pass within that suite; no excluded config, batch, policy, renderer, or generation-service changes were added to mask those unrelated failures.

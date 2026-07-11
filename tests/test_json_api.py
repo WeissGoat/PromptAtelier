@@ -7,10 +7,12 @@ import unittest
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.cli import main
+from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.services.json_api_models import BatchItemRequest
 from tags_machine_core.verification import build_acceptance_record
@@ -194,6 +196,143 @@ class JsonApiTest(unittest.TestCase):
             self.assertIn("style prefix", request["prompt"])
             self.assertIn("style suffix", request["prompt"])
             self.assertIn("bad anatomy", request["negative_prompt"])
+
+    def test_compose_render_plan_uses_artist_loader_for_bare_artist_ref(self):
+        calls = []
+
+        def load_artist(ref: str) -> NodeDocument:
+            calls.append(ref)
+            return NodeDocument(
+                kind="artist",
+                id=ref,
+                name=ref,
+                renderers={
+                    "novelai": {
+                        "prompt_prefix": ["artist prefix"],
+                        "params": {"steps": 28},
+                    }
+                },
+            )
+
+        result = GenerationJsonApi(artist_loader=load_artist).compose_render_plan(
+            {
+                "compose": {
+                    "prompt": "1girl, standing",
+                },
+                "render": {
+                    "backend": "novelai",
+                    "artist": "20260412",
+                },
+            }
+        )
+
+        self.assertEqual(calls, ["20260412", "20260412"])
+        self.assertIn("artist prefix", result["render_request"]["prompt"])
+        self.assertEqual(result["render_request"]["params"]["steps"], 28)
+
+    def test_existing_absolute_artist_path_uses_artist_loader_before_node_reader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            artist_path = design_root / "legacy_artist"
+            artist_path.mkdir(parents=True)
+            (artist_path / "tags.txt").write_text(
+                "absolute artist marker,\nquality suffix,",
+                encoding="utf-8",
+            )
+            repository = NovelAIArtistRepository(design_root)
+            calls: list[str] = []
+
+            def load_artist(ref: str) -> NodeDocument:
+                calls.append(ref)
+                return repository.load_node(ref)
+
+            node_reader = Mock()
+            node_reader.read.side_effect = AssertionError("artist path must bypass NodeReader")
+            result = GenerationJsonApi(
+                artist_loader=load_artist,
+                node_reader=node_reader,
+            ).compose_render_plan(
+                {
+                    "compose": {"prompt": "1girl, standing"},
+                    "render": {
+                        "backend": "novelai",
+                        "artist": artist_path,
+                    },
+                }
+            )
+
+            self.assertEqual(calls, [str(artist_path), str(artist_path)])
+            node_reader.read.assert_not_called()
+            self.assertEqual(
+                result["render_request"]["prompt"].count("absolute artist marker"),
+                1,
+            )
+
+    def test_inline_artist_mapping_bypasses_configured_artist_loader(self):
+        artist_loader = Mock(side_effect=AssertionError("inline artist must not use loader"))
+        result = GenerationJsonApi(artist_loader=artist_loader).compose_render_plan(
+            {
+                "compose": {"prompt": "1girl, standing"},
+                "render": {
+                    "backend": "novelai",
+                    "artist": {
+                        "kind": "artist",
+                        "id": "inline-artist",
+                        "renderers": {
+                            "novelai": {
+                                "prompt_prefix": ["inline artist marker"],
+                            }
+                        },
+                    },
+                },
+            }
+        )
+
+        artist_loader.assert_not_called()
+        self.assertEqual(
+            result["render_request"]["prompt"].count("inline artist marker"),
+            1,
+        )
+
+    def test_compose_render_plan_deduplicates_real_legacy_explicit_and_resolved_artist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp) / "design"
+            artist_path = design_root / "legacy_artist"
+            artist_path.mkdir(parents=True)
+            (artist_path / "tags.txt").write_text(
+                "real legacy artist marker,\nquality suffix,",
+                encoding="utf-8",
+            )
+            repository = NovelAIArtistRepository(design_root)
+
+            result = GenerationJsonApi(
+                artist_loader=repository.load_node,
+            ).compose_render_plan(
+                {
+                    "compose": {
+                        "nodes": [
+                            {"role": "artist", "ref": str(artist_path)},
+                            {
+                                "role": "character",
+                                "ref": "inline-character",
+                                "node": {
+                                    "kind": "character",
+                                    "id": "subject",
+                                    "prompt": {"positive": ["1girl, standing"]},
+                                },
+                            },
+                        ],
+                    },
+                    "render": {
+                        "backend": "novelai",
+                        "artist": str(artist_path),
+                    },
+                }
+            )
+
+            prompt = result["render_request"]["prompt"]
+            self.assertEqual(prompt.count("real legacy artist marker"), 1)
+            self.assertEqual(prompt.count("quality suffix"), 1)
 
     def test_compose_render_plan_json_api_supports_node_list_character_prompts(self):
         with tempfile.TemporaryDirectory() as tmp:

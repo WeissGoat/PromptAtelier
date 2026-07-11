@@ -59,3 +59,19 @@ class WebComposeTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(job["status"], "succeeded")
         self.assertEqual(job["result"]["images"][0]["filename"], "image.png")
+
+    def test_compose_preview_returns_json_error_for_bad_artist_ref(self):
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/api/compose-preview",
+            json={
+                "compose": {"prompt": "1girl, standing"},
+                "render": {"backend": "novelai", "artist": "missing_artist_ref"},
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "compose_preview_failed")
+        self.assertIn("missing_artist_ref", data["error"]["message"])
