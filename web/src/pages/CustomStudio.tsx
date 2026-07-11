@@ -1,76 +1,155 @@
-import { Eye, Play, Save } from "lucide-react";
+import { Eye, Play } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { apiPost } from "../api/client";
+import { apiPost, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
-import { NodePicker } from "../components/NodePicker";
+import { NodeEditorDrawer } from "../components/NodeEditorDrawer";
+import { NodeSlot } from "../components/NodeSlot";
 import { PromptPreview } from "../components/PromptPreview";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
+import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
+import type { NodeRole, NodeSlotState } from "../nodes/types";
+import { useTemporaryNodes } from "../nodes/useTemporaryNodes";
+
+const slotLabels: Record<NodeRole, string> = {
+  artist: "Artist",
+  character: "Character",
+  action: "Action",
+};
 
 export function CustomStudio() {
-  const [artist, setArtist] = useState("109841329_03_manga_monochrome_yabuki_rance_no_vibe_latest_stable");
-  const [character, setCharacter] = useState("");
-  const [action, setAction] = useState("");
-  const [prompt, setPrompt] = useState("1girl, standing");
+  const {
+    slots,
+    selectNode,
+    createBlank,
+    updateDraft,
+    restore,
+    clear,
+    composeNodes,
+    revision: nodeRevision,
+  } = useTemporaryNodes();
   const [negative, setNegative] = useState("lowres");
-  const [nodeDraft, setNodeDraft] = useState("kind: character\nname: draft\nprompt:\n  positive:\n    - 1girl");
   const [width, setWidth] = useState(1024);
   const [height, setHeight] = useState(1024);
   const [nt, setNt] = useState(1);
   const [seed, setSeed] = useState("-1");
+  const [renderRevision, setRenderRevision] = useState(0);
   const [preview, setPreview] = useState<ComposePreviewResponse | null>(null);
+  const [previewRevision, setPreviewRevision] = useState<number | null>(null);
   const [job, setJob] = useState<JobRecord | null>(null);
+  const [editingRole, setEditingRole] = useState<NodeRole | null>(null);
   const [status, setStatus] = useState("Ready");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
+  const revision = nodeRevision + renderRevision;
+  const previewIsCurrent = previewRevision === revision;
   const renderRequest = preview?.render_request;
-  const previewPrompt = preview?.prompt_bundle?.prompt.positive ?? prompt;
+  const previewPrompt = preview?.prompt_bundle?.prompt.positive ?? "";
   const previewNegative = preview?.prompt_bundle?.prompt.negative ?? negative;
+  const artistSlot = slots.artist;
+  const artistIsInline = Boolean(artistSlot.draftNode) && nodeSlotStatus(artistSlot) !== "original";
 
   const requestBody = useMemo(() => {
-    const nodes = [
-      character ? { role: "character", ref: character } : null,
-      action ? { role: "action", ref: action } : null,
-      artist ? { role: "artist", ref: artist } : null,
-    ].filter(Boolean);
+    const parsedSeed = Number(seed);
     return {
       compose: {
-        prompt,
+        nodes: composeNodes,
         negative,
-        nodes,
       },
       render: {
         backend: "novelai",
-        artist,
+        artist: artistIsInline ? undefined : artistSlot.sourceRef ?? undefined,
         width,
         height,
-        seed: Number.isFinite(Number(seed)) ? Number(seed) : undefined,
+        seed: Number.isFinite(parsedSeed) && parsedSeed >= 0 ? parsedSeed : undefined,
         params: {
           n_samples: nt,
         },
       },
     };
-  }, [action, artist, character, height, negative, nt, prompt, seed, width]);
+  }, [artistIsInline, artistSlot.sourceRef, composeNodes, height, negative, nt, seed, width]);
 
-  async function runPreview() {
-    setStatus("Previewing");
+  function updateRenderParameter<T>(setter: (value: T) => void, value: T) {
+    setter(value);
+    setRenderRevision((current) => current + 1);
+  }
+
+  function validationError(): string | null {
+    const hasCharacterOrAction = [slots.character, slots.action].some((slot) => slot.draftNode);
+    if (!hasCharacterOrAction) {
+      return "请至少选择或新建一个 Character 或 Action 节点。";
+    }
+
+    const emptyDraft = Object.values(slots).find((slot: NodeSlotState) => (
+      slot.draftNode
+      && nodeSlotStatus(slot) !== "original"
+      && !hasUsablePositivePrompt(slot.draftNode)
+    ));
+    return emptyDraft ? `${slotLabels[emptyDraft.role]} 节点的临时 prompt 不能为空。` : null;
+  }
+
+  async function composePreview(): Promise<ComposePreviewResponse> {
     const result = await apiPost<ComposePreviewResponse>("/compose-preview", requestBody);
     setPreview(result);
-    setStatus(result.status === "ready" ? "Preview ready" : "Agent required");
+    if (result.render_request) {
+      setPreviewRevision(revision);
+    }
+    return result;
+  }
+
+  async function runPreview() {
+    const message = validationError();
+    if (message) {
+      setError(message);
+      setStatus("Preview blocked");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setStatus("Previewing");
+    try {
+      const result = await composePreview();
+      setStatus(result.status === "ready" ? "Preview ready" : "Agent required");
+    } catch (err) {
+      setStatus("Preview failed");
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function generate() {
-    const readyPreview = preview?.render_request ? preview : await apiPost<ComposePreviewResponse>("/compose-preview", requestBody);
-    if (!readyPreview.render_request) {
-      setPreview(readyPreview);
-      setStatus("Agent required");
+    const message = validationError();
+    if (message) {
+      setError(message);
+      setStatus("Generate blocked");
       return;
     }
-    setPreview(readyPreview);
-    const result = await apiPost<JobRecord>("/generate", {
-      render_request: readyPreview.render_request,
-    });
-    setJob(result);
-    setStatus(`Job ${result.id}: ${result.status}`);
+
+    setBusy(true);
+    setError("");
+    setStatus("Generating");
+    try {
+      const readyPreview = previewIsCurrent && preview?.render_request
+        ? preview
+        : await composePreview();
+      if (!readyPreview.render_request) {
+        setStatus("Agent required");
+        return;
+      }
+      const result = await apiPost<JobRecord>("/generate", {
+        render_request: readyPreview.render_request,
+      });
+      setJob(result);
+      setStatus(`Job ${result.id}: ${result.status}`);
+    } catch (err) {
+      setStatus("Generate failed");
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -79,47 +158,56 @@ export function CustomStudio() {
         <div className="panel-title">
           <h2>Nodes</h2>
         </div>
-        <NodePicker
+        <NodeSlot
+          clear={clear}
+          createBlank={createBlank}
           label="Artist"
-          onClear={() => setArtist("")}
-          onSelect={(node) => setArtist(node.ref)}
+          onEdit={(slot) => setEditingRole(slot.role)}
           placeholder="artist ref"
+          restore={restore}
           role="artist"
-          value={artist}
+          selectNode={selectNode}
+          slot={slots.artist}
         />
-        <NodePicker
+        <NodeSlot
+          clear={clear}
+          createBlank={createBlank}
           label="Character"
           minSearchLength={2}
-          onClear={() => setCharacter("")}
-          onSelect={(node) => setCharacter(node.ref)}
+          onEdit={(slot) => setEditingRole(slot.role)}
           placeholder="type 2+ chars to search"
+          restore={restore}
           role="character"
-          value={character}
+          selectNode={selectNode}
+          slot={slots.character}
         />
-        <NodePicker
+        <NodeSlot
+          clear={clear}
+          createBlank={createBlank}
           label="Action"
           minSearchLength={2}
-          onClear={() => setAction("")}
-          onSelect={(node) => setAction(node.ref)}
+          onEdit={(slot) => setEditingRole(slot.role)}
           placeholder="type 2+ chars to search"
+          restore={restore}
           role="action"
-          value={action}
+          selectNode={selectNode}
+          slot={slots.action}
         />
-        <label className="field">
-          <span>Full Prompt</span>
-          <textarea aria-label="Full prompt" onChange={(event) => setPrompt(event.target.value)} value={prompt} />
-        </label>
         <label className="field compact">
           <span>Negative</span>
-          <textarea aria-label="Negative prompt" onChange={(event) => setNegative(event.target.value)} value={negative} />
+          <textarea
+            aria-label="Negative prompt"
+            onChange={(event) => updateRenderParameter(setNegative, event.target.value)}
+            value={negative}
+          />
         </label>
         <RenderParamsPanel
           height={height}
           nt={nt}
-          onHeightChange={setHeight}
-          onNtChange={setNt}
-          onSeedChange={setSeed}
-          onWidthChange={setWidth}
+          onHeightChange={(value) => updateRenderParameter(setHeight, value)}
+          onNtChange={(value) => updateRenderParameter(setNt, value)}
+          onSeedChange={(value) => updateRenderParameter(setSeed, value)}
+          onWidthChange={(value) => updateRenderParameter(setWidth, value)}
           seed={seed}
           width={width}
         />
@@ -130,23 +218,29 @@ export function CustomStudio() {
           <h2>Prompt Preview</h2>
           <span className="status-pill">{status}</span>
         </div>
+        {error ? <div className="alert error-alert" role="alert">{error}</div> : null}
         <PromptPreview negative={previewNegative} prompt={previewPrompt} renderRequest={renderRequest} />
         {job ? <pre className="json-preview compact-json">{JSON.stringify(job, null, 2)}</pre> : null}
         <div className="button-row">
-          <button onClick={runPreview} type="button">
+          <button disabled={busy} onClick={() => void runPreview()} type="button">
             <Eye size={16} />
             Preview
           </button>
-          <button onClick={generate} type="button">
+          <button disabled={busy} onClick={() => void generate()} type="button">
             <Play size={16} />
             Generate
           </button>
-          <button disabled type="button" title="Node save arrives with structured editing">
-            <Save size={16} />
-            Save
-          </button>
         </div>
       </section>
+
+      <NodeEditorDrawer
+        onApply={updateDraft}
+        onClose={() => setEditingRole(null)}
+        onRestore={restore}
+        onSaved={selectNode}
+        open={editingRole !== null}
+        slot={editingRole ? slots[editingRole] : null}
+      />
     </main>
   );
 }

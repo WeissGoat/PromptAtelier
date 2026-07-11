@@ -49,7 +49,37 @@ class WebNodesTest(TestCase):
             self.assertEqual(loaded["node"]["id"], "homura")
             self.assertEqual(loaded["form"]["prompt"]["positive"], ["akemi_homura"])
 
-    def test_nodes_http_preview_does_not_write_file(self):
+    def test_node_workspace_recursively_lists_nested_nodes_with_query_and_limit(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design = root / "design"
+            _write_meta(
+                design / "角色" / "madoka_magica" / "akemi_homura",
+                kind="character",
+                node_id="homura",
+                prompt="akemi_homura",
+            )
+            _write_meta(
+                design / "动作改2" / "st_foot" / "圆神足部闻香",
+                kind="action",
+                node_id="foot_smell",
+                prompt="foot smell",
+            )
+            workspace = NodeWorkspace(design_root=design)
+
+            characters = workspace.list_nodes("character", query="homura", limit=10)
+            actions = workspace.list_nodes("action", query="足部", limit=10)
+
+            self.assertEqual(len(characters), 1)
+            self.assertEqual(characters[0]["name"], "akemi_homura")
+            self.assertEqual(characters[0]["relative"], "madoka_magica/akemi_homura")
+            self.assertEqual(len(actions), 1)
+            self.assertEqual(actions[0]["name"], "圆神足部闻香")
+            self.assertEqual(actions[0]["relative"], "st_foot/圆神足部闻香")
+
+    def test_preview_node_returns_normalized_node(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -66,9 +96,28 @@ class WebNodesTest(TestCase):
 
             response = client.post(
                 "/api/nodes/preview",
-                json={"kind": "character", "id": "draft", "prompt": {"positive": ["draft_tag"]}},
+                json={
+                    "node": {
+                        "kind": "character",
+                        "id": "draft",
+                        "prompt": {"positive": ["draft_tag"]},
+                    }
+                },
             )
 
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["node"]["kind"], "character")
             self.assertEqual(response.json()["form"]["prompt"]["positive"], ["draft_tag"])
             self.assertFalse((design / "角色" / "draft").exists())
+
+    def test_preview_node_returns_json_error_for_invalid_node(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = NodeWorkspace(design_root=Path(tmp) / "design")
+            client = TestClient(create_app(node_workspace=workspace))
+
+            response = client.post("/api/nodes/preview", json={"node": {"kind": "character"}})
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["error"]["code"], "invalid_node")

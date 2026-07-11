@@ -67,7 +67,7 @@ export function NodeEditorDrawer({ open, slot, onClose, onApply, onRestore, onSa
 
   async function validateNode(): Promise<NodeDocument> {
     const parsed = parseNode(text, activeSlot.role);
-    const response = await apiPost<NodePreviewResponse>("/nodes/preview", parsed);
+    const response = await apiPost<NodePreviewResponse>("/nodes/preview", { node: parsed });
     return response.node;
   }
 
