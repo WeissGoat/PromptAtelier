@@ -7,7 +7,7 @@ Web Node Editor 不再把完整 `NodeDocument` 当作普通 Form 展示，而是
 保存时必须更新节点原数据源：
 
 - Artist 保存回原 `tags.txt`。
-- Action 保存回原 `tags.txt`；涉及分类数据时可同时保存 `classify.yaml`。
+- Action Prompt 保存回原 `tags.txt`；结构化元数据保存回 `meta.yaml`；角色选择规则保存回实际来源 `action_profile.yaml` 或 `run-prompt-prompt.md`。
 - Character 保存回原 `meta.yaml`。
 
 第一次点击保存只生成源文件 Diff，不修改磁盘。用户在 Diff 弹窗中二次确认后，系统才正式写入文件。
@@ -126,9 +126,12 @@ FileMutation[]
 Action 保存可以同时生成：
 
 - `tags.txt` 变更。
-- `classify.yaml` 变更。
+- `meta.yaml` 变更。
+- `action_profile.yaml` 或 `run-prompt-prompt.md` YAML 头变更。
 
-两个文件在同一个 Diff 弹窗中按文件分别展示并一次确认写入。
+所有涉及文件在同一个 Diff 弹窗中按文件分别展示并一次确认写入。
+
+`classify.yaml` 仅承载动作分类；除非 Form 明确开放分类字段，否则保存 `selected_keys` 时不得修改它。
 
 ### 5.3 Character
 
@@ -268,7 +271,7 @@ PUT /api/nodes/save-commit
 
 ## 8. 多文件原子性
 
-Action 一次保存可能修改 `tags.txt` 和 `classify.yaml`。
+Action 一次保存可能修改 `tags.txt`、`meta.yaml` 和角色选择规则来源文件。
 
 提交步骤：
 
@@ -339,9 +342,10 @@ Action 一次保存可能修改 `tags.txt` 和 `classify.yaml`。
 ### 12.2 Action
 
 1. 修改 Action Prompt 和 `selected_keys`。
-2. Diff 弹窗分别展示 `tags.txt` 和 `classify.yaml`。
-3. 确认后两个文件均更新。
-4. ScriptComposer 使用新的 Action 数据；AgentComposer 链路不受影响。
+2. Diff 弹窗展示 `tags.txt`，并按节点实际来源展示 `action_profile.yaml` 或 `run-prompt-prompt.md`。
+3. 如同时修改 Action 结构化元数据，Diff 额外展示 `meta.yaml`。
+4. 确认后所有涉及文件均更新，`classify.yaml` 在未编辑分类字段时保持不变。
+5. ScriptComposer 使用新的 Action 数据；AgentComposer 链路不受影响。
 
 ### 12.3 Character
 
