@@ -60,6 +60,15 @@ describe("NodeSlot", () => {
     expect(screen.queryByDisplayValue("F:/nodes/source")).toBeNull();
   });
 
+  it("marks modified and temporary node names with an asterisk", () => {
+    const modified = { ...baseSlot, draftNode: { ...sourceNode, description: "edited" } };
+    const view = render(<NodeSlot {...renderSlotProps(modified)} />);
+    expect((screen.getByRole("combobox", { name: "Character" }) as HTMLInputElement).value).toBe("source-file *");
+
+    view.rerender(<NodeSlot {...renderSlotProps({ ...baseSlot, sourceRef: null, sourceNode: null, draftNode: { ...sourceNode, name: null } })} />);
+    expect((screen.getByRole("combobox", { name: "Character" }) as HTMLInputElement).value).toBe("source *");
+  });
+
   it("reads and commits the exact selected ref", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.spyOn(globalThis, "fetch")

@@ -29,6 +29,7 @@ type ControllerDependencies = {
   pollIntervalMs?: number;
   get?: (path: string) => Promise<unknown>;
   post?: (path: string, body: unknown) => Promise<unknown>;
+  randomSeed?: () => number;
 };
 
 const terminalStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
@@ -65,6 +66,10 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
   const get = dependencies.get ?? apiGet;
   const post = dependencies.post ?? apiPost;
   const pollIntervalMs = dependencies.pollIntervalMs ?? 500;
+  const randomSeed = dependencies.randomSeed ?? (() => {
+    if (globalThis.crypto?.getRandomValues) return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+    return Math.floor(Math.random() * 0x100000000);
+  });
   const runToken = useRef(0);
   const [results, setResults] = useState<CompareCombinationResult[]>([]);
   const [running, setRunning] = useState(false);
@@ -90,6 +95,9 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     }
     const token = ++runToken.current;
     const matrix = buildCompareMatrix(groups);
+    const parsedSeed = Number(params.seed);
+    const sharedSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0 ? parsedSeed : randomSeed();
+    const runParams: RenderWorkspaceParams = { ...params, seed: String(sharedSeed) };
     setResults(matrix.map(initialResult));
     setRunning(true);
     let nextIndex = 0;
@@ -98,7 +106,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
       const combinationId = combination.combinationId;
       updateResult(token, combinationId, { status: "running", error: "" });
       try {
-        const request = buildComposeRenderRequest(combination, params, { compare: true });
+        const request = buildComposeRenderRequest(combination, runParams, { compare: true });
         const preview = await post("/compose-preview", request) as ComposePreviewResponse;
         if (!preview.render_request) throw new Error("该组合需要外部 Agent 先完成提示词拼接。");
         const queued = await post("/generate", { render_request: preview.render_request }) as JobRecord;
@@ -123,7 +131,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     // NovelAI 同一账号并发请求时，一组会稳定触发 429；Compare 按单 worker 串行提交。
     await worker();
     if (runToken.current === token) setRunning(false);
-  }, [pollJob, post, updateResult]);
+  }, [pollJob, post, randomSeed, updateResult]);
 
   const reset = useCallback(() => {
     runToken.current += 1;

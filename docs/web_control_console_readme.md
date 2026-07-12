@@ -56,7 +56,8 @@ Custom 页由三列组成：
 
 - `Form`：编辑基础字段、Prompt、Negative Prompt、Tags 和扩展字段。
 - `JSON`：编辑完整 `NodeDocument`；与 Form 共用同一份草稿。
-- `应用到本次运行`：校验节点后更新当前工作台草稿，不修改磁盘文件。
+- Form 中的合法修改会立即更新当前运行草稿，下一次 Preview/Generate 自动使用，不需要额外应用按钮。
+- JSON 中只有语法和节点结构合法的内容会更新运行草稿；无效 JSON 会保留在编辑器中并显示错误。
 - `保存节点`：显式调用 `/api/nodes/save`，写入节点库的 `meta.yaml`。
 - `还原`：恢复到节点库中读入的原始内容。
 
@@ -98,7 +99,7 @@ Prompt 片段可选字段：
 3. `Generate` 把 `render_request` 提交到 `/api/generate`。
 4. 前端轮询 Job，并显示状态、图片、seed 和输出路径。
 
-普通 Generate 使用界面中的 `NT`。`Negative` 默认是空字符串，`Seed=-1` 表示不固定种子。
+普通 Generate 使用界面中的 `NT`。`Negative` 默认是空字符串，`Seed=-1` 表示每次运行随机种子。临时节点和临时修改节点会在名称后显示 `*`。
 
 ### Compare Generate
 
@@ -117,6 +118,8 @@ Artist 2 × Character 1 × Action 2 = 4
 ```
 
 点击一次 `Compare Generate · 4` 会生成 4 个独立 Job。每个组合固定 `n_samples=1`，并针对 NovelAI 串行提交，避免同一账号并发生图触发 `429`；某个组合失败不会中止其他组合。结果卡会显示 Artist、Character、Action、Job 状态、seed、图片和错误信息。
+
+Compare 启动时会冻结当前生图参数。若界面 Seed 为 `-1`，本轮只随机一次 seed，所有组合共享该 seed；若指定了 seed，所有组合使用指定值。除 Artist/Character/Action 节点组合外，宽高、Negative 和其他 Renderer 参数在同一轮 Compare 中保持一致。
 
 ## Batch
 

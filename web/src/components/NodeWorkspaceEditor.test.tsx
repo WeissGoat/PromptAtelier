@@ -47,17 +47,14 @@ describe("NodeWorkspaceEditor", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps form edits temporary until Apply and preserves extension fields", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({ node: { ...node, id: "edited", legacy: { source_file: "new.txt", keep: true } } }));
+  it("applies valid form edits to the runtime draft immediately", () => {
     renderEditor();
 
     fireEvent.change(screen.getByLabelText("Node ID"), { target: { value: "edited" } });
     fireEvent.change(screen.getByLabelText("extensions.legacy.source_file"), { target: { value: "new.txt" } });
-    expect(screen.getByTestId("slot-id").textContent).toBe("homura");
-
-    fireEvent.click(screen.getByRole("button", { name: "应用到本次运行" }));
-    await waitFor(() => expect(screen.getByTestId("slot-id").textContent).toBe("edited"));
+    expect(screen.getByTestId("slot-id").textContent).toBe("edited");
     expect(screen.getByTestId("legacy").textContent).toBe("new.txt");
+    expect(screen.queryByRole("button", { name: "应用到本次运行" })).toBeNull();
   });
 
   it("syncs valid JSON into the form and keeps invalid JSON visible", () => {
@@ -99,12 +96,22 @@ describe("NodeWorkspaceEditor", () => {
     expect(fetchMock.mock.calls[1][1]?.method).toBe("PUT");
   });
 
-  it("confirms before closing with unapplied edits", () => {
-    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("closes valid auto-applied edits without confirmation", () => {
+    const confirmMock = vi.spyOn(window, "confirm");
     renderEditor();
     fireEvent.change(screen.getByLabelText("Node ID"), { target: { value: "local" } });
     fireEvent.click(screen.getByRole("button", { name: "关闭节点编辑器" }));
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Node ID")).toBeNull();
+  });
+
+  it("confirms before discarding invalid JSON text", () => {
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderEditor();
+    fireEvent.click(screen.getByRole("tab", { name: /JSON/ }));
+    fireEvent.change(screen.getByLabelText("Node JSON"), { target: { value: "{broken" } });
+    fireEvent.click(screen.getByRole("button", { name: "关闭节点编辑器" }));
     expect(confirmMock).toHaveBeenCalled();
-    expect(screen.getByLabelText("Node ID")).toBeTruthy();
+    expect(screen.getByLabelText("Node JSON")).toBeTruthy();
   });
 });

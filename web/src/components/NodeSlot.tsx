@@ -34,7 +34,9 @@ function requiresConfirmation(slot: NodeVariantSlot): boolean {
 }
 
 function displayName(slot: NodeVariantSlot): string {
-  return slot.draftNode?.name || slot.sourceNode?.name || slot.draftNode?.id || "";
+  const name = slot.draftNode?.name || slot.sourceNode?.name || slot.draftNode?.id || "";
+  const status = nodeSlotStatus(slot);
+  return name && (status === "modified" || status === "temporary") ? `${name} *` : name;
 }
 
 export function NodeSlot({

@@ -40,7 +40,7 @@ function parseEditorNode(text: string): NodeDocument {
   return parsed as NodeDocument;
 }
 
-export function editorHasChanges(draft: NodeDocument | null, baseline: NodeDocument | null, jsonError = ""): boolean {
+function editorHasChanges(draft: NodeDocument | null, baseline: NodeDocument | null, jsonError = ""): boolean {
   return Boolean(jsonError) || !sameValue(draft, baseline);
 }
 
@@ -68,6 +68,7 @@ export function NodeWorkspaceEditor() {
 
   function updateDraft(next: NodeDocument) {
     workspace.setEditorDraft(next);
+    if (slot) workspace.updateDraft(slot.slotId, next);
     setJsonText(formatNode(next));
     setJsonError("");
   }
@@ -83,31 +84,15 @@ export function NodeWorkspaceEditor() {
   }
 
   function requestClose() {
-    if (editorHasChanges(draft, editor.baselineNode, jsonError) && !window.confirm("当前编辑尚未应用，关闭后会丢失这些修改。是否继续？")) return;
+    if (jsonError && !window.confirm("当前 JSON 无效，关闭后会丢失尚未生效的文本。是否继续？")) return;
     workspace.closeEditor();
   }
 
   async function validateDraft(): Promise<NodeDocument> {
     if (jsonError || !draft) throw new Error(jsonError || "没有可应用的节点草稿。");
-    if (draft.kind !== slot?.role) throw new Error(`节点类型必须为 ${slot?.role}。`);
     if (!draft.id.trim()) throw new Error("节点 id 不能为空。");
     const response = await apiPost<NodePreviewResponse>("/nodes/preview", { node: draft });
     return response.node;
-  }
-
-  async function handleApply() {
-    if (!slot) return;
-    setBusy(true);
-    setError("");
-    try {
-      const normalized = await validateDraft();
-      workspace.updateDraft(slot.slotId, normalized);
-      workspace.closeEditor();
-    } catch (requestError) {
-      setError(errorMessage(requestError));
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function handleSave() {
@@ -223,6 +208,7 @@ export function NodeWorkspaceEditor() {
                 try {
                   const parsed = parseEditorNode(text);
                   workspace.setEditorDraft(parsed);
+                  workspace.updateDraft(slot.slotId, parsed);
                   setJsonError("");
                 } catch (parseError) {
                   setJsonError(errorMessage(parseError));
@@ -247,7 +233,6 @@ export function NodeWorkspaceEditor() {
           workspace.closeEditor();
         }} type="button"><RotateCcw size={15} /> 还原</button>
         <span />
-        <button disabled={busy || Boolean(jsonError)} onClick={() => void handleApply()} type="button">应用到本次运行</button>
         <button disabled={busy || Boolean(jsonError) || !(slot.sourceRef ?? targetRef).trim()} onClick={() => void handleSave()} type="button"><Save size={15} /> 保存节点</button>
       </div>
     </section>

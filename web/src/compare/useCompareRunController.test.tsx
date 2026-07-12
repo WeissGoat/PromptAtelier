@@ -25,9 +25,11 @@ describe("useCompareRunController", () => {
     let maxActivePreviews = 0;
     const previewed = new Set<string>();
     const generated: string[] = [];
+    const seeds = new Set<number>();
     const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
       if (path === "/compose-preview") {
         const request = body as { compose: { nodes: Array<{ ref: string }> } };
+        seeds.add((body as { render: { seed: number } }).render.seed);
         const marker = request.compose.nodes.map((item) => item.ref).join("|");
         activePreviews += 1;
         maxActivePreviews = Math.max(maxActivePreviews, activePreviews);
@@ -41,7 +43,8 @@ describe("useCompareRunController", () => {
       generated.push(marker);
       return { id: `job-${generated.length}`, name: "generate", status: "succeeded", result: { images: [] } };
     });
-    const { result } = renderHook(() => useCompareRunController({ post, pollIntervalMs: 1 }));
+    const randomSeed = vi.fn(() => 123456789);
+    const { result } = renderHook(() => useCompareRunController({ post, pollIntervalMs: 1, randomSeed }));
     const groups = { artist: group("artist", 2), character: group("character", 1), action: group("action", 2) };
 
     await act(async () => { await result.current.start(groups, params); });
@@ -49,6 +52,29 @@ describe("useCompareRunController", () => {
     expect(maxActivePreviews).toBe(1);
     expect(result.current.summary.succeeded).toBe(4);
     expect(generated).toHaveLength(4);
+    expect(randomSeed).toHaveBeenCalledTimes(1);
+    expect([...seeds]).toEqual([123456789]);
+  });
+
+  it("reuses an explicit seed without generating a random one", async () => {
+    const seeds: number[] = [];
+    const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
+      if (path === "/compose-preview") {
+        seeds.push((body as { render: { seed: number } }).render.seed);
+        return { status: "ready", render_request: {} };
+      }
+      return { id: `job-${seeds.length}`, name: "generate", status: "succeeded" };
+    });
+    const randomSeed = vi.fn(() => 999);
+    const { result } = renderHook(() => useCompareRunController({ post, randomSeed }));
+    await act(async () => {
+      await result.current.start(
+        { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) },
+        { ...params, seed: "42" },
+      );
+    });
+    expect(seeds).toEqual([42, 42]);
+    expect(randomSeed).not.toHaveBeenCalled();
   });
 
   it("polls jobs and continues when one combination fails", async () => {

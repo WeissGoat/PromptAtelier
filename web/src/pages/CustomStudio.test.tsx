@@ -95,6 +95,9 @@ describe("CustomStudio", () => {
     const composeCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"));
     expect(composeCalls).toHaveLength(4);
     expect(composeCalls.every(([, init]) => JSON.parse(String(init?.body)).render.params.n_samples === 1)).toBe(true);
+    const seeds = composeCalls.map(([, init]) => JSON.parse(String(init?.body)).render.seed);
+    expect(new Set(seeds).size).toBe(1);
+    expect(seeds[0]).toBeGreaterThanOrEqual(0);
     await waitFor(() => expect(screen.getByText("成功 4")).toBeTruthy());
     expect(screen.getAllByRole("img", { name: /Compare image/ })).toHaveLength(4);
   });
