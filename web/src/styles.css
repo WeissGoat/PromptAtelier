@@ -157,22 +157,29 @@ button {
   position: relative;
 }
 
+.node-picker:focus-within {
+  z-index: 40;
+}
+
 .node-picker-results {
   background: #fff;
   border: 1px solid #d9dde5;
   box-shadow: 0 8px 18px rgb(32 33 36 / 14%);
   display: flex;
   flex-direction: column;
-  left: 0;
+  left: -8px;
   max-height: 180px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
   position: absolute;
-  right: 0;
+  right: -8px;
+  scrollbar-gutter: stable;
   top: calc(100% + 4px);
   z-index: 20;
 }
 
-.node-picker-results button {
+.node-picker-results button[role="option"] {
   align-items: flex-start;
   background: #fff;
   border: 0;
@@ -180,14 +187,26 @@ button {
   color: #202124;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 0;
-  padding: 7px 8px;
+  flex: 0 0 34px;
+  min-height: 34px;
+  padding: 8px 10px;
   text-align: left;
+  width: 100%;
 }
 
-.node-picker-results button:hover {
+.node-picker-results button[role="option"] > span {
+  color: inherit;
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.node-picker-results button[role="option"]:hover {
   background: #f4f7fb;
 }
 
@@ -195,6 +214,45 @@ button {
   color: #687182;
   font-size: 12px;
   padding: 9px;
+}
+
+.node-picker-sentinel {
+  flex: 0 0 1px;
+  height: 1px;
+}
+
+.node-picker-more-message {
+  border-top: 1px solid #edf0f4;
+  text-align: center;
+}
+
+.node-picker-more-error {
+  align-items: center;
+  border-top: 1px solid #edf0f4;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 7px 9px;
+}
+
+.node-picker-more-error > span {
+  color: #b3261e;
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-picker-more-error button {
+  background: #fff;
+  border: 1px solid #c9ced8;
+  border-radius: 5px;
+  color: #202124;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 4px 8px;
 }
 
 .icon-button {

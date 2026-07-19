@@ -29,10 +29,23 @@ class NodeWorkspace:
         *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        nodes, _ = self.list_nodes_page(role, query=query, offset=0, limit=limit)
+        return nodes
+
+    def list_nodes_page(
+        self,
+        role: str,
+        query: str | None = None,
+        *,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], bool]:
         roots = [self.design_root / item for item in ROLE_DIRS.get(role, [role])]
         result: list[dict[str, Any]] = []
         needle = (query or "").strip().lower()
+        offset = max(0, offset)
         limit = max(1, min(limit, 500))
+        matched = 0
         for root in roots:
             if not root.exists():
                 continue
@@ -41,6 +54,11 @@ class NodeWorkspace:
                 searchable = f"{item.name} {relative}".lower()
                 if needle and needle not in searchable:
                     continue
+                if matched < offset:
+                    matched += 1
+                    continue
+                if len(result) >= limit:
+                    return result, True
                 result.append(
                     {
                         "role": role,
@@ -49,9 +67,7 @@ class NodeWorkspace:
                         "relative": relative,
                     }
                 )
-                if len(result) >= limit:
-                    return result
-        return result
+        return result, False
 
     def read_node(self, ref: str | Path) -> dict[str, Any]:
         path = Path(ref)

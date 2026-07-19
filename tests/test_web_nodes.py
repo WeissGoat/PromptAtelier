@@ -108,6 +108,52 @@ class WebNodesTest(TestCase):
             self.assertEqual(len(nodes), 1)
             self.assertIn(nodes[0]["relative"], {"series-a/alpha", "series-b/beta"})
 
+    def test_nodes_http_paginates_without_repeating_nodes(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            for index in range(5):
+                _write_meta(
+                    design / "characters" / f"node-{index}",
+                    kind="character",
+                    node_id=f"node-{index}",
+                    prompt=f"node_{index}",
+                )
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+
+            first = client.get(
+                "/api/nodes",
+                params={"role": "character", "offset": 0, "limit": 2},
+            )
+            second = client.get(
+                "/api/nodes",
+                params={"role": "character", "offset": 2, "limit": 2},
+            )
+            final = client.get(
+                "/api/nodes",
+                params={"role": "character", "offset": 4, "limit": 2},
+            )
+
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(second.status_code, 200)
+            self.assertEqual(final.status_code, 200)
+            first_body = first.json()
+            second_body = second.json()
+            final_body = final.json()
+            self.assertEqual(first_body["offset"], 0)
+            self.assertEqual(first_body["limit"], 2)
+            self.assertTrue(first_body["has_more"])
+            self.assertEqual(second_body["offset"], 2)
+            self.assertTrue(second_body["has_more"])
+            self.assertFalse(final_body["has_more"])
+            self.assertEqual(len(first_body["nodes"]), 2)
+            self.assertEqual(len(second_body["nodes"]), 2)
+            self.assertEqual(len(final_body["nodes"]), 1)
+            first_refs = {node["ref"] for node in first_body["nodes"]}
+            second_refs = {node["ref"] for node in second_body["nodes"]}
+            self.assertFalse(first_refs & second_refs)
+
     def test_save_node_accepts_relative_and_in_root_absolute_targets(self):
         import tempfile
 

@@ -19,6 +19,9 @@ export type NodeListResponse = {
   schema: string;
   role: string;
   nodes: NodeSummary[];
+  offset: number;
+  limit: number;
+  has_more: boolean;
 };
 
 export type ComposePreviewResponse = {

@@ -1,10 +1,36 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NodePicker } from "./NodePicker";
 
-function response(nodes: Array<{ role: string; name: string; ref: string; relative?: string }>): Response {
-  return new Response(JSON.stringify({ schema: "list", role: "action", nodes }), {
+type ResponseOptions = {
+  offset?: number;
+  limit?: number;
+  hasMore?: boolean;
+};
+
+let intersectionCallback: IntersectionObserverCallback | undefined;
+
+class MockIntersectionObserver implements IntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = "0px";
+  readonly thresholds = [0];
+
+  constructor(callback: IntersectionObserverCallback) {
+    intersectionCallback = callback;
+  }
+
+  disconnect = vi.fn();
+  observe = vi.fn();
+  takeRecords = vi.fn(() => []);
+  unobserve = vi.fn();
+}
+
+function response(
+  nodes: Array<{ role: string; name: string; ref: string; relative?: string }>,
+  { offset = 0, limit = 20, hasMore = false }: ResponseOptions = {},
+): Response {
+  return new Response(JSON.stringify({ schema: "list", role: "action", nodes, offset, limit, has_more: hasMore }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
@@ -22,23 +48,58 @@ async function runSearchDebounce() {
 }
 
 describe("NodePicker", () => {
+  beforeEach(() => {
+    intersectionCallback = undefined;
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+  });
+
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  it("loads at most six filename-only results on focus", async () => {
+  it("loads the first twenty filename-only results on focus", async () => {
     vi.useFakeTimers();
     const nodes = Array.from({ length: 8 }, (_, index) => ({ role: "action", name: `node-${index}`, ref: `F:/path/${index}`, relative: `group/node-${index}` }));
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(response(nodes));
     renderPicker();
     fireEvent.focus(screen.getByRole("combobox", { name: "Action" }));
     await runSearchDebounce();
-    expect(screen.getAllByRole("option")).toHaveLength(6);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("limit=6");
+    expect(screen.getAllByRole("option")).toHaveLength(8);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("limit=20");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("offset=0");
     expect(screen.queryByText("group/node-0")).toBeNull();
     expect(screen.queryByText("F:/path/0")).toBeNull();
+  });
+
+  it("loads and deduplicates the next page when the bottom sentinel becomes visible", async () => {
+    vi.useFakeTimers();
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({ role: "action", name: `node-${index}`, ref: `F:/path/${index}` }));
+    const secondPage = [
+      { role: "action", name: "node-19", ref: "F:/path/19" },
+      { role: "action", name: "node-20", ref: "F:/path/20" },
+      { role: "action", name: "node-21", ref: "F:/path/21" },
+    ];
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response(firstPage, { hasMore: true }))
+      .mockResolvedValueOnce(response(secondPage, { offset: 20 }));
+    renderPicker();
+    fireEvent.focus(screen.getByRole("combobox", { name: "Action" }));
+    await runSearchDebounce();
+    expect(screen.getAllByRole("option")).toHaveLength(20);
+
+    await act(async () => {
+      intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("offset=20");
+    expect(screen.getAllByRole("option")).toHaveLength(22);
+    expect(screen.getAllByRole("option", { name: "node-19" })).toHaveLength(1);
   });
 
   it("debounces typed queries by 300ms", async () => {

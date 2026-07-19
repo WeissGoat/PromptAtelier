@@ -15,11 +15,28 @@ def _workspace(request: Request) -> NodeWorkspace:
 
 
 @router.get("/nodes")
-def list_nodes(role: str, request: Request, q: str | None = None, limit: int = 100) -> dict:
+def list_nodes(
+    role: str,
+    request: Request,
+    q: str | None = None,
+    offset: int = 0,
+    limit: int = 20,
+) -> dict:
+    offset = max(0, offset)
+    limit = max(1, min(limit, 500))
+    nodes, has_more = _workspace(request).list_nodes_page(
+        role,
+        query=q,
+        offset=offset,
+        limit=limit,
+    )
     return {
         "schema": "tags-machine-core.web.node-list/v1",
         "role": role,
-        "nodes": _workspace(request).list_nodes(role, query=q, limit=limit),
+        "nodes": nodes,
+        "offset": offset,
+        "limit": limit,
+        "has_more": has_more,
     }
 
 
