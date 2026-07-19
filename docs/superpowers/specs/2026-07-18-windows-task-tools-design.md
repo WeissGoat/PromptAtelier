@@ -380,7 +380,7 @@ SendTo 快捷方式指向 LocalAppData 中的稳定启动器。启动器读取�
 ## 12. 建议代码结构
 
 ```text
-src/tags_machine_core/task_tools/
+src/tags_machine_core/tools/task_tools/
   __init__.py
   cli.py
   config.py

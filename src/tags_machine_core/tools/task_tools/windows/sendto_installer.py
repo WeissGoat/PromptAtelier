@@ -174,7 +174,7 @@ def _safe_filename(value: str) -> str:
 
 
 def _read_packaged_text(name: str) -> str:
-    package = resources.files("tags_machine_core.task_tools.windows")
+    package = resources.files("tags_machine_core.tools.task_tools.windows")
     return package.joinpath(name).read_text(encoding="utf-8")
 
 

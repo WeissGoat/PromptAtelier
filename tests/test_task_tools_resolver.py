@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from tags_machine_core.task_tools.resolver import (
+from tags_machine_core.tools.task_tools.resolver import (
     TaskArchiveNotFoundError,
     TaskArchiveReadError,
     TaskArchiveResolver,
     _merge_resources,
 )
-from tags_machine_core.task_tools.models import RelatedResource
+from tags_machine_core.tools.task_tools.models import RelatedResource
 
 
 def _write_task(task_dir: Path, *, action: Path, artist: Path) -> Path:

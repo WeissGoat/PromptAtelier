@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from tags_machine_core.task_tools.config import (
+from tags_machine_core.tools.task_tools.config import (
     OperationPlacement,
     load_task_tools_config,
 )
-from tags_machine_core.task_tools.registry import build_default_registry
-from tags_machine_core.task_tools.windows.paths import WindowsTaskToolPaths
-from tags_machine_core.task_tools.windows.sendto_installer import SendToInstaller
+from tags_machine_core.tools.task_tools.registry import build_default_registry
+from tags_machine_core.tools.task_tools.windows.paths import WindowsTaskToolPaths
+from tags_machine_core.tools.task_tools.windows.sendto_installer import SendToInstaller
 
 
 def _installer(tmp_path: Path) -> tuple[SendToInstaller, WindowsTaskToolPaths]:

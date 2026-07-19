@@ -4,15 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from tags_machine_core.task_tools.config import (
+from tags_machine_core.tools.task_tools.config import (
     OperationOverride,
     OperationPlacement,
     TaskToolsConfig,
 )
-from tags_machine_core.task_tools.models import RelatedResource, TaskContext, TaskContextSet
-from tags_machine_core.task_tools.registry import OperationRegistry, OperationSpec
-from tags_machine_core.task_tools.runner import OperationAvailability
-from tags_machine_core.task_tools.windows import launcher
+from tags_machine_core.tools.task_tools.models import RelatedResource, TaskContext, TaskContextSet
+from tags_machine_core.tools.task_tools.registry import OperationRegistry, OperationSpec
+from tags_machine_core.tools.task_tools.runner import OperationAvailability
+from tags_machine_core.tools.task_tools.windows import launcher
 
 
 @dataclass

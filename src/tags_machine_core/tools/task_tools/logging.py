@@ -19,7 +19,7 @@ def configure_task_tool_file_logging(
     """配置任务工具的轮转文件日志。"""
     resolved_log_dir = (log_dir or default_task_tool_log_dir()).resolve()
     resolved_log_dir.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("tags_machine_core.task_tools")
+    logger = logging.getLogger("tags_machine_core.tools.task_tools")
     level_number = normalize_log_level(level)
     logger.setLevel(level_number)
     logger.propagate = False

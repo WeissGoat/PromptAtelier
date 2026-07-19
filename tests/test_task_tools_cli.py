@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tags_machine_core.cli import build_parser
-from tags_machine_core.task_tools.cli import (
+from tags_machine_core.tools.task_tools.cli import (
     cmd_task_tools_install,
     run_task_tool_operation,
 )
@@ -38,7 +38,7 @@ def test_task_tools_launcher_parser_accepts_config_before_inputs(tmp_path: Path)
     assert args.inputs == ["task-a"]
 
 
-@patch("tags_machine_core.task_tools.cli.TaskArchiveResolver")
+@patch("tags_machine_core.tools.task_tools.cli.TaskArchiveResolver")
 def test_quick_run_reports_errors_through_notifier(resolver_type, tmp_path: Path) -> None:
     resolver_type.return_value.resolve.side_effect = RuntimeError("归档损坏")
     notifier = Mock()
@@ -54,8 +54,8 @@ def test_quick_run_reports_errors_through_notifier(resolver_type, tmp_path: Path
     notifier.assert_called_once_with("Refactor 任务工具", "归档损坏")
 
 
-@patch("tags_machine_core.task_tools.cli.TaskToolRunner")
-@patch("tags_machine_core.task_tools.cli.TaskArchiveResolver")
+@patch("tags_machine_core.tools.task_tools.cli.TaskToolRunner")
+@patch("tags_machine_core.tools.task_tools.cli.TaskArchiveResolver")
 def test_quick_run_passes_config_log_level_to_runner(
     resolver_type,
     runner_type,
@@ -78,9 +78,9 @@ def test_quick_run_passes_config_log_level_to_runner(
     )
 
 
-@patch("tags_machine_core.task_tools.cli.show_error")
-@patch("tags_machine_core.task_tools.cli.SendToInstaller")
-@patch("tags_machine_core.task_tools.cli.Path")
+@patch("tags_machine_core.tools.task_tools.cli.show_error")
+@patch("tags_machine_core.tools.task_tools.cli.SendToInstaller")
+@patch("tags_machine_core.tools.task_tools.cli.Path")
 def test_install_rejects_missing_pythonw(path_type, installer_type, show_error) -> None:
     executable = Mock()
     executable.with_name.return_value.is_file.return_value = False

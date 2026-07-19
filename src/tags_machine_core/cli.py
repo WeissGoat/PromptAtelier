@@ -39,7 +39,7 @@ from tags_machine_core.nodes import (
     validate_node_tree,
 )
 from tags_machine_core.services import GenerationJsonApi, GenerationService
-from tags_machine_core.task_tools.cli import add_task_tools_subparser
+from tags_machine_core.tools.task_tools.cli import add_task_tools_subparser
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_image_comparison_report,

@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from tags_machine_core.task_tools.config import (
+from tags_machine_core.tools.task_tools.config import (
     OperationPlacement,
     load_task_tools_config,
 )
-from tags_machine_core.task_tools.models import RelatedResource, TaskContext, TaskContextSet
-from tags_machine_core.task_tools.registry import build_default_registry
+from tags_machine_core.tools.task_tools.models import RelatedResource, TaskContext, TaskContextSet
+from tags_machine_core.tools.task_tools.registry import build_default_registry
 
 
 def test_default_registry_contains_only_first_phase_operations():

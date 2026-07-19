@@ -3,17 +3,17 @@ from unittest.mock import Mock
 
 import pytest
 
-from tags_machine_core.task_tools.config import load_task_tools_config
-from tags_machine_core.task_tools.logging import configure_task_tool_file_logging
-from tags_machine_core.task_tools.models import RelatedResource, TaskContext, TaskContextSet
-from tags_machine_core.task_tools.operations.open_directory import open_directory_with_explorer
-from tags_machine_core.task_tools.registry import (
+from tags_machine_core.tools.task_tools.config import load_task_tools_config
+from tags_machine_core.tools.task_tools.logging import configure_task_tool_file_logging
+from tags_machine_core.tools.task_tools.models import RelatedResource, TaskContext, TaskContextSet
+from tags_machine_core.tools.task_tools.operations.open_directory import open_directory_with_explorer
+from tags_machine_core.tools.task_tools.registry import (
     OperationRegistry,
     OperationSpec,
     build_default_registry,
 )
-from tags_machine_core.task_tools.runner import OperationUnavailableError, TaskToolRunner
-from tags_machine_core.task_tools.windows.notifications import show_error
+from tags_machine_core.tools.task_tools.runner import OperationUnavailableError, TaskToolRunner
+from tags_machine_core.tools.task_tools.windows.notifications import show_error
 
 
 def _contexts(tmp_path: Path, role: str, path: Path) -> TaskContextSet:
@@ -302,7 +302,7 @@ def test_runner_rejects_unsupported_cardinality(
 
 
 def test_explorer_opener_rejects_non_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    monkeypatch.setattr("tags_machine_core.task_tools.operations.open_directory.sys.platform", "linux")
+    monkeypatch.setattr("tags_machine_core.tools.task_tools.operations.open_directory.sys.platform", "linux")
 
     with pytest.raises(RuntimeError, match="当前只支持 Windows"):
         open_directory_with_explorer(tmp_path)
@@ -315,9 +315,9 @@ def test_explorer_opener_invokes_windows_explorer(
     path = tmp_path / "artist"
     path.mkdir()
     popen = Mock()
-    monkeypatch.setattr("tags_machine_core.task_tools.operations.open_directory.sys.platform", "win32")
+    monkeypatch.setattr("tags_machine_core.tools.task_tools.operations.open_directory.sys.platform", "win32")
     monkeypatch.setattr(
-        "tags_machine_core.task_tools.operations.open_directory.subprocess.Popen",
+        "tags_machine_core.tools.task_tools.operations.open_directory.subprocess.Popen",
         popen,
     )
 
@@ -330,7 +330,7 @@ def test_notification_fallback_writes_chinese_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
-    monkeypatch.setattr("tags_machine_core.task_tools.windows.notifications.sys.platform", "linux")
+    monkeypatch.setattr("tags_machine_core.tools.task_tools.windows.notifications.sys.platform", "linux")
 
     show_error("任务工具错误", "无法打开目录")
 

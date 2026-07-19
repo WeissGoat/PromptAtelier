@@ -4,7 +4,7 @@
 
 **Goal:** 为 refactor 增加可持久化的 Windows SendTo 任务工具，默认支持从真实任务归档打开 Action 和 Artist 目录，并允许通过配置决定操作显示在高频快捷项、统一工具窗口或两者中。
 
-**Architecture:** 新增独立的 `tags_machine_core.task_tools` 应用层模块。`TaskArchiveResolver` 只负责把 Explorer 输入解析为 `TaskContextSet`，`OperationRegistry` 只负责注册操作，Runner 和 Tkinter Launcher 复用同一套操作定义；Windows 安装器只管理 LocalAppData 启动器和自己创建的 SendTo 项。现有 Composer、Policy、Renderer、Client 和 Batch 链路不做行为修改。
+**Architecture:** 新增独立的 `tags_machine_core.tools.task_tools` 应用层模块。`TaskArchiveResolver` 只负责把 Explorer 输入解析为 `TaskContextSet`，`OperationRegistry` 只负责注册操作，Runner 和 Tkinter Launcher 复用同一套操作定义；Windows 安装器只管理 LocalAppData 启动器和自己创建的 SendTo 项。现有 Composer、Policy、Renderer、Client 和 Batch 链路不做行为修改。
 
 **Tech Stack:** Python 3.11、Pydantic 2、PyYAML、标准库 `argparse/json/pathlib/subprocess/tkinter/ctypes`、Windows PowerShell、VBScript SendTo 薄入口、pytest/unittest、Ruff。
 
@@ -28,7 +28,7 @@
 创建以下模块：
 
 ```text
-src/tags_machine_core/task_tools/
+src/tags_machine_core/tools/task_tools/
   __init__.py              # 导出公共运行时接口
   cli.py                   # task-tools 子命令及根 CLI 接线
   config.py                # 配置模型、默认配置、配置覆盖
@@ -73,10 +73,10 @@ src/tags_machine_core/cli.py
 ### Task 1: Runtime Models, Configuration, and Operation Registry
 
 **Files:**
-- Create: `src/tags_machine_core/task_tools/__init__.py`
-- Create: `src/tags_machine_core/task_tools/models.py`
-- Create: `src/tags_machine_core/task_tools/config.py`
-- Create: `src/tags_machine_core/task_tools/registry.py`
+- Create: `src/tags_machine_core/tools/task_tools/__init__.py`
+- Create: `src/tags_machine_core/tools/task_tools/models.py`
+- Create: `src/tags_machine_core/tools/task_tools/config.py`
+- Create: `src/tags_machine_core/tools/task_tools/registry.py`
 - Create: `tests/test_task_tools_config.py`
 
 **Interfaces:**
@@ -92,12 +92,12 @@ from pathlib import Path
 
 import pytest
 
-from tags_machine_core.task_tools.config import (
+from tags_machine_core.tools.task_tools.config import (
     OperationPlacement,
     load_task_tools_config,
 )
-from tags_machine_core.task_tools.models import RelatedResource, TaskContext, TaskContextSet
-from tags_machine_core.task_tools.registry import build_default_registry
+from tags_machine_core.tools.task_tools.models import RelatedResource, TaskContext, TaskContextSet
+from tags_machine_core.tools.task_tools.registry import build_default_registry
 
 
 def test_default_registry_contains_only_first_phase_operations():
@@ -169,7 +169,7 @@ Run:
 uv run pytest tests/test_task_tools_config.py -q
 ```
 
-Expected: collection fails with `ModuleNotFoundError: No module named 'tags_machine_core.task_tools'`.
+Expected: collection fails with `ModuleNotFoundError: No module named 'tags_machine_core.tools.task_tools'`.
 
 - [ ] **Step 3: Implement runtime models**
 
@@ -381,7 +381,7 @@ Run:
 
 ```powershell
 uv run pytest tests/test_task_tools_config.py -q
-uv run ruff check src/tags_machine_core/task_tools tests/test_task_tools_config.py
+uv run ruff check src/tags_machine_core/tools/task_tools tests/test_task_tools_config.py
 ```
 
 Expected: all tests pass and Ruff exits `0`.
@@ -389,7 +389,7 @@ Expected: all tests pass and Ruff exits `0`.
 - [ ] **Step 6: Commit Task 1**
 
 ```powershell
-git add src/tags_machine_core/task_tools tests/test_task_tools_config.py
+git add src/tags_machine_core/tools/task_tools tests/test_task_tools_config.py
 git commit -m "feat: add task tool runtime models"
 ```
 
@@ -398,7 +398,7 @@ git commit -m "feat: add task tool runtime models"
 ### Task 2: Task Archive Resolver
 
 **Files:**
-- Create: `src/tags_machine_core/task_tools/resolver.py`
+- Create: `src/tags_machine_core/tools/task_tools/resolver.py`
 - Create: `tests/test_task_tools_resolver.py`
 
 **Interfaces:**
@@ -415,7 +415,7 @@ from pathlib import Path
 
 import pytest
 
-from tags_machine_core.task_tools.resolver import (
+from tags_machine_core.tools.task_tools.resolver import (
     TaskArchiveNotFoundError,
     TaskArchiveResolver,
 )
@@ -686,7 +686,7 @@ Merge resources by `(role, index, normalized ref/path)` while preferring records
 
 ```powershell
 uv run pytest tests/test_task_tools_resolver.py tests/test_task_tools_config.py -q
-uv run ruff check src/tags_machine_core/task_tools tests/test_task_tools_resolver.py
+uv run ruff check src/tags_machine_core/tools/task_tools tests/test_task_tools_resolver.py
 ```
 
 Expected: all tests pass.
@@ -694,7 +694,7 @@ Expected: all tests pass.
 - [ ] **Step 6: Commit Task 2**
 
 ```powershell
-git add src/tags_machine_core/task_tools/resolver.py tests/test_task_tools_resolver.py
+git add src/tags_machine_core/tools/task_tools/resolver.py tests/test_task_tools_resolver.py
 git commit -m "feat: resolve task archive resources"
 ```
 
@@ -703,14 +703,14 @@ git commit -m "feat: resolve task archive resources"
 ### Task 3: Operation Runner and Open Directory Handlers
 
 **Files:**
-- Create: `src/tags_machine_core/task_tools/operations/__init__.py`
-- Create: `src/tags_machine_core/task_tools/operations/open_directory.py`
-- Create: `src/tags_machine_core/task_tools/logging.py`
-- Create: `src/tags_machine_core/task_tools/runner.py`
-- Create: `src/tags_machine_core/task_tools/windows/__init__.py`
-- Create: `src/tags_machine_core/task_tools/windows/notifications.py`
+- Create: `src/tags_machine_core/tools/task_tools/operations/__init__.py`
+- Create: `src/tags_machine_core/tools/task_tools/operations/open_directory.py`
+- Create: `src/tags_machine_core/tools/task_tools/logging.py`
+- Create: `src/tags_machine_core/tools/task_tools/runner.py`
+- Create: `src/tags_machine_core/tools/task_tools/windows/__init__.py`
+- Create: `src/tags_machine_core/tools/task_tools/windows/notifications.py`
 - Create: `tests/test_task_tools_runner.py`
-- Modify: `src/tags_machine_core/task_tools/registry.py`
+- Modify: `src/tags_machine_core/tools/task_tools/registry.py`
 
 **Interfaces:**
 - Consumes: `TaskArchiveResolver`, `TaskContextSet`, `TaskToolsConfig`, `OperationRegistry`.
@@ -727,11 +727,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from tags_machine_core.task_tools.config import load_task_tools_config
-from tags_machine_core.task_tools.logging import configure_task_tool_file_logging
-from tags_machine_core.task_tools.models import RelatedResource, TaskContext, TaskContextSet
-from tags_machine_core.task_tools.registry import build_default_registry
-from tags_machine_core.task_tools.runner import OperationUnavailableError, TaskToolRunner
+from tags_machine_core.tools.task_tools.config import load_task_tools_config
+from tags_machine_core.tools.task_tools.logging import configure_task_tool_file_logging
+from tags_machine_core.tools.task_tools.models import RelatedResource, TaskContext, TaskContextSet
+from tags_machine_core.tools.task_tools.registry import build_default_registry
+from tags_machine_core.tools.task_tools.runner import OperationUnavailableError, TaskToolRunner
 
 
 def _contexts(tmp_path: Path, role: str, path: Path) -> TaskContextSet:
@@ -818,7 +818,7 @@ Expected: import failure for `runner`.
 from pathlib import Path
 from typing import Callable
 
-from tags_machine_core.task_tools.models import TaskContextSet
+from tags_machine_core.tools.task_tools.models import TaskContextSet
 
 
 DirectoryOpener = Callable[[Path], None]
@@ -932,7 +932,7 @@ from tags_machine_core.logging_config import normalize_log_level
 
 def configure_task_tool_file_logging(log_dir: Path, level: str = "error") -> logging.Logger:
     log_dir.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("tags_machine_core.task_tools")
+    logger = logging.getLogger("tags_machine_core.tools.task_tools")
     level_number = normalize_log_level(level)
     logger.setLevel(level_number)
     logger.propagate = False
@@ -962,7 +962,7 @@ CLI、Launcher 和 Installer 在执行前调用该函数。快捷入口捕获异
 
 ```powershell
 uv run pytest tests/test_task_tools_runner.py tests/test_task_tools_resolver.py -q
-uv run ruff check src/tags_machine_core/task_tools tests/test_task_tools_runner.py
+uv run ruff check src/tags_machine_core/tools/task_tools tests/test_task_tools_runner.py
 ```
 
 Expected: all tests pass.
@@ -970,7 +970,7 @@ Expected: all tests pass.
 - [ ] **Step 8: Commit Task 3**
 
 ```powershell
-git add src/tags_machine_core/task_tools tests/test_task_tools_runner.py
+git add src/tags_machine_core/tools/task_tools tests/test_task_tools_runner.py
 git commit -m "feat: execute task tool operations"
 ```
 
@@ -979,7 +979,7 @@ git commit -m "feat: execute task tool operations"
 ### Task 4: Config-Driven Tkinter Launcher
 
 **Files:**
-- Create: `src/tags_machine_core/task_tools/windows/launcher.py`
+- Create: `src/tags_machine_core/tools/task_tools/windows/launcher.py`
 - Create: `tests/test_task_tools_launcher.py`
 
 **Interfaces:**
@@ -993,11 +993,11 @@ git commit -m "feat: execute task tool operations"
 from pathlib import Path
 from unittest.mock import Mock
 
-from tags_machine_core.task_tools.config import OperationPlacement, load_task_tools_config
-from tags_machine_core.task_tools.models import RelatedResource, TaskContext, TaskContextSet
-from tags_machine_core.task_tools.registry import build_default_registry
-from tags_machine_core.task_tools.runner import TaskToolRunner
-from tags_machine_core.task_tools.windows.launcher import build_launcher_items
+from tags_machine_core.tools.task_tools.config import OperationPlacement, load_task_tools_config
+from tags_machine_core.tools.task_tools.models import RelatedResource, TaskContext, TaskContextSet
+from tags_machine_core.tools.task_tools.registry import build_default_registry
+from tags_machine_core.tools.task_tools.runner import TaskToolRunner
+from tags_machine_core.tools.task_tools.windows.launcher import build_launcher_items
 
 
 def test_launcher_only_lists_launcher_and_both_operations(tmp_path: Path):
@@ -1174,8 +1174,8 @@ Window requirements:
 
 ```powershell
 uv run pytest tests/test_task_tools_launcher.py -q
-uv run python -c "from tags_machine_core.task_tools.windows.launcher import launch_task_tools_window; print(launch_task_tools_window.__name__)"
-uv run ruff check src/tags_machine_core/task_tools/windows/launcher.py tests/test_task_tools_launcher.py
+uv run python -c "from tags_machine_core.tools.task_tools.windows.launcher import launch_task_tools_window; print(launch_task_tools_window.__name__)"
+uv run ruff check src/tags_machine_core/tools/task_tools/windows/launcher.py tests/test_task_tools_launcher.py
 ```
 
 Expected: tests pass; import command prints `launch_task_tools_window` without opening a window.
@@ -1183,7 +1183,7 @@ Expected: tests pass; import command prints `launch_task_tools_window` without o
 - [ ] **Step 6: Commit Task 4**
 
 ```powershell
-git add src/tags_machine_core/task_tools/windows/launcher.py tests/test_task_tools_launcher.py
+git add src/tags_machine_core/tools/task_tools/windows/launcher.py tests/test_task_tools_launcher.py
 git commit -m "feat: add task tool launcher window"
 ```
 
@@ -1192,10 +1192,10 @@ git commit -m "feat: add task tool launcher window"
 ### Task 5: Persistent Windows Bootstrap and SendTo Installer
 
 **Files:**
-- Create: `src/tags_machine_core/task_tools/windows/paths.py`
-- Create: `src/tags_machine_core/task_tools/windows/sendto_installer.py`
-- Create: `src/tags_machine_core/task_tools/windows/bootstrap.ps1`
-- Create: `src/tags_machine_core/task_tools/windows/sendto_entry.vbs`
+- Create: `src/tags_machine_core/tools/task_tools/windows/paths.py`
+- Create: `src/tags_machine_core/tools/task_tools/windows/sendto_installer.py`
+- Create: `src/tags_machine_core/tools/task_tools/windows/bootstrap.ps1`
+- Create: `src/tags_machine_core/tools/task_tools/windows/sendto_entry.vbs`
 - Create: `tests/test_task_tools_sendto.py`
 
 **Interfaces:**
@@ -1209,10 +1209,10 @@ git commit -m "feat: add task tool launcher window"
 import json
 from pathlib import Path
 
-from tags_machine_core.task_tools.config import load_task_tools_config
-from tags_machine_core.task_tools.registry import build_default_registry
-from tags_machine_core.task_tools.windows.paths import WindowsTaskToolPaths
-from tags_machine_core.task_tools.windows.sendto_installer import SendToInstaller
+from tags_machine_core.tools.task_tools.config import load_task_tools_config
+from tags_machine_core.tools.task_tools.registry import build_default_registry
+from tags_machine_core.tools.task_tools.windows.paths import WindowsTaskToolPaths
+from tags_machine_core.tools.task_tools.windows.sendto_installer import SendToInstaller
 
 
 def test_install_creates_quick_entries_launcher_and_manifest(tmp_path: Path):
@@ -1542,7 +1542,7 @@ def _safe_filename(value: str) -> str:
 
 
 def _read_packaged_text(name: str) -> str:
-    package = resources.files("tags_machine_core.task_tools.windows")
+    package = resources.files("tags_machine_core.tools.task_tools.windows")
     return package.joinpath(name).read_text(encoding="utf-8")
 
 
@@ -1582,7 +1582,7 @@ Before replacing entries, read the old manifest and delete only its listed entri
 
 ```powershell
 uv run pytest tests/test_task_tools_sendto.py -q
-uv run ruff check src/tags_machine_core/task_tools/windows tests/test_task_tools_sendto.py
+uv run ruff check src/tags_machine_core/tools/task_tools/windows tests/test_task_tools_sendto.py
 ```
 
 Expected: tests pass; no unmanaged file is removed.
@@ -1590,7 +1590,7 @@ Expected: tests pass; no unmanaged file is removed.
 - [ ] **Step 7: Commit Task 5**
 
 ```powershell
-git add src/tags_machine_core/task_tools/windows tests/test_task_tools_sendto.py
+git add src/tags_machine_core/tools/task_tools/windows tests/test_task_tools_sendto.py
 git commit -m "feat: install persistent SendTo task tools"
 ```
 
@@ -1599,13 +1599,13 @@ git commit -m "feat: install persistent SendTo task tools"
 ### Task 6: CLI Integration, Example Configuration, and User Documentation
 
 **Files:**
-- Create: `src/tags_machine_core/task_tools/cli.py`
+- Create: `src/tags_machine_core/tools/task_tools/cli.py`
 - Create: `configs/task_tools.example.yaml`
 - Create: `docs/task_tools_readme.md`
 - Create: `scripts/install_task_tools.ps1`
 - Create: `tests/test_task_tools_cli.py`
 - Modify: `src/tags_machine_core/cli.py`
-- Modify: `src/tags_machine_core/task_tools/__init__.py`
+- Modify: `src/tags_machine_core/tools/task_tools/__init__.py`
 
 **Interfaces:**
 - Produces the top-level `uv run python -m tags_machine_core task-tools` command group.
@@ -1639,8 +1639,8 @@ def test_task_tools_run_parser_preserves_multiple_input_paths():
     assert args.inputs == [r"G:\ai_auto\task-a", r"G:\ai_auto\task b\image.png"]
 
 
-@patch("tags_machine_core.task_tools.cli.TaskArchiveResolver")
-@patch("tags_machine_core.task_tools.cli.TaskToolRunner")
+@patch("tags_machine_core.tools.task_tools.cli.TaskArchiveResolver")
+@patch("tags_machine_core.tools.task_tools.cli.TaskToolRunner")
 def test_quick_run_reports_errors_through_notifier(runner_type, resolver_type, tmp_path: Path):
     resolver_type.return_value.resolve.side_effect = RuntimeError("归档损坏")
     notifier = Mock()
@@ -1758,7 +1758,7 @@ task-tools uninstall-sendto
 In root `cli.py`, add only:
 
 ```python
-from tags_machine_core.task_tools.cli import add_task_tools_subparser
+from tags_machine_core.tools.task_tools.cli import add_task_tools_subparser
 
 # inside build_parser(), after output_parent is defined
 add_task_tools_subparser(subparsers, output_parent=output_parent)
@@ -1838,7 +1838,7 @@ Run it from project root through `uv` and ensure the implementation uses `sys.ex
 uv run pytest tests/test_task_tools_cli.py tests/test_task_tools_config.py -q
 uv run python -m tags_machine_core task-tools --help
 uv run python -m tags_machine_core task-tools install-sendto --help
-uv run ruff check src/tags_machine_core/task_tools src/tags_machine_core/cli.py tests/test_task_tools_cli.py
+uv run ruff check src/tags_machine_core/tools/task_tools src/tags_machine_core/cli.py tests/test_task_tools_cli.py
 ```
 
 Expected: tests pass; help output lists all five commands.
@@ -1846,7 +1846,7 @@ Expected: tests pass; help output lists all five commands.
 - [ ] **Step 8: Commit Task 6**
 
 ```powershell
-git add src/tags_machine_core/cli.py src/tags_machine_core/task_tools configs/task_tools.example.yaml docs/task_tools_readme.md scripts/install_task_tools.ps1 tests/test_task_tools_cli.py
+git add src/tags_machine_core/cli.py src/tags_machine_core/tools/task_tools configs/task_tools.example.yaml docs/task_tools_readme.md scripts/install_task_tools.ps1 tests/test_task_tools_cli.py
 git commit -m "feat: expose configurable Windows task tools"
 ```
 
@@ -1866,7 +1866,7 @@ git commit -m "feat: expose configurable Windows task tools"
 
 ```powershell
 uv run pytest tests/test_task_tools_config.py tests/test_task_tools_resolver.py tests/test_task_tools_runner.py tests/test_task_tools_launcher.py tests/test_task_tools_sendto.py tests/test_task_tools_cli.py -q
-uv run ruff check src/tags_machine_core/task_tools src/tags_machine_core/cli.py tests/test_task_tools_*.py
+uv run ruff check src/tags_machine_core/tools/task_tools src/tags_machine_core/cli.py tests/test_task_tools_*.py
 ```
 
 Expected: all tests pass and Ruff exits `0`.
@@ -1876,7 +1876,7 @@ Expected: all tests pass and Ruff exits `0`.
 Run:
 
 ```powershell
-uv run python -c "from tags_machine_core.task_tools.resolver import TaskArchiveResolver; c=TaskArchiveResolver().resolve([r'G:\ai_auto\20260718\0c012038_2_0_2_d0108c2f']); print('ACTION=' + str(c.existing_paths('action')[0])); print('ARTIST=' + str(c.existing_paths('artist')[0]))"
+uv run python -c "from tags_machine_core.tools.task_tools.resolver import TaskArchiveResolver; c=TaskArchiveResolver().resolve([r'G:\ai_auto\20260718\0c012038_2_0_2_d0108c2f']); print('ACTION=' + str(c.existing_paths('action')[0])); print('ARTIST=' + str(c.existing_paths('artist')[0]))"
 ```
 
 Expected Action path ends with the archived action node `00_start_侧脸回眸`; Artist path equals:
@@ -1978,7 +1978,7 @@ Do not automatically reboot the user's workstation. Record that the entries are 
 
 ```powershell
 uv run pytest tests/test_task_tools_config.py tests/test_task_tools_resolver.py tests/test_task_tools_runner.py tests/test_task_tools_launcher.py tests/test_task_tools_sendto.py tests/test_task_tools_cli.py -q
-uv run ruff check src/tags_machine_core/task_tools src/tags_machine_core/cli.py tests/test_task_tools_*.py
+uv run ruff check src/tags_machine_core/tools/task_tools src/tags_machine_core/cli.py tests/test_task_tools_*.py
 git diff --check
 ```
 
@@ -1987,6 +1987,6 @@ Expected: all tests pass, Ruff exits `0`, and `git diff --check` reports no whit
 - [ ] **Step 12: Commit business acceptance artifacts and any acceptance fixes**
 
 ```powershell
-git add docs/task_tools_business_acceptance_20260718.md src/tags_machine_core/task_tools src/tags_machine_core/cli.py configs/task_tools.example.yaml docs/task_tools_readme.md scripts/install_task_tools.ps1 tests/test_task_tools_*.py
+git add docs/task_tools_business_acceptance_20260718.md src/tags_machine_core/tools/task_tools src/tags_machine_core/cli.py configs/task_tools.example.yaml docs/task_tools_readme.md scripts/install_task_tools.ps1 tests/test_task_tools_*.py
 git commit -m "test: verify Windows task tools workflow"
 ```
