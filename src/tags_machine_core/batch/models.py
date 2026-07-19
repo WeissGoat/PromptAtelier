@@ -95,7 +95,7 @@ class BatchDefaults(BaseModel):
     agent_model: str | None = None
     cache_dir: str | None = None
     add_male_caption: bool = True
-    character_prompts: str | None = "auto"
+    character_prompts: Literal["auto", False] | None = "auto"
     params: dict[str, Any] = Field(default_factory=dict)
     artist_input_filter: ArtistInputFilterConfig | None = None
 

@@ -54,7 +54,7 @@ def write_parameter_details_image(
         y=y,
         width=CANVAS_WIDTH - MARGIN * 2,
         height=310,
-        title="Render",
+        title="Basic Information",
         lines=_render_lines(task=task, request=request, params=params),
         fonts=fonts,
     )
@@ -182,21 +182,23 @@ def _draw_box(
 
 
 def _render_lines(*, task: BatchTask, request: dict[str, Any], params: dict[str, Any]) -> list[str]:
-    size = request.get("size") if isinstance(request.get("size"), dict) else {}
-    width = params.get("width") or size.get("width") or task.render.width or "-"
-    height = params.get("height") or size.get("height") or task.render.height or "-"
-    sample_line = f"task_nt={task.render.nt}, png_n_samples={params.get('n_samples', '-')}"
-    if params.get("_actual_image_count"):
-        sample_line += f", actual_png_images={params['_actual_image_count']}"
-    lines = [
+    return [
         f"backend: {task.render.backend}",
         f"artist: {task.render.artist or '-'}",
         f"model: {request.get('model') or params.get('model') or task.render.model or '-'}",
-        f"resolution: {task.render.resolution}",
-        f"size: {width} x {height}",
-        f"samples: {sample_line}",
+        f"action: {_action_node_name(task)}",
     ]
-    return lines
+
+
+def _action_node_name(task: BatchTask) -> str:
+    source_action = task.source.get("action")
+    if source_action:
+        return Path(str(source_action)).name
+
+    for node in task.nodes:
+        if node.role == "action":
+            return Path(node.ref).name
+    return "-"
 
 
 def _parameter_lines(*, params: dict[str, Any], request: dict[str, Any]) -> list[str]:

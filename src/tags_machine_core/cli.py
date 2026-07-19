@@ -1084,6 +1084,7 @@ def cmd_resume_batch(args) -> int:
         spec,
         resume=True,
         stop_on_error=args.stop_on_error,
+        execution_mode="mock" if args.mock_client else None,
     )
     output_dir = _batch_output_dir(
         spec,
@@ -2072,6 +2073,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume_batch.add_argument("--batch-spec", help="Override stored source BatchSpec")
     resume_batch.add_argument("--config", help="Override BatchSpec config")
     resume_batch.add_argument("--limit", type=int)
+    resume_batch.add_argument(
+        "--mock-client",
+        action="store_true",
+        help="Resume with local mock images instead of backend API calls",
+    )
     resume_batch.add_argument(
         "--stop-on-error",
         action="store_true",
