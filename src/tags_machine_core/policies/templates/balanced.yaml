@@ -7,6 +7,11 @@ rules:
     enabled: true
   dedupe:
     enabled: true
+  character_section_filter:
+    enabled: true
+    options:
+      blocked_sections:
+        - copyright
   tag_conflict:
     enabled: true
   character_count:

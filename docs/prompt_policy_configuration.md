@@ -37,6 +37,7 @@ off
 
 - `tag_normalize`
 - `character_extension`
+- `character_section_filter`（默认屏蔽 character `copyright` section）
 - `clothing_policy`
 - `visibility_policy`
 - `dedupe`
@@ -379,3 +380,37 @@ reason: "matched character identity: akemi_homura"
 ```
 
 最终 effective 配置、规则版本和执行顺序进入 cache key。模板路径和模板 hash 只用于追踪，不单独制造缓存差异。
+
+## 13. CharacterSectionFilterPolicy
+
+`character_section_filter` 根据 character section 的来源删除角色贡献的提示词，默认屏蔽：
+
+```yaml
+blocked_sections:
+  - copyright
+```
+
+即使 action 的 `selected_keys` 或 character 的 `identity_minimal` 选择了 `copyright`，最终 ScriptComposer 结果也不会保留该 section。规则会同步更新 `character_materials`，因此 NovelAI Character Prompts 不会再次加入被屏蔽内容。
+
+Batch 局部替换屏蔽列表：
+
+```yaml
+prompt_policy:
+  rules:
+    character_section_filter:
+      options:
+        blocked_sections:
+          - copyright
+          - role
+```
+
+关闭规则：
+
+```yaml
+prompt_policy:
+  rules:
+    character_section_filter:
+      enabled: false
+```
+
+`selected_keys` 继续记录 action 请求的原始 section；最终结果记录在 `used_sections`、`suppressed_sections` 和 `blocked_sections` 中。AgentComposer 不经过该规则。

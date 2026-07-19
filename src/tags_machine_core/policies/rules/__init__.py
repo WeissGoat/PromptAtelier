@@ -1,5 +1,9 @@
 from .base import PromptRule, RulePhase
 from .character_extension import CharacterExtensionPolicyRule
+from .character_section_filter import (
+    CharacterSectionFilterOptions,
+    CharacterSectionFilterPolicyRule,
+)
 from .character_count import CharacterCountRule
 from .clothing import ClothingPolicyRule
 from .character_weight import CharacterWeightOptions, CharacterWeightPolicyRule
@@ -12,6 +16,7 @@ DEFAULT_RULES: list[PromptRule] = [
     TagNormalizeRule(),
     DedupeRule(),
     CharacterExtensionPolicyRule(),
+    CharacterSectionFilterPolicyRule(),
     TagConflictRule(),
     CharacterCountRule(),
     ClothingPolicyRule(),
@@ -22,6 +27,8 @@ DEFAULT_RULES: list[PromptRule] = [
 __all__ = [
     "CharacterCountRule",
     "CharacterExtensionPolicyRule",
+    "CharacterSectionFilterOptions",
+    "CharacterSectionFilterPolicyRule",
     "CharacterWeightOptions",
     "CharacterWeightPolicyRule",
     "ClothingPolicyRule",
