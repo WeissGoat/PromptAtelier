@@ -138,6 +138,7 @@ def resolve_character_scope(
 def character_positive(
     node: NodeDocument | None,
     character_scope: str | None,
+    identity_minimal_override: list[str] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     if node is None:
         return [], [], []
@@ -155,7 +156,12 @@ def character_positive(
         return texts, dedupe(included_roles), dedupe(suppressed_roles)
 
     sections = list(node.tags.keys())
-    include_sections = included_character_sections(sections, character_scope, node=node)
+    include_sections = included_character_sections(
+        sections,
+        character_scope,
+        node=node,
+        identity_minimal_override=identity_minimal_override,
+    )
     include_set = set(include_sections)
     suppressed_sections = [section for section in sections if section not in include_set]
     texts: list[str] = []
@@ -168,13 +174,20 @@ def character_positive_with_selected_keys(
     node: NodeDocument | None,
     character_scope: str | None,
     selected_keys: list[str] | None,
+    identity_minimal_override: list[str] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     if node is None:
         return [], [], []
     normalized_keys = [str(key).strip() for key in selected_keys or [] if str(key).strip()]
     if not normalized_keys:
-        return character_positive(node, character_scope)
-    normalized_keys = dedupe(identity_minimal_sections(node) + normalized_keys)
+        return character_positive(
+            node,
+            character_scope,
+            identity_minimal_override=identity_minimal_override,
+        )
+    normalized_keys = dedupe(
+        identity_minimal_sections(node, override=identity_minimal_override) + normalized_keys
+    )
     if node.prompt.positive:
         return _character_prompt_fragments_by_selected_keys(node, normalized_keys)
     sections = list(node.tags.keys())
@@ -254,20 +267,27 @@ def included_character_sections(
     character_scope: str | None,
     *,
     node: NodeDocument | None = None,
+    identity_minimal_override: list[str] | None = None,
 ) -> list[str]:
     policy = CHARACTER_SCOPE_POLICY.get(character_scope or "default")
     if policy is None:
         policy = CHARACTER_SCOPE_POLICY["default"]
     include = policy.get("include")
     if include == IDENTITY_MINIMAL_POLICY:
-        include = identity_minimal_sections(node)
+        include = identity_minimal_sections(node, override=identity_minimal_override)
     if include is None:
         return sections
     include_set = set(include)
     return [section for section in sections if section in include_set]
 
 
-def identity_minimal_sections(node: NodeDocument | None) -> list[str]:
+def identity_minimal_sections(
+    node: NodeDocument | None,
+    *,
+    override: list[str] | None = None,
+) -> list[str]:
+    if override is not None:
+        return dedupe([str(item).strip() for item in override if str(item).strip()])
     if node is not None and node.identity_minimal:
         return node.identity_minimal
     return IDENTITY_MINIMAL_SECTIONS

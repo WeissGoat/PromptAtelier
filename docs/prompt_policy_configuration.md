@@ -154,6 +154,27 @@ defaults:
 - `examples/batches/character_weight_mock.yaml`
 - `examples/batches/character_weight_real.yaml`
 
+ScriptComposer 的最小角色 section 也可以在 Batch 中覆盖：
+
+```yaml
+defaults:
+  composer: script
+  identity_minimal_sections:
+    - character
+    - copyright
+    - role
+```
+
+优先级：
+
+```text
+Batch identity_minimal_sections
+  > character meta.yaml identity_minimal
+  > 内置默认 [character, role]
+```
+
+该字段只影响 ScriptComposer，不影响 AgentComposer，也不属于 NovelAI Renderer 参数。
+
 运行 mock 参数验收：
 
 ```powershell

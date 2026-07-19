@@ -73,6 +73,7 @@ class ScriptComposer:
         negative: str = "",
         character_scope: str | None = None,
         body_scope: str | None = None,
+        identity_minimal_sections: list[str] | None = None,
     ) -> PromptBundle:
         scope = resolve_character_scope(
             action=action,
@@ -85,6 +86,7 @@ class ScriptComposer:
                 character,
                 scope,
                 selected_keys,
+                identity_minimal_sections,
             )
         )
         positive = _join_prompt_parts(
@@ -109,6 +111,7 @@ class ScriptComposer:
             prompt=positive,
             negative=negative_prompt,
             character_scope=scope,
+            identity_minimal_sections=json.dumps(identity_minimal_sections or [], sort_keys=True),
             nodes=json.dumps([ref.model_dump(mode="json") for ref in node_refs], sort_keys=True),
         )
         extra = self._prompt_extra(action=action)
@@ -136,6 +139,7 @@ class ScriptComposer:
         negative: str = "",
         character_scope: str | None = None,
         body_scope: str | None = None,
+        identity_minimal_sections: list[str] | None = None,
     ) -> PromptBundle:
         characters = resolved_nodes.characters()
         actions = resolved_nodes.actions()
@@ -160,6 +164,7 @@ class ScriptComposer:
                 item.node,
                 scope,
                 selected_keys,
+                identity_minimal_sections,
             )
             character_negative = node_negative(item.node, scope)
             positive_parts.append(character_positive_tags)
@@ -176,6 +181,7 @@ class ScriptComposer:
                     "positive_tags": character_positive_tags,
                     "negative_tags": character_negative,
                     "selected_keys": selected_keys or [],
+                    "identity_minimal_sections": identity_minimal_sections,
                 }
             )
 
@@ -198,6 +204,7 @@ class ScriptComposer:
             prompt=positive,
             negative=negative_prompt,
             character_scope=scope,
+            identity_minimal_sections=json.dumps(identity_minimal_sections or [], sort_keys=True),
             nodes=json.dumps([ref.model_dump(mode="json") for ref in node_refs], sort_keys=True),
         )
         extra = {

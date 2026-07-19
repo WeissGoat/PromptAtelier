@@ -24,6 +24,7 @@ from .models import (
     AgentOptions,
     BatchSpec,
     BatchTask,
+    CompositionOptions,
     NodeRef,
     PromptItem,
     RenderOptions,
@@ -757,6 +758,9 @@ class BatchPlanner:
             agent=AgentOptions(
                 agent_model=spec.defaults.agent_model,
                 cache_dir=spec.defaults.cache_dir,
+            ),
+            composition=CompositionOptions(
+                identity_minimal_sections=spec.defaults.identity_minimal_sections,
             ),
             policy=self.policy_provider.resolve(
                 spec.defaults.prompt_policy,

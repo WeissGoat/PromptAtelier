@@ -121,6 +121,7 @@ class BatchExecutor:
             resolved_nodes,
             extra_prompt=task.extra_prompt,
             negative=task.negative or "",
+            identity_minimal_sections=task.composition.identity_minimal_sections,
             prompt_policy=task.policy or None,
         )
 

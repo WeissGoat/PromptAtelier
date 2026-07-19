@@ -91,6 +91,7 @@ class BatchDefaults(BaseModel):
     image_format: str = "png"
     model: str | None = "nai-diffusion-4-5-full"
     prompt_policy: PromptPolicySource | None = None
+    identity_minimal_sections: list[str] | None = None
     agent_model: str | None = None
     cache_dir: str | None = None
     add_male_caption: bool = True
@@ -209,6 +210,10 @@ class AgentOptions(BaseModel):
     cache_dir: str | None = None
 
 
+class CompositionOptions(BaseModel):
+    identity_minimal_sections: list[str] | None = None
+
+
 class TaskOutput(BaseModel):
     task_dir: str
     output_dir: str | None = None
@@ -227,6 +232,7 @@ class BatchTask(BaseModel):
     extra_prompt: str = ""
     render: RenderOptions
     agent: AgentOptions = Field(default_factory=AgentOptions)
+    composition: CompositionOptions = Field(default_factory=CompositionOptions)
     policy: PromptPolicyConfig | None = None
     artist_input_filter: ArtistInputFilterConfig | None = None
     output: TaskOutput

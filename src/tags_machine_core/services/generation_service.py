@@ -78,6 +78,7 @@ class GenerationService:
         negative: str = "",
         character_scope: str | None = None,
         body_scope: str | None = None,
+        identity_minimal_sections: list[str] | None = None,
         prompt_policy: PromptPolicyConfig | PromptPolicySource | dict[str, Any] | None = None,
     ) -> PromptBundle:
         bundle = self.composer.compose_nodes(
@@ -89,6 +90,7 @@ class GenerationService:
             negative=negative,
             character_scope=character_scope,
             body_scope=body_scope,
+            identity_minimal_sections=identity_minimal_sections,
         )
         logger.info(
             "compose_nodes produced bundle composer=%s node_count=%s",
@@ -122,6 +124,7 @@ class GenerationService:
         negative: str = "",
         character_scope: str | None = None,
         body_scope: str | None = None,
+        identity_minimal_sections: list[str] | None = None,
         prompt_policy: PromptPolicyConfig | PromptPolicySource | dict[str, Any] | None = None,
     ) -> PromptBundle:
         bundle = self.composer.compose_resolved_nodes(
@@ -130,6 +133,7 @@ class GenerationService:
             negative=negative,
             character_scope=character_scope,
             body_scope=body_scope,
+            identity_minimal_sections=identity_minimal_sections,
         )
         logger.info(
             "compose_resolved_nodes produced bundle composer=%s resolved_node_count=%s",
