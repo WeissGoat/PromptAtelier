@@ -16,6 +16,7 @@ from tags_machine_core.batch import (
     load_batch_spec,
     load_batch_spec_mapping,
 )
+from tags_machine_core.batch.paths import resolve_batch_output_path
 from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.web.services.job_manager import JobContext
@@ -179,7 +180,9 @@ class BatchWorkspace:
     ) -> Path:
         raw = _optional_string(data, "output_dir") or spec.output_dir
         if raw:
-            return _relative_path(raw, spec_path=spec_path)
+            return resolve_batch_output_path(
+                _relative_path(raw, spec_path=spec_path)
+            )
         return run_dir / "outputs"
 
     def _config_path(self, spec: BatchSpec, *, spec_path: Path, override: str | None) -> Path:

@@ -65,6 +65,7 @@ from tags_machine_core.batch import (
     load_batch_spec_mapping,
     write_initial_manifest,
 )
+from tags_machine_core.batch.paths import resolve_batch_output_path
 
 
 logger = get_logger(__name__)
@@ -1374,7 +1375,9 @@ def _batch_output_dir(
 ) -> Path:
     raw = override or spec.output_dir
     if raw:
-        return _batch_relative_path(raw, spec_path=spec_path)
+        return resolve_batch_output_path(
+            _batch_relative_path(raw, spec_path=spec_path)
+        )
     return run_dir / "outputs"
 
 
