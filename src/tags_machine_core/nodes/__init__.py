@@ -17,6 +17,11 @@ from .character_scope import (
     node_positive,
     resolve_character_scope,
 )
+from .artist_input_filter import (
+    ArtistInputFilter,
+    ArtistInputFilterConfig,
+    ArtistNegativePromptFilterConfig,
+)
 from .models import NodeDocument
 from .novelai_artist import NovelAIArtist, NovelAIArtistRepository
 from .reader import NodeReader
@@ -27,6 +32,9 @@ from .validation import validate_node_tree
 migrate_legacy_style_tags = migrate_legacy_artist_tags
 
 __all__ = [
+    "ArtistInputFilter",
+    "ArtistInputFilterConfig",
+    "ArtistNegativePromptFilterConfig",
     "NodeDocument",
     "NodeInput",
     "NodeReader",

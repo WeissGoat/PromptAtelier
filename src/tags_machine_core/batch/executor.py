@@ -10,7 +10,13 @@ from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.execution import execute_mock_generation, execute_render_request
-from tags_machine_core.nodes import NodeReader, NovelAIArtistRepository, ResolvedNode, ResolvedNodeSet
+from tags_machine_core.nodes import (
+    ArtistInputFilter,
+    NodeReader,
+    NovelAIArtistRepository,
+    ResolvedNode,
+    ResolvedNodeSet,
+)
 from tags_machine_core.services import GenerationService
 
 from .models import BatchTask
@@ -126,6 +132,9 @@ class BatchExecutor:
             nodes.append(NodeRef(role="artist", ref=task.render.artist, index=0))
 
         artist_repo = NovelAIArtistRepository(config.legacy.design_root)
+        artist_filter = ArtistInputFilter(
+            task.artist_input_filter or config.artist_input_filter
+        )
         items: list[ResolvedNode] = []
         role_counts: dict[str, int] = {}
         for node_ref in nodes:
@@ -137,6 +146,7 @@ class BatchExecutor:
                     if Path(node_ref.ref).exists() or task.render.backend != "novelai"
                     else artist_repo.load_node(node_ref.ref)
                 )
+                document = artist_filter.apply(document)
             else:
                 document = self.node_reader.read(node_ref.ref)
             items.append(

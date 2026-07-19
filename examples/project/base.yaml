@@ -12,6 +12,14 @@ defaults:
     require: legacy_compat
   character_prompts: auto
   add_male_caption: true
+  artist_input_filter:
+    negative_prompt:
+      enabled: true
+      blocked_tokens:
+        - nsfw
+      fields:
+        - negative_prompt
+        - after_negative_prompt
 
 expand:
   action_group_strategy: balanced_random

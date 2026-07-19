@@ -24,6 +24,7 @@ from tags_machine_core.execution import execute_render_request as _execute_rende
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.logging_config import configure_logging, get_logger
 from tags_machine_core.nodes import (
+    ArtistInputFilter,
     NodeInput,
     NodeReader,
     NovelAIArtistRepository,
@@ -1803,6 +1804,7 @@ def _read_resolved_nodes(
     artist=None,
 ) -> ResolvedNodeSet:
     reader = NodeReader()
+    artist_filter = _artist_input_filter_for_args(args)
     items: list[tuple[str, str, object]] = []
     if artist is not None and artist_ref:
         items.append(("artist", artist_ref, artist))
@@ -1824,6 +1826,8 @@ def _read_resolved_nodes(
     role_counts: dict[str, int] = {}
     resolved: list[ResolvedNode] = []
     for role, ref, node in items:
+        if role == "artist":
+            node = artist_filter.apply(node)
         index = role_counts.get(role, 0)
         role_counts[role] = index + 1
         resolved.append(ResolvedNode(role=role, ref=ref, index=index, node=node))
@@ -1831,17 +1835,27 @@ def _read_resolved_nodes(
 
 
 def _load_render_artist(args):
+    artist_filter = _artist_input_filter_for_args(args)
     if getattr(args, "artist_node", None):
         node = NodeReader().read(args.artist_node)
-        return node.id, node
+        return node.id, artist_filter.apply(node)
     artist_ref = getattr(args, "artist", None)
     if artist_ref and Path(artist_ref).exists():
         node = NodeReader().read(artist_ref)
-        return artist_ref, node
+        return artist_ref, artist_filter.apply(node)
     if artist_ref and getattr(args, "config", None):
         config = _load_command_config(args.config, args)
-        return artist_ref, NovelAIArtistRepository(config.legacy.design_root).load_node(artist_ref)
+        node = NovelAIArtistRepository(config.legacy.design_root).load_node(artist_ref)
+        return artist_ref, artist_filter.apply(node)
     return artist_ref, None
+
+
+def _artist_input_filter_for_args(args) -> ArtistInputFilter:
+    config_path = getattr(args, "config", None)
+    if not config_path:
+        return ArtistInputFilter()
+    config = _load_command_config(config_path, args)
+    return ArtistInputFilter(config.artist_input_filter)
 
 
 def _load_novelai_artist_for_nodes(args):

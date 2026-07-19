@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tags_machine_core.nodes.artist_input_filter import ArtistInputFilterConfig
 from tags_machine_core.policies import PromptPolicyConfig, PromptPolicySource
 
 
@@ -95,6 +96,7 @@ class BatchDefaults(BaseModel):
     add_male_caption: bool = True
     character_prompts: str | None = "auto"
     params: dict[str, Any] = Field(default_factory=dict)
+    artist_input_filter: ArtistInputFilterConfig | None = None
 
     @field_validator("artist", mode="before")
     @classmethod
@@ -226,6 +228,7 @@ class BatchTask(BaseModel):
     render: RenderOptions
     agent: AgentOptions = Field(default_factory=AgentOptions)
     policy: PromptPolicyConfig | None = None
+    artist_input_filter: ArtistInputFilterConfig | None = None
     output: TaskOutput
     source: dict[str, Any] = Field(default_factory=dict)
 

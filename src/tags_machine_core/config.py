@@ -6,6 +6,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field
 
+from tags_machine_core.nodes.artist_input_filter import ArtistInputFilterConfig
 from tags_machine_core.policies import (
     PromptPolicyProvider,
     PromptPolicySource,
@@ -66,6 +67,9 @@ class AppConfig(BaseModel):
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    artist_input_filter: ArtistInputFilterConfig = Field(
+        default_factory=ArtistInputFilterConfig
+    )
     prompt_policy_template_root: Path | None = None
     prompt_policy: PromptPolicySource = Field(
         default_factory=lambda: PromptPolicySource(require="default")

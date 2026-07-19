@@ -13,6 +13,15 @@ defaults:
 generation:
   executor: "ai_image_gateway_raw"
 
+artist_input_filter:
+  negative_prompt:
+    enabled: true
+    blocked_tokens:
+      - nsfw
+    fields:
+      - negative_prompt
+      - after_negative_prompt
+
 novelai:
   base_url: "https://image.novelai.net"
   access_token: null

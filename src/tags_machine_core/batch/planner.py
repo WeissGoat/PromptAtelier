@@ -762,6 +762,7 @@ class BatchPlanner:
                 spec.defaults.prompt_policy,
                 relative_to=self.base_dir,
             ),
+            artist_input_filter=spec.defaults.artist_input_filter,
             output={
                 "task_dir": str(run_dir / "tasks" / task_id),
                 "output_dir": str(output_dir / task_id),
