@@ -15,6 +15,7 @@ def write_report(
     include_prompt_preview: bool = True,
     include_png_params_summary: bool = True,
     visual_check_template: bool = True,
+    action_group_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = Path(run_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -25,6 +26,8 @@ def write_report(
         "counts": dict(counts),
         "entries": entries,
     }
+    if action_group_summary and action_group_summary.get("rounds"):
+        data["action_groups"] = action_group_summary
     if json_report:
         (root / "report.json").write_text(
             json.dumps(
@@ -68,6 +71,17 @@ def _markdown_report(
     ]
     for status, count in sorted(data["counts"].items()):
         lines.append(f"- {status}: {count}")
+    action_groups = data.get("action_groups") or {}
+    if action_groups:
+        lines.extend(["", "## Action Groups", "", f"- rounds: {action_groups.get('rounds', 0)}"])
+        for character, count in sorted((action_groups.get("characters") or {}).items()):
+            lines.append(f"- character `{character}`: {count} rounds")
+        lines.extend(["", "| Group | Selected | Completed | Failed |", "| --- | ---: | ---: | ---: |"])
+        for group, counts in sorted((action_groups.get("groups") or {}).items()):
+            lines.append(
+                f"| `{group}` | {counts.get('selected', 0)} | "
+                f"{counts.get('completed', 0)} | {counts.get('failed', 0)} |"
+            )
     lines.extend(
         [
             "",

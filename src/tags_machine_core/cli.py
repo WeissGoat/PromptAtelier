@@ -848,6 +848,7 @@ def cmd_api_run_batch(args) -> int:
         run_dir=run_dir,
         override=_optional_request_string(data, "output_dir"),
     )
+    _prepare_fresh_batch_run_dir(run_dir, fresh=spec.run.fresh)
     planner = _build_batch_planner(
         spec,
         spec_path=spec_path,
@@ -870,11 +871,12 @@ def cmd_api_run_batch(args) -> int:
         run_id=run_id,
         output_dir=output_dir,
     )
+    execution_run_config = spec.run.model_copy(update={"fresh": False}) if spec.run.fresh else spec.run
     result = BatchRunner().run_tasks(
         run_dir=run_dir,
         tasks=tasks,
         config=config,
-        run_config=spec.run,
+        run_config=execution_run_config,
         archive_config=spec.archive,
         report_config=spec.report,
         limit=_optional_request_int(data, "limit"),
@@ -1040,6 +1042,7 @@ def cmd_run_batch(args) -> int:
         run_dir=run_dir,
         override=args.output_dir,
     ).resolve()
+    _prepare_fresh_batch_run_dir(run_dir, fresh=spec.run.fresh)
     planner = _build_batch_planner(
         spec,
         spec_path=spec_path,
@@ -1052,11 +1055,12 @@ def cmd_run_batch(args) -> int:
     config = _load_command_config(config_path, args)
     _write_batch_source(run_dir, spec_path, run_id=run_id, output_dir=output_dir)
     _copy_batch_spec(run_dir, spec_path)
+    execution_run_config = spec.run.model_copy(update={"fresh": False}) if spec.run.fresh else spec.run
     result = BatchRunner().run_tasks(
         run_dir=run_dir,
         tasks=tasks,
         config=config,
-        run_config=spec.run,
+        run_config=execution_run_config,
         archive_config=spec.archive,
         report_config=spec.report,
         limit=args.limit,
@@ -1353,6 +1357,12 @@ def _batch_work_dir(spec, *, output_root: str | None = None, work_root: str | No
 
 def _batch_run_dir(spec, *, output_root: str | None, work_root: str | None = None, spec_path: Path | None = None) -> Path:
     return _batch_work_dir(spec, output_root=output_root, work_root=work_root, spec_path=spec_path)
+
+
+def _prepare_fresh_batch_run_dir(run_dir: str | Path, *, fresh: bool) -> None:
+    path = Path(run_dir)
+    if fresh and path.exists():
+        shutil.rmtree(path)
 
 
 def _batch_output_dir(

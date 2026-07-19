@@ -57,6 +57,19 @@ def resolve_ref(value: str | Path, base_dir: Path) -> Path:
     return path if path.is_absolute() else base_dir / path
 
 
+def matching_directories(root: Path, spec: SelectorSpec) -> list[Path]:
+    if not root.exists():
+        raise FileNotFoundError(f"Selector root not found: {root}")
+    if not root.is_dir():
+        return []
+    candidates = sorted((path for path in root.iterdir() if path.is_dir()), key=_natural_sort_key)
+    return [path for path in candidates if not _excluded(path, spec) and _included(path, spec)]
+
+
+def discover_nodes(root: Path, spec: SelectorSpec) -> list[str]:
+    return _discover_nodes(root, spec)
+
+
 def _expand_collection(
     *,
     role: str,

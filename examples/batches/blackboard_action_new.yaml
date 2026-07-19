@@ -3,18 +3,24 @@ require:
   - ../project/collections.yaml
   - ../project/nai_const_action_groups.yaml
 
-name: blackboard-action-new-manga-monochrome
+name: blackboard_action_new
 description: 参考旧 blackboard.py:run_tags_machine 的 ACTION_NEW + 特殊_next_select 批量跑图配置。
-output_dir: G:/ai_auto/blackboard-action-new-manga-monochrome
+output_dir: "G:/ai_auto/{date}"
 
 batch:
   characters: special_next_select
-  action_groups:
-    - action_new
-  artist: "109841329_03_manga_monochrome_yabuki_rance_no_vibe_latest_stable"
+  action_groups: action_new
+  artist: "114425243_Luminous_Soft_Anime"
   composer: script
-  auto_num: true
+  character_prompts: false
   nt: 3
 
 archive:
   save_parameter_image: true
+
+expand:
+  mode: blackboard_rounds
+  max_tasks: 1000
+  action_group_strategy: balanced_random
+  actions_per_group: 3
+  action_selection: random_preserve_order

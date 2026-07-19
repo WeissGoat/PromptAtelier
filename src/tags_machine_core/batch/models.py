@@ -20,6 +20,7 @@ ExpandMode = Literal[
     "blackboard_rounds",
 ]
 ActionGroupStrategyName = Literal["random", "ordered", "balanced_random"]
+ActionSelectionName = Literal["all", "random_preserve_order"]
 BatchStatus = Literal[
     "pending",
     "ready",
@@ -157,8 +158,17 @@ class ExpandConfig(BaseModel):
     shuffle: bool = False
     action_group_strategy: ActionGroupStrategyName = "balanced_random"
     action_group_record: str | None = None
+    actions_per_group: int | None = None
+    action_selection: ActionSelectionName = "all"
     allow_fill_missing_cp_from_candidates: bool = False
     seed: int | None = None
+
+    @field_validator("actions_per_group")
+    @classmethod
+    def _actions_per_group_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("actions_per_group must be >= 1")
+        return value
 
 
 class NodeRef(BaseModel):

@@ -12,6 +12,7 @@ from tags_machine_core.config import AppConfig
 from tags_machine_core.logging_config import emit_console_record, get_logger
 
 from .archive import BatchArchive
+from .action_group_state import ActionGroupRunTracker
 from .executor import BatchExecutionResult, BatchExecutor
 from .manifest import (
     append_manifest_entry,
@@ -83,6 +84,7 @@ class BatchRunner:
         if run_config.fresh and root.exists():
             shutil.rmtree(root)
         root.mkdir(parents=True, exist_ok=True)
+        action_group_tracker = ActionGroupRunTracker(root)
         if not (run_config.resume and (root / "manifest.jsonl").exists()):
             write_initial_manifest(root, tasks)
         logger.info(
@@ -108,6 +110,7 @@ class BatchRunner:
             if image_budget is not None and image_budget <= 0:
                 break
             task = _resume_task_snapshot(planned_task) if run_config.resume else planned_task
+            action_group_tracker.start_task(task)
             if run_config.resume and task_already_succeeded(task):
                 entry = self._record_skipped(run_dir=root, task=task)
                 entries.append(entry)
@@ -166,6 +169,7 @@ class BatchRunner:
                 _emit_progress(f"[batch] stopped_on_error task_id={result['task_id']}", level="warning")
                 break
 
+        action_group_summary = action_group_tracker.reconcile(selected, entries)
         _log_action_group_summary(entries)
         report = write_report(
             root,
@@ -175,6 +179,7 @@ class BatchRunner:
             include_prompt_preview=report_config.include_prompt_preview,
             include_png_params_summary=report_config.include_png_params_summary,
             visual_check_template=report_config.visual_check_template,
+            action_group_summary=action_group_summary,
         )
         logger.info("batch report written run_dir=%s counts=%s", root, report["counts"])
         _emit_progress(f"[batch] completed run_dir={root} counts={report['counts']}")

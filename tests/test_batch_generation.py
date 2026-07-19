@@ -1,5 +1,6 @@
 import io
 import json
+import random
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -7,6 +8,8 @@ from pathlib import Path
 
 from tags_machine_core.batch import (
     ArchiveConfig,
+    ActionGroupRecord,
+    ActionGroupStateStore,
     BatchArchive,
     BatchPlanner,
     BatchRunner,
@@ -14,11 +17,23 @@ from tags_machine_core.batch import (
     SelectorSpec,
     expand_selector,
     load_batch_spec,
+    mark_round_started,
+    mark_round_finished,
+    resolve_action_groups,
+    select_group_actions,
 )
+from tags_machine_core.batch.action_groups import ResolvedActionGroup
 from tags_machine_core.batch.executor import BatchExecutor
 from tags_machine_core.batch.executor import BatchExecutionResult
 from tags_machine_core.batch.manifest import write_initial_manifest
-from tags_machine_core.batch.models import BatchSpec, BatchTask, RenderOptions, RetryConfig, RunConfig
+from tags_machine_core.batch.models import (
+    BatchSpec,
+    BatchTask,
+    ExpandConfig,
+    RenderOptions,
+    RetryConfig,
+    RunConfig,
+)
 from tags_machine_core.batch.report import write_report
 from tags_machine_core.cli import main
 from tags_machine_core.config import AppConfig, LegacyConfig
@@ -1073,8 +1088,8 @@ batch:
 
             self.assertEqual(sorted(task.source["action_group"] for task in tasks), ["g2", "g3"])
             self.assertEqual(record["groups"]["g1"]["selected_count"], 2)
-            self.assertEqual(record["groups"]["g2"]["selected_count"], 1)
-            self.assertEqual(record["groups"]["g3"]["selected_count"], 1)
+            self.assertEqual(record["groups"]["g2"]["selected_count"], 0)
+            self.assertEqual(record["groups"]["g3"]["selected_count"], 0)
 
     def test_character_action_group_rejects_select_actions(self):
         spec = BatchSpec.model_validate(
@@ -1151,6 +1166,74 @@ expand:
             source = json.loads((Path(data["run_dir"]) / "batch_source.json").read_text(encoding="utf-8"))
             self.assertEqual(source["run_id"], data["run_id"])
             self.assertEqual(Path(source["output_dir"]).resolve(), (root / "custom_outputs").resolve())
+
+    def test_cli_plan_batch_does_not_delete_run_dir_when_spec_is_fresh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec_path = root / "batch.yaml"
+            run_dir = root / "preview-fresh"
+            stale = run_dir / "keep.txt"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("keep", encoding="utf-8")
+            spec_path.write_text(
+                """
+schema: tags-machine-core.batch/v1
+name: preview-fresh
+select:
+  prompts:
+    - selector: prompt_list
+      items:
+        - id: p1
+          prompt: akemi_homura, standing
+expand:
+  mode: prompt_list
+run:
+  fresh: true
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(io.StringIO()):
+                exit_code = main(["plan-batch", str(spec_path), "--full"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(stale.exists())
+
+    def test_cli_run_batch_fresh_preserves_source_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec_path = root / "batch.yaml"
+            run_dir = root / "run-fresh"
+            stale = run_dir / "stale.txt"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("remove", encoding="utf-8")
+            spec_path.write_text(
+                """
+schema: tags-machine-core.batch/v1
+name: run-fresh
+defaults:
+  composer: full
+select:
+  prompts:
+    - selector: prompt_list
+      items:
+        - id: p1
+          prompt: akemi_homura, standing
+expand:
+  mode: prompt_list
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    ["run-batch", str(spec_path), "--mock-client", "--fresh", "--limit", "1"]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(stale.exists())
+            self.assertTrue((run_dir / "batch_source.json").exists())
+            self.assertTrue((run_dir / "batch.yaml").exists())
 
     def test_planner_accepts_separate_work_and_output_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1899,6 +1982,308 @@ expand:
             self.assertEqual(executor.calls, 2)
             self.assertEqual(executor.timeouts, [1, 1])
             self.assertEqual(result["entries"][0]["retry_records"][0]["attempt"], 1)
+
+
+class ActionGroupRoundSelectionTests(unittest.TestCase):
+    def test_expand_config_rejects_non_positive_actions_per_group(self):
+        with self.assertRaisesRegex(ValueError, "actions_per_group must be >= 1"):
+            ExpandConfig(actions_per_group=0)
+
+    def test_random_preserve_order_samples_then_restores_source_order(self):
+        group = ResolvedActionGroup(name="g1", actions=["a1", "a2", "a3", "a4"])
+
+        selected = select_group_actions(
+            group,
+            strategy="random_preserve_order",
+            limit=2,
+            rng=random.Random(7),
+        )
+
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(selected, sorted(selected, key=group.actions.index))
+
+    def test_all_selection_respects_limit_without_shuffle(self):
+        group = ResolvedActionGroup(name="g1", actions=["a1", "a2", "a3"])
+
+        selected = select_group_actions(
+            group,
+            strategy="all",
+            limit=2,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(selected, ["a1", "a2"])
+
+    def test_action_group_collection_preserves_matched_folder_boundaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "actions"
+            _write_node(root / "pn_a" / "01", kind="action", node_id="a1", prompt="a1")
+            _write_node(root / "pn_a" / "02", kind="action", node_id="a2", prompt="a2")
+            _write_node(root / "pn_b" / "01", kind="action", node_id="b1", prompt="b1")
+            context = SelectorContext(
+                base_dir=Path(tmp),
+                collections={
+                    "actions": {
+                        "action_new": [
+                            {
+                                "selector": "folder",
+                                "root": str(root),
+                                "include": {"names": ["pn_*"]},
+                            }
+                        ]
+                    }
+                },
+            )
+
+            groups = resolve_action_groups(
+                [SelectorSpec(selector="collection", name="action_new")],
+                context=context,
+            )
+
+            self.assertEqual([group.name for group in groups], ["pn_a", "pn_b"])
+            self.assertEqual([len(group.actions) for group in groups], [2, 1])
+
+    def test_ordinary_action_collection_remains_flat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "actions"
+            _write_node(root / "pn_a" / "01", kind="action", node_id="a1", prompt="a1")
+            _write_node(root / "pn_a" / "02", kind="action", node_id="a2", prompt="a2")
+            _write_node(root / "pn_b" / "01", kind="action", node_id="b1", prompt="b1")
+            context = SelectorContext(
+                base_dir=Path(tmp),
+                collections={
+                    "actions": {
+                        "action_new": [
+                            {
+                                "selector": "folder",
+                                "root": str(root),
+                                "include": {"names": ["pn_*"]},
+                            }
+                        ]
+                    }
+                },
+            )
+
+            actions = expand_selector(
+                role="action",
+                spec=SelectorSpec(selector="collection", name="action_new"),
+                context=context,
+            )
+
+            self.assertEqual(len(actions), 3)
+
+    def test_action_group_state_defaults_under_run_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ActionGroupStateStore.for_run_dir(Path(tmp) / "run")
+
+            self.assertEqual(
+                store.path,
+                Path(tmp) / "run" / "state" / "action_groups.json",
+            )
+
+    def test_mark_round_started_is_idempotent(self):
+        record = ActionGroupRecord()
+
+        self.assertTrue(mark_round_started(record, round_id="r1", group_name="g1"))
+        self.assertFalse(mark_round_started(record, round_id="r1", group_name="g1"))
+        self.assertEqual(record.groups["g1"].selected_count, 1)
+
+    def test_planning_baseline_rolls_back_rounds_from_current_run(self):
+        record = ActionGroupRecord()
+        mark_round_started(record, round_id="r1", group_name="g1")
+
+        baseline = record.planning_baseline()
+
+        self.assertEqual(baseline.groups["g1"].selected_count, 0)
+        self.assertEqual(baseline.recorded_rounds, {})
+        self.assertEqual(record.groups["g1"].selected_count, 1)
+
+    def test_failed_round_can_recover_to_completed(self):
+        record = ActionGroupRecord()
+        mark_round_started(record, round_id="r1", group_name="g1")
+        mark_round_finished(record, round_id="r1", status="failed")
+
+        self.assertTrue(mark_round_finished(record, round_id="r1", status="completed"))
+
+        self.assertEqual(record.recorded_rounds["r1"].status, "completed")
+        self.assertEqual(record.groups["g1"].failed_count, 0)
+        self.assertEqual(record.groups["g1"].completed_count, 1)
+
+    def test_state_store_round_trip_preserves_recorded_rounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ActionGroupStateStore.for_run_dir(Path(tmp) / "run")
+            record = ActionGroupRecord()
+            mark_round_started(record, round_id="r1", group_name="g1")
+
+            store.save(record)
+            loaded = store.load()
+
+            self.assertEqual(loaded.recorded_rounds["r1"].group, "g1")
+            self.assertEqual(loaded.groups["g1"].selected_count, 1)
+
+    def test_blackboard_rounds_samples_three_actions_then_switches_character(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for character in ("c1", "c2"):
+                _write_node(
+                    root / "characters" / character,
+                    kind="character",
+                    node_id=character,
+                    prompt=character,
+                )
+            for group in ("g1", "g2"):
+                for index in range(5):
+                    _write_node(
+                        root / "groups" / group / f"a{index}",
+                        kind="action",
+                        node_id=f"{group}_a{index}",
+                        prompt="standing",
+                    )
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "sampled-rounds",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {
+                                "selector": "folder",
+                                "root": str(root / "characters"),
+                                "recursive": True,
+                            }
+                        ],
+                        "action_groups": [
+                            {
+                                "name": group,
+                                "selector": "folder",
+                                "root": str(root / "groups" / group),
+                                "recursive": True,
+                            }
+                            for group in ("g1", "g2")
+                        ],
+                    },
+                    "expand": {
+                        "mode": "blackboard_rounds",
+                        "max_tasks": 6,
+                        "action_group_strategy": "ordered",
+                        "actions_per_group": 3,
+                        "action_selection": "random_preserve_order",
+                        "seed": 7,
+                    },
+                }
+            )
+
+            tasks = BatchPlanner(base_dir=root).plan(spec, run_dir=root / "run", run_id="sample")
+
+            self.assertEqual(len(tasks), 6)
+            self.assertEqual(len({task.source["round_id"] for task in tasks[:3]}), 1)
+            self.assertEqual(len({task.source["round_id"] for task in tasks[3:]}), 1)
+            self.assertEqual({Path(task.source["character"]).name for task in tasks[:3]}, {"c1"})
+            self.assertEqual({Path(task.source["character"]).name for task in tasks[3:]}, {"c2"})
+            self.assertEqual([task.source["action_group"] for task in tasks], ["g1"] * 3 + ["g2"] * 3)
+            self.assertEqual([task.source["action_index_in_group"] for task in tasks], [0, 1, 2, 0, 1, 2])
+
+    def test_blackboard_resume_rebuilds_same_plan_from_run_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            _write_node(root / "characters" / "c1", kind="character", node_id="c1", prompt="c1")
+            for group in ("g1", "g2"):
+                _write_node(
+                    root / "groups" / group / "a1",
+                    kind="action",
+                    node_id=f"{group}_a1",
+                    prompt="standing",
+                )
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "resume-rounds",
+                    "defaults": {"composer": "agent", "artist": "20260412"},
+                    "select": {
+                        "characters": [
+                            {"selector": "folder", "root": str(root / "characters"), "recursive": True}
+                        ],
+                        "action_groups": [
+                            {
+                                "name": group,
+                                "selector": "folder",
+                                "root": str(root / "groups" / group),
+                                "recursive": True,
+                            }
+                            for group in ("g1", "g2")
+                        ],
+                    },
+                    "expand": {
+                        "mode": "blackboard_rounds",
+                        "max_tasks": 1,
+                        "action_group_strategy": "balanced_random",
+                    },
+                }
+            )
+            planner = BatchPlanner(base_dir=root)
+            first = planner.plan(spec, run_dir=run_dir, run_id="stable-run")
+            state = ActionGroupRecord()
+            mark_round_started(
+                state,
+                round_id=first[0].source["round_id"],
+                group_name=first[0].source["action_group"],
+            )
+            ActionGroupStateStore.for_run_dir(run_dir).save(state)
+
+            resumed = planner.plan(spec, run_dir=run_dir, run_id="stable-run")
+
+            self.assertEqual([task.id for task in resumed], [task.id for task in first])
+            self.assertEqual(
+                [task.source["action_group"] for task in resumed],
+                [task.source["action_group"] for task in first],
+            )
+
+    def test_runner_records_one_completed_round_for_three_tasks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            tasks = [
+                BatchTask(
+                    id=f"round_task_{index}",
+                    index=index,
+                    composer="full",
+                    prompt="akemi_homura",
+                    render=RenderOptions(artist="20260412"),
+                    output={
+                        "task_dir": str(run_dir / "tasks" / f"round_task_{index}"),
+                        "output_dir": str(run_dir / "outputs" / f"round_task_{index}"),
+                    },
+                    source={
+                        "round_id": "r1",
+                        "action_group": "g1",
+                        "character": "homura",
+                    },
+                )
+                for index in range(3)
+            ]
+
+            BatchRunner(executor=SuccessfulExecutor()).run_tasks(
+                run_dir=run_dir,
+                tasks=tasks,
+                config=_config(root),
+                run_config=RunConfig(fresh=True),
+            )
+            state = ActionGroupStateStore.for_run_dir(run_dir).load()
+
+            self.assertEqual(state.groups["g1"].selected_count, 1)
+            self.assertEqual(state.groups["g1"].completed_count, 1)
+            self.assertEqual(state.recorded_rounds["r1"].status, "completed")
+            report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["action_groups"]["rounds"], 1)
+
+            BatchRunner(executor=SuccessfulExecutor()).run_tasks(
+                run_dir=run_dir,
+                tasks=tasks,
+                config=_config(root),
+                run_config=RunConfig(resume=True),
+            )
+            resumed = ActionGroupStateStore.for_run_dir(run_dir).load()
+            self.assertEqual(resumed.groups["g1"].selected_count, 1)
+            self.assertEqual(resumed.groups["g1"].completed_count, 1)
 
 
 def _config(root: Path) -> AppConfig:

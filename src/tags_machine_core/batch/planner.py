@@ -15,10 +15,13 @@ from tags_machine_core.policies import PromptPolicyProvider
 
 from .action_groups import (
     ActionGroupRecord,
+    ResolvedActionGroup,
     choose_action_group,
     resolve_action_groups,
     resolve_record_path,
+    select_group_actions,
 )
+from .action_group_state import ActionGroupStateStore
 from .character_relations import detect_required_girl_count, resolve_cp_character_refs
 from .models import (
     AgentOptions,
@@ -341,9 +344,8 @@ class BatchPlanner:
         context = SelectorContext(base_dir=self.base_dir, collections=spec.collections)
         groups = resolve_action_groups(spec.select.action_groups, context=context)
         group_indices = {group.name: index for index, group in enumerate(groups)}
-        record_path = resolve_record_path(spec.expand.action_group_record, base_dir=self.base_dir)
-        record = ActionGroupRecord.load(record_path)
-        rng = random.Random(spec.expand.seed)
+        record = self._planning_action_group_record(spec, run_dir=run_dir)
+        rng = random.Random(spec.expand.seed if spec.expand.seed is not None else run_id)
         tasks: list[BatchTask] = []
 
         logger.info(
@@ -353,15 +355,15 @@ class BatchPlanner:
             spec.expand.action_group_strategy,
         )
         for character_index, character in enumerate(selections.characters):
-            group, selected_count = choose_action_group(
-                groups,
-                strategy=spec.expand.action_group_strategy,
-                character_index=character_index,
-                rng=rng,
+            round_id, group, actions, selected_count = self._select_action_round(
+                spec,
+                character=character,
+                round_index=character_index,
+                groups=groups,
                 record=record,
+                rng=rng,
+                run_id=run_id,
             )
-            if spec.expand.action_group_strategy == "balanced_random":
-                record.save(record_path)
             logger.info(
                 "action group selected character=%s group=%s strategy=%s action_count=%s selected_count=%s",
                 Path(character).name,
@@ -370,7 +372,7 @@ class BatchPlanner:
                 len(group.actions),
                 selected_count,
             )
-            for action_index, action in enumerate(group.actions):
+            for action_index, action in enumerate(actions):
                 character_refs, character_source = self._character_refs_for_action(
                     spec,
                     character=character,
@@ -411,13 +413,17 @@ class BatchPlanner:
                                 "background": background,
                                 **character_source,
                                 "run_id": run_id,
+                                "round_id": round_id,
+                                "round_index": character_index,
                                 "action_group": group.name,
                                 "action_group_strategy": spec.expand.action_group_strategy,
-                                "action_group_record": str(record_path) if record_path else None,
                                 "action_group_index": group_indices[group.name],
                                 "action_index_in_group": action_index,
-                                "action_count_in_group": len(group.actions),
+                                "action_count_in_group": len(actions),
+                                "action_group_total_actions": len(group.actions),
                                 "action_group_selected_count": selected_count,
+                                "action_selection": spec.expand.action_selection,
+                                "actions_per_group": spec.expand.actions_per_group,
                             },
                             run_dir=run_dir,
                             output_dir=output_dir,
@@ -440,9 +446,8 @@ class BatchPlanner:
         context = SelectorContext(base_dir=self.base_dir, collections=spec.collections)
         groups = resolve_action_groups(spec.select.action_groups, context=context)
         group_indices = {group.name: index for index, group in enumerate(groups)}
-        record_path = resolve_record_path(spec.expand.action_group_record, base_dir=self.base_dir)
-        record = ActionGroupRecord.load(record_path)
-        rng = random.Random(spec.expand.seed)
+        record = self._planning_action_group_record(spec, run_dir=run_dir)
+        rng = random.Random(spec.expand.seed if spec.expand.seed is not None else run_id)
         task_target = spec.expand.max_tasks or 0
         tasks: list[BatchTask] = []
         max_planning_rounds = max(
@@ -465,7 +470,6 @@ class BatchPlanner:
                 groups=groups,
                 group_indices=group_indices,
                 record=record,
-                record_path=record_path,
                 rng=rng,
                 artists=artists,
                 backgrounds=backgrounds,
@@ -489,24 +493,25 @@ class BatchPlanner:
                     "Check action filters and character relations.cp for multi-character actions."
                 )
             character = selections.characters[round_index % len(selections.characters)]
-            group, selected_count = choose_action_group(
-                groups,
-                strategy=spec.expand.action_group_strategy,
-                character_index=round_index,
-                rng=rng,
+            round_id, group, actions, selected_count = self._select_action_round(
+                spec,
+                character=character,
+                round_index=round_index,
+                groups=groups,
                 record=record,
+                rng=rng,
+                run_id=run_id,
             )
-            if spec.expand.action_group_strategy == "balanced_random":
-                record.save(record_path)
             logger.info(
-                "blackboard round selected round=%s character=%s group=%s action_count=%s selected_count=%s",
+                "blackboard round selected round=%s character=%s group=%s selected_actions=%s total_actions=%s selected_count=%s",
                 round_index,
                 Path(character).name,
                 group.name,
+                len(actions),
                 len(group.actions),
                 selected_count,
             )
-            for action_index, action in enumerate(group.actions):
+            for action_index, action in enumerate(actions):
                 character_refs, character_source = self._character_refs_for_action(
                     spec,
                     character=character,
@@ -549,14 +554,17 @@ class BatchPlanner:
                                 "background": background,
                                 **character_source,
                                 "run_id": run_id,
+                                "round_id": round_id,
                                 "round_index": round_index,
                                 "action_group": group.name,
                                 "action_group_strategy": spec.expand.action_group_strategy,
-                                "action_group_record": str(record_path) if record_path else None,
                                 "action_group_index": group_indices[group.name],
                                 "action_index_in_group": action_index,
-                                "action_count_in_group": len(group.actions),
+                                "action_count_in_group": len(actions),
+                                "action_group_total_actions": len(group.actions),
                                 "action_group_selected_count": selected_count,
+                                "action_selection": spec.expand.action_selection,
+                                "actions_per_group": spec.expand.actions_per_group,
                             },
                             run_dir=run_dir,
                             output_dir=output_dir,
@@ -581,7 +589,6 @@ class BatchPlanner:
         groups,
         group_indices: dict[str, int],
         record: ActionGroupRecord,
-        record_path: Path | None,
         rng: random.Random,
         artists: list[str | None],
         backgrounds: list[str | None],
@@ -592,24 +599,25 @@ class BatchPlanner:
     ) -> list[BatchTask]:
         tasks: list[BatchTask] = []
         for round_index, character in enumerate(selections.characters):
-            group, selected_count = choose_action_group(
-                groups,
-                strategy=spec.expand.action_group_strategy,
-                character_index=round_index,
-                rng=rng,
+            round_id, group, actions, selected_count = self._select_action_round(
+                spec,
+                character=character,
+                round_index=round_index,
+                groups=groups,
                 record=record,
+                rng=rng,
+                run_id=run_id,
             )
-            if spec.expand.action_group_strategy == "balanced_random":
-                record.save(record_path)
             logger.info(
-                "blackboard auto_num round selected round=%s character=%s group=%s action_count=%s selected_count=%s",
+                "blackboard auto_num round selected round=%s character=%s group=%s selected_actions=%s total_actions=%s selected_count=%s",
                 round_index,
                 Path(character).name,
                 group.name,
+                len(actions),
                 len(group.actions),
                 selected_count,
             )
-            for action_index, action in enumerate(group.actions):
+            for action_index, action in enumerate(actions):
                 character_refs, character_source = self._character_refs_for_action(
                     spec,
                     character=character,
@@ -652,15 +660,18 @@ class BatchPlanner:
                                 "background": background,
                                 **character_source,
                                 "run_id": run_id,
+                                "round_id": round_id,
                                 "round_index": round_index,
                                 "auto_num": True,
                                 "action_group": group.name,
                                 "action_group_strategy": spec.expand.action_group_strategy,
-                                "action_group_record": str(record_path) if record_path else None,
                                 "action_group_index": group_indices[group.name],
                                 "action_index_in_group": action_index,
-                                "action_count_in_group": len(group.actions),
+                                "action_count_in_group": len(actions),
+                                "action_group_total_actions": len(group.actions),
                                 "action_group_selected_count": selected_count,
+                                "action_selection": spec.expand.action_selection,
+                                "actions_per_group": spec.expand.actions_per_group,
                             },
                             run_dir=run_dir,
                             output_dir=output_dir,
@@ -675,6 +686,46 @@ class BatchPlanner:
                         )
                         return tasks
         return tasks
+
+    def _planning_action_group_record(
+        self,
+        spec: BatchSpec,
+        *,
+        run_dir: Path,
+    ) -> ActionGroupRecord:
+        if spec.run.fresh:
+            return ActionGroupRecord()
+        if spec.expand.action_group_record:
+            path = resolve_record_path(spec.expand.action_group_record, base_dir=self.base_dir)
+            return ActionGroupRecord.load(path).model_copy(deep=True)
+        return ActionGroupStateStore.for_run_dir(run_dir).load().planning_baseline()
+
+    def _select_action_round(
+        self,
+        spec: BatchSpec,
+        *,
+        character: str,
+        round_index: int,
+        groups: list[ResolvedActionGroup],
+        record: ActionGroupRecord,
+        rng: random.Random,
+        run_id: str,
+    ) -> tuple[str, ResolvedActionGroup, list[str], int | None]:
+        group, selected_count = choose_action_group(
+            groups,
+            strategy=spec.expand.action_group_strategy,
+            character_index=round_index,
+            rng=rng,
+            record=record,
+        )
+        actions = select_group_actions(
+            group,
+            strategy=spec.expand.action_selection,
+            limit=spec.expand.actions_per_group,
+            rng=rng,
+        )
+        round_id = _task_id(run_id, "round", round_index, character, group.name, *actions)
+        return round_id, group, actions, selected_count
 
     def _plan_manual(self, spec: BatchSpec, *, run_dir: Path, output_dir: Path, run_id: str) -> list[BatchTask]:
         tasks: list[BatchTask] = []

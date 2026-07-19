@@ -196,7 +196,7 @@ run:
 | `agent_model` | `null` | 给 agent 任务记录的模型偏好，不直接调用模型。 |
 | `cache_dir` | `null` | agent prompt cache 目录。 |
 | `add_male_caption` | `true` | NovelAI v4+ character captions 自动拆分时，如检测到男性角色，额外补男性 caption。 |
-| `character_prompts` | `auto` | NovelAI v4+ character captions 模式。`auto` 表示 renderer 尝试根据 character 节点把角色提示词移入 character captions。 |
+| `character_prompts` | `auto` | NovelAI v4+ character captions 模式。`auto` 表示 renderer 尝试根据 character 节点把角色提示词移入 character captions；`false` 表示明确关闭，可覆盖 require 基础配置中的 `auto`。 |
 | `params` | `{}` | 透传给 renderer/backend 的高级参数，例如 NovelAI 特定采样参数。 |
 
 尺寸预设：
@@ -1213,7 +1213,7 @@ batch:
 ```
 
 其中 `homura_madoka`、`st_rp`、`st_sfw` 来自 `examples/project/collections.yaml`。读取时会展开成普通 `select.characters`、`select.action_groups` 和 `expand`，后续 `BatchPlanner`、Composer、Renderer 不需要感知这个简写。
-`auto_num: true` 表示不用手填 `max_tasks`：每个角色按策略选择一个动作组，并跑完整组。`blackboard_rounds` 会先选择一个动作组并跑完整组，再进入下一轮；如果额外设置 `max_tasks`，它只作为上限。
+`auto_num: true` 表示不用手填 `max_tasks`：每个角色运行一个 round，全部角色轮换一次后结束。每个 round 内使用全部动作还是抽取部分动作，由 `expand.action_selection` 和 `expand.actions_per_group` 决定。
 真实 `run-batch` 时，进度日志会带上 `character`、`group`、`action`，方便长时间跑图时确认当前组合。
 
 可以这样预览任务：
@@ -1226,7 +1226,11 @@ uv run python -m tags_machine_core plan-batch examples\batches\blackboard_style_
 
 ### 旧 nai_const action group
 
-`examples/project/nai_const_action_groups.yaml` 复刻了旧 `nai_const.py` 里常用的动作组枚举。它只包含 action collection，不包含账号、vibe、旧全局运行状态。
+`examples/project/nai_const_action_groups.yaml` 保存的是从旧 `nai_const.py` 整理出的 action collection，不包含账号、vibe、旧全局运行状态。
+
+- collection 用在 `select.actions` 时，所有匹配目录中的动作会扁平展开成动作节点池。
+- collection 用在 `select.action_groups` 时，会保留 folder selector 匹配到的直接子目录边界，每个目录形成一个独立动作组。
+- 例如 `action_new` 会解析成多个非空 `pn_*` 动作组，而不是一个包含全部动作的大组。
 
 这些动作组可以用动态匹配和组合维护：
 
@@ -1273,3 +1277,42 @@ batch:
 ```
 
 `special_next_select` 是旧 design 下的角色目录集合，已经可以通过 character collection 引用。分辨率支持 `square` / `landscape` / `portrait`，也支持旧名 `normal_square` / `normal_landscape` / `normal_portrait`；`random_standard` 会从这三种标准尺寸里随机选一个。
+
+需要持续运行固定任务量时使用：
+
+```yaml
+expand:
+  mode: blackboard_rounds
+  max_tasks: 300
+  action_group_strategy: balanced_random
+  actions_per_group: 3
+  action_selection: random_preserve_order
+```
+
+其中：
+
+- `action_group_strategy` 决定当前角色选择哪个动作组。
+- `actions_per_group` 决定一个 round 最多选择多少个动作。
+- `action_selection` 决定组内动作如何选择；`random_preserve_order` 会随机抽样，再恢复原 natural sort 顺序。
+- `auto_num` 只控制外层角色轮次，与组内动作选择无关。
+
+动作组运行状态自动保存在 `<run_dir>/state/action_groups.json`。`plan-batch` 只读取状态并在内存中模拟调度，不写回状态；`run-batch` 在 round 实际开始时记录；`resume-batch` 不重复累计；`--fresh` 会随 run directory 一起重置状态。
+
+### 每日日期输出目录
+
+服务器每天启动一次 Batch 时，可以在 `output_dir` 中使用 `{date}`：
+
+```yaml
+output_dir: "G:/ai_auto/{date}"
+```
+
+例如在 2026-07-12 启动时，实际输出目录是 `G:/ai_auto/20260712`。日期使用服务器本地时区，并在一次运行开始时固定；任务跨过午夜也不会切换目录。
+
+`run-batch --fresh` 会为新运行重新计算日期。`resume-batch` 则读取 `batch_source.json` 中已经展开的实际路径，因此即使第二天恢复，也会继续写入原运行所属的日期目录。同一天多次 `--fresh` 会共享日期根目录，但新的 `run_id` 和 `task_id` 可避免任务目录互相覆盖。
+
+```powershell
+uv run python -m tags_machine_core run-batch `
+  examples/batches/blackboard_action_new.yaml `
+  --fresh `
+  --full
+```

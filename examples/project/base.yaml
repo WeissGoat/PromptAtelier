@@ -23,7 +23,6 @@ defaults:
 
 expand:
   action_group_strategy: balanced_random
-  allow_fill_missing_cp_from_candidates: true
 
 run:
   resume: true

@@ -209,7 +209,7 @@ refactor/examples/batches/blackboard-action-new-manga-monochrome/state/action_gr
 
 ```json
 {
-  "schema": "tags-machine-core.action-group-state/v1",
+  "schema": "tags-machine-core.action-group-record/v1",
   "updated_at": "...",
   "groups": {
     "pn_group_a": {
