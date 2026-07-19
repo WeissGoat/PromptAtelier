@@ -81,8 +81,38 @@ describe("NodeSlot", () => {
       fireEvent.mouseDown(screen.getByRole("option", { name: "same" }));
       await Promise.resolve();
     });
-    expect(props.onSelect).toHaveBeenCalledWith("F:/nodes/second", expect.objectContaining({ id: "second" }));
+    expect(props.onSelect).toHaveBeenCalledWith(expect.objectContaining({
+      ref: "F:/nodes/second",
+      node: expect.objectContaining({ id: "second" }),
+    }));
     expect(String(fetchMock.mock.calls[1][0])).toContain(encodeURIComponent("F:/nodes/second"));
+    expect(String(fetchMock.mock.calls[1][0])).toContain("role=character");
+  });
+
+  it("reloads a cached source node before opening an editor when sourceEditor is missing", async () => {
+    const editor = {
+      adapter: "character_meta_yaml/v1",
+      role: "character",
+      values: { id: "source" },
+      sources: [],
+      capabilities: { save: true },
+    };
+    const readResponse = {
+      schema: "tags-machine-core.web.node/v2",
+      ref: "F:/nodes/source",
+      node: sourceNode,
+      form: {},
+      editor,
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response(readResponse));
+    const props = renderSlot();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "编辑Character节点" }));
+      await Promise.resolve();
+    });
+
+    expect(props.onEdit).toHaveBeenCalledWith(readResponse);
   });
 
   it("confirms before replacing a modified draft", async () => {

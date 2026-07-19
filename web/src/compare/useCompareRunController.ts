@@ -6,10 +6,14 @@ import type { NodeRole } from "../nodes/types";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
 import type { RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { buildCompareMatrix, selectedSlots, type CompareCombination } from "./matrix";
+import { buildCompareRunPlan, type CompareRunItem } from "./runPlan";
 
 export type CompareCombinationStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type CompareCombinationResult = {
+  runId: string;
+  groupIndex: number;
+  groupSeed: number;
   combination: CompareCombination;
   labels: Record<NodeRole, string>;
   status: CompareCombinationStatus;
@@ -25,26 +29,48 @@ export type CompareRunSummary = {
   failed: number;
 };
 
+export type CompareGroupSummary = CompareRunSummary & {
+  groupIndex: number;
+  seed: number;
+};
+
 type ControllerDependencies = {
   pollIntervalMs?: number;
   get?: (path: string) => Promise<unknown>;
   post?: (path: string, body: unknown) => Promise<unknown>;
   randomSeed?: () => number;
+  outputDirFactory?: () => string;
 };
 
 const terminalStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
+
+export function createCompareOutputDir(): string {
+  const timestamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+  const suffix = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(16).slice(2, 10).padEnd(8, "0");
+  return `outputs/compare_${timestamp}_${suffix}`;
+}
+
+export function createCompareGroupOutputDir(parent: string, groupIndex: number, seed: number): string {
+  const root = parent.replace(/[\\/]+$/, "");
+  return `${root}/group_${String(groupIndex).padStart(3, "0")}_seed_${seed}`;
+}
 
 function slotLabel(slot: CompareCombination[NodeRole]): string {
   return slot?.draftNode?.name || slot?.draftNode?.id || slot?.sourceNode?.name || slot?.sourceRef || "未选择";
 }
 
-function initialResult(combination: CompareCombination): CompareCombinationResult {
+function initialResult(item: CompareRunItem): CompareCombinationResult {
   return {
-    combination,
+    runId: item.runId,
+    groupIndex: item.groupIndex,
+    groupSeed: item.groupSeed,
+    combination: item.combination,
     labels: {
-      artist: slotLabel(combination.artist),
-      character: slotLabel(combination.character),
-      action: slotLabel(combination.action),
+      artist: slotLabel(item.combination.artist),
+      character: slotLabel(item.combination.character),
+      action: slotLabel(item.combination.action),
     },
     status: "queued",
     job: null,
@@ -62,6 +88,18 @@ function summarize(results: CompareCombinationResult[]): CompareRunSummary {
   };
 }
 
+function summarizeGroups(results: CompareCombinationResult[]): CompareGroupSummary[] {
+  const groupIndexes = [...new Set(results.map((item) => item.groupIndex))];
+  return groupIndexes.map((groupIndex) => {
+    const items = results.filter((item) => item.groupIndex === groupIndex);
+    return {
+      groupIndex,
+      seed: items[0]?.groupSeed ?? 0,
+      ...summarize(items),
+    };
+  });
+}
+
 export function useCompareRunController(dependencies: ControllerDependencies = {}) {
   const get = dependencies.get ?? apiGet;
   const post = dependencies.post ?? apiPost;
@@ -70,13 +108,14 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     if (globalThis.crypto?.getRandomValues) return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
     return Math.floor(Math.random() * 0x100000000);
   });
+  const outputDirFactory = dependencies.outputDirFactory ?? createCompareOutputDir;
   const runToken = useRef(0);
   const [results, setResults] = useState<CompareCombinationResult[]>([]);
   const [running, setRunning] = useState(false);
 
-  const updateResult = useCallback((token: number, combinationId: string, patch: Partial<CompareCombinationResult>) => {
+  const updateResult = useCallback((token: number, runId: string, patch: Partial<CompareCombinationResult>) => {
     if (runToken.current !== token) return;
-    setResults((current) => current.map((item) => item.combination.combinationId === combinationId ? { ...item, ...patch } : item));
+    setResults((current) => current.map((item) => item.runId === runId ? { ...item, ...patch } : item));
   }, []);
 
   const pollJob = useCallback(async (token: number, job: JobRecord): Promise<JobRecord> => {
@@ -95,43 +134,45 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     }
     const token = ++runToken.current;
     const matrix = buildCompareMatrix(groups);
-    const parsedSeed = Number(params.seed);
-    const sharedSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0 ? parsedSeed : randomSeed();
-    const runParams: RenderWorkspaceParams = { ...params, seed: String(sharedSeed) };
-    setResults(matrix.map(initialResult));
+    const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
+    const outputDir = outputDirFactory();
+    setResults(plan.items.map(initialResult));
     setRunning(true);
     let nextIndex = 0;
 
-    async function runCombination(combination: CompareCombination) {
-      const combinationId = combination.combinationId;
-      updateResult(token, combinationId, { status: "running", error: "" });
+    async function runItem(item: CompareRunItem) {
+      updateResult(token, item.runId, { status: "running", error: "" });
       try {
-        const request = buildComposeRenderRequest(combination, runParams, { compare: true });
+        const runParams: RenderWorkspaceParams = { ...params, seed: String(item.groupSeed) };
+        const request = buildComposeRenderRequest(item.combination, runParams, { compare: true });
         const preview = await post("/compose-preview", request) as ComposePreviewResponse;
         if (!preview.render_request) throw new Error("该组合需要外部 Agent 先完成提示词拼接。");
-        const queued = await post("/generate", { render_request: preview.render_request }) as JobRecord;
-        updateResult(token, combinationId, { job: queued });
+        const queued = await post("/generate", {
+          render_request: preview.render_request,
+          output_dir: createCompareGroupOutputDir(outputDir, item.groupIndex, item.groupSeed),
+        }) as JobRecord;
+        updateResult(token, item.runId, { job: queued });
         const completed = await pollJob(token, queued);
         if (completed.status !== "succeeded") throw new Error(completed.error || `Job ${completed.status}`);
-        updateResult(token, combinationId, { status: "succeeded", job: completed });
+        updateResult(token, item.runId, { status: "succeeded", job: completed });
       } catch (runError) {
         if (runToken.current !== token) return;
-        updateResult(token, combinationId, { status: "failed", error: errorMessage(runError) });
+        updateResult(token, item.runId, { status: "failed", error: errorMessage(runError) });
       }
     }
 
     async function worker() {
       while (runToken.current === token) {
         const index = nextIndex++;
-        if (index >= matrix.length) return;
-        await runCombination(matrix[index]);
+        if (index >= plan.items.length) return;
+        await runItem(plan.items[index]);
       }
     }
 
     // NovelAI 同一账号并发请求时，一组会稳定触发 429；Compare 按单 worker 串行提交。
     await worker();
     if (runToken.current === token) setRunning(false);
-  }, [pollJob, post, randomSeed, updateResult]);
+  }, [outputDirFactory, pollJob, post, randomSeed, updateResult]);
 
   const reset = useCallback(() => {
     runToken.current += 1;
@@ -140,7 +181,11 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
   }, []);
 
   const summary = useMemo(() => summarize(results), [results]);
-  return useMemo(() => ({ start, reset, summary, results, running }), [reset, results, running, start, summary]);
+  const groupSummaries = useMemo(() => summarizeGroups(results), [results]);
+  return useMemo(
+    () => ({ start, reset, summary, groupSummaries, results, running }),
+    [groupSummaries, reset, results, running, start, summary],
+  );
 }
 
 export type CompareRunController = ReturnType<typeof useCompareRunController>;

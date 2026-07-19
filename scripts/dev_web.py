@@ -21,7 +21,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1", help="前后端监听地址")
     parser.add_argument("--backend-port", type=int, default=DEFAULT_BACKEND_PORT)
     parser.add_argument("--frontend-port", type=int, default=DEFAULT_FRONTEND_PORT)
-    parser.add_argument("--reload-backend", action="store_true", help="后端启用 uvicorn reload")
+    reload_group = parser.add_mutually_exclusive_group()
+    reload_group.add_argument("--reload-backend", dest="reload_backend", action="store_true", help="后端启用 uvicorn reload")
+    reload_group.add_argument("--no-reload-backend", dest="reload_backend", action="store_false", help="关闭后端 uvicorn reload")
+    parser.set_defaults(reload_backend=True)
     parser.add_argument("--no-install", action="store_true", help="跳过 node_modules 自动安装检查")
     return parser
 

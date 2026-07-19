@@ -27,6 +27,31 @@ def _write_meta(path: Path, *, kind: str, node_id: str, prompt: str) -> None:
 
 
 class WebNodesTest(TestCase):
+    def test_node_workspace_reads_legacy_artist_with_novelai_renderer_payload(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            artist = design / "画风" / "manga"
+            artist.mkdir(parents=True)
+            (artist / "tags.txt").write_text(
+                "prefix_a\nprefix_b\nsuffix_c\n=\n"
+                'origin_uc, bad anatomy\n'
+                'gen_json, {"model":"nai-diffusion-4-5-full","sampler":"k_euler_ancestral","steps":23,"noise_schedule":"karras"}\n',
+                encoding="utf-8",
+            )
+            workspace = NodeWorkspace(design_root=design)
+
+            loaded = workspace.read_node(artist, role="artist")
+
+            novelai = loaded["node"]["renderers"]["novelai"]
+            self.assertEqual(novelai["prompt_prefix"], ["prefix_a", "prefix_b"])
+            self.assertEqual(novelai["prompt_suffix"], ["suffix_c"])
+            self.assertEqual(novelai["params"]["sampler"], "k_euler_ancestral")
+            self.assertEqual(novelai["params"]["steps"], 23)
+            self.assertEqual(loaded["node"]["prompt"]["positive"], [])
+            self.assertEqual(loaded["node"]["tags"], {})
+
     def test_node_workspace_lists_and_reads_nodes(self):
         import tempfile
 
@@ -153,6 +178,30 @@ class WebNodesTest(TestCase):
             first_refs = {node["ref"] for node in first_body["nodes"]}
             second_refs = {node["ref"] for node in second_body["nodes"]}
             self.assertFalse(first_refs & second_refs)
+
+    def test_nodes_http_uses_role_specific_artist_reader(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            artist = design / "画风" / "manga"
+            artist.mkdir(parents=True)
+            (artist / "tags.txt").write_text(
+                'prefix\nsuffix\n=\ngen_json, {"steps":23}\n',
+                encoding="utf-8",
+            )
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+
+            response = client.get(
+                "/api/nodes/read",
+                params={"ref": str(artist), "role": "artist"},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.json()["node"]["renderers"]["novelai"]["params"]["steps"],
+                23,
+            )
 
     def test_save_node_accepts_relative_and_in_root_absolute_targets(self):
         import tempfile

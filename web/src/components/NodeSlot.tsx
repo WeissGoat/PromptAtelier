@@ -12,11 +12,11 @@ type NodeSlotProps = {
   label: string;
   slot: NodeVariantSlot;
   placeholder: string;
-  onSelect: (ref: string, node: NodeDocument) => void;
+  onSelect: (response: NodeReadResponse) => void;
   onCreateBlank: () => void;
   onRestore: () => void;
   onClear: () => void;
-  onEdit: () => void;
+  onEdit: (response?: NodeReadResponse) => void;
   onRemove?: () => void;
 };
 
@@ -70,9 +70,33 @@ export function NodeSlot({
     setLoading(true);
     setError("");
     try {
-      const response = await apiGet<NodeReadResponse>(`/nodes/read?${new URLSearchParams({ ref: node.ref })}`);
+      const response = await apiGet<NodeReadResponse>(`/nodes/read?${new URLSearchParams({ ref: node.ref, role: slot.role })}`);
       if (requestId !== readRequestId.current) return;
-      onSelect(response.ref, response.node);
+      onSelect(response);
+    } catch (requestError) {
+      if (requestId !== readRequestId.current) return;
+      setError(errorMessage(requestError));
+    } finally {
+      if (requestId === readRequestId.current) setLoading(false);
+    }
+  }
+
+  async function handleEdit() {
+    if (!slot.sourceRef || slot.sourceEditor) {
+      onEdit();
+      return;
+    }
+    if (requiresConfirmation(slot) && !window.confirm("当前节点来自旧缓存，重新读取源文件会替换临时修改。是否继续？")) return;
+    const requestId = ++readRequestId.current;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiGet<NodeReadResponse>(`/nodes/read?${new URLSearchParams({ ref: slot.sourceRef, role: slot.role })}`);
+      if (requestId !== readRequestId.current) return;
+      if (!response.editor) {
+        throw new Error("当前后端版本未提供节点源表单，请重启 PromptAtelier Web 服务后重试。");
+      }
+      onEdit(response);
     } catch (requestError) {
       if (requestId !== readRequestId.current) return;
       setError(errorMessage(requestError));
@@ -95,7 +119,7 @@ export function NodeSlot({
           <span className="node-status">{statusLabel(slot)}</span>
         </div>
         <div className="node-slot-actions">
-          <button aria-label={`编辑${label}节点`} className="icon-button" disabled={!slot.draftNode} onClick={onEdit} title="编辑节点" type="button"><Pencil size={16} /></button>
+          <button aria-label={`编辑${label}节点`} className="icon-button" disabled={!slot.draftNode || loading} onClick={() => void handleEdit()} title="编辑节点" type="button"><Pencil size={16} /></button>
           <button aria-label={`新建空白${label}节点`} className="icon-button" onClick={() => runReplacingAction(onCreateBlank, "当前临时修改将被替换，是否继续？")} title="新建空白节点" type="button"><FilePlus2 size={16} /></button>
           <button aria-label={`还原${label}节点`} className="icon-button" disabled={!slot.sourceNode} onClick={() => runReplacingAction(onRestore, "当前临时修改将被还原，是否继续？")} title="还原原始节点" type="button"><RotateCcw size={16} /></button>
           {onRemove ? (

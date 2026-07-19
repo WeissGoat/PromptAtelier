@@ -1,7 +1,7 @@
 import { ListChecks, Play } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { apiPost } from "../api/client";
+import { apiPost, errorMessage } from "../api/client";
 import type { BatchPreviewResponse, JobRecord } from "../api/types";
 
 export function BatchStudio() {
@@ -15,6 +15,8 @@ export function BatchStudio() {
   const [preview, setPreview] = useState<BatchPreviewResponse | null>(null);
   const [job, setJob] = useState<JobRecord | null>(null);
   const [status, setStatus] = useState("Ready");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const requestBody = useMemo(() => {
     if (!useInlineSpec) {
@@ -51,16 +53,35 @@ export function BatchStudio() {
   }, [actionGroups, artist, batchSpec, characters, maxTasks, nt, useInlineSpec]);
 
   async function planPreview() {
+    setBusy(true);
+    setError("");
     setStatus("Planning");
-    const result = await apiPost<BatchPreviewResponse>("/batches/preview", requestBody);
-    setPreview(result);
-    setStatus(`Tasks: ${result.task_count}`);
+    try {
+      const result = await apiPost<BatchPreviewResponse>("/batches/preview", requestBody);
+      setPreview(result);
+      setStatus(`Tasks: ${result.task_count}`);
+    } catch (err) {
+      setStatus("Planning failed");
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function runBatch() {
-    const result = await apiPost<JobRecord>("/batches/run", requestBody);
-    setJob(result);
-    setStatus(`Job ${result.id}: ${result.status}`);
+    setBusy(true);
+    setError("");
+    setStatus("Starting batch");
+    try {
+      const result = await apiPost<JobRecord>("/batches/run", requestBody);
+      setJob(result);
+      setStatus(`Job ${result.id}: ${result.status}`);
+    } catch (err) {
+      setStatus("Batch failed");
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -101,15 +122,16 @@ export function BatchStudio() {
           </label>
         </div>
         <div className="button-row">
-          <button onClick={planPreview} type="button">
+          <button disabled={busy} onClick={planPreview} type="button">
             <ListChecks size={16} />
             Plan Preview
           </button>
-          <button onClick={runBatch} type="button">
+          <button disabled={busy} onClick={runBatch} type="button">
             <Play size={16} />
             Run Batch
           </button>
         </div>
+        {error ? <div className="alert error-alert">{error}</div> : null}
       </section>
       <section className="panel">
         <div className="panel-title">

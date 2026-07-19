@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
 
+import type { NodeReadResponse } from "../api/types";
 import { nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
@@ -13,7 +14,7 @@ function isDirty(slot: NodeVariantSlot): boolean {
   return status === "modified" || status === "temporary";
 }
 
-export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot?: (slotId: string) => void }) {
+export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot?: (slotId: string, response?: NodeReadResponse) => void }) {
   const workspace = useCustomWorkspace();
   const group = workspace.state.groups[role];
   const label = labels[role];
@@ -25,13 +26,13 @@ export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot
         label={label}
         onClear={() => workspace.clearSlot(slot.slotId)}
         onCreateBlank={() => workspace.createBlank(slot.slotId)}
-        onEdit={() => onEditSlot ? onEditSlot(slot.slotId) : workspace.openEditor(slot.slotId)}
+        onEdit={(response) => onEditSlot ? onEditSlot(slot.slotId, response) : workspace.openEditor(slot.slotId, response)}
         onRemove={slot.mode === "compare" ? () => {
           if (isDirty(slot) && !window.confirm("删除后将丢失当前 Compare 临时修改，是否继续？")) return;
           workspace.removeCompare(slot.slotId);
         } : undefined}
         onRestore={() => workspace.restoreSlot(slot.slotId)}
-        onSelect={(ref, node) => workspace.selectNode(slot.slotId, ref, node)}
+        onSelect={(response) => workspace.selectNode(slot.slotId, response.ref, response.node, response.editor)}
         placeholder={`搜索 ${label} 节点`}
         slot={slot}
       />

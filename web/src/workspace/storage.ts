@@ -25,6 +25,8 @@ export function createEmptySlot(role: NodeRole, mode: "primary" | "compare"): No
     sourceRef: null,
     sourceNode: null,
     draftNode: null,
+    sourceEditor: null,
+    draftEditorValues: null,
   };
 }
 
@@ -41,7 +43,7 @@ export function createEmptyWorkspace(): CustomWorkspaceState {
       action: createEmptyGroup("action"),
     },
     params: { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" },
-    editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null },
+    editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
     preview: null,
     revision: 0,
   };
@@ -58,7 +60,9 @@ function isSlot(value: unknown, role: NodeRole, mode: "primary" | "compare"): va
     && typeof value.slotId === "string"
     && (value.sourceRef === null || typeof value.sourceRef === "string")
     && (value.sourceNode === null || isObject(value.sourceNode))
-    && (value.draftNode === null || isObject(value.draftNode));
+    && (value.draftNode === null || isObject(value.draftNode))
+    && (value.sourceEditor === undefined || value.sourceEditor === null || isObject(value.sourceEditor))
+    && (value.draftEditorValues === undefined || value.draftEditorValues === null || isObject(value.draftEditorValues));
 }
 
 function isWorkspace(value: unknown): value is CustomWorkspaceState {
@@ -87,7 +91,20 @@ export function loadWorkspaceSnapshot(storage: Storage): WorkspaceLoadResult {
     if (!isWorkspace(parsed)) {
       return { status: "invalid", state: createEmptyWorkspace(), message: "工作台缓存格式不兼容，请重置工作台。" };
     }
-    return { status: "loaded", state: structuredClone(parsed) };
+    const state = structuredClone(parsed);
+    const editorValues = state.editor.editValues;
+    if (state.editor.slotId && editorValues) {
+      for (const role of roles) {
+        const group = state.groups[role];
+        const slot = [group.primary, ...group.compares]
+          .find((candidate) => candidate.slotId === state.editor.slotId);
+        if (slot) {
+          slot.draftEditorValues = structuredClone(editorValues);
+          break;
+        }
+      }
+    }
+    return { status: "loaded", state };
   } catch {
     return { status: "invalid", state: createEmptyWorkspace(), message: "工作台缓存无法解析，请重置工作台。" };
   }

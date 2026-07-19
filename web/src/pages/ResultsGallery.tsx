@@ -1,20 +1,31 @@
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 
-import { apiGet } from "../api/client";
+import { apiGet, errorMessage } from "../api/client";
 import type { ResultRun } from "../api/types";
 
 export function ResultsGallery() {
   const [runs, setRuns] = useState<ResultRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<ResultRun | null>(null);
   const [status, setStatus] = useState("Ready");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function refresh() {
+    setBusy(true);
+    setError("");
     setStatus("Loading");
-    const result = await apiGet<{ runs: ResultRun[] }>("/results/runs");
-    setRuns(result.runs);
-    setSelectedRun(result.runs[0] ?? null);
-    setStatus(`Runs: ${result.runs.length}`);
+    try {
+      const result = await apiGet<{ runs: ResultRun[] }>("/results/runs");
+      setRuns(result.runs);
+      setSelectedRun(result.runs[0] ?? null);
+      setStatus(`Runs: ${result.runs.length}`);
+    } catch (err) {
+      setStatus("Load failed");
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -24,10 +35,11 @@ export function ResultsGallery() {
           <h2>Results Gallery</h2>
           <span className="status-pill">{status}</span>
         </div>
-        <button className="inline-button" onClick={refresh} type="button">
+        <button className="inline-button" disabled={busy} onClick={refresh} type="button">
           <RefreshCw size={16} />
           Refresh
         </button>
+        {error ? <div className="alert error-alert">{error}</div> : null}
         <div className="run-list">
           {runs.map((run) => (
             <button key={run.path} onClick={() => setSelectedRun(run)} type="button">

@@ -11,6 +11,7 @@ uv run python scripts\dev_web.py --backend-port 8877
 ```
 
 启动后终端会打印前端地址。当前机器的 `8765` 位于 Windows 保留端口范围内，推荐固定使用 `8877`。
+开发脚本默认启用后端热重载，Python 源码更新后会自动重启 Uvicorn；如需关闭可传入 `--no-reload-backend`。
 
 配置读取顺序：
 
@@ -54,14 +55,17 @@ Custom 页由三列组成：
 
 选择节点后点击铅笔按钮，节点会在中间栏展开：
 
-- `Form`：编辑基础字段、Prompt、Negative Prompt、Tags 和扩展字段。
-- `JSON`：编辑完整 `NodeDocument`；与 Form 共用同一份草稿。
-- Form 中的合法修改会立即更新当前运行草稿，下一次 Preview/Generate 自动使用，不需要额外应用按钮。
+- `Form`：只展示当前节点源真正拥有的业务字段，不显示 `legacy`、路径、Renderer 快照或 Generation 等运行时字段。
+- Artist 表单读取并保存 `tags.txt`；Action 的 Prompt 保存到 `tags.txt`，名称/描述等元数据保存到 `meta.yaml`，角色 `selected_keys` 保存到实际的 `action_profile.yaml` 或 `run-prompt-prompt.md`；Character 保存到 `meta.yaml`。
+- `JSON`：查看和临时编辑生成链路使用的完整 `NodeDocument`，不会把整份运行时对象直接覆盖回源文件。
+- Form 中的合法修改会在约 200ms 后更新当前运行草稿，下一次 Preview/Generate 自动使用，不需要额外应用按钮。只打开表单不会产生临时修改。
 - JSON 中只有语法和节点结构合法的内容会更新运行草稿；无效 JSON 会保留在编辑器中并显示错误。
-- `保存节点`：显式调用 `/api/nodes/save`，写入节点库的 `meta.yaml`。
+- `保存节点`：先调用 `/api/nodes/save-preview` 生成逐文件 Unified Diff；此时不会写盘。用户二次确认后才调用 `/api/nodes/save-commit` 写回原数据源。
+- 保存确认前若任一源文件已被外部修改，后端返回 `source_changed` 并拒绝覆盖，需要重新生成 Diff。
+- 浏览器中若存在升级前缓存的节点，首次点击编辑会重新读取源节点并补齐 Form；若后端进程仍是旧版本，界面会明确提示重启 Web 服务，不再把已有节点误显示成空白节点。
 - `还原`：恢复到节点库中读入的原始内容。
 
-关闭或切换节点时，如果存在尚未应用的修改，界面会先确认。新建空白节点与编辑已有节点使用同一套临时草稿机制；空白节点保存前需要填写节点库内的目标 `ref`。
+临时修改只影响当前 Preview/Generate，并在节点名称后显示 `*`。确认保存成功后，当前源节点、运行草稿和 Form 基线会一起刷新。
 
 ### NodeDocument 字段
 
@@ -88,7 +92,7 @@ Prompt 片段可选字段：
 | `include_scopes` / `exclude_scopes` | ScriptComposer 的通用作用域条件。 |
 | `notes` | 维护备注。 |
 
-除核心字段外，`legacy`、`agent`、`composition`、`generation`、`clothing` 等扩展对象会在 Form/JSON 切换和保存时原样保留。
+`legacy`、`generation` 等运行时扩展仍存在于 `NodeDocument`，但不会出现在源感知 Form，也不会因为保存 Form 被写进源文件。源文件中不属于当前表单的业务扩展字段会由对应 Adapter 保留。
 
 ### 普通 Generate
 
@@ -106,20 +110,40 @@ Prompt 片段可选字段：
 Compare 使用每种角色下所有非空的 Primary 和 Compare 节点，展开笛卡尔积：
 
 ```text
-图片数 = Artist 数量 × Character 数量 × Action 数量
+图片数 = Artist 数量 × Character 数量 × Action 数量 × NT
 ```
 
 某类节点完全为空时按一个 `null` 因子计算，但 Character 和 Action 至少要有一类存在。空白 Compare 槽位不会进入矩阵。
 
-例如配置 2 个 Artist、1 个 Character、2 个 Action，按钮会显示：
+Compare 中的 `NT` 表示完整 Matrix 的执行组数，不是单次 NovelAI 请求的图片数。例如配置 2 个 Artist、1 个 Character、2 个 Action，`NT=3`，按钮会显示：
 
 ```text
-Artist 2 × Character 1 × Action 2 = 4
+Artist 2 × Character 1 × Action 2 × Groups 3 = 12
 ```
 
-点击一次 `Compare Generate · 4` 会生成 4 个独立 Job。每个组合固定 `n_samples=1`，并针对 NovelAI 串行提交，避免同一账号并发生图触发 `429`；某个组合失败不会中止其他组合。结果卡会显示 Artist、Character、Action、Job 状态、seed、图片和错误信息。
+点击一次 `Compare Generate · 12` 会按 Group 顺序生成 12 个独立 Job。每个组合固定 `n_samples=1`，并针对 NovelAI 串行提交，避免同一账号并发生图触发 `429`；某个组合失败不会中止当前 Group 的其他组合或后续 Group。结果按 Group 展示 seed、进度、Artist、Character、Action、Job 状态、图片和错误信息。
 
-Compare 启动时会冻结当前生图参数。若界面 Seed 为 `-1`，本轮只随机一次 seed，所有组合共享该 seed；若指定了 seed，所有组合使用指定值。除 Artist/Character/Action 节点组合外，宽高、Negative 和其他 Renderer 参数在同一轮 Compare 中保持一致。
+Compare 启动时会冻结当前生图参数。同一 Group 内所有组合共享 seed，不同 Group 使用不同 seed。若界面 Seed 为 `-1`，每组生成一个不同的随机 seed；若指定 Seed，则各组依次使用 `Seed + 0`、`Seed + 1`……。除 Artist/Character/Action 节点组合外，宽高、Negative 和其他 Renderer 参数在整次 Compare 中保持一致。
+
+每次点击 `Compare Generate` 都会创建一个独立父目录，并按 Group 建立子目录：
+
+```text
+outputs/compare_<timestamp>_<id>/
+  group_001_seed_123456/
+  group_002_seed_123457/
+```
+
+图片详情的左右切换顺序先遍历当前 Group 的 Matrix，再进入下一 Group。节点类型右侧的加号会镜像当前 Primary 节点；随后对 Compare 节点的临时修改不会改变 Primary。
+
+旧 `design/画风` 下的 Artist 会通过 Artist 专用读取器载入，因此临时修改仍保留 `renderers.novelai` 中的 `gen_json`、negative prompt 和画风前后缀。升级前已缓存在浏览器中的旧 Artist 草稿需要重新选择一次节点，避免继续使用缺少 Renderer 信息的历史缓存。
+
+### 图片详情与 PNG 元数据
+
+普通 Generate 和 Compare Generate 成功后，点击任意缩略图会打开共享的图片详情窗口。左侧显示可缩放的大图，右侧显示尺寸、文件大小、修改时间、seed、模型、采样器、steps、scale、Prompt、Negative，以及可展开的完整 PNG Parameters 和 PNG Text。
+
+详情中的元数据由后端在打开窗口时重新读取实际 PNG 文件，不使用前端生成请求或内存中的 `GenerationResult` 推断。点击 `打开所在文件夹` 会在 Windows 资源管理器中打开输出目录并选中当前图片；按 `Escape`、点击遮罩或右上角关闭按钮可退出详情窗口。
+
+同一普通 Job 或同一轮 Compare 的图片会组成一个详情序列。使用左右箭头按钮或键盘 `←` / `→` 切换图片，首尾位置停住且不会循环。第二张开始会显示“当前 PNG 相对上一张 PNG”的参数 Diff，包括变更、新增和移除项；reference/vibe 图片只展示 hash 与大小摘要，不展示原始 base64。
 
 ## Batch
 

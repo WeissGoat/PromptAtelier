@@ -1,4 +1,4 @@
-import type { ComposePreviewResponse } from "../api/types";
+import type { ComposePreviewResponse, NodeEditorDocument } from "../api/types";
 import type { NodeDocument, NodeRole } from "../nodes/types";
 
 export type SlotMode = "primary" | "compare";
@@ -10,6 +10,8 @@ export type NodeVariantSlot = {
   sourceRef: string | null;
   sourceNode: NodeDocument | null;
   draftNode: NodeDocument | null;
+  sourceEditor?: NodeEditorDocument | null;
+  draftEditorValues?: Record<string, unknown> | null;
 };
 
 export type RoleNodeGroup = {
@@ -30,6 +32,8 @@ export type WorkspaceEditorState = {
   tab: "form" | "json";
   draftNode: NodeDocument | null;
   baselineNode: NodeDocument | null;
+  editValues: Record<string, unknown> | null;
+  baselineValues: Record<string, unknown> | null;
 };
 
 export type CustomWorkspaceState = {

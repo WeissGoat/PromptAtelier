@@ -4,15 +4,37 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord } from "../api/types";
 import { compareDimensions } from "../compare/matrix";
+import { compareRunCount } from "../compare/runPlan";
 import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
 import type { NodeVariantSlot } from "../workspace/types";
 import { PromptPreview } from "./PromptPreview";
+import { ImageDetailDialog } from "./ImageDetailDialog";
 
 const terminalJobStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
 const slotLabels: Record<NodeRole, string> = { artist: "Artist", character: "Character", action: "Action" };
+
+function novelaiArtistPayload(slot: NodeVariantSlot): Record<string, unknown> | null {
+  const renderers = slot.draftNode?.renderers;
+  if (!renderers || typeof renderers !== "object" || Array.isArray(renderers)) return null;
+  const payload = (renderers as Record<string, unknown>).novelai;
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : null;
+}
+
+function hasTextList(value: unknown): boolean {
+  return Array.isArray(value) && value.some((item) => typeof item === "string" && item.trim());
+}
+
+function isLegacyTagsArtist(slot: NodeVariantSlot): boolean {
+  const legacy = slot.draftNode?.legacy;
+  if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) return false;
+  const sourceFile = (legacy as Record<string, unknown>).source_file;
+  return typeof sourceFile === "string" && sourceFile.toLowerCase().endsWith("tags.txt");
+}
 
 function seedForImage(image: GenerationImage, result: GenerationResult | undefined): string | null {
   const imageSeed = image.meta?.seed;
@@ -34,22 +56,52 @@ function validateSelected(slots: Record<NodeRole, NodeVariantSlot>): string | nu
   if (!slots.character.draftNode && !slots.action.draftNode) return "请至少选择或新建一个 Character 或 Action 节点。";
   for (const role of Object.keys(slots) as NodeRole[]) {
     const slot = slots[role];
-    if (slot.draftNode && nodeSlotStatus(slot) !== "original" && !hasUsablePositivePrompt(slot.draftNode)) {
+    const status = nodeSlotStatus(slot);
+    if (role === "artist" && slot.draftNode && status !== "original") {
+      const artistPayload = novelaiArtistPayload(slot);
+      if (slot.sourceRef && isLegacyTagsArtist(slot) && !artistPayload) {
+        return "Artist 节点来自旧版浏览器缓存，请重新选择该 Artist 后再生成。";
+      }
+      if (artistPayload) {
+        const hasRendererPrompt = hasTextList(artistPayload.prompt_prefix) || hasTextList(artistPayload.prompt_suffix);
+        if (!hasRendererPrompt && !hasUsablePositivePrompt(slot.draftNode)) {
+          return "Artist 临时节点的画风提示词不能为空。";
+        }
+        continue;
+      }
+    }
+    if (slot.draftNode && status !== "original" && !hasUsablePositivePrompt(slot.draftNode)) {
       return `${slotLabels[role]} 临时节点的正向 prompt 不能为空。`;
     }
   }
   return null;
 }
 
-function ImageGrid({ job, prefix = "Generated" }: { job: JobRecord; prefix?: string }) {
+type ImageSelection = { paths: string[]; index: number };
+
+function ImageGrid({
+  job,
+  prefix = "Generated",
+  sequencePaths,
+  onOpenImage,
+}: {
+  job: JobRecord;
+  prefix?: string;
+  sequencePaths?: string[];
+  onOpenImage(selection: ImageSelection): void;
+}) {
   if (job.status !== "succeeded" || !job.result?.images?.length) return null;
+  const localPaths = job.result.images.map((image) => image.path);
+  const paths = sequencePaths?.length ? sequencePaths : localPaths;
   return (
     <div className="generated-image-grid">
       {job.result.images.map((image, index) => {
         const seed = seedForImage(image, job.result);
         return (
           <figure className="generated-image" key={`${image.path}-${index}`}>
-            <img alt={`${prefix} image ${index + 1}`} src={apiUrl(`/results/image?path=${encodeURIComponent(image.path)}`)} />
+            <button aria-label={`打开 ${prefix} image ${index + 1} 大图`} className="image-preview-button" onClick={() => onOpenImage({ paths, index: Math.max(0, paths.indexOf(image.path)) })} type="button">
+              <img alt={`${prefix} image ${index + 1}`} src={apiUrl(`/results/image?path=${encodeURIComponent(image.path)}`)} />
+            </button>
             <figcaption>{seed ? <span>Seed: {seed}</span> : null}<code>{image.path}</code></figcaption>
           </figure>
         );
@@ -76,10 +128,18 @@ export function CustomGeneratePanel() {
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<ImageSelection | null>(null);
   const pollToken = useRef(0);
   const dimensions = compareDimensions(groups);
-  const compareTotal = dimensions.artist * dimensions.character * dimensions.action;
+  const matrixTotal = dimensions.artist * dimensions.character * dimensions.action;
+  const compareTotal = compareRunCount(matrixTotal, params.nt);
   const compare = workspace.compareRun;
+  const ordinaryImagePaths = job?.status === "succeeded"
+    ? job.result?.images?.map((image) => image.path) ?? []
+    : [];
+  const compareImagePaths = compare.results.flatMap((result) => result.job?.status === "succeeded"
+    ? result.job.result?.images?.map((image) => image.path) ?? []
+    : []);
   const preview = workspace.state.preview;
   const previewCurrent = previewSignature === signature;
   const displayPreview = previewCurrent ? preview : null;
@@ -177,13 +237,13 @@ export function CustomGeneratePanel() {
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>
         <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> Generate</button>
       </div>
-      {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><ImageGrid job={job} /></section> : null}
+      {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
 
       <section className="compare-generate-section">
         <div className="section-title-row">
           <div>
             <h3>Compare Matrix</h3>
-            <small>Artist {dimensions.artist} × Character {dimensions.character} × Action {dimensions.action} = {compareTotal}</small>
+            <small>Artist {dimensions.artist} × Character {dimensions.character} × Action {dimensions.action} × Groups {params.nt} = {compareTotal}</small>
           </div>
           <div className="button-row">
             {compare.results.length ? <button disabled={compare.running} onClick={compare.reset} title="清空 Compare 结果" type="button"><RotateCcw size={15} /></button> : null}
@@ -195,21 +255,32 @@ export function CustomGeneratePanel() {
             <span>排队 {compare.summary.queued}</span><span>运行 {compare.summary.running}</span><span>成功 {compare.summary.succeeded}</span><span>失败 {compare.summary.failed}</span>
           </div>
         ) : null}
-        <div className="compare-result-grid">
-          {compare.results.map((result) => (
-            <article className={`compare-result-card ${result.status}`} key={result.combination.combinationId}>
-              <div className="compare-result-header"><strong>{result.status}</strong>{result.job ? <span>{result.job.id}</span> : null}</div>
-              <dl>
-                <dt>Artist</dt><dd>{result.labels.artist}</dd>
-                <dt>Character</dt><dd>{result.labels.character}</dd>
-                <dt>Action</dt><dd>{result.labels.action}</dd>
-              </dl>
-              {result.error ? <div className="field-error">{result.error}</div> : null}
-              {result.job ? <ImageGrid job={result.job} prefix="Compare" /> : null}
-            </article>
+        <div className="compare-groups">
+          {compare.groupSummaries.map((group) => (
+            <section className="compare-group" key={group.groupIndex}>
+              <div className="compare-group-title">
+                <strong>Group {group.groupIndex} · Seed {group.seed}</strong>
+                <span>成功 {group.succeeded} / {group.total}{group.failed ? ` · 失败 ${group.failed}` : ""}</span>
+              </div>
+              <div className="compare-result-grid">
+                {compare.results.filter((result) => result.groupIndex === group.groupIndex).map((result) => (
+                  <article className={`compare-result-card ${result.status}`} key={result.runId}>
+                    <div className="compare-result-header"><strong>{result.status}</strong>{result.job ? <span>{result.job.id}</span> : null}</div>
+                    <dl>
+                      <dt>Artist</dt><dd>{result.labels.artist}</dd>
+                      <dt>Character</dt><dd>{result.labels.character}</dd>
+                      <dt>Action</dt><dd>{result.labels.action}</dd>
+                    </dl>
+                    {result.error ? <div className="field-error">{result.error}</div> : null}
+                    {result.job ? <ImageGrid job={result.job} onOpenImage={setSelectedImage} prefix="Compare" sequencePaths={compareImagePaths} /> : null}
+                  </article>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </section>
+      {selectedImage ? <ImageDetailDialog initialIndex={selectedImage.index} onClose={() => setSelectedImage(null)} paths={selectedImage.paths} /> : null}
     </section>
   );
 }

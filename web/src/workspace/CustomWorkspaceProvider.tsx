@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ComposePreviewResponse } from "../api/types";
+import type { ComposePreviewResponse, NodeEditorDocument, NodeReadResponse } from "../api/types";
 import { useCompareRunController, type CompareRunController } from "../compare/useCompareRunController";
 import { cloneNode, createTemporaryNode } from "../nodes/temporaryNodes";
 import type { NodeDocument, NodeRole } from "../nodes/types";
@@ -18,17 +18,19 @@ type CustomWorkspaceContextValue = {
   storageWarning: string;
   compareRun: CompareRunController;
   findSlot(slotId: string): NodeVariantSlot | null;
-  selectNode(slotId: string, ref: string, node: NodeDocument): void;
+  selectNode(slotId: string, ref: string, node: NodeDocument, editor?: NodeEditorDocument | null): void;
+  applySavedNode(slotId: string, response: NodeReadResponse): void;
   createBlank(slotId: string): void;
   updateDraft(slotId: string, node: NodeDocument): void;
   restoreSlot(slotId: string): void;
   clearSlot(slotId: string): void;
   addCompare(role: NodeRole): string;
   removeCompare(slotId: string): void;
-  openEditor(slotId: string): void;
+  openEditor(slotId: string, response?: NodeReadResponse): void;
   closeEditor(): void;
   setEditorTab(tab: "form" | "json"): void;
   setEditorDraft(node: NodeDocument): void;
+  setEditorValues(values: Record<string, unknown>): void;
   setParams(patch: Partial<RenderWorkspaceParams>): void;
   setPreview(preview: ComposePreviewResponse | null): void;
   resetWorkspace(): void;
@@ -102,15 +104,47 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     storageWarning,
     compareRun,
     findSlot: (slotId) => findSlotInState(state, slotId),
-    selectNode: (slotId, ref, node) => setState((current) => mapSlot(current, slotId, (slot) => {
+    selectNode: (slotId, ref, node, editor = null) => setState((current) => mapSlot(current, slotId, (slot) => {
       const sourceNode = cloneNode(node);
-      return { ...slot, sourceRef: ref, sourceNode, draftNode: cloneNode(sourceNode) };
+      return {
+        ...slot,
+        sourceRef: ref,
+        sourceNode,
+        draftNode: cloneNode(sourceNode),
+        sourceEditor: editor ? structuredClone(editor) : null,
+        draftEditorValues: editor ? structuredClone(editor.values) : null,
+      };
     })),
+    applySavedNode: (slotId, response) => setState((current) => {
+      const sourceNode = cloneNode(response.node);
+      const sourceEditor = response.editor ? structuredClone(response.editor) : null;
+      const next = mapSlot(current, slotId, (slot) => ({
+        ...slot,
+        sourceRef: response.ref,
+        sourceNode,
+        draftNode: cloneNode(sourceNode),
+        sourceEditor,
+        draftEditorValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+      }));
+      if (next.editor.slotId !== slotId) return next;
+      return {
+        ...next,
+        editor: {
+          ...next.editor,
+          draftNode: cloneNode(sourceNode),
+          baselineNode: cloneNode(sourceNode),
+          editValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+          baselineValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+        },
+      };
+    }),
     createBlank: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
       sourceRef: null,
       sourceNode: null,
       draftNode: createTemporaryNode(slot.role),
+      sourceEditor: null,
+      draftEditorValues: null,
     }))),
     updateDraft: (slotId, node) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
@@ -119,23 +153,37 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     restoreSlot: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
       draftNode: slot.sourceNode ? cloneNode(slot.sourceNode) : null,
+      draftEditorValues: slot.sourceEditor ? structuredClone(slot.sourceEditor.values) : null,
     }))),
     clearSlot: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
       sourceRef: null,
       sourceNode: null,
       draftNode: null,
+      sourceEditor: null,
+      draftEditorValues: null,
     }))),
     addCompare: (role) => {
       const slot = createEmptySlot(role, "compare");
-      setState((current) => ({
-        ...current,
-        groups: { ...current.groups, [role]: {
-          ...current.groups[role],
-          compares: [...current.groups[role].compares, slot],
-        } },
-        revision: current.revision + 1,
-      }));
+      setState((current) => {
+        const primary = current.groups[role].primary;
+        const mirrored = {
+          ...slot,
+          sourceRef: primary.sourceRef,
+          sourceNode: primary.sourceNode ? cloneNode(primary.sourceNode) : null,
+          draftNode: primary.draftNode ? cloneNode(primary.draftNode) : null,
+          sourceEditor: primary.sourceEditor ? structuredClone(primary.sourceEditor) : null,
+          draftEditorValues: primary.draftEditorValues ? structuredClone(primary.draftEditorValues) : null,
+        };
+        return {
+          ...current,
+          groups: { ...current.groups, [role]: {
+            ...current.groups[role],
+            compares: [...current.groups[role].compares, mirrored],
+          } },
+          revision: current.revision + 1,
+        };
+      });
       return slot.slotId;
     },
     removeCompare: (slotId) => setState((current) => {
@@ -149,7 +197,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
               compares: group.compares.filter((slot) => slot.slotId !== slotId),
             } },
             editor: current.editor.slotId === slotId
-              ? { slotId: null, tab: "form", draftNode: null, baselineNode: null }
+              ? { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null }
               : current.editor,
             revision: current.revision + 1,
           };
@@ -157,25 +205,55 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       }
       return current;
     }),
-    openEditor: (slotId) => setState((current) => {
-      const slot = findSlotInState(current, slotId);
+    openEditor: (slotId, response) => setState((current) => {
+      const next = response ? mapSlot(current, slotId, (slot) => {
+        const sourceNode = cloneNode(response.node);
+        return {
+          ...slot,
+          sourceRef: response.ref,
+          sourceNode,
+          draftNode: cloneNode(sourceNode),
+          sourceEditor: response.editor ? structuredClone(response.editor) : null,
+          draftEditorValues: response.editor ? structuredClone(response.editor.values) : null,
+        };
+      }) : current;
+      const slot = findSlotInState(next, slotId);
       if (!slot?.draftNode) return current;
-      return { ...current, editor: {
+      return { ...next, editor: {
         slotId,
         tab: "form",
         draftNode: cloneNode(slot.draftNode),
         baselineNode: cloneNode(slot.draftNode),
+        editValues: slot.draftEditorValues
+          ? structuredClone(slot.draftEditorValues)
+          : slot.sourceEditor
+            ? structuredClone(slot.sourceEditor.values)
+            : null,
+        baselineValues: slot.sourceEditor ? structuredClone(slot.sourceEditor.values) : null,
       } };
     }),
     closeEditor: () => setState((current) => ({
       ...current,
-      editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null },
+      editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
     })),
     setEditorTab: (tab) => setState((current) => ({ ...current, editor: { ...current.editor, tab } })),
     setEditorDraft: (node) => setState((current) => ({
       ...current,
       editor: { ...current.editor, draftNode: cloneNode(node) },
     })),
+    setEditorValues: (values) => setState((current) => {
+      const slotId = current.editor.slotId;
+      const next = slotId
+        ? mapSlot(current, slotId, (slot) => ({
+          ...slot,
+          draftEditorValues: structuredClone(values),
+        }), false)
+        : current;
+      return {
+        ...next,
+        editor: { ...next.editor, editValues: structuredClone(values) },
+      };
+    }),
     setParams: (patch) => setState((current) => ({
       ...current,
       params: { ...current.params, ...patch },

@@ -38,6 +38,18 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiClientError) {
     return error.code ? `${error.code}: ${error.message}` : error.message;

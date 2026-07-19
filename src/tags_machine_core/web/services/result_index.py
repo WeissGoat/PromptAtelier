@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from tags_machine_core.verification.image_params import (
+    read_image_parameters,
+    read_png_dimensions,
+)
+from tags_machine_core.verification.render_params import (
+    compare_render_parameters,
+    normalize_render_parameters,
+)
 
 
 class ResultIndex:
@@ -75,6 +85,69 @@ class ResultIndex:
             if any(target.is_relative_to(root) for root in self.roots):
                 return target
         raise FileNotFoundError(str(path))
+
+    def image_metadata(self, path: str | Path) -> dict[str, Any]:
+        target = self.resolve_image(path)
+        stat = target.stat()
+        result: dict[str, Any] = {
+            "schema": "tags-machine-core.web.image-metadata/v1",
+            "path": str(target),
+            "filename": target.name,
+            "size_bytes": stat.st_size,
+            "modified_at": datetime.fromtimestamp(
+                stat.st_mtime,
+                tz=timezone.utc,
+            ).isoformat(),
+            "dimensions": None,
+            "png_text": {},
+            "parameters": {},
+            "model": None,
+        }
+        if target.suffix.lower() != ".png":
+            result["metadata_error"] = "PNG metadata is only available for PNG images"
+            return result
+
+        dimensions = read_png_dimensions(target)
+        metadata = read_image_parameters(target)
+        png_text = metadata.get("png_text", {})
+        parameters = metadata.get("parameters", {})
+        result.update(
+            dimensions=dimensions,
+            png_text=png_text,
+            parameters=parameters,
+            model=parameters.get("model") or png_text.get("Source"),
+        )
+        return result
+
+    def image_parameter_diff(
+        self,
+        previous_path: str | Path,
+        current_path: str | Path,
+    ) -> dict[str, Any]:
+        previous = self.resolve_image(previous_path)
+        current = self.resolve_image(current_path)
+        previous_params = read_image_parameters(previous)
+        current_params = read_image_parameters(current)
+        diffs = [
+            item.as_dict()
+            for item in compare_render_parameters(previous_params, current_params)
+        ]
+        return {
+            "schema": "tags-machine-core.web.image-parameter-diff/v1",
+            "previous": {
+                "path": str(previous),
+                "filename": previous.name,
+            },
+            "current": {
+                "path": str(current),
+                "filename": current.name,
+            },
+            "match": not diffs,
+            "diff_count": len(diffs),
+            "diffs": diffs,
+            "previous_normalized": normalize_render_parameters(previous_params),
+            "current_normalized": normalize_render_parameters(current_params),
+        }
 
     def _task_count(self, run: Path) -> int:
         tasks = run / "tasks"

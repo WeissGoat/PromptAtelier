@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import difflib
+import uuid
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.nodes.reader import NodeReader
+from tags_machine_core.web.node_editing import FileMutation, NodeSourceAdapterRegistry, create_default_registry
+from tags_machine_core.web.node_editing.text_utils import source_hash
+from tags_machine_core.web.services.node_save_preview_store import SourceChangedError
 
 
 ROLE_DIRS = {
@@ -18,9 +24,17 @@ ROLE_DIRS = {
 
 
 class NodeWorkspace:
-    def __init__(self, *, design_root: str | Path, reader: NodeReader | None = None):
+    def __init__(
+        self,
+        *,
+        design_root: str | Path,
+        reader: NodeReader | None = None,
+        adapter_registry: NodeSourceAdapterRegistry | None = None,
+    ):
         self.design_root = Path(design_root).resolve()
         self.reader = reader or NodeReader()
+        self.artist_repository = NovelAIArtistRepository(self.design_root)
+        self.adapter_registry = adapter_registry or create_default_registry(self.design_root, self.reader)
 
     def list_nodes(
         self,
@@ -69,16 +83,92 @@ class NodeWorkspace:
                 )
         return result, False
 
-    def read_node(self, ref: str | Path) -> dict[str, Any]:
-        path = Path(ref)
-        node = self.reader.read(path)
+    def read_node(self, ref: str | Path, *, role: str | None = None) -> dict[str, Any]:
+        path = Path(ref).resolve()
+        node = self._read_node_document(path, role=role)
+        effective_role = role or node.kind
+        editor = self.adapter_registry.resolve(path, effective_role).read_editor(path)
         return {
-            "schema": "tags-machine-core.web.node/v1",
+            "schema": "tags-machine-core.web.node/v2",
             "ref": str(path),
             "node": node.model_dump(mode="json"),
             "form": self.to_form(node),
             "raw": self._raw_file(path),
+            "editor": editor.model_dump(mode="json"),
         }
+
+    def preview_editor(self, ref: str | Path, *, role: str, values: dict[str, Any]) -> dict[str, Any]:
+        path = self.resolve_node_path(ref)
+        adapter = self.adapter_registry.resolve(path, role)
+        node = adapter.build_runtime_node(path, values)
+        return {
+            "schema": "tags-machine-core.web.node-editor-preview/v1",
+            "node": node.model_dump(mode="json"),
+            "editor": adapter.read_editor(path).model_dump(mode="json") | {"values": values},
+        }
+
+    def preview_file_mutations(
+        self,
+        ref: str | Path,
+        *,
+        role: str,
+        values: dict[str, Any],
+    ) -> tuple[NodeDocument, list[FileMutation]]:
+        path = self.resolve_node_path(ref)
+        adapter = self.adapter_registry.resolve(path, role)
+        return adapter.build_runtime_node(path, values), adapter.preview_mutations(path, values)
+
+    def mutation_payload(self, mutation: FileMutation, *, node_dir: str | Path) -> dict[str, Any]:
+        relative = mutation.path.resolve().relative_to(Path(node_dir).resolve()).as_posix()
+        diff = "".join(
+            difflib.unified_diff(
+                mutation.before_text.splitlines(keepends=True),
+                mutation.after_text.splitlines(keepends=True),
+                fromfile=relative,
+                tofile=relative,
+            )
+        )
+        return {
+            "path": str(mutation.path.resolve()),
+            "relative": relative,
+            "format": mutation.format,
+            "before_sha256": mutation.before_sha256,
+            "changed": mutation.changed,
+            "diff": diff,
+            "after_text": mutation.after_text,
+        }
+
+    def commit_file_mutations(self, mutations: list[FileMutation]) -> None:
+        changed = [mutation for mutation in mutations if mutation.changed]
+        for mutation in changed:
+            current_hash = source_hash(mutation.path)
+            if current_hash != mutation.before_sha256:
+                raise SourceChangedError(f"Source changed after preview: {mutation.path}")
+
+        temporary: list[tuple[Path, Path]] = []
+        try:
+            for mutation in changed:
+                mutation.path.parent.mkdir(parents=True, exist_ok=True)
+                temp = mutation.path.with_name(f".{mutation.path.name}.{uuid.uuid4().hex}.promptatelier.tmp")
+                temp.write_text(mutation.after_text, encoding="utf-8")
+                temporary.append((temp, mutation.path))
+            for temp, target in temporary:
+                temp.replace(target)
+        finally:
+            for temp, _ in temporary:
+                if temp.exists():
+                    temp.unlink()
+
+    def resolve_node_path(self, ref: str | Path) -> Path:
+        candidate = Path(ref)
+        if not candidate.is_absolute():
+            candidate = self.design_root / candidate
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(self.design_root)
+        except ValueError as exc:
+            raise ValueError("node path must be inside design_root") from exc
+        return resolved
 
     def preview_node(self, raw: dict[str, Any]) -> dict[str, Any]:
         node = NodeDocument.model_validate(raw)
@@ -98,6 +188,21 @@ class NodeWorkspace:
             encoding="utf-8",
         )
         return self.read_node(path)
+
+    def _read_node_document(self, path: Path, *, role: str | None) -> NodeDocument:
+        if (
+            role == "artist"
+            and path.is_dir()
+            and (path / "tags.txt").exists()
+            and not any((path / name).exists() for name in ("meta.yaml", "node.yaml"))
+        ):
+            resolved = path.resolve()
+            try:
+                artist_ref = resolved.relative_to(self.artist_repository.artist_root.resolve()).as_posix()
+            except ValueError:
+                artist_ref = str(resolved)
+            return self.artist_repository.load_node(artist_ref)
+        return self.reader.read(path)
 
     def _resolve_save_path(self, ref: str | Path) -> Path:
         candidate = Path(ref)

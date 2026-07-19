@@ -6,7 +6,7 @@ import type { NodeDocument, NodeRole } from "../nodes/types";
 import type { RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { useCompareRunController } from "./useCompareRunController";
 
-const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 4, seed: "-1" };
+const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" };
 
 function group(role: NodeRole, count: number): RoleNodeGroup {
   const makeSlot = (slotId: string, mode: "primary" | "compare") => {
@@ -25,6 +25,7 @@ describe("useCompareRunController", () => {
     let maxActivePreviews = 0;
     const previewed = new Set<string>();
     const generated: string[] = [];
+    const outputDirs = new Set<string>();
     const seeds = new Set<number>();
     const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
       if (path === "/compose-preview") {
@@ -38,22 +39,70 @@ describe("useCompareRunController", () => {
         previewed.add(marker);
         return { status: "ready", render_request: { marker } };
       }
-      const marker = String((body as { render_request: { marker: string } }).render_request.marker);
+      const generateBody = body as { render_request: { marker: string }; output_dir: string };
+      const marker = String(generateBody.render_request.marker);
+      outputDirs.add(generateBody.output_dir);
       expect(previewed.has(marker)).toBe(true);
       generated.push(marker);
       return { id: `job-${generated.length}`, name: "generate", status: "succeeded", result: { images: [] } };
     });
-    const randomSeed = vi.fn(() => 123456789);
-    const { result } = renderHook(() => useCompareRunController({ post, pollIntervalMs: 1, randomSeed }));
+    const randomSeed = vi.fn()
+      .mockReturnValueOnce(123456789)
+      .mockReturnValueOnce(123456790);
+    const { result } = renderHook(() => useCompareRunController({
+      post,
+      pollIntervalMs: 1,
+      randomSeed,
+      outputDirFactory: () => "outputs/compare_test",
+    }));
     const groups = { artist: group("artist", 2), character: group("character", 1), action: group("action", 2) };
 
-    await act(async () => { await result.current.start(groups, params); });
+    await act(async () => { await result.current.start(groups, { ...params, nt: 2 }); });
 
     expect(maxActivePreviews).toBe(1);
-    expect(result.current.summary.succeeded).toBe(4);
-    expect(generated).toHaveLength(4);
-    expect(randomSeed).toHaveBeenCalledTimes(1);
-    expect([...seeds]).toEqual([123456789]);
+    expect(result.current.summary.succeeded).toBe(8);
+    expect(generated).toHaveLength(8);
+    expect(randomSeed).toHaveBeenCalledTimes(2);
+    expect([...seeds]).toEqual([123456789, 123456790]);
+    expect([...outputDirs]).toEqual([
+      "outputs/compare_test/group_001_seed_123456789",
+      "outputs/compare_test/group_002_seed_123456790",
+    ]);
+    expect(result.current.results.map((item) => item.runId)).toEqual([
+      "group-001::primary-artist::primary-character::primary-action",
+      "group-001::primary-artist::primary-character::action-0",
+      "group-001::artist-0::primary-character::primary-action",
+      "group-001::artist-0::primary-character::action-0",
+      "group-002::primary-artist::primary-character::primary-action",
+      "group-002::primary-artist::primary-character::action-0",
+      "group-002::artist-0::primary-character::primary-action",
+      "group-002::artist-0::primary-character::action-0",
+    ]);
+  });
+
+  it("creates one output directory per compare run", async () => {
+    const outputDirFactory = vi.fn()
+      .mockReturnValueOnce("outputs/compare_run_1")
+      .mockReturnValueOnce("outputs/compare_run_2");
+    const generateDirs: string[] = [];
+    const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
+      if (path === "/compose-preview") return { status: "ready", render_request: {} };
+      generateDirs.push((body as { output_dir: string }).output_dir);
+      return { id: `job-${generateDirs.length}`, name: "generate", status: "succeeded" };
+    });
+    const { result } = renderHook(() => useCompareRunController({ post, outputDirFactory }));
+    const groups = { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) };
+
+    await act(async () => { await result.current.start(groups, { ...params, seed: "42" }); });
+    await act(async () => { await result.current.start(groups, { ...params, seed: "42" }); });
+
+    expect(outputDirFactory).toHaveBeenCalledTimes(2);
+    expect(generateDirs).toEqual([
+      "outputs/compare_run_1/group_001_seed_42",
+      "outputs/compare_run_1/group_001_seed_42",
+      "outputs/compare_run_2/group_001_seed_42",
+      "outputs/compare_run_2/group_001_seed_42",
+    ]);
   });
 
   it("reuses an explicit seed without generating a random one", async () => {
@@ -70,11 +119,15 @@ describe("useCompareRunController", () => {
     await act(async () => {
       await result.current.start(
         { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) },
-        { ...params, seed: "42" },
+        { ...params, nt: 2, seed: "42" },
       );
     });
-    expect(seeds).toEqual([42, 42]);
+    expect(seeds).toEqual([42, 42, 43, 43]);
     expect(randomSeed).not.toHaveBeenCalled();
+    expect(result.current.groupSummaries).toEqual([
+      expect.objectContaining({ groupIndex: 1, seed: 42, total: 2, succeeded: 2 }),
+      expect.objectContaining({ groupIndex: 2, seed: 43, total: 2, succeeded: 2 }),
+    ]);
   });
 
   it("polls jobs and continues when one combination fails", async () => {

@@ -19,6 +19,7 @@ from .routes import batch, compose, generate, health, jobs, nodes, results
 from .services.batch_workspace import BatchWorkspace
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
+from .services.node_save_preview_store import NodeSavePreviewStore
 from .services.result_index import ResultIndex
 
 
@@ -55,6 +56,7 @@ def create_app(
     app.state.config = config
     app.state.config_path = resolved_config_path
     app.state.node_workspace = node_workspace or NodeWorkspace(design_root=config.legacy.design_root)
+    app.state.node_save_previews = NodeSavePreviewStore()
     app.state.result_index = result_index or ResultIndex(
         roots=[config.runtime.output_dir, "outputs", "examples/batches/outputs"],
     )
