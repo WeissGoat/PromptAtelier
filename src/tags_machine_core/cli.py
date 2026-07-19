@@ -39,6 +39,7 @@ from tags_machine_core.nodes import (
     validate_node_tree,
 )
 from tags_machine_core.services import GenerationJsonApi, GenerationService
+from tags_machine_core.task_tools.cli import add_task_tools_subparser
 from tags_machine_core.verification import (
     archive_acceptance_case,
     build_image_comparison_report,
@@ -1898,6 +1899,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write diagnostic logs to stderr; defaults to TAGS_MACHINE_CORE_LOG_LEVEL or error",
     )
 
+    add_task_tools_subparser(subparsers, output_parent=output_parent)
+
     compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
     compose.add_argument("--prompt", required=True)
     compose.add_argument("--negative")
@@ -3076,4 +3079,3 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     logger.trace("cli command selected command=%s", getattr(args, "command", None))
     return args.func(args)
-

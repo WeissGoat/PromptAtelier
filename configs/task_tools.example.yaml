@@ -1,0 +1,13 @@
+schema: prompt-atelier.task-tools/v1
+log_level: error
+
+operations:
+  open_action_directory:
+    enabled: true
+    placement: both
+    order: 10
+
+  open_artist_directory:
+    enabled: true
+    placement: both
+    order: 20

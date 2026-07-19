@@ -139,7 +139,7 @@ def test_unknown_operation_id_is_rejected(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Unknown task tool operation: misspelled_action"):
+    with pytest.raises(ValueError, match="未知的任务工具操作：misspelled_action"):
         load_task_tools_config(path, registry=build_default_registry())
 
 
