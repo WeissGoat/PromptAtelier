@@ -22,7 +22,7 @@ class ResolvedNodesTest(unittest.TestCase):
             id="madoka",
             tags={"character": ["kaname madoka"]},
         )
-        artist = NodeDocument(kind="style", id="20260412_2")
+        artist = NodeDocument(kind="artist", id="20260412_2")
         nodes = ResolvedNodeSet(
             [
                 ResolvedNode(role="character", ref="homura", index=0, node=homura),

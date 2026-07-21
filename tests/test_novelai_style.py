@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 
 from tags_machine_core.composers import ScriptComposer
-from tags_machine_core.nodes import migrate_legacy_style_tags
+from tags_machine_core.nodes import NovelAIArtistRepository, migrate_legacy_artist_tags
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.renderers import NovelAIRenderAdapter, NovelAIStyleRepository
+from tags_machine_core.renderers import NovelAIRenderAdapter
 
 
 class NovelAIStyleTest(unittest.TestCase):
@@ -27,9 +27,9 @@ not_quality_prompts
                 encoding="utf-8",
             )
 
-            node = NovelAIStyleRepository(design_root).load_node("sample_style")
+            node = NovelAIArtistRepository(design_root).load_node("sample_style")
 
-            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.kind, "artist")
             self.assertEqual(node.id, "sample_style")
             novelai = node.renderers["novelai"]
             self.assertTrue(novelai["legacy_compat"])
@@ -143,7 +143,7 @@ gen_json, {"sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 
                 encoding="utf-8",
             )
 
-            style = NovelAIStyleRepository(design_root).load("sample_style")
+            style = NovelAIArtistRepository(design_root).load("sample_style")
             self.assertEqual(style.prompt_prefix, ["style prefix", "style suffix, best quality"])
             self.assertEqual(style.prompt_suffix, [])
             self.assertEqual(style.params["reference_image_multiple"], ["abc"])
@@ -151,9 +151,8 @@ gen_json, {"sampler": "k_euler_ancestral", "noise_schedule": "karras", "steps": 
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="akemi homura, foot focus",
                 negative="bad feet",
-                style_ref="sample_style",
             )
-            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, artist=style)
 
             self.assertEqual(request.model, "nai-diffusion-4-5-full")
             self.assertIn("style prefix", request.prompt)
@@ -188,7 +187,7 @@ origin_uc, lowres
                 encoding="utf-8",
             )
 
-            style = NovelAIStyleRepository(design_root).load("typed_style")
+            style = NovelAIArtistRepository(design_root).load("typed_style")
 
             self.assertEqual(style.prompt_prefix, ["style prefix", "style suffix"])
             self.assertEqual(style.prompt_suffix, [])
@@ -198,9 +197,8 @@ origin_uc, lowres
 
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="akemi homura, foot focus",
-                style_ref="typed_style",
             )
-            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, artist=style)
 
             self.assertEqual(
                 request.prompt,
@@ -224,16 +222,15 @@ origin_uc, lowres
                 encoding="utf-8",
             )
 
-            style = NovelAIStyleRepository(design_root).load("suffix_style")
+            style = NovelAIArtistRepository(design_root).load("suffix_style")
 
             self.assertEqual(style.prompt_prefix, ["style suffix"])
             self.assertEqual(style.prompt_suffix, [])
 
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="akemi homura, foot focus",
-                style_ref="suffix_style",
             )
-            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, artist=style)
 
             self.assertEqual(
                 request.prompt,
@@ -256,16 +253,15 @@ origin_uc, lowres
                 encoding="utf-8",
             )
 
-            style = NovelAIStyleRepository(design_root).load("three_line_style")
+            style = NovelAIArtistRepository(design_root).load("three_line_style")
 
             self.assertEqual(style.prompt_prefix, ["line A", "line B"])
             self.assertEqual(style.prompt_suffix, ["line C"])
 
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="character and action",
-                style_ref="three_line_style",
             )
-            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, artist=style)
 
             self.assertEqual(
                 request.prompt,
@@ -286,17 +282,16 @@ alias_name, \u9ed8\u8ba4
 """.strip(),
                 encoding="utf-8",
             )
-            style = NovelAIStyleRepository(design_root).load("\u52a8\u753b_\u7535\u5f71\u611f_\u65392")
+            style = NovelAIArtistRepository(design_root).load("\u52a8\u753b_\u7535\u5f71\u611f_\u65392")
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="1girl, akemi homura, standing",
-                style_ref="\u52a8\u753b_\u7535\u5f71\u611f_\u65392",
             )
 
-            request = NovelAIRenderAdapter().build_request(bundle, seed=123, style=style)
+            request = NovelAIRenderAdapter().build_request(bundle, seed=123, artist=style)
 
             self.assertEqual(
                 request.prompt,
-                "wlop,artist:,artist:ogipote,artist:ciloranko,anime style,"
+                "wlop,artist:ogipote,artist:ciloranko,anime style,"
                 "High_contrast / Perfect_lighting / etc,dramatic lighting on characters,"
                 "1girl,akemi homura,standing,::,very aesthetic,"
                 "masterpiece,no text,",
@@ -320,25 +315,24 @@ not_quality_prompts
                 encoding="utf-8",
             )
 
-            legacy_style = NovelAIStyleRepository(design_root).load("sample_style")
+            legacy_style = NovelAIArtistRepository(design_root).load("sample_style")
             migrated_node = NodeDocument.model_validate(
-                migrate_legacy_style_tags(style_dir, node_id="sample_style")
+                migrate_legacy_artist_tags(style_dir, node_id="sample_style")
             )
             bundle = ScriptComposer().compose_full_prompt(
                 prompt="akemi homura, foot focus",
                 negative="bad feet",
-                style_ref="sample_style",
             )
 
             legacy_request = NovelAIRenderAdapter().build_request(
                 bundle,
                 seed=123,
-                style=legacy_style,
+                artist=legacy_style,
             )
             migrated_request = NovelAIRenderAdapter().build_request(
                 bundle,
                 seed=123,
-                style=migrated_node,
+                artist=migrated_node,
             )
 
             self.assertEqual(migrated_node.renderers["novelai"]["include_common_tags"], False)
@@ -368,11 +362,11 @@ not_quality_prompts
     def test_structured_style_node_builds_novelai_request(self):
         style = NodeDocument.model_validate(
             {
-                "schema": "tags-machine.style/v1",
-                "kind": "style",
+                "schema": "tags-machine.artist/v1",
+                "kind": "artist",
                 "id": "anime_comfy",
                 "tags": {
-                    "style": ["anime style", "clean lineart"],
+                    "artist": ["anime style", "clean lineart"],
                     "quality": ["{best quality}"],
                 },
                 "negative_prompt": ["lowres"],
@@ -399,10 +393,9 @@ not_quality_prompts
         bundle = ScriptComposer().compose_full_prompt(
             prompt="akemi homura, foot focus",
             negative="bad feet",
-            style_ref="anime_comfy",
         )
 
-        request = NovelAIRenderAdapter().build_request(bundle, seed=321, style=style)
+        request = NovelAIRenderAdapter().build_request(bundle, seed=321, artist=style)
 
         self.assertEqual(request.model, "nai-diffusion-4-5-full")
         self.assertEqual(request.params["steps"], 30)

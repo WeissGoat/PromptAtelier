@@ -76,11 +76,11 @@ character_scope: foot_detail
     )
     (style / "node.yaml").write_text(
         """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: api_style
 tags:
-  style:
+  artist:
     - anime style
 negative_prompt:
   - lowres
@@ -97,6 +97,21 @@ renderers:
       steps: 30
   comfyui:
     workflow: portrait_workflow
+    workflow_json:
+      "1":
+        class_type: CLIPTextEncode
+        inputs:
+          text: ""
+          negative: ""
+          width: 1024
+          height: 1024
+          seed: 0
+    inputs:
+      positive_prompt: "1.inputs.text"
+      negative_prompt: "1.inputs.negative"
+      width: "1.inputs.width"
+      height: "1.inputs.height"
+      seed: "1.inputs.seed"
     checkpoint: anime_comfy.safetensors
     params:
       steps: 32
@@ -143,7 +158,7 @@ class JsonApiTest(unittest.TestCase):
                 },
                 "render": {
                     "backend": "novelai",
-                    "style": "examples/nodes/styles/anime_comfy",
+                    "artist": "examples/nodes/artists/anime_comfy",
                     "seed": 123,
                 },
                 "output": {"dir": "outputs/case_001"},
@@ -167,11 +182,11 @@ class JsonApiTest(unittest.TestCase):
                             "character": str(character),
                             "action": str(action),
                         },
-                        "style": str(style),
+                        "artist": str(style),
                     },
                     "render": {
                         "backend": "novelai",
-                        "style": str(style),
+                        "artist": str(style),
                         "seed": 123,
                         "width": 832,
                         "height": 1216,
@@ -182,12 +197,13 @@ class JsonApiTest(unittest.TestCase):
             bundle = result["prompt_bundle"]
             request = result["render_request"]
             self.assertEqual(result["schema"], "tags-machine-core.compose-render-plan-result/v1")
-            self.assertEqual(bundle["meta"]["character_ref"], "homura")
-            self.assertEqual(bundle["meta"]["action_ref"], "foot_closeup")
-            self.assertEqual(bundle["meta"]["style_ref"], "api_style")
+            self.assertEqual(
+                [(node["role"], node["id"]) for node in bundle["meta"]["nodes"]],
+                [("character", "homura"), ("action", "foot_closeup"), ("artist", "api_style")],
+            )
             self.assertEqual(bundle["meta"]["composition"]["character_scope"], "foot_detail")
-            self.assertIn("akemi homura", bundle["prompt"]["positive"])
-            self.assertIn("bare soles", bundle["prompt"]["positive"])
+            self.assertIn("2.0::akemi_homura::", bundle["prompt"]["positive"])
+            self.assertIn("bare_soles", bundle["prompt"]["positive"])
             self.assertNotIn("purple eyes", bundle["prompt"]["positive"])
             self.assertEqual(request["backend"], "novelai")
             self.assertEqual(request["seed"], 123)
@@ -373,8 +389,8 @@ tags:
 
             caption = result["render_request"]["params"]["v4_prompt"]["caption"]
             self.assertEqual(len(caption["char_captions"]), 2)
-            self.assertIn("akemi homura", caption["char_captions"][0]["char_caption"])
-            self.assertIn("kaname madoka", caption["char_captions"][1]["char_caption"])
+            self.assertIn("2.0::akemi_homura::", caption["char_captions"][0]["char_caption"])
+            self.assertIn("2.0::kaname_madoka::", caption["char_captions"][1]["char_caption"])
             self.assertNotIn("akemi homura", caption["base_caption"])
 
     def test_compose_render_plan_full_prompt_uses_nodes_only_as_render_context(self):
@@ -391,11 +407,11 @@ tags:
                             "character": str(character),
                             "action": str(action),
                         },
-                        "style": str(style),
+                        "artist": str(style),
                     },
                     "render": {
                         "backend": "novelai",
-                        "style": str(style),
+                        "artist": str(style),
                         "model": "nai-diffusion-4-5-full",
                         "params": {"character_prompts": {"mode": "auto"}},
                     },
@@ -407,8 +423,7 @@ tags:
             caption = request["params"]["v4_prompt"]["caption"]
             char_caption = caption["char_captions"][0]["char_caption"]
             self.assertEqual(bundle["prompt"]["positive"], prompt)
-            self.assertIsNone(bundle["meta"]["character_ref"])
-            self.assertIsNone(bundle["meta"]["action_ref"])
+            self.assertEqual(bundle["meta"]["nodes"], [])
             self.assertEqual(
                 bundle["meta"]["composition"]["included_character_sections"],
                 [],
@@ -451,10 +466,9 @@ tags:
                 }
             )
 
-            self.assertIsNone(bundle["meta"]["character_ref"])
-            self.assertEqual(bundle["meta"]["extra"]["node_refs"][0]["id"], "homura")
-            self.assertEqual(bundle["meta"]["extra"]["node_refs"][1]["id"], "madoka")
-            self.assertIn("kaname madoka", bundle["prompt"]["positive"])
+            self.assertEqual(bundle["meta"]["nodes"][0]["id"], "homura")
+            self.assertEqual(bundle["meta"]["nodes"][1]["id"], "madoka")
+            self.assertIn("2.0::kaname_madoka::", bundle["prompt"]["positive"])
 
     def test_render_plan_json_api_accepts_existing_prompt_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -467,7 +481,7 @@ tags:
                         "character": str(character),
                         "action": str(action),
                     },
-                    "style": str(style),
+                    "artist": str(style),
                 }
             )
 
@@ -475,7 +489,7 @@ tags:
                 {
                     "prompt_bundle": bundle,
                     "backend": "comfyui",
-                    "style": str(style),
+                    "artist": str(style),
                     "seed": 456,
                     "params": {"scheduler": "karras"},
                 }
@@ -490,7 +504,7 @@ tags:
 
     def test_render_plan_json_api_rejects_unknown_backend_with_support_matrix_error(self):
         bundle = {
-            "schema": "tags-machine-core.prompt-bundle/v1",
+            "schema": "tags-machine-core.prompt-bundle/v2",
             "prompt": {
                 "positive": "akemi homura",
                 "negative": "",
@@ -555,11 +569,11 @@ tags:
                                 "character": str(character),
                                 "action": str(action),
                             },
-                            "style": str(style),
+                            "artist": str(style),
                         },
                         "render": {
                             "backend": "comfyui",
-                            "style": str(style),
+                            "artist": str(style),
                             "seed": 789,
                             "params": {"scheduler": "normal"},
                         },
@@ -604,13 +618,13 @@ tags:
                                 "character": str(character),
                                 "action": str(action),
                             },
-                            "style": str(style),
+                            "artist": str(style),
                             "extra_prompt": "dynamic low angle",
                             "negative": "messy crop",
                         },
                         "render": {
                             "backend": "novelai",
-                            "style": str(style),
+                            "artist": str(style),
                             "seed": 1357,
                             "width": 832,
                             "height": 1216,
@@ -636,8 +650,8 @@ tags:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-ref",
-                        "api_style",
+                        "--node",
+                        f"artist:{style}",
                         "--extra-prompt",
                         "dynamic low angle",
                         "--negative",
@@ -656,7 +670,7 @@ tags:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--extra-prompt",
                         "dynamic low angle",
@@ -693,7 +707,10 @@ tags:
                 _without_runtime_fields(api_result["prompt_bundle"]),
                 _without_runtime_fields(prompt_bundle),
             )
-            self.assertEqual(api_result["render_request"], render_request)
+            self.assertEqual(
+                _without_trace_locations(api_result["render_request"]),
+                _without_trace_locations(render_request),
+            )
             self.assertEqual(
                 api_result["prompt_bundle"]["meta"]["composition"]["character_scope"],
                 "foot_detail",
@@ -716,11 +733,11 @@ tags:
                         "compose": {
                             "prompt": prompt,
                             "negative": "bad feet",
-                            "style": str(style),
+                            "artist": str(style),
                         },
                         "render": {
                             "backend": "novelai",
-                            "style": str(style),
+                            "artist": str(style),
                             "seed": 2468,
                             "width": 832,
                             "height": 1216,
@@ -746,7 +763,7 @@ tags:
                         prompt,
                         "--negative",
                         "bad feet",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "2468",
@@ -774,9 +791,11 @@ tags:
                 _without_runtime_fields(api_result["prompt_bundle"]),
                 _without_runtime_fields(run_prompt["prompt_bundle"]),
             )
-            self.assertEqual(api_result["render_request"], run_prompt["render_request"])
-            self.assertEqual(api_result["prompt_bundle"]["meta"]["character_ref"], None)
-            self.assertEqual(api_result["prompt_bundle"]["meta"]["action_ref"], None)
+            self.assertEqual(
+                _without_trace_locations(api_result["render_request"]),
+                _without_trace_locations(run_prompt["render_request"]),
+            )
+            self.assertEqual(api_result["prompt_bundle"]["meta"]["nodes"], [])
             self.assertEqual(
                 api_result["prompt_bundle"]["meta"]["composition"]["included_character_sections"],
                 [],
@@ -799,8 +818,8 @@ tags:
                         prompt,
                         "--negative",
                         "bad feet",
-                        "--style-node",
-                        "examples\\nodes\\styles\\anime_comfy",
+                        "--artist-node",
+                        "examples\\nodes\\artists\\anime_comfy",
                         "--seed",
                         "123",
                         "--width",
@@ -827,9 +846,11 @@ tags:
             _without_runtime_fields(api_result["prompt_bundle"]),
             _without_runtime_fields(run_prompt["prompt_bundle"]),
         )
-        self.assertEqual(api_result["render_request"], run_prompt["render_request"])
-        self.assertIsNone(api_result["prompt_bundle"]["meta"]["character_ref"])
-        self.assertIsNone(api_result["prompt_bundle"]["meta"]["action_ref"])
+        self.assertEqual(
+            _without_trace_locations(api_result["render_request"]),
+            _without_trace_locations(run_prompt["render_request"]),
+        )
+        self.assertEqual(api_result["prompt_bundle"]["meta"]["nodes"], [])
         self.assertEqual(
             api_result["prompt_bundle"]["meta"]["composition"]["included_character_sections"],
             [],
@@ -849,7 +870,7 @@ tags:
                     "character": str(character),
                     "action": str(action),
                 },
-                "style": str(style),
+                "artist": str(style),
                 "extra_prompt": "soles toward viewer",
                 "negative": "face focus",
                 "character_scope": "foot_detail",
@@ -880,15 +901,16 @@ tags:
             }
             second = api.compose_agent(second_request)
 
-            self.assertEqual(task["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertEqual(task["schema"], "tags-machine-core.agent-composition-task/v2")
             self.assertTrue(task["cache_key"].startswith("sha256:"))
             self.assertEqual(task["nodes"]["character"]["id"], "homura")
             self.assertEqual(task["nodes"]["action"]["node"]["character_scope"], "foot_detail")
             self.assertEqual(task["instructions"], ["局部特写只保留脚部相关角色细节"])
             self.assertEqual(task["agent_model"], "agent-model-v1")
             self.assertEqual(first["meta"]["composer_type"], "agent")
-            self.assertEqual(first["meta"]["style_ref"], "api_style")
-            self.assertEqual(first["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+            artist_nodes = [node for node in first["meta"]["nodes"] if node["role"] == "artist"]
+            self.assertEqual(artist_nodes[0]["id"], "api_style")
+            self.assertEqual(first["meta"]["agent"]["agent_model"], "agent-model-v1")
             self.assertEqual(first["prompt"]["positive"], "akemi homura, bare soles, foot focus, soles toward viewer")
             self.assertEqual(first["meta"]["composition"]["suppressed_character_sections"], ["eyes", "upper_clothes"])
             self.assertFalse(first["cache"]["cache_hit"])
@@ -908,7 +930,7 @@ tags:
                     "character": str(character),
                     "action": str(action),
                 },
-                "style": str(style),
+                "artist": str(style),
                 "agent": {
                     "model": "agent-model-v1",
                 },
@@ -954,7 +976,7 @@ tags:
                     "character": str(character),
                     "action": str(action),
                 },
-                "style": str(style),
+                "artist": str(style),
                 "extra_prompt": "soles toward viewer",
                 "negative": "face focus",
                 "character_scope": "foot_detail",
@@ -1005,7 +1027,7 @@ tags:
                     "character": str(character),
                     "action": str(action),
                 },
-                "style": str(style),
+                "artist": str(style),
                 "extra_prompt": "soles toward viewer",
                 "negative": "face focus",
                 "character_scope": "foot_detail",
@@ -1041,7 +1063,7 @@ tags:
                     bundle = api.compose_agent(request)
 
                     self.assertEqual(task["agent_model"], "agent-model-v1")
-                    self.assertEqual(bundle["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+                    self.assertEqual(bundle["meta"]["agent"]["agent_model"], "agent-model-v1")
                     self.assertEqual(task["cache_key"], bundle["cache"]["cache_key"])
                     cache_keys.add(task["cache_key"])
 
@@ -1056,7 +1078,7 @@ tags:
                     "character": str(character),
                     "action": str(action),
                 },
-                "style": str(style),
+                "artist": str(style),
                 "extra_prompt": "soles toward viewer",
                 "negative": "face focus",
                 "character_scope": "foot_detail",
@@ -1105,7 +1127,7 @@ tags:
                     self.assertFalse(first["cache"]["cache_hit"])
                     self.assertTrue(second["cache"]["cache_hit"])
                     self.assertEqual(first["cache"]["cache_key"], second["cache"]["cache_key"])
-                    self.assertEqual(second["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+                    self.assertEqual(second["meta"]["agent"]["agent_model"], "agent-model-v1")
 
     def test_resolve_agent_json_api_returns_task_on_cache_miss_then_cached_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1117,7 +1139,7 @@ tags:
                     "character": str(character),
                     "action": str(action),
                 },
-                "style": str(style),
+                "artist": str(style),
                 "extra_prompt": "soles toward viewer",
                 "negative": "face focus",
                 "character_scope": "foot_detail",
@@ -1149,7 +1171,7 @@ tags:
 
             self.assertEqual(missing["schema"], "tags-machine-core.agent-compose-resolution/v1")
             self.assertEqual(missing["status"], "requires_agent")
-            self.assertEqual(missing["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertEqual(missing["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v2")
             self.assertEqual(missing["agent_task"]["nodes"]["action"]["node"]["character_scope"], "foot_detail")
             self.assertEqual(created["status"], "ready")
             self.assertFalse(created["prompt_bundle"]["cache"]["cache_hit"])
@@ -1181,7 +1203,7 @@ tags:
                         "character": str(character),
                         "action": str(action),
                     },
-                    "style": str(style),
+                    "artist": str(style),
                     "extra_prompt": "soles toward viewer",
                     "negative": "face focus",
                     "character_scope": "foot_detail",
@@ -1202,7 +1224,7 @@ tags:
                 },
                 "render": {
                     "backend": "novelai",
-                    "style": str(style),
+                    "artist": str(style),
                     "seed": 2468,
                     "width": 832,
                     "height": 1216,
@@ -1233,8 +1255,9 @@ tags:
 
             self.assertEqual(first["schema"], "tags-machine-core.compose-render-plan-result/v1")
             self.assertEqual(first_bundle["meta"]["composer_type"], "agent")
-            self.assertEqual(first_bundle["meta"]["style_ref"], "api_style")
-            self.assertEqual(first_bundle["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+            artist_nodes = [node for node in first_bundle["meta"]["nodes"] if node["role"] == "artist"]
+            self.assertEqual(artist_nodes[0]["id"], "api_style")
+            self.assertEqual(first_bundle["meta"]["agent"]["agent_model"], "agent-model-v1")
             self.assertEqual(first_bundle["meta"]["composition"]["character_scope"], "foot_detail")
             self.assertEqual(first_bundle["meta"]["composition"]["suppressed_character_sections"], ["eyes", "upper_clothes"])
             self.assertEqual(first_bundle["prompt"]["positive"], "akemi homura, bare soles, foot focus, soles toward viewer")
@@ -1269,7 +1292,7 @@ tags:
                         "character": str(character),
                         "action": str(action),
                     },
-                    "style": str(style),
+                    "artist": str(style),
                     "extra_prompt": "soles toward viewer",
                     "negative": "face focus",
                     "character_scope": "foot_detail",
@@ -1283,7 +1306,7 @@ tags:
                 },
                 "render": {
                     "backend": "novelai",
-                    "style": str(style),
+                    "artist": str(style),
                     "seed": 2468,
                     "width": 832,
                     "height": 1216,
@@ -1327,7 +1350,7 @@ tags:
 
             self.assertEqual(ready["status"], "ready")
             self.assertFalse(ready["prompt_bundle"]["cache"]["cache_hit"])
-            self.assertEqual(ready["prompt_bundle"]["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+            self.assertEqual(ready["prompt_bundle"]["meta"]["agent"]["agent_model"], "agent-model-v1")
             self.assertEqual(ready["render_request"]["backend"], "novelai")
             self.assertEqual(ready["render_request"]["seed"], 2468)
             self.assertEqual(ready["render_request"]["params"]["n_samples"], 2)
@@ -1349,14 +1372,14 @@ tags:
                             "character": str(character),
                             "action": str(action),
                         },
-                        "style": str(style),
+                        "artist": str(style),
                         "character_scope": "foot_detail",
                         "agent": {"model": "agent-model-v1"},
                         "cache": {"cache_dir": str(root / "cache" / "missing")},
                     },
                     "render": {
                         "backend": "novelai",
-                        "style": str(style),
+                        "artist": str(style),
                         "seed": 123,
                     },
                     "output": {"dir": str(root / "outputs" / "foot_detail_001")},
@@ -1368,7 +1391,7 @@ tags:
             self.assertEqual(response["status"], "requires_agent")
             self.assertEqual(
                 response["agent_task"]["schema"],
-                "tags-machine-core.agent-composition-task/v1",
+                "tags-machine-core.agent-composition-task/v2",
             )
             self.assertNotIn("prompt_bundle", response)
             self.assertNotIn("render_request", response)
@@ -1387,7 +1410,7 @@ tags:
                     },
                     "render": {
                         "backend": "novelai",
-                        "style": str(style),
+                        "artist": str(style),
                         "seed": 123,
                         "width": 832,
                         "height": 1216,
@@ -1421,7 +1444,7 @@ tags:
                             "character": str(character),
                             "action": str(action),
                         },
-                        "style": str(style),
+                        "artist": str(style),
                         "character_scope": "foot_detail",
                         "agent": {
                             "instructions": ["避免把眼睛和上衣放进脚部特写"],
@@ -1505,7 +1528,7 @@ tags:
                             "character": str(character),
                             "action": str(action),
                         },
-                        "style": str(style),
+                        "artist": str(style),
                         "character_scope": "foot_detail",
                         "agent": {
                             "instructions": ["避免把眼睛和上衣放进脚部特写"],
@@ -1555,7 +1578,7 @@ tags:
                                 "character": str(character),
                                 "action": str(action),
                             },
-                            "style": str(style),
+                            "artist": str(style),
                             "character_scope": "foot_detail",
                             "agent": {
                                 "instructions": ["避免把眼睛和上衣放进脚部特写"],
@@ -1573,7 +1596,7 @@ tags:
                         },
                         "render": {
                             "backend": "novelai",
-                            "style": str(style),
+                            "artist": str(style),
                             "seed": 123,
                         },
                     },
@@ -1618,7 +1641,7 @@ tags:
                                 "character": str(character),
                                 "action": str(action),
                             },
-                            "style": str(style),
+                            "artist": str(style),
                             "character_scope": "foot_detail",
                             "agent": {
                                 "instructions": ["避免把眼睛和上衣放进脚部特写"],
@@ -1629,7 +1652,7 @@ tags:
                         },
                         "render": {
                             "backend": "novelai",
-                            "style": str(style),
+                            "artist": str(style),
                             "seed": 123,
                         },
                     },
@@ -1676,14 +1699,14 @@ tags:
                                 "character": str(character),
                                 "action": str(action),
                             },
-                            "style": str(style),
+                            "artist": str(style),
                             "character_scope": "foot_detail",
                             "agent": {"model": "agent-model-v1"},
                             "cache": {"cache_dir": str(root / "cache" / "prompt")},
                         },
                         "render": {
                             "backend": "novelai",
-                            "style": str(style),
+                            "artist": str(style),
                             "seed": 123,
                         },
                         "output": {"dir": str(root / "outputs" / "foot_detail_001")},
@@ -1743,10 +1766,11 @@ tags:
         self.assertEqual(missing["status"], "requires_agent")
         self.assertEqual(missing["agent_task"]["nodes"]["character"]["id"], "homura")
         self.assertEqual(missing["agent_task"]["nodes"]["action"]["id"], "foot_closeup")
-        self.assertEqual(missing["agent_task"]["style_ref"], "anime_comfy")
+        self.assertEqual(missing["agent_task"]["nodes"]["artist"]["id"], "anime_comfy")
 
         self.assertEqual(bundle["meta"]["composer_type"], "agent")
-        self.assertEqual(bundle["meta"]["style_ref"], "anime_comfy")
+        artist_nodes = [node for node in bundle["meta"]["nodes"] if node["role"] == "artist"]
+        self.assertEqual(artist_nodes[0]["id"], "anime_comfy")
         self.assertIn("bare soles", bundle["prompt"]["positive"])
         self.assertEqual(
             bundle["meta"]["composition"]["included_character_sections"],
@@ -1759,7 +1783,7 @@ tags:
 
         self.assertEqual(plan["prompt_bundle"]["meta"]["composer_type"], "script")
         self.assertEqual(plan["prompt_bundle"]["meta"]["composition"]["character_scope"], "foot_detail")
-        self.assertIn("bare soles", plan["prompt_bundle"]["prompt"]["positive"])
+        self.assertIn("bare_soles", plan["prompt_bundle"]["prompt"]["positive"])
         self.assertNotIn("purple eyes", plan["prompt_bundle"]["prompt"]["positive"])
         self.assertEqual(plan["render_request"]["backend"], "novelai")
         self.assertEqual(plan["render_request"]["seed"], 123)
@@ -1769,8 +1793,7 @@ tags:
         self.assertIn("v4_prompt", plan["render_request"]["params"])
 
         self.assertEqual(full_prompt_plan["prompt_bundle"]["meta"]["composer_type"], "script")
-        self.assertIsNone(full_prompt_plan["prompt_bundle"]["meta"]["character_ref"])
-        self.assertIsNone(full_prompt_plan["prompt_bundle"]["meta"]["action_ref"])
+        self.assertEqual(full_prompt_plan["prompt_bundle"]["meta"]["nodes"], [])
         self.assertEqual(
             full_prompt_plan["prompt_bundle"]["meta"]["composition"]["included_character_sections"],
             [],
@@ -1963,11 +1986,11 @@ tags:
                             "character": str(character),
                             "action": str(action),
                         },
-                        "style": str(style),
+                        "artist": str(style),
                     },
                     "render": {
                         "backend": "novelai",
-                        "style": str(style),
+                        "artist": str(style),
                         "seed": 123,
                         "width": 832,
                         "height": 1216,
@@ -2097,6 +2120,7 @@ tags:
                 base_url="http://novelai.local",
                 timeout=30,
                 retry=1,
+                retry_interval=None,
             )
             client.generate_images.assert_called_once()
             self.assertEqual(client.generate_images.call_args.args[0].prompt, "akemi homura")
@@ -2157,7 +2181,7 @@ tags:
             self.assertEqual(executor.call_args.kwargs["image_format"], "png")
             self.assertIs(executor.call_args.kwargs["allow_experimental_backend"], False)
 
-    def test_cli_api_generate_rejects_non_novelai_backend_in_v1_scope(self):
+    def test_cli_api_generate_supports_comfyui_backend_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = _write_config(root)
@@ -2170,15 +2194,19 @@ tags:
                             "backend": "comfyui",
                             "prompt": "akemi homura",
                             "negative_prompt": "bad anatomy",
-                            "params": {"workflow": "portrait_workflow"},
+                            "params": {"workflow_json": {}},
                         }
                     }
                 ),
                 encoding="utf-8",
             )
 
-            with self.assertRaises(ValueError) as raised:
-                main(
+            with patch("tags_machine_core.cli._execute_render_request") as executor:
+                executor.return_value = GenerationResult(
+                    backend="comfyui",
+                    request_body={"prompt": {}},
+                )
+                exit_code = main(
                     [
                         "api-generate",
                         str(request),
@@ -2189,8 +2217,10 @@ tags:
                     ]
                 )
 
-            self.assertIn("only NovelAI", str(raised.exception))
-            self.assertFalse(response.exists())
+            self.assertEqual(exit_code, 0)
+            executor.assert_called_once()
+            self.assertEqual(executor.call_args.args[1].backend, "comfyui")
+            self.assertTrue(response.exists())
 
     def test_cli_api_generate_rejects_sd_backend_in_v1_scope_before_execution(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2241,6 +2271,19 @@ def _without_runtime_fields(value):
         }
     if isinstance(value, list):
         return [_without_runtime_fields(item) for item in value]
+    return value
+
+
+def _without_trace_locations(value):
+    if isinstance(value, dict):
+        is_node_ref = "role" in value and "id" in value
+        return {
+            key: _without_trace_locations(item)
+            for key, item in value.items()
+            if key != "source_nodes" and not (is_node_ref and key == "ref")
+        }
+    if isinstance(value, list):
+        return [_without_trace_locations(item) for item in value]
     return value
 
 

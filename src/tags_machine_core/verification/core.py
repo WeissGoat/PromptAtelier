@@ -62,8 +62,8 @@ def _core_verification_commands() -> list[dict[str, Any]]:
             "command": [python, "-m", "compileall", "-q", "src", "tests"],
         },
         {
-            "label": "unittest_discover",
-            "command": [python, "-m", "unittest", "discover", "-s", "tests"],
+            "label": "pytest_suite",
+            "command": [python, "-m", "pytest", "tests", "-q"],
         },
         {
             "label": "validate_example_nodes",

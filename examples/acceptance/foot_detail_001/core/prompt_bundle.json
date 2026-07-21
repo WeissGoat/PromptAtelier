@@ -1,39 +1,58 @@
 {
-  "schema": "tags-machine-core.prompt-bundle/v1",
-  "prompt": {
-    "positive": "akemi homura, bare soles, foot focus, masterpiece, best quality",
-    "negative": "bad anatomy, low quality"
-  },
-  "meta": {
-    "character_ref": "examples/nodes/characters/homura",
-    "action_ref": "examples/nodes/actions/foot_closeup",
-    "style_ref": "examples/nodes/styles/anime_comfy",
-    "composer_type": "script",
-    "composer_version": "v1",
-    "composition": {
-      "character_scope": "foot_detail",
-      "included_character_sections": [
-        "character",
-        "body",
-        "feet",
-        "legwear",
-        "footwear"
-      ],
-      "suppressed_character_sections": [
-        "hair",
-        "eyes",
-        "upper_clothes"
-      ]
-    },
-    "source_nodes": [
-      "examples/nodes/characters/homura",
-      "examples/nodes/actions/foot_closeup"
-    ]
-  },
-  "cache": {
-    "cacheable": true,
-    "cache_key": "sha256:example-foot-detail",
-    "cache_hit": false
-  },
-  "created_at": "2026-05-25T00:00:00+00:00"
+    "schema":  "tags-machine-core.prompt-bundle/v2",
+    "prompt":  {
+                   "positive":  "akemi homura, bare soles, foot focus, masterpiece, best quality",
+                   "negative":  "bad anatomy, low quality"
+               },
+    "meta":  {
+                 "composer_type":  "script",
+                 "composer_version":  "v1",
+                 "composition":  {
+                                     "character_scope":  "foot_detail",
+                                     "included_character_sections":  [
+                                                                         "character",
+                                                                         "body",
+                                                                         "feet",
+                                                                         "legwear",
+                                                                         "footwear"
+                                                                     ],
+                                     "suppressed_character_sections":  [
+                                                                           "hair",
+                                                                           "eyes",
+                                                                           "upper_clothes"
+                                                                       ]
+                                 },
+                 "nodes":  [
+                               {
+                                   "role":  "character",
+                                   "ref":  "examples/nodes/characters/homura",
+                                   "id":  "homura",
+                                   "kind":  "character",
+                                   "index":  0
+                               },
+                               {
+                                   "role":  "action",
+                                   "ref":  "examples/nodes/actions/foot_closeup",
+                                   "id":  "foot_closeup",
+                                   "kind":  "action",
+                                   "index":  0
+                               },
+                               {
+                                   "role":  "artist",
+                                   "ref":  "examples/nodes/artists/anime_comfy",
+                                   "id":  "anime_comfy",
+                                   "kind":  "artist",
+                                   "index":  0
+                               }
+                           ],
+                 "extra":  {
+
+                           }
+             },
+    "cache":  {
+                  "cacheable":  true,
+                  "cache_key":  "sha256:example-foot-detail",
+                  "cache_hit":  false
+              },
+    "created_at":  "2026-05-25T00:00:00+00:00"
 }

@@ -39,6 +39,7 @@ from tags_machine_core.nodes import (
     plan_legacy_tags_migration,
     validate_node_tree,
 )
+from tags_machine_core.nodes.resolved import node_role_order
 from tags_machine_core.services import GenerationJsonApi, GenerationService
 from tags_machine_core.tools.action_resolver.cli import add_action_resolver_subparser
 from tags_machine_core.tools.task_tools.cli import add_task_tools_subparser
@@ -1838,6 +1839,8 @@ def _read_resolved_nodes(
         node_input = NodeInput.parse(value)
         items.append((node_input.role, node_input.ref, reader.read(node_input.ref)))
 
+    items.sort(key=lambda item: node_role_order(item[0]))
+
     role_counts: dict[str, int] = {}
     resolved: list[ResolvedNode] = []
     for role, ref, node in items:
@@ -1853,7 +1856,7 @@ def _load_render_artist(args):
     artist_filter = _artist_input_filter_for_args(args)
     if getattr(args, "artist_node", None):
         node = NodeReader().read(args.artist_node)
-        return node.id, artist_filter.apply(node)
+        return str(args.artist_node), artist_filter.apply(node)
     artist_ref = getattr(args, "artist", None)
     if artist_ref and Path(artist_ref).exists():
         node = NodeReader().read(artist_ref)

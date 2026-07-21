@@ -60,21 +60,35 @@ def _second_character(path: str | None = None) -> NodeDocument:
     )
 
 
+def _artist(path: str | None = None) -> NodeDocument:
+    return NodeDocument.model_validate(
+        {
+            "schema": "tags-machine.artist/v1",
+            "kind": "artist",
+            "id": "20260412_2",
+            "path": path,
+            "tags": {"artist": ["anime style"]},
+            "renderers": {"novelai": {}},
+        }
+    )
+
+
 class AgentComposerTest(unittest.TestCase):
     def test_build_task_contains_agent_readable_node_snapshots(self):
         task = AgentComposer().build_task(
             character=_character("characters/homura"),
             action=_action("actions/foot_closeup"),
-            style_ref="20260412_2",
+            artist=_artist("artists/20260412_2"),
             character_scope="foot_detail",
             instructions=["避免把眼睛和上衣放进脚部特写"],
             agent_model="agent-model-v1",
         )
 
-        self.assertEqual(task.schema_id, "tags-machine-core.agent-composition-task/v1")
+        self.assertEqual(task.schema_id, "tags-machine-core.agent-composition-task/v2")
         self.assertTrue(task.cache_key.startswith("sha256:"))
         self.assertEqual(task.nodes["character"].id, "homura")
         self.assertEqual(task.nodes["action"].node["character_scope"], "foot_detail")
+        self.assertEqual(task.nodes["artist"].id, "20260412_2")
         self.assertEqual(task.instructions, ["避免把眼睛和上衣放进脚部特写"])
         self.assertEqual(task.agent_model, "agent-model-v1")
 
@@ -82,7 +96,7 @@ class AgentComposerTest(unittest.TestCase):
         task = AgentComposer().build_task(
             character=_character("characters/homura"),
             action=_action("actions/foot_closeup"),
-            style_ref="20260412_2",
+            artist=_artist("artists/20260412_2"),
         )
 
         self.assertEqual(task.character_scope, "foot_detail")
@@ -247,8 +261,8 @@ class AgentComposerTest(unittest.TestCase):
         self.assertEqual(second.prompt.positive, "akemi homura, bare soles, foot focus")
         self.assertEqual(second.meta.composer_type, "agent")
         self.assertEqual(second.meta.composition.character_scope, "foot_detail")
-        self.assertEqual(second.meta.extra["agent"]["agent_model"], "agent-model-v1")
-        self.assertEqual(second.meta.extra["agent"]["notes"], ["agent 合并了角色和动作"])
+        self.assertEqual(second.meta.agent.agent_model, "agent-model-v1")
+        self.assertEqual(second.meta.agent.notes, ["agent 合并了角色和动作"])
 
     def test_compose_nodes_with_new_result_does_not_read_stale_cache_first(self):
         composer = AgentComposer()
@@ -346,13 +360,17 @@ class AgentComposerTest(unittest.TestCase):
 
         bundle = composer.compose_resolved_nodes(
             resolved,
-            style_ref="20260412_2",
             result=result,
         )
 
-        self.assertIsNone(bundle.meta.character_ref)
-        self.assertEqual(bundle.meta.action_ref, "foot_closeup")
-        self.assertEqual(bundle.meta.extra["node_refs"][1]["id"], "madoka")
+        self.assertEqual(
+            [(node.role, node.id, node.index) for node in bundle.meta.nodes],
+            [
+                ("character", "homura", 0),
+                ("character", "madoka", 1),
+                ("action", "foot_closeup", 0),
+            ],
+        )
         self.assertEqual(
             bundle.meta.extra["character_materials"][0]["positive_tags"],
             ["akemi homura", "bare soles"],

@@ -11,6 +11,7 @@ from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRe
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.nodes import NodeReader, ResolvedNode, ResolvedNodeSet
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.resolved import node_role_order
 from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api_models import (
     AgentComposeResolution,
@@ -270,6 +271,7 @@ class GenerationJsonApi:
                 for ref, node in self._load_node_values(value, role=role):
                     items.append((role, ref, node))
 
+        items.sort(key=lambda item: node_role_order(item[0]))
         role_counts: dict[str, int] = {}
         resolved: list[ResolvedNode] = []
         for role, ref, node in items:

@@ -19,6 +19,17 @@ NodeRole = Literal[
     "lighting",
 ]
 
+NODE_ROLE_ORDER = {
+    "character": 0,
+    "action": 1,
+    "background": 2,
+    "artist": 3,
+}
+
+
+def node_role_order(role: str) -> int:
+    return NODE_ROLE_ORDER.get(role, len(NODE_ROLE_ORDER))
+
 
 @dataclass(frozen=True)
 class NodeInput:

@@ -60,13 +60,20 @@ def renderer_artist_prompt_parts(
 
 
 def render_meta(bundle: PromptBundle, *, action: str, backend: str) -> dict[str, Any]:
-    return {
+    meta = {
         "action": action,
         "backend": backend,
         "composer_type": bundle.meta.composer_type,
         "composer_version": bundle.meta.composer_version,
         "prompt_cache_key": bundle.cache.cache_key,
     }
+    if bundle.meta.nodes:
+        meta["node_refs"] = [
+            node.model_dump(mode="json", exclude_none=True)
+            for node in bundle.meta.nodes
+        ]
+        meta["source_nodes"] = [node.ref for node in bundle.meta.nodes]
+    return meta
 
 
 def get_setting(

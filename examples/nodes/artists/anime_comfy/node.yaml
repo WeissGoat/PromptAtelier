@@ -1,11 +1,11 @@
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: anime_comfy
 name: Anime Comfy
 description: 结构化画风节点示例。通用画风词保存在 tags，后端差异保存在 renderers。
 
 tags:
-  style:
+  artist:
     - "anime style"
     - "clean lineart"
   quality:

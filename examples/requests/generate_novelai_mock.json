@@ -22,7 +22,15 @@
     },
     "meta": {
       "action": "generate",
-      "style_ref": "anime_comfy"
+      "node_refs": [
+        {
+          "role": "artist",
+          "ref": "examples/nodes/artists/anime_comfy",
+          "id": "anime_comfy",
+          "kind": "artist",
+          "index": 0
+        }
+      ]
     }
   },
   "output_dir": "outputs",

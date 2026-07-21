@@ -63,11 +63,11 @@ renderers:
             node_dir.mkdir()
             (node_dir / "node.yaml").write_text(
                 """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: anime_comfy
 tags:
-  style:
+  artist:
     - anime style
   quality:
     - "{best quality}"
@@ -88,8 +88,8 @@ renderers:
             )
 
             node = NodeReader().read(node_dir)
-            self.assertEqual(node.kind, "style")
-            self.assertEqual(node.tags["style"], ["anime style"])
+            self.assertEqual(node.kind, "artist")
+            self.assertEqual(node.tags["artist"], ["anime style"])
             self.assertEqual(node.negative_prompt, ["lowres"])
             self.assertEqual(node.renderers["comfyui"]["workflow"], "portrait_workflow")
 
@@ -138,14 +138,17 @@ not_quality_prompts
 
             node = migrate_legacy_style_tags(style_dir, node_id="migrated_style")
 
-            self.assertEqual(node["schema"], "tags-machine.style/v1")
-            self.assertEqual(node["kind"], "style")
+            self.assertEqual(node["schema"], "tags-machine.artist/v1")
+            self.assertEqual(node["kind"], "artist")
             self.assertEqual(node["id"], "migrated_style")
-            self.assertEqual(node["tags"]["style"], ["style prefix", "style suffix, best quality"])
+            self.assertEqual(node["tags"]["artist"], ["style prefix", "style suffix, best quality"])
             novelai = node["renderers"]["novelai"]
             self.assertFalse(novelai["include_common_tags"])
-            self.assertEqual(novelai["prompt_prefix"], ["style prefix"])
-            self.assertEqual(novelai["prompt_suffix"], ["style suffix, best quality"])
+            self.assertEqual(
+                novelai["prompt_prefix"],
+                ["style prefix", "style suffix, best quality"],
+            )
+            self.assertEqual(novelai["prompt_suffix"], [])
             self.assertEqual(novelai["negative_prompt"], ["lowres, bad anatomy"])
             self.assertEqual(novelai["after_negative_prompt"], ["extra fingers"])
             self.assertEqual(novelai["params"]["reference_image_multiple"], ["abc"])
@@ -310,7 +313,7 @@ blue_eyes,short_hair,jacket
 
             ready_action = root / "ready_action"
             ready_action.mkdir()
-            (ready_action / "tags.txt").write_text("foot focus, toes focus", encoding="utf-8")
+            (ready_action / "tags.txt").write_text("foot focus, close-up", encoding="utf-8")
 
             existing_target = output_root / "nodes" / "actions" / "ready_action" / "meta.yaml"
             existing_target.parent.mkdir(parents=True)
@@ -359,7 +362,7 @@ blue_eyes,short_hair,jacket
 
             ready_action = root / "ready_action"
             ready_action.mkdir()
-            (ready_action / "tags.txt").write_text("foot focus, toes focus", encoding="utf-8")
+            (ready_action / "tags.txt").write_text("foot focus, close-up", encoding="utf-8")
 
             review_action = root / "needs_review_action"
             review_action.mkdir()
@@ -399,7 +402,7 @@ blue_eyes,short_hair,jacket
             self.assertTrue(ready_output.exists())
             migrated_node = NodeReader().read(ready_output)
             self.assertEqual(migrated_node.kind, "action")
-            self.assertEqual(migrated_node.tags["action"], ["foot focus", "toes focus"])
+            self.assertEqual(migrated_node.tags["action"], ["foot focus", "close-up"])
             self.assertEqual(migrated_node.character_scope, "foot_detail")
             self.assertEqual(existing_target.read_text(encoding="utf-8"), "already exists")
             self.assertFalse((ready_action / "meta.yaml").exists())
@@ -438,7 +441,8 @@ rabbit_ears,jacket,long_sleeves
             self.assertEqual(node.tags["hair"], ["brown_hair", "long_hair", "hair_between_eyes"])
             self.assertEqual(node.tags["eyes"], ["blue_eyes"])
             self.assertEqual(node.tags["ears"], ["rabbit_ears"])
-            self.assertEqual(node.tags["upper_clothes"], ["jacket", "long_sleeves"])
+            self.assertEqual(node.tags["upper_clothes"], ["jacket"])
+            self.assertEqual(node.tags["hands"], ["long_sleeves"])
             self.assertEqual(node.renderers, {})
 
     def test_migrate_legacy_action_tags_allows_character_scope_override(self):
@@ -543,9 +547,9 @@ gen_json, {"sampler": "k_euler"}
 
             node = NodeReader().read(style_dir)
 
-            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.kind, "artist")
             self.assertEqual(node.id, "old_style")
-            self.assertEqual(node.tags["style"], ["style prefix"])
+            self.assertEqual(node.tags["artist"], ["style prefix"])
             self.assertEqual(node.renderers["novelai"]["negative_prompt"], ["lowres"])
             self.assertEqual(node.renderers["novelai"]["params"]["sampler"], "k_euler")
 
@@ -648,11 +652,11 @@ shot:
             invalid_style.mkdir(parents=True)
             (invalid_style / "node.yaml").write_text(
                 """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: simple
 tags:
-  style:
+  artist:
     - soft anime style
 """.strip(),
                 encoding="utf-8",
@@ -668,7 +672,7 @@ tags:
             self.assertEqual(result["summary"]["issue_counts"]["node_file_name_mismatch"], 1)
             self.assertEqual(result["summary"]["issue_counts"]["action_missing_character_scope"], 1)
             self.assertEqual(result["summary"]["issue_counts"]["forbidden_v1_field"], 1)
-            self.assertEqual(result["summary"]["issue_counts"]["style_missing_renderers_novelai"], 1)
+            self.assertEqual(result["summary"]["issue_counts"]["artist_missing_renderers"], 1)
             items_by_id = {item["node_id"]: item for item in result["items"]}
             self.assertEqual(items_by_id["homura"]["status"], "pass")
             action_codes = {issue["code"] for issue in items_by_id["foot_closeup"]["issues"]}
@@ -701,11 +705,11 @@ tags:
             unsupported.mkdir(parents=True)
             (unsupported / "node.yaml").write_text(
                 """
-schema: tags-machine.style/v1
-kind: artist
+schema: tags-machine.artist/v1
+kind: style
 id: legacy_artist
 tags:
-  style:
+  artist:
     - soft anime style
 renderers:
   novelai: {}
@@ -861,7 +865,7 @@ prompt:
                 "constraints",
                 "renderers",
             },
-            "style": {
+            "artist": {
                 "rules",
                 "profiles",
                 "include_scopes",
@@ -874,7 +878,7 @@ prompt:
             "character": "meta.yaml",
             "action": "meta.yaml",
             "background": "meta.yaml",
-            "style": "node.yaml",
+            "artist": "node.yaml",
         }
         violations: list[str] = []
         yaml_paths = sorted(examples_root.rglob("*.yaml"))
@@ -897,10 +901,12 @@ prompt:
 
             if kind == "action" and not str(data.get("character_scope") or "").strip():
                 violations.append(f"{relative}: action node missing character_scope")
-            if kind == "style":
+            if kind == "artist":
                 renderers = data.get("renderers")
-                if not isinstance(renderers, dict) or not isinstance(renderers.get("novelai"), dict):
-                    violations.append(f"{relative}: style node missing renderers.novelai")
+                if not isinstance(renderers, dict) or not any(
+                    isinstance(renderer, dict) for renderer in renderers.values()
+                ):
+                    violations.append(f"{relative}: artist node missing renderers")
 
         self.assertEqual(violations, [])
         self.assertTrue(validate_node_tree(examples_root)["valid"])

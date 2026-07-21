@@ -237,11 +237,14 @@ def _validate_node_yaml(path: Path, source_root: Path) -> dict[str, Any]:
         _append_issue(issues, "action_missing_character_scope", "action 节点缺少 character_scope。")
     if kind == "artist":
         renderers = data.get("renderers")
-        if not isinstance(renderers, dict) or not isinstance(renderers.get("novelai"), dict):
+        has_renderer = isinstance(renderers, dict) and any(
+            isinstance(renderer, dict) for renderer in renderers.values()
+        )
+        if not has_renderer:
             _append_issue(
                 issues,
-                "artist_missing_renderers_novelai",
-                "artist 节点缺少 renderers.novelai。",
+                "artist_missing_renderers",
+                "artist 节点至少需要一个 renderer 配置。",
             )
 
     return {

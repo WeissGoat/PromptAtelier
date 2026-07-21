@@ -15,10 +15,10 @@ class ContractsTest(unittest.TestCase):
     def test_compose_and_render_request(self):
         bundle = ScriptComposer().compose_full_prompt(
             prompt="akemi homura, foot focus",
-            style_ref="20260412_2",
         )
         self.assertEqual(bundle.prompt.positive, "akemi homura, foot focus")
-        self.assertEqual(bundle.meta.style_ref, "20260412_2")
+        self.assertEqual(bundle.schema_id, "tags-machine-core.prompt-bundle/v2")
+        self.assertEqual(bundle.meta.nodes, [])
         self.assertTrue(bundle.cache.cache_key.startswith("sha256:"))
 
         request = NovelAIRenderAdapter().build_request(bundle, seed=123)
@@ -26,7 +26,7 @@ class ContractsTest(unittest.TestCase):
         self.assertEqual(request.seed, 123)
         self.assertEqual(request.params["extra_noise_seed"], 123)
         self.assertIn("v4_prompt", request.params)
-        self.assertEqual(request.meta["style_ref"], "20260412_2")
+        self.assertNotIn("style_ref", request.meta)
 
     def test_prompt_bundle_meta_excludes_shot_and_constraints_contract_fields(self):
         bundle = PromptBundle.model_validate(
@@ -38,6 +38,22 @@ class ContractsTest(unittest.TestCase):
                 "meta": {
                     "character_ref": "homura",
                     "action_ref": "foot_closeup",
+                    "nodes": [
+                        {
+                            "role": "character",
+                            "ref": "characters/homura",
+                            "id": "homura",
+                            "kind": "character",
+                            "index": 0,
+                        },
+                        {
+                            "role": "action",
+                            "ref": "actions/foot_closeup",
+                            "id": "foot_closeup",
+                            "kind": "action",
+                            "index": 0,
+                        },
+                    ],
                     "shot": {"body_scope": "foot_detail"},
                     "constraints": {"forbidden_parts": ["eyes"]},
                     "composition": {
@@ -50,7 +66,7 @@ class ContractsTest(unittest.TestCase):
         )
 
         meta = bundle.model_dump(mode="json", by_alias=True)["meta"]
-        self.assertEqual(meta["action_ref"], "foot_closeup")
+        self.assertEqual(meta["nodes"][1]["id"], "foot_closeup")
         self.assertEqual(meta["composition"]["character_scope"], "foot_detail")
         self.assertNotIn("shot", meta)
         self.assertNotIn("constraints", meta)

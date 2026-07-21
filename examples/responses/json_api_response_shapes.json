@@ -9,11 +9,11 @@
         "equals": {
           "$.schema": "tags-machine-core.agent-compose-resolution/v1",
           "$.status": "requires_agent",
-          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
+          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v2",
           "$.agent_task.nodes.character.id": "homura",
           "$.agent_task.nodes.action.id": "foot_closeup",
           "$.agent_task.nodes.action.node.character_scope": "foot_detail",
-          "$.agent_task.style_ref": "anime_comfy",
+          "$.agent_task.nodes.artist.id": "anime_comfy",
           "$.agent_task.character_scope": "foot_detail",
           "$.agent_task.agent_model": "agent-model-v1"
         },
@@ -37,11 +37,11 @@
       "request": "examples/requests/agent_compose_with_result.json",
       "expect": {
         "equals": {
-          "$.schema": "tags-machine-core.prompt-bundle/v1",
+          "$.schema": "tags-machine-core.prompt-bundle/v2",
           "$.meta.composer_type": "agent",
-          "$.meta.character_ref": "homura",
-          "$.meta.action_ref": "foot_closeup",
-          "$.meta.style_ref": "anime_comfy",
+          "$.meta.nodes[0].id": "homura",
+          "$.meta.nodes[1].id": "foot_closeup",
+          "$.meta.nodes[2].id": "anime_comfy",
           "$.meta.composition.character_scope": "foot_detail",
           "$.meta.composition.included_character_sections": [
             "character",
@@ -53,7 +53,7 @@
             "eyes",
             "upper_clothes"
           ],
-          "$.meta.extra.agent.agent_model": "agent-model-v1",
+          "$.meta.agent.agent_model": "agent-model-v1",
           "$.cache.cache_hit": false
         },
         "contains": {
@@ -62,7 +62,7 @@
         },
         "required": [
           "$.cache.cache_key",
-          "$.meta.extra.agent.task_schema"
+          "$.meta.agent.task_schema"
         ],
         "absent": [
           "$.meta.shot",
@@ -94,14 +94,14 @@
           "$.render_request.params.director_reference_images": []
         },
         "contains": {
-          "$.render_request.prompt": "bare soles",
+          "$.render_request.prompt": "bare_soles",
           "$.render_request.negative_prompt": "worst quality"
         },
         "required": [
           "$.prompt_bundle.prompt.positive",
           "$.render_request.params.v4_prompt",
           "$.render_request.params.v4_negative_prompt",
-          "$.render_request.style_payload"
+          "$.render_request.artist_payload"
         ],
         "absent": [
           "$.prompt_bundle.meta.shot",
@@ -119,8 +119,7 @@
         "equals": {
           "$.schema": "tags-machine-core.compose-render-plan-result/v1",
           "$.prompt_bundle.meta.composer_type": "script",
-          "$.prompt_bundle.meta.character_ref": null,
-          "$.prompt_bundle.meta.action_ref": null,
+          "$.prompt_bundle.meta.nodes": [],
           "$.prompt_bundle.meta.composition.included_character_sections": [],
           "$.prompt_bundle.meta.composition.suppressed_character_sections": [],
           "$.render_request.backend": "novelai",
@@ -142,7 +141,7 @@
         "required": [
           "$.render_request.params.v4_prompt",
           "$.render_request.params.v4_negative_prompt",
-          "$.render_request.style_payload"
+          "$.render_request.artist_payload"
         ],
         "absent": [
           "$.prompt_bundle.meta.shot",
@@ -161,7 +160,7 @@
           "$.schema": "tags-machine-core.compose-render-plan-resolution/v1",
           "$.status": "ready",
           "$.prompt_bundle.meta.composer_type": "agent",
-          "$.prompt_bundle.meta.extra.agent.agent_model": "agent-model-v1",
+          "$.prompt_bundle.meta.agent.agent_model": "agent-model-v1",
           "$.render_request.backend": "novelai",
           "$.render_request.seed": 123,
           "$.render_request.meta.composer_type": "agent"
@@ -190,10 +189,10 @@
         "equals": {
           "$.schema": "tags-machine-core.compose-render-plan-resolution/v1",
           "$.status": "requires_agent",
-          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
+          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v2",
           "$.agent_task.nodes.character.id": "homura",
           "$.agent_task.nodes.action.id": "foot_closeup",
-          "$.agent_task.style_ref": "anime_comfy",
+          "$.agent_task.nodes.artist.id": "anime_comfy",
           "$.agent_task.agent_model": "agent-model-v1"
         },
         "contains": {
@@ -252,10 +251,10 @@
           "$.id": "foot_detail_001",
           "$.status": "requires_agent",
           "$.output.dir": "outputs/foot_detail_001",
-          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v1",
+          "$.agent_task.schema": "tags-machine-core.agent-composition-task/v2",
           "$.agent_task.nodes.character.id": "homura",
           "$.agent_task.nodes.action.id": "foot_closeup",
-          "$.agent_task.style_ref": "anime_comfy",
+          "$.agent_task.nodes.artist.id": "anime_comfy",
           "$.agent_task.agent_model": "agent-model-v1"
         },
         "contains": {
@@ -286,24 +285,24 @@
             "sd"
           ],
           "$.default_execution_backends": [
-            "novelai"
+            "novelai",
+            "comfyui"
           ],
           "$.experimental_execution_backends": [
-            "comfyui",
             "sd"
           ],
           "$.items[0].backend": "novelai",
           "$.items[0].stage": "stable",
           "$.items[0].executes_by_default": true,
           "$.items[1].backend": "comfyui",
-          "$.items[1].stage": "experimental",
-          "$.items[1].requires_experimental_execution": true,
+          "$.items[1].stage": "stable",
+          "$.items[1].requires_experimental_execution": false,
           "$.items[2].backend": "sd",
           "$.items[2].stage": "experimental",
           "$.items[2].requires_experimental_execution": true
         },
         "contains": {
-          "$.items[1].note": "预研后端"
+          "$.items[1].note": "正式 opt-in"
         },
         "required": [
           "$.items[0].display_name",

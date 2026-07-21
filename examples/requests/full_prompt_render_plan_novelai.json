@@ -2,11 +2,11 @@
   "compose": {
     "prompt": "akemi homura, bare soles, foot focus, soles toward viewer",
     "negative": "bad feet",
-    "style": "examples/nodes/styles/anime_comfy"
+    "artist": "examples/nodes/artists/anime_comfy"
   },
   "render": {
     "backend": "novelai",
-    "style": "examples/nodes/styles/anime_comfy",
+    "artist": "examples/nodes/artists/anime_comfy",
     "seed": 123,
     "width": 832,
     "height": 1216,

@@ -40,12 +40,17 @@ class ComfyUIRenderAdapter:
     ) -> RenderRequest:
         artist_payload = renderer_artist_payload(artist, self.backend)
         artist_params = copy.deepcopy(artist_payload.get("params", {}) or {})
+        resolved_model = (
+            model
+            or artist_payload.get("model")
+            or artist_payload.get("checkpoint")
+        )
         final_params = self._build_parameters(
             bundle=bundle,
             seed=seed,
             width=width,
             height=height,
-            model=model,
+            model=resolved_model,
             artist=artist,
             artist_payload=artist_payload,
             params={**artist_params, **(params or {})},
@@ -54,7 +59,7 @@ class ComfyUIRenderAdapter:
             backend=self.backend,
             prompt=bundle.prompt.positive,
             negative_prompt=bundle.prompt.negative,
-            model=model,
+            model=resolved_model,
             seed=final_params["seed"],
             size=RenderSize(width=width, height=height),
             params=final_params,

@@ -77,11 +77,11 @@ character_scope: foot_detail
         style.mkdir()
         (style / "node.yaml").write_text(
             """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: cross_backend_style
 tags:
-  style:
+  artist:
     - anime style
   quality:
     - "{best quality}"
@@ -109,7 +109,28 @@ renderers:
         - director-abc
   comfyui:
     workflow: portrait_workflow
+    workflow_json:
+      "1":
+        class_type: CLIPTextEncode
+        inputs:
+          text: ""
+          negative: ""
+          width: 1024
+          height: 1024
+          seed: 0
+    inputs:
+      positive_prompt: "1.inputs.text"
+      negative_prompt: "1.inputs.negative"
+      width: "1.inputs.width"
+      height: "1.inputs.height"
+      seed: "1.inputs.seed"
     checkpoint: anime_comfy.safetensors
+    inputs:
+      positive_prompt: "17.inputs.text"
+      negative_prompt: "17.inputs.negative"
+      width: "12.inputs.width"
+      height: "12.inputs.height"
+      seed: "12.inputs.seed"
     loras:
       - name: lineart
         weight: 0.65
@@ -200,12 +221,12 @@ sd:
                 composition["suppressed_character_sections"],
                 ["eyes", "upper_clothes"],
             )
-            self.assertIn("akemi homura", data["prompt"]["positive"])
-            self.assertIn("bare soles", data["prompt"]["positive"])
-            self.assertIn("foot focus", data["prompt"]["positive"])
+            self.assertIn("2.0::akemi_homura::", data["prompt"]["positive"])
+            self.assertIn("bare_soles", data["prompt"]["positive"])
+            self.assertIn("foot_focus", data["prompt"]["positive"])
             self.assertNotIn("purple eyes", data["prompt"]["positive"])
             self.assertNotIn("school uniform", data["prompt"]["positive"])
-            self.assertIn("extra toes", data["prompt"]["negative"])
+            self.assertIn("extra_toes", data["prompt"]["negative"])
 
     def test_compose_nodes_command_merges_background_node(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -229,10 +250,13 @@ sd:
 
             self.assertEqual(exit_code, 0)
             data = json.loads(stdout.getvalue())
-            self.assertEqual(data["meta"]["background_ref"], "simple_room")
-            self.assertIn("simple room", data["prompt"]["positive"])
-            self.assertIn("soft window light", data["prompt"]["positive"])
-            self.assertIn("crowded background", data["prompt"]["negative"])
+            background_refs = [
+                node for node in data["meta"]["nodes"] if node["role"] == "background"
+            ]
+            self.assertEqual(background_refs[0]["id"], "simple_room")
+            self.assertIn("simple_room", data["prompt"]["positive"])
+            self.assertIn("soft_window_light", data["prompt"]["positive"])
+            self.assertIn("crowded_background", data["prompt"]["negative"])
 
     def test_agent_task_and_compose_agent_nodes_reuse_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -319,14 +343,14 @@ sd:
             self.assertEqual(task_exit_code, 0)
             self.assertEqual(first_exit_code, 0)
             self.assertEqual(second_exit_code, 0)
-            self.assertEqual(task_data["schema"], "tags-machine-core.agent-composition-task/v1")
+            self.assertEqual(task_data["schema"], "tags-machine-core.agent-composition-task/v2")
             self.assertEqual(task_data["agent_model"], "agent-model-v1")
             self.assertEqual(first_data["cache"]["cache_key"], task_data["cache_key"])
             self.assertFalse(first_data["cache"]["cache_hit"])
             self.assertTrue(second_data["cache"]["cache_hit"])
             self.assertEqual(second_data["prompt"]["positive"], "akemi homura, bare soles, foot focus")
             self.assertEqual(second_data["meta"]["composer_type"], "agent")
-            self.assertEqual(first_data["meta"]["extra"]["agent"]["agent_model"], "agent-model-v1")
+            self.assertEqual(first_data["meta"]["agent"]["agent_model"], "agent-model-v1")
 
     def test_render_plan_nodes_supports_comfyui_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -345,7 +369,7 @@ sd:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "123",
@@ -368,7 +392,8 @@ sd:
             self.assertEqual(data["params"]["steps"], 32)
             self.assertEqual(data["params"]["cfg"], 6.5)
             self.assertEqual(data["params"]["scheduler"], "karras")
-            self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+            artist_refs = [node for node in data["meta"]["node_refs"] if node["role"] == "artist"]
+            self.assertEqual(artist_refs[0]["id"], "cross_backend_style")
 
     def test_render_plan_nodes_expands_comfyui_workflow_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -380,22 +405,31 @@ sd:
             (workflow_dir / "portrait.json").write_text(
                 json.dumps(
                     {
-                        "12": {"inputs": {"cfg": 5.0}},
-                        "17": {"inputs": {"text": ""}},
+                        "12": {"class_type": "KSampler", "inputs": {"cfg": 5.0}},
+                        "17": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}},
                     }
                 ),
                 encoding="utf-8",
             )
             (style / "node.yaml").write_text(
                 """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: comfy_workflow_style
+tags:
+  artist:
+    - comfy workflow style
 renderers:
   comfyui:
     workflow: portrait_workflow
     workflow_path: workflows/portrait.json
     checkpoint: anime_comfy.safetensors
+    inputs:
+      positive_prompt: "17.inputs.text"
+      negative_prompt: "17.inputs.negative"
+      width: "12.inputs.width"
+      height: "12.inputs.height"
+      seed: "12.inputs.seed"
     node_overrides:
       "17.inputs.text": "{positive_prompt}"
       "18.inputs.seed": "{seed}"
@@ -418,7 +452,7 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "123",
@@ -433,7 +467,7 @@ renderers:
             self.assertEqual(data["params"]["workflow_json"]["17"]["inputs"]["text"], "")
             self.assertEqual(
                 data["params"]["node_overrides"]["17.inputs.text"],
-                "akemi homura, bare soles, foot focus",
+                "1girl, 2.0::akemi_homura::, bare_soles, foot_focus",
             )
             self.assertEqual(data["params"]["node_overrides"]["18.inputs.seed"], 123)
             self.assertEqual(data["params"]["node_overrides"]["18.inputs.width"], 1024)
@@ -455,7 +489,7 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "789",
@@ -472,14 +506,15 @@ renderers:
             self.assertEqual(data["params"]["reference_information_extracted_multiple"], [0.6])
             self.assertEqual(data["params"]["director_reference_images"], ["director-abc"])
             self.assertIn("style prefix", data["prompt"])
-            self.assertIn("akemi homura", data["prompt"])
+            self.assertIn("2.0::akemi_homura::", data["prompt"])
             self.assertIn("anime style", data["prompt"])
             self.assertIn("{best quality}", data["prompt"])
             self.assertIn("style suffix", data["prompt"])
-            self.assertIn("extra toes", data["negative_prompt"])
+            self.assertIn("extra_toes", data["negative_prompt"])
             self.assertIn("lowres", data["negative_prompt"])
             self.assertIn("bad anatomy", data["negative_prompt"])
-            self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+            artist_refs = [node for node in data["meta"]["node_refs"] if node["role"] == "artist"]
+            self.assertEqual(artist_refs[0]["id"], "cross_backend_style")
 
     def test_archive_novelai_acceptance_nodes_builds_core_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -491,14 +526,14 @@ renderers:
             bundle = service.compose_nodes(
                 character=reader.read(character),
                 action=reader.read(action),
-                style_ref="cross_backend_style",
+                artist=reader.read(style),
             )
             request = service.build_novelai_request(
                 bundle,
                 seed=789,
                 width=832,
                 height=1216,
-                style=reader.read(style),
+                artist=reader.read(style),
             )
             legacy = root / "legacy_request.json"
             legacy_image = root / "legacy.png"
@@ -572,7 +607,7 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "789",
@@ -673,8 +708,8 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-ref",
-                        "cross_backend_style",
+                        "--node",
+                        f"artist:{style}",
                         "--extra-prompt",
                         "dynamic low angle",
                         "--negative",
@@ -694,7 +729,7 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--extra-prompt",
                         "dynamic low angle",
@@ -740,7 +775,7 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--extra-prompt",
                         "dynamic low angle",
@@ -772,9 +807,14 @@ renderers:
             self.assertEqual(render_exit, 0)
             self.assertEqual(archive_exit, 0)
             self.assertEqual(archive["result"], "pass")
+            self.assertEqual(archived_bundle["prompt"], prompt_bundle["prompt"])
             self.assertEqual(
-                _without_runtime_fields(archived_bundle),
-                _without_runtime_fields(prompt_bundle),
+                archived_bundle["meta"]["composition"],
+                prompt_bundle["meta"]["composition"],
+            )
+            self.assertEqual(
+                sorted((node["role"], node["id"]) for node in archived_bundle["meta"]["nodes"]),
+                sorted((node["role"], node["id"]) for node in prompt_bundle["meta"]["nodes"]),
             )
             self.assertEqual(archived_request, render_request)
             self.assertTrue(archive["record"]["diff"]["normalized_equal"])
@@ -799,7 +839,7 @@ renderers:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "456",
@@ -821,7 +861,8 @@ renderers:
             self.assertEqual(data["params"]["sampler"], "DPM++ 2M")
             self.assertEqual(data["params"]["clip_skip"], 2)
             self.assertEqual(data["params"]["vae"], "anime.vae.pt")
-            self.assertEqual(data["meta"]["style_ref"], "cross_backend_style")
+            artist_refs = [node for node in data["meta"]["node_refs"] if node["role"] == "artist"]
+            self.assertEqual(artist_refs[0]["id"], "cross_backend_style")
 
     def test_execute_render_request_queues_comfyui_request(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -871,7 +912,12 @@ renderers:
 
             data = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
-            client_cls.assert_called_once_with(base_url="http://comfy.local", timeout=30)
+            client_cls.assert_called_once_with(
+                base_url="http://comfy.local",
+                timeout=30,
+                retry=3,
+                retry_interval=2.0,
+            )
             client.queue_prompt.assert_called_once()
             self.assertEqual(client.queue_prompt.call_args.kwargs["client_id"], "client-1")
             client.generate_images.assert_not_called()
@@ -880,7 +926,7 @@ renderers:
             self.assertEqual(data["request_body"]["client_id"], "client-1")
             self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
 
-    def test_execute_render_request_rejects_experimental_backend_by_default(self):
+    def test_execute_render_request_supports_comfyui_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = self._write_config(root)
@@ -896,21 +942,35 @@ renderers:
                 encoding="utf-8",
             )
 
-            with (
-                patch("tags_machine_core.execution.ComfyUIClient") as client_cls,
-                self.assertRaises(ValueError) as raised,
-            ):
-                main(
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.queue_prompt.return_value = SimpleNamespace(
+                    prompt_id="abc123",
+                    raw={"prompt_id": "abc123"},
+                )
+                client.build_payload.return_value = {
+                    "prompt": {},
+                    "client_id": "client-default",
+                }
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
                     [
                         "execute-render-request",
                         str(request),
                         "--config",
                         str(config),
+                        "--client-id",
+                        "client-default",
+                        "--comfyui-no-wait",
                     ]
                 )
 
-            self.assertIn("only NovelAI by default", str(raised.exception))
-            client_cls.assert_not_called()
+            data = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            client.queue_prompt.assert_called_once()
+            self.assertEqual(data["backend"], "comfyui")
+            self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
 
     def test_execute_render_request_executes_novelai_without_experimental_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -976,14 +1036,17 @@ renderers:
                 base_url="https://image.novelai.net",
                 timeout=120,
                 retry=3,
+                retry_interval=None,
             )
-            client.generate_images.assert_called_once()
-            called_request = client.generate_images.call_args.args[0]
-            self.assertEqual(called_request.backend, "novelai")
-            self.assertEqual(called_request.params["n_samples"], 2)
+            self.assertEqual(client.generate_images.call_count, 2)
+            called_requests = [call.args[0] for call in client.generate_images.call_args_list]
+            self.assertTrue(all(item.backend == "novelai" for item in called_requests))
+            self.assertEqual([item.params["n_samples"] for item in called_requests], [1, 1])
+            self.assertEqual([item.seed for item in called_requests], [135, 136])
             self.assertEqual(data["backend"], "novelai")
-            self.assertEqual(data["request_body"]["parameters"]["seed"], 135)
-            self.assertEqual(len(data["images"]), 1)
+            self.assertTrue(data["request_body"]["split_batch"])
+            self.assertEqual(len(data["request_body"]["requests"]), 2)
+            self.assertEqual(len(data["images"]), 2)
             saved_path = Path(data["images"][0]["path"])
             self.assertEqual(saved_path.parent, output_dir)
             self.assertEqual(saved_path.suffix, ".png")
@@ -1090,13 +1153,15 @@ renderers:
             self.assertEqual(len(data["images"]), 1)
             saved_path = Path(data["images"][0]["path"])
             self.assertEqual(saved_path.parent, output_dir)
-            self.assertEqual(saved_path.read_bytes(), image_bytes)
+            self.assertNotEqual(saved_path.read_bytes(), image_bytes)
+            self.assertTrue(saved_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
             self.assertEqual(data["images"][0]["meta"]["node_id"], "7")
             self.assertEqual(data["images"][0]["meta"]["image_type"], "output")
             png_info = data["png_info"]["images"][0]
             self.assertEqual(png_info["parameters"]["prompt"], "akemi homura")
             self.assertEqual(png_info["parameters"]["seed"], 222)
             self.assertEqual(png_info["png_text"]["Source"], "ComfyUI")
+            self.assertIn("tags_machine_core", png_info["png_text"])
 
     def test_execute_render_request_saves_sd_images(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1236,7 +1301,7 @@ gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multipl
             with redirect_stdout(stdout):
                 exit_code = main(
                     [
-                        "migrate-style-tags",
+                        "migrate-artist-tags",
                         str(style_dir),
                         "--id",
                         "migrated_style",
@@ -1250,9 +1315,9 @@ gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multipl
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["id"], "migrated_style")
             self.assertTrue(output.exists())
-            self.assertEqual(node.kind, "style")
+            self.assertEqual(node.kind, "artist")
             self.assertEqual(node.id, "migrated_style")
-            self.assertEqual(node.tags["style"], ["style prefix", "style suffix, best quality"])
+            self.assertEqual(node.tags["artist"], ["style prefix", "style suffix, best quality"])
             self.assertFalse(node.renderers["novelai"]["include_common_tags"])
             self.assertEqual(node.renderers["novelai"]["negative_prompt"], ["lowres, bad anatomy"])
             self.assertEqual(node.renderers["novelai"]["after_negative_prompt"], ["extra fingers"])
@@ -1416,7 +1481,7 @@ shoes, shoes|boots|loafers
             clean_action.mkdir()
             (clean_action / "tags.txt").write_text(
                 """
-foot focus, toes focus
+foot focus, close-up
 =
 uc, bad feet
 """.strip(),
@@ -1504,7 +1569,7 @@ gen_json, {"reference_image_multiple": ["abc"], "reference_strength_multiple": [
                         "plan-legacy-tags-migration",
                         str(style_root),
                         "--kind",
-                        "style",
+                        "artist",
                         "--output-root",
                         str(output_root),
                         "--output",
@@ -1516,22 +1581,22 @@ gen_json, {"reference_image_multiple": ["abc"], "reference_strength_multiple": [
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["schema"], "tags-machine-core.legacy-tags-migration-plan/v1")
-            self.assertEqual(data["kind"], "style")
+            self.assertEqual(data["kind"], "artist")
             self.assertEqual(data["summary"]["total"], 1)
             self.assertEqual(data["summary"]["ready"], 1)
-            self.assertEqual(data["summary"]["issue_counts"]["style_reference_params_present"], 1)
+            self.assertEqual(data["summary"]["issue_counts"]["artist_reference_params_present"], 1)
             item = data["items"][0]
             self.assertEqual(item["node_id"], "anime_style")
             self.assertEqual(item["safe_node_dir"], "anime_style")
             self.assertEqual(item["migration_status"], "ready")
             self.assertEqual(
                 item["target_file"],
-                str(output_root / "nodes" / "styles" / "anime_style" / "node.yaml"),
+                str(output_root / "nodes" / "artists" / "anime_style" / "node.yaml"),
             )
             self.assertEqual(plan["summary"], data["summary"])
             self.assertTrue(plan_path.exists())
             self.assertFalse((style_dir / "node.yaml").exists())
-            self.assertFalse((output_root / "nodes" / "styles" / "anime_style" / "node.yaml").exists())
+            self.assertFalse((output_root / "nodes" / "artists" / "anime_style" / "node.yaml").exists())
 
     def test_apply_legacy_tags_migration_command_writes_ready_nodes_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1616,11 +1681,11 @@ tags:
             style_dir.mkdir(parents=True)
             (style_dir / "node.yaml").write_text(
                 """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: missing_renderer
 tags:
-  style:
+  artist:
     - soft anime style
 """.strip(),
                 encoding="utf-8",
@@ -1646,7 +1711,7 @@ tags:
             self.assertEqual(data["summary"]["total_files"], 2)
             self.assertEqual(data["summary"]["fail_count"], 2)
             self.assertEqual(data["summary"]["issue_counts"]["action_missing_character_scope"], 1)
-            self.assertEqual(data["summary"]["issue_counts"]["style_missing_renderers_novelai"], 1)
+            self.assertEqual(data["summary"]["issue_counts"]["artist_missing_renderers"], 1)
             self.assertEqual(report["summary"], data["summary"])
 
 

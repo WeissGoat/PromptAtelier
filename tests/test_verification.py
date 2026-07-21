@@ -126,7 +126,7 @@ def _prompt_bundle_fixture(
     if meta_extra:
         meta.update(meta_extra)
     return {
-        "schema": "tags-machine-core.prompt-bundle/v1",
+        "schema": "tags-machine-core.prompt-bundle/v2",
         "prompt": {
             "positive": prompt,
             "negative": negative,
@@ -177,7 +177,7 @@ class VerificationTest(unittest.TestCase):
             labels,
             [
                 "compileall",
-                "unittest_discover",
+                "pytest_suite",
                 "validate_example_nodes",
                 "fixture_acceptance_suite",
                 "git_diff_check",
@@ -209,7 +209,7 @@ class VerificationTest(unittest.TestCase):
         self.assertEqual(result["result"], "fail")
         self.assertEqual(result["summary"]["total"], 5)
         self.assertEqual(result["summary"]["fail_count"], 1)
-        self.assertEqual(result["commands"][1]["label"], "unittest_discover")
+        self.assertEqual(result["commands"][1]["label"], "pytest_suite")
         self.assertEqual(result["commands"][1]["status"], "fail")
         self.assertIn("unit test failure", result["commands"][1]["stdout_tail"])
         self.assertEqual(len(calls), 5)
@@ -680,7 +680,7 @@ class VerificationTest(unittest.TestCase):
                         "v4_prompt": {"caption": {"base_caption": "akemi homura"}},
                         "reference_image_multiple": ["base64-ref"],
                     },
-                    "style_payload": {"renderers": {"novelai": {}}},
+                    "artist_payload": {"renderers": {"novelai": {}}},
                 }
             )
             bundle.write_text(
@@ -707,8 +707,8 @@ class VerificationTest(unittest.TestCase):
                     "$.params",
                     "$.params.v4_prompt",
                     "$.params.reference_image_multiple",
-                    "$.style_payload",
-                    "$.style_payload.renderers",
+                    "$.artist_payload",
+                    "$.artist_payload.renderers",
                 ],
             )
 
@@ -740,7 +740,7 @@ class VerificationTest(unittest.TestCase):
             evidence = verified["prompt_bundle_contract_evidence"]
             self.assertEqual(evidence["result"], "fail")
             self.assertIn(
-                "$.schema must be tags-machine-core.prompt-bundle/v1",
+                "$.schema must be tags-machine-core.prompt-bundle/v2",
                 evidence["contract_errors"],
             )
             self.assertIn("$.prompt must be an object", evidence["contract_errors"])
@@ -1360,7 +1360,7 @@ class VerificationTest(unittest.TestCase):
             messages = strict["legacy_oracle_evidence_checks"][0]["messages"]
             self.assertIn("PromptBundle contract evidence failed", messages)
             self.assertIn(
-                "PromptBundle contract error: $.schema must be tags-machine-core.prompt-bundle/v1",
+                "PromptBundle contract error: $.schema must be tags-machine-core.prompt-bundle/v2",
                 messages,
             )
             self.assertIn("PromptBundle forbidden meta field: $.meta.shot", messages)

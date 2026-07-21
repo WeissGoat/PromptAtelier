@@ -28,3 +28,8 @@ ai-image-gateway = { path = "vendor/ai-image-gateway", editable = true }
 
 [tool.ruff]
 line-length = 100
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

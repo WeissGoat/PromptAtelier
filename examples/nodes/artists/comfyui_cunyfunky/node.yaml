@@ -1,7 +1,11 @@
-schema: tags-machine-core.node/v1
+schema: tags-machine.artist/v1
 kind: artist
 id: comfyui_cunyfunky
 description: "ComfyUI Aki cunyfunky API workflow preset."
+
+tags:
+  artist:
+    - "cunyfunky"
 
 renderers:
   comfyui:

@@ -37,11 +37,11 @@ def _write_style_node(root: Path) -> Path:
     style.mkdir()
     (style / "node.yaml").write_text(
         """
-schema: tags-machine.style/v1
-kind: style
+schema: tags-machine.artist/v1
+kind: artist
 id: prompt_style
 tags:
-  style:
+  artist:
     - anime style
   quality:
     - "{best quality}"
@@ -154,7 +154,7 @@ negative_prompt:
                         "akemi homura, bare soles, foot focus",
                         "--negative",
                         "bad feet",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "789",
@@ -180,7 +180,8 @@ negative_prompt:
                 "akemi homura, bare soles, foot focus",
             )
             self.assertEqual(bundle["prompt"]["negative"], "bad feet")
-            self.assertEqual(bundle["meta"]["style_ref"], "prompt_style")
+            self.assertEqual(bundle["schema"], "tags-machine-core.prompt-bundle/v2")
+            self.assertEqual(bundle["meta"]["nodes"], [])
             self.assertEqual(bundle["meta"]["composition"]["included_character_sections"], [])
             self.assertEqual(request["backend"], "novelai")
             self.assertEqual(request["seed"], 789)
@@ -269,14 +270,14 @@ tags:
             data = json.loads(stdout.getvalue())
             caption = data["render_request"]["params"]["v4_prompt"]["caption"]
             self.assertEqual(exit_code, 0)
-            self.assertEqual(caption["base_caption"], "2girls, standing side by side")
+            self.assertEqual(caption["base_caption"], "2girls, standing_side_by_side")
             self.assertEqual(len(caption["char_captions"]), 2)
             self.assertEqual(
                 caption["char_captions"][0]["char_caption"],
-                "girl, akemi homura, black hair",
+                "girl, 2.0::akemi_homura::",
             )
             self.assertEqual(
-                data["prompt_bundle"]["meta"]["extra"]["node_refs"][1]["id"],
+                data["prompt_bundle"]["meta"]["nodes"][1]["id"],
                 "madoka",
             )
 
@@ -295,7 +296,7 @@ tags:
                         "--full",
                         "--prompt",
                         "akemi homura, bare soles, foot focus, soles close-up",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--node",
                         f"character:{character}",
@@ -338,7 +339,7 @@ tags:
                         str(prompt_file),
                         "--artist",
                         "artist_alias",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                     ]
                 )
@@ -346,8 +347,13 @@ tags:
             data = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["prompt_bundle"]["prompt"]["positive"], "akemi homura, hand focus")
-            self.assertEqual(data["prompt_bundle"]["meta"]["style_ref"], "artist_alias")
-            self.assertEqual(data["render_request"]["meta"]["style_ref"], "artist_alias")
+            self.assertEqual(data["prompt_bundle"]["meta"]["nodes"], [])
+            artist_refs = [
+                node
+                for node in data["render_request"]["meta"]["node_refs"]
+                if node["role"] == "artist"
+            ]
+            self.assertEqual(artist_refs[0]["id"], "prompt_style")
 
     def test_run_prompt_agent_cache_miss_returns_agent_task_without_render_request(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -368,7 +374,7 @@ tags:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--agent-instruction",
                         "组合角色和动作，避免带入脸部细节",
@@ -387,8 +393,8 @@ tags:
             self.assertIn("agent_task", data)
             self.assertNotIn("prompt_bundle", data)
             self.assertNotIn("render_request", data)
-            self.assertEqual(data["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v1")
-            self.assertEqual(data["agent_task"]["style_ref"], "prompt_style")
+            self.assertEqual(data["agent_task"]["schema"], "tags-machine-core.agent-composition-task/v2")
+            self.assertEqual(data["agent_task"]["nodes"]["artist"]["id"], "prompt_style")
             self.assertEqual(data["agent_task"]["character_scope"], "foot_detail")
             self.assertFalse(any(cache_dir.glob("*.json")))
 
@@ -414,7 +420,7 @@ tags:
                         str(action),
                         "--character-scope",
                         "foot_detail",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--instruction",
                         "组合角色和动作，避免带入脸部细节",
@@ -449,7 +455,7 @@ tags:
                         str(action),
                         "--character-scope",
                         "foot_detail",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--instruction",
                         "组合角色和动作，避免带入脸部细节",
@@ -506,7 +512,7 @@ tags:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--agent-model",
                         "agent-model-v1",
@@ -541,7 +547,7 @@ tags:
                             str(character),
                             "--action",
                             str(action),
-                            "--style-node",
+                            "--artist-node",
                             str(style),
                             "--agent-model",
                             "agent-model-v1",
@@ -597,7 +603,7 @@ tags:
                             "run-prompt",
                             "--prompt",
                             "akemi homura, foot focus",
-                            "--style-node",
+                            "--artist-node",
                             str(style),
                             "--config",
                             str(config),
@@ -621,14 +627,17 @@ tags:
                 base_url="http://novelai.local",
                 timeout=30,
                 retry=1,
+                retry_interval=None,
             )
-            client.generate_images.assert_called_once()
-            called_request = client.generate_images.call_args.args[0]
-            self.assertEqual(called_request.params["n_samples"], 2)
+            self.assertEqual(client.generate_images.call_count, 2)
+            called_requests = [call.args[0] for call in client.generate_images.call_args_list]
+            self.assertEqual([item.params["n_samples"] for item in called_requests], [1, 1])
+            self.assertEqual([item.seed for item in called_requests], [111, 112])
             self.assertEqual(request["params"]["n_samples"], 2)
             self.assertEqual(result["backend"], "novelai")
-            self.assertEqual(result["request_body"]["parameters"]["n_samples"], 2)
-            self.assertEqual(len(result["images"]), 1)
+            self.assertTrue(result["request_body"]["split_batch"])
+            self.assertEqual(len(result["request_body"]["requests"]), 2)
+            self.assertEqual(len(result["images"]), 2)
             saved_path = Path(result["images"][0]["path"])
             self.assertEqual(saved_path.parent, output_dir)
             self.assertEqual(saved_path.suffix, ".webp")
@@ -655,7 +664,7 @@ tags:
                             "run-prompt",
                             "--prompt",
                             "akemi homura, foot focus",
-                            "--style-node",
+                            "--artist-node",
                             str(style),
                             "--config",
                             str(config),
@@ -699,7 +708,7 @@ tags:
                         str(character),
                         "--action",
                         str(action),
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "456",
@@ -720,23 +729,29 @@ tags:
             self.assertEqual(data["status"], "ready")
             self.assertTrue(data["dry_run"])
             self.assertEqual(data["prompt_bundle"]["meta"]["composer_type"], "script")
-            self.assertEqual(data["prompt_bundle"]["meta"]["character_ref"], "homura")
-            self.assertEqual(data["prompt_bundle"]["meta"]["action_ref"], "foot_detail")
+            self.assertEqual(
+                [(node["role"], node["id"]) for node in data["prompt_bundle"]["meta"]["nodes"]],
+                [("character", "homura"), ("action", "foot_detail"), ("artist", "prompt_style")],
+            )
             self.assertEqual(
                 data["prompt_bundle"]["meta"]["composition"]["character_scope"],
                 "foot_detail",
             )
-            self.assertIn("akemi homura", data["prompt_bundle"]["prompt"]["positive"])
-            self.assertIn("bare soles", data["prompt_bundle"]["prompt"]["positive"])
-            self.assertIn("foot focus", data["prompt_bundle"]["prompt"]["positive"])
-            self.assertNotIn("long black hair", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertIn("akemi_homura", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertIn("bare_soles", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertIn("foot_focus", data["prompt_bundle"]["prompt"]["positive"])
+            self.assertNotIn("long_black_hair", data["prompt_bundle"]["prompt"]["positive"])
             self.assertEqual(data["render_request"]["backend"], "novelai")
             self.assertEqual(data["render_request"]["seed"], 456)
             self.assertEqual(data["render_request"]["size"], {"width": 832, "height": 1216})
             self.assertEqual(data["render_request"]["params"]["n_samples"], 2)
             self.assertEqual(data["render_request"]["params"]["scale"], 6.0)
-            self.assertEqual(data["render_request"]["meta"]["character_ref"], "homura")
-            self.assertEqual(data["render_request"]["meta"]["action_ref"], "foot_detail")
+            node_ids = {
+                node["role"]: node["id"]
+                for node in data["render_request"]["meta"]["node_refs"]
+            }
+            self.assertEqual(node_ids["character"], "homura")
+            self.assertEqual(node_ids["action"], "foot_detail")
 
     def test_generate_uses_unified_execution_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -786,13 +801,13 @@ tags:
             reader = NodeReader()
             service = GenerationService()
             prompt = "akemi homura, bare soles, foot focus"
-            bundle = service.compose_full_prompt(prompt=prompt, style_ref="prompt_style")
+            bundle = service.compose_full_prompt(prompt=prompt)
             request = service.build_novelai_request(
                 bundle,
                 seed=789,
                 width=832,
                 height=1216,
-                style=reader.read(style),
+                artist=reader.read(style),
                 params={"n_samples": 2},
             )
             legacy = root / "legacy_request.json"
@@ -865,7 +880,7 @@ tags:
                         str(legacy_image),
                         "--prompt",
                         prompt,
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "789",
@@ -974,7 +989,7 @@ tags:
                         "bad feet",
                         "--artist",
                         "artist_alias",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "2468",
@@ -1013,7 +1028,7 @@ tags:
                         "bad feet",
                         "--artist",
                         "artist_alias",
-                        "--style-node",
+                        "--artist-node",
                         str(style),
                         "--seed",
                         "2468",
@@ -1051,7 +1066,12 @@ tags:
             self.assertEqual(archived_bundle["meta"]["composition"]["included_character_sections"], [])
             self.assertEqual(archived_request["params"]["n_samples"], 2)
             self.assertEqual(archived_request["params"]["cfg_rescale"], 0.15)
-            self.assertEqual(archived_request["meta"]["style_ref"], "artist_alias")
+            artist_refs = [
+                node
+                for node in archived_request["meta"]["node_refs"]
+                if node["role"] == "artist"
+            ]
+            self.assertEqual(artist_refs[0]["id"], "prompt_style")
 
 
 def _without_runtime_fields(value):
