@@ -59,6 +59,19 @@ export type ComposePreviewResponse = {
       positive: string;
       negative: string;
     };
+    meta?: {
+      composition?: {
+        included_character_sections?: string[];
+        suppressed_character_sections?: string[];
+      };
+      extra?: {
+        policy?: {
+          template?: string | null;
+          effective_rule_order?: string[];
+        };
+        policy_trace?: Array<Record<string, unknown>>;
+      };
+    };
   };
   render_request?: Record<string, unknown>;
   agent_task?: Record<string, unknown>;

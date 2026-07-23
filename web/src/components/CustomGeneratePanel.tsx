@@ -216,7 +216,7 @@ export function CustomGeneratePanel() {
   async function generateCompare() {
     setError("");
     try {
-      await compare.start(groups, params);
+      await compare.start(groups, params, promptBehavior);
     } catch (requestError) {
       setError(errorMessage(requestError));
     }
@@ -232,6 +232,7 @@ export function CustomGeneratePanel() {
       <PromptPreview
         negative={displayPreview?.prompt_bundle?.prompt.negative ?? params.negative}
         prompt={displayPreview?.prompt_bundle?.prompt.positive ?? ""}
+        promptBundle={displayPreview?.prompt_bundle}
         renderRequest={displayPreview?.render_request}
       />
       <div className="button-row ordinary-generate-actions">

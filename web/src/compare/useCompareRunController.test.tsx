@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import type { NodeDocument, NodeRole } from "../nodes/types";
-import type { RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
+import type { PromptBehaviorParams, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { useCompareRunController } from "./useCompareRunController";
 
 const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" };
@@ -161,5 +161,35 @@ describe("useCompareRunController", () => {
     await act(async () => { await result.current.start({ artist: group("artist", 1), character: group("character", 1), action: group("action", 1) }, params); });
     await waitFor(() => expect(result.current.summary.succeeded).toBe(1));
     expect(JSON.stringify(localStorage)).not.toContain("job");
+  });
+
+  it("uses the same prompt behavior for every compare combination", async () => {
+    const composeRequests: Array<Record<string, unknown>> = [];
+    const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
+      if (path === "/compose-preview") {
+        composeRequests.push(body as Record<string, unknown>);
+        return { status: "ready", render_request: {} };
+      }
+      return { id: "job", name: "generate", status: "succeeded" };
+    });
+    const promptBehavior: PromptBehaviorParams = {
+      identityMinimal: { mode: "override", sections: ["character", "role"] },
+      characterPrompts: { mode: "auto", addMaleCaption: true },
+      policyRules: { visibility_policy: { state: "disabled" } },
+    };
+    const { result } = renderHook(() => useCompareRunController({ post }));
+
+    await act(async () => {
+      await result.current.start(
+        { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) },
+        params,
+        promptBehavior,
+      );
+    });
+
+    expect(composeRequests).toHaveLength(2);
+    expect(new Set(composeRequests.map((request) => JSON.stringify((request.compose as Record<string, unknown>).prompt_policy))).size).toBe(1);
+    expect(new Set(composeRequests.map((request) => JSON.stringify((request.compose as Record<string, unknown>).identity_minimal_sections))).size).toBe(1);
+    expect(new Set(composeRequests.map((request) => JSON.stringify(((request.render as Record<string, unknown>).params as Record<string, unknown>).character_prompts))).size).toBe(1);
   });
 });
