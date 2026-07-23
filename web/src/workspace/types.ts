@@ -27,6 +27,23 @@ export type RenderWorkspaceParams = {
   seed: string;
 };
 
+export type PolicyRuleState = "inherit" | "enabled" | "disabled";
+
+export type PromptBehaviorParams = {
+  identityMinimal: {
+    mode: "inherit" | "override";
+    sections: string[];
+  };
+  characterPrompts: {
+    mode: "auto" | "off";
+    addMaleCaption: boolean;
+  };
+  policyRules: Record<string, {
+    state: PolicyRuleState;
+    options?: Record<string, unknown>;
+  }>;
+};
+
 export type WorkspaceEditorState = {
   slotId: string | null;
   tab: "form" | "json";
@@ -40,6 +57,7 @@ export type CustomWorkspaceState = {
   schema: "promptatelier.custom-workspace/v1";
   groups: Record<NodeRole, RoleNodeGroup>;
   params: RenderWorkspaceParams;
+  promptBehavior: PromptBehaviorParams;
   editor: WorkspaceEditorState;
   preview: ComposePreviewResponse | null;
   revision: number;

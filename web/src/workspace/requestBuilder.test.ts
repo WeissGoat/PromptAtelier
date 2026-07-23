@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { NodeDocument } from "../nodes/types";
-import type { NodeVariantSlot, RenderWorkspaceParams } from "./types";
+import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams } from "./types";
 import { buildComposeRenderRequest } from "./requestBuilder";
 
 const params: RenderWorkspaceParams = { negative: "", width: 832, height: 1216, nt: 3, seed: "-1" };
 const artistNode: NodeDocument = { schema: "tags-machine-core.node/v1", kind: "artist", id: "artist-a", prompt: { positive: [], negative: [] } };
+const promptBehavior: PromptBehaviorParams = {
+  identityMinimal: { mode: "override", sections: ["character", "role"] },
+  characterPrompts: { mode: "auto", addMaleCaption: true },
+  policyRules: { visibility_policy: { state: "disabled" } },
+};
 
 function artistSlot(modified = false): NodeVariantSlot {
   return {
@@ -38,5 +43,50 @@ describe("request builder", () => {
     expect(request.render.params.n_samples).toBe(1);
     expect(request.render.seed).toBe(42);
     expect(request.compose.negative).toBe("");
+  });
+
+  it("serializes prompt behavior overrides", () => {
+    const request = buildComposeRenderRequest(
+      { artist: artistSlot(), character: null, action: null },
+      params,
+      { compare: false, promptBehavior },
+    );
+
+    expect(request.compose.identity_minimal_sections).toEqual(["character", "role"]);
+    expect(request.compose.prompt_policy?.rules.visibility_policy).toEqual({ enabled: false });
+    expect(request.render.params.character_prompts).toEqual({ mode: "auto", add_male_caption: true });
+  });
+
+  it("omits inherited prompt behavior", () => {
+    const request = buildComposeRenderRequest(
+      { artist: artistSlot(), character: null, action: null },
+      params,
+      {
+        compare: false,
+        promptBehavior: {
+          identityMinimal: { mode: "inherit", sections: [] },
+          characterPrompts: { mode: "off", addMaleCaption: true },
+          policyRules: { visibility_policy: { state: "inherit" } },
+        },
+      },
+    );
+
+    expect(request.compose).not.toHaveProperty("identity_minimal_sections");
+    expect(request.compose).not.toHaveProperty("prompt_policy");
+    expect(request.render.params).not.toHaveProperty("character_prompts");
+  });
+
+  it("rejects an empty identity override", () => {
+    expect(() => buildComposeRenderRequest(
+      { artist: artistSlot(), character: null, action: null },
+      params,
+      {
+        compare: false,
+        promptBehavior: {
+          ...promptBehavior,
+          identityMinimal: { mode: "override", sections: [] },
+        },
+      },
+    )).toThrow("identity_minimal_sections");
   });
 });
