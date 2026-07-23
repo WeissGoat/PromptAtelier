@@ -1,12 +1,31 @@
 import { CustomGeneratePanel } from "../components/CustomGeneratePanel";
 import { NodeRoleGroup } from "../components/NodeRoleGroup";
 import { NodeWorkspaceEditor } from "../components/NodeWorkspaceEditor";
+import { PromptBehaviorPanel } from "../components/PromptBehaviorPanel";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
+import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
+
+function nodeSections(node: NodeDocument | null): string[] {
+  if (!node) return [];
+  const tags = node.tags;
+  const tagSections = tags && typeof tags === "object" && !Array.isArray(tags)
+    ? Object.keys(tags as Record<string, unknown>)
+    : [];
+  const promptSections = node.prompt.positive
+    .map((fragment) => fragment.role || "")
+    .filter(Boolean);
+  return [...tagSections, ...promptSections];
+}
 
 export function CustomStudio() {
   const workspace = useCustomWorkspace();
   const params = workspace.state.params;
+  const groups = workspace.state.groups;
+  const characterSections = [...new Set([
+    ...nodeSections(groups.character.primary.draftNode),
+    ...groups.character.compares.flatMap((slot) => nodeSections(slot.draftNode)),
+  ])];
 
   return (
     <main className="studio-grid">
@@ -28,6 +47,11 @@ export function CustomStudio() {
           onWidthChange={(width) => workspace.setParams({ width })}
           seed={params.seed}
           width={params.width}
+        />
+        <PromptBehaviorPanel
+          characterSections={characterSections}
+          onChange={workspace.setPromptBehavior}
+          value={workspace.state.promptBehavior}
         />
       </section>
       <NodeWorkspaceEditor />
