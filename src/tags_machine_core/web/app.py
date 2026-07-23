@@ -8,10 +8,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tags_machine_core.contracts import GenerationResult, RenderRequest
-from tags_machine_core.config import load_config
+from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.execution import execute_render_request
 from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.services import GenerationJsonApi
+from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
@@ -61,7 +62,12 @@ def create_app(
         roots=[config.runtime.output_dir, "outputs", "examples/batches/outputs"],
     )
     app.state.batch_workspace = batch_workspace or BatchWorkspace(base_dir=Path.cwd())
+    policy_provider = build_prompt_policy_provider(
+        config,
+        config_path=resolved_config_path,
+    )
     app.state.generation_api = GenerationJsonApi(
+        service=GenerationService(policy_provider=policy_provider),
         artist_loader=NovelAIArtistRepository(config.legacy.design_root).load_node,
         generation_executor=generation_executor or _default_generation_executor(config),
     )

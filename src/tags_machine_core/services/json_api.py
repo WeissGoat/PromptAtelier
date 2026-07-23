@@ -71,6 +71,10 @@ class GenerationJsonApi:
             negative=str(data.get("negative") or ""),
             character_scope=_optional_string(data.get("character_scope")),
             body_scope=_optional_string(data.get("body_scope")),
+            identity_minimal_sections=_optional_non_empty_string_list(
+                data.get("identity_minimal_sections"),
+                label="identity_minimal_sections",
+            ),
             prompt_policy=_optional_mapping(data.get("prompt_policy")),
         )
         return to_jsonable(bundle)
@@ -360,6 +364,23 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value if str(item).strip()]
     raise ValueError(f"Expected string or list of strings, got: {type(value).__name__}")
+
+
+def _optional_non_empty_string_list(value: Any, *, label: str) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{label} must be a non-empty list of strings")
+    result: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if not text:
+            raise ValueError(f"{label} must not contain empty values")
+        if text not in result:
+            result.append(text)
+    if not result:
+        raise ValueError(f"{label} must contain at least one section")
+    return result
 
 
 def _optional_int(value: Any) -> int | None:
