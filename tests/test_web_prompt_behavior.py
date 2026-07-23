@@ -64,7 +64,13 @@ class WebPromptBehaviorTest(TestCase):
             character,
         )
 
-    def _preview(self, client: TestClient, character: Path, compose: dict) -> dict:
+    def _preview(
+        self,
+        client: TestClient,
+        character: Path,
+        compose: dict,
+        render: dict | None = None,
+    ) -> dict:
         response = client.post(
             "/api/compose-preview",
             json={
@@ -72,7 +78,12 @@ class WebPromptBehaviorTest(TestCase):
                     "nodes": [{"role": "character", "ref": str(character)}],
                     **compose,
                 },
-                "render": {"backend": "novelai", "width": 1024, "height": 1024},
+                "render": {
+                    "backend": "novelai",
+                    "width": 1024,
+                    "height": 1024,
+                    **(render or {}),
+                },
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -156,3 +167,46 @@ class WebPromptBehaviorTest(TestCase):
 
             self.assertEqual(response.status_code, 400)
             self.assertIn("require", response.json()["error"]["message"])
+
+    def test_character_prompts_auto_builds_v4_character_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client, character = self._create_client(Path(tmp))
+
+            body = self._preview(
+                client,
+                character,
+                {},
+                render={
+                    "model": "nai-diffusion-4-5-full",
+                    "params": {
+                        "character_prompts": {
+                            "mode": "auto",
+                            "add_male_caption": True,
+                        },
+                    },
+                },
+            )
+
+            request = body["render_request"]
+            self.assertIn("characterPrompts", request["params"])
+            self.assertEqual(request["meta"]["character_prompts"]["mode"], "auto")
+            self.assertGreaterEqual(request["meta"]["character_prompts"]["count"], 1)
+
+    def test_character_prompts_off_keeps_character_tags_in_base_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client, character = self._create_client(Path(tmp))
+
+            body = self._preview(
+                client,
+                character,
+                {},
+                render={
+                    "model": "nai-diffusion-4-5-full",
+                    "params": {"character_prompts": {"mode": "off"}},
+                },
+            )
+
+            request = body["render_request"]
+            self.assertNotIn("characterPrompts", request["params"])
+            self.assertNotIn("character_prompts", request["meta"])
+            self.assertIn("akemi_homura", request["params"]["prompt"])
