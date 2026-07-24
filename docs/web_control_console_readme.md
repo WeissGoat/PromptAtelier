@@ -110,20 +110,24 @@ Prompt 片段可选字段：
 Compare 使用每种角色下所有非空的 Primary 和 Compare 节点，展开笛卡尔积：
 
 ```text
-图片数 = Artist 数量 × Character 数量 × Action 数量 × NT
+图片数 = Artist 数量 × Character 数量 × Action 数量 × Behavior 数量 × NT
 ```
+
+`Behavior 数量 = 1 + Prompt Behavior Compare 方案数量`。Primary Behavior 始终存在；没有新增 Compare 方案时，Behavior 数量就是 1，和旧版 Compare 数量一致。
 
 某类节点完全为空时按一个 `null` 因子计算，但 Character 和 Action 至少要有一类存在。空白 Compare 槽位不会进入矩阵。
 
 Compare 中的 `NT` 表示完整 Matrix 的执行组数，不是单次 NovelAI 请求的图片数。例如配置 2 个 Artist、1 个 Character、2 个 Action，`NT=3`，按钮会显示：
 
 ```text
-Artist 2 × Character 1 × Action 2 × Groups 3 = 12
+Artist 2 × Character 1 × Action 2 × Behavior 1 × Groups 3 = 12
 ```
 
-点击一次 `Compare Generate · 12` 会按 Group 顺序生成 12 个独立 Job。每个组合固定 `n_samples=1`，并针对 NovelAI 串行提交，避免同一账号并发生图触发 `429`；某个组合失败不会中止当前 Group 的其他组合或后续 Group。结果按 Group 展示 seed、进度、Artist、Character、Action、Job 状态、图片和错误信息。
+点击一次 `Compare Generate · 12` 会按 Group 顺序生成 12 个独立 Job。每个组合固定 `n_samples=1`，并针对 NovelAI 串行提交，避免同一账号并发生图触发 `429`；某个组合失败不会中止当前 Group 的其他组合或后续 Group。结果按 Group 展示 seed、进度、Artist、Character、Action、Behavior、Job 状态、图片和错误信息。
 
-Compare 启动时会冻结当前生图参数。同一 Group 内所有组合共享 seed，不同 Group 使用不同 seed。若界面 Seed 为 `-1`，每组生成一个不同的随机 seed；若指定 Seed，则各组依次使用 `Seed + 0`、`Seed + 1`……。除 Artist/Character/Action 节点组合外，宽高、Negative 和其他 Renderer 参数在整次 Compare 中保持一致。
+Compare 启动时会冻结当前生图参数。同一 Group 内所有组合共享 seed，不同 Group 使用不同 seed。若界面 Seed 为 `-1`，每组生成一个不同的随机 seed；若指定 Seed，则各组依次使用 `Seed + 0`、`Seed + 1`……。除 Artist/Character/Action/Behavior 组合外，宽高、Negative 和其他 Renderer 参数在整次 Compare 中保持一致。
+
+Prompt Behavior 方案也遵循同一规则：同一 Group 内不同 Behavior 方案共享 seed，只有完整 Behavior 配置不同。普通 `Generate` 始终使用 Primary Behavior；当前选中的 Compare Behavior 可以用于 Preview，但只会在 `Compare Generate` 中实际批量执行。
 
 每次点击 `Compare Generate` 都会创建一个独立父目录，并按 Group 建立子目录：
 
@@ -174,7 +178,26 @@ Web 不提供 Policy 模板选择，始终继承项目配置中的 `legacy_compa
 
 当前可覆盖规则包括：`tag_normalize`、`dedupe`、`character_section_filter`、`tag_conflict`、`character_count`、`clothing_policy`、`visibility_policy`、`character_extension`、`character_weight`。
 
-Preview 会显示后端实际返回的 Policy baseline、Identity included/suppressed sections 和 Character Prompts 状态。Preview、普通 Generate、Compare Generate 使用同一份 Prompt Behavior 配置。
+Preview 会显示后端实际返回的 Policy baseline、Identity included/suppressed sections 和 Character Prompts 状态。Preview、普通 Generate、Compare Generate 使用同一份 Request Builder；普通 Generate 使用 Primary，Compare Generate 为每个组合使用对应的完整 Behavior 方案。
+
+### Prompt Behavior Compare
+
+点击 Prompt Behavior 标题右侧的加号，会完整镜像当前 Primary 方案并创建一个 Compare 方案。方案包含完整的 Identity、Character Prompts 和 Policy Rules 配置，可以独立改名、编辑和删除。
+
+例如：
+
+```text
+Default              Primary
+No Character Prompts Compare
+```
+
+此时 Compare 摘要会显示：
+
+```text
+Artist 1 × Character 1 × Action 1 × Behavior 2 × Groups 1 = 2
+```
+
+方案之间不会共享临时编辑状态。刷新页面后方案和当前选中方案会从浏览器 Workspace 缓存恢复；旧版本只有一份 `promptBehavior` 的 Workspace 会自动迁移为 Primary。
 
 ## Batch
 
