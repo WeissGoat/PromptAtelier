@@ -692,13 +692,87 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.prompt-behavior-panel {
+.prompt-behavior-group-panel {
   border-top: 1px solid #e0e5ec;
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-top: 6px;
   padding-top: 12px;
+}
+
+.prompt-behavior-group-panel h3 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.prompt-behavior-group-panel .section-title-row small {
+  color: #687182;
+  font-size: 11px;
+}
+
+.prompt-behavior-variant-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prompt-behavior-variant-row {
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+}
+
+.prompt-behavior-variant-select {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #cbd3df;
+  border-radius: 5px;
+  color: #303844;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 190px;
+  min-height: 42px;
+  min-width: 112px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.prompt-behavior-variant-select span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-behavior-variant-select small {
+  color: #718096;
+  font-size: 10px;
+}
+
+.prompt-behavior-variant-select.active {
+  background: #eef4f8;
+  border-color: #54748c;
+  box-shadow: inset 0 0 0 1px #54748c;
+}
+
+.prompt-behavior-remove {
+  align-self: stretch;
+  height: 42px;
+  min-height: 42px;
+  width: 30px;
+}
+
+.prompt-behavior-label-field input {
+  width: 100%;
+}
+
+.prompt-behavior-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .behavior-section {

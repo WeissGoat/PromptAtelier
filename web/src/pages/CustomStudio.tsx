@@ -1,7 +1,7 @@
 import { CustomGeneratePanel } from "../components/CustomGeneratePanel";
 import { NodeRoleGroup } from "../components/NodeRoleGroup";
 import { NodeWorkspaceEditor } from "../components/NodeWorkspaceEditor";
-import { PromptBehaviorPanel } from "../components/PromptBehaviorPanel";
+import { PromptBehaviorGroupPanel } from "../components/PromptBehaviorGroupPanel";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
 import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
@@ -48,11 +48,7 @@ export function CustomStudio() {
           seed={params.seed}
           width={params.width}
         />
-        <PromptBehaviorPanel
-          characterSections={characterSections}
-          onChange={workspace.setPromptBehavior}
-          value={workspace.state.promptBehavior}
-        />
+        <PromptBehaviorGroupPanel characterSections={characterSections} />
       </section>
       <NodeWorkspaceEditor />
       <CustomGeneratePanel />

@@ -109,14 +109,7 @@ export function PromptBehaviorPanel({ value, characterSections, onChange }: Prom
   }
 
   return (
-    <section className="prompt-behavior-panel" aria-label="Prompt behavior">
-      <div className="section-title-row">
-        <div>
-          <h3>Prompt Behavior</h3>
-          <small>Prompt composition and renderer behavior</small>
-        </div>
-      </div>
-
+    <section className="prompt-behavior-panel" aria-label="Prompt behavior configuration">
       <section className="behavior-section">
         <div className="behavior-section-title">
           <strong>Identity Minimal Sections</strong>
