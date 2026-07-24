@@ -4,7 +4,8 @@ import { apiGet, apiPost, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import type { NodeRole } from "../nodes/types";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
-import type { PromptBehaviorParams, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
+import { promptBehaviorFingerprint } from "../workspace/promptBehavior";
+import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { buildCompareMatrix, selectedSlots, type CompareCombination } from "./matrix";
 import { buildCompareRunPlan, type CompareRunItem } from "./runPlan";
 
@@ -16,6 +17,11 @@ export type CompareCombinationResult = {
   groupSeed: number;
   combination: CompareCombination;
   labels: Record<NodeRole, string>;
+  behavior: {
+    slotId: string;
+    label: string;
+    fingerprint: string;
+  };
   status: CompareCombinationStatus;
   job: JobRecord | null;
   error: string;
@@ -71,6 +77,11 @@ function initialResult(item: CompareRunItem): CompareCombinationResult {
       artist: slotLabel(item.combination.artist),
       character: slotLabel(item.combination.character),
       action: slotLabel(item.combination.action),
+    },
+    behavior: {
+      slotId: item.combination.promptBehavior.slotId,
+      label: item.combination.promptBehavior.label,
+      fingerprint: promptBehaviorFingerprint(item.combination.promptBehavior.value),
     },
     status: "queued",
     job: null,
@@ -131,13 +142,13 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
   const start = useCallback(async (
     groups: Record<NodeRole, RoleNodeGroup>,
     params: RenderWorkspaceParams,
-    promptBehavior?: PromptBehaviorParams,
+    promptBehaviorGroup: PromptBehaviorGroup,
   ) => {
     if (!selectedSlots(groups.character).length && !selectedSlots(groups.action).length) {
       throw new Error("Compare Generate 至少需要一个 Character 或 Action 节点。");
     }
     const token = ++runToken.current;
-    const matrix = buildCompareMatrix(groups);
+    const matrix = buildCompareMatrix(groups, promptBehaviorGroup);
     const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
     const outputDir = outputDirFactory();
     setResults(plan.items.map(initialResult));
@@ -148,7 +159,10 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
       updateResult(token, item.runId, { status: "running", error: "" });
       try {
         const runParams: RenderWorkspaceParams = { ...params, seed: String(item.groupSeed) };
-        const request = buildComposeRenderRequest(item.combination, runParams, { compare: true, promptBehavior });
+        const request = buildComposeRenderRequest(item.combination, runParams, {
+          compare: true,
+          promptBehavior: item.combination.promptBehavior.value,
+        });
         const preview = await post("/compose-preview", request) as ComposePreviewResponse;
         if (!preview.render_request) throw new Error("该组合需要外部 Agent 先完成提示词拼接。");
         const queued = await post("/generate", {

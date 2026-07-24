@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createDefaultPromptBehaviorGroup } from "../workspace/promptBehavior";
 import type { CompareCombination } from "./matrix";
 import { buildCompareRunPlan, compareRunCount } from "./runPlan";
 
 const matrix = [
-  { combinationId: "a", artist: null, character: null, action: null },
-  { combinationId: "b", artist: null, character: null, action: null },
+  { combinationId: "a", artist: null, character: null, action: null, promptBehavior: createDefaultPromptBehaviorGroup().primary },
+  { combinationId: "b", artist: null, character: null, action: null, promptBehavior: createDefaultPromptBehaviorGroup().primary },
 ] satisfies CompareCombination[];
 
 describe("buildCompareRunPlan", () => {

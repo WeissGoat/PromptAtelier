@@ -3,10 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import type { NodeDocument, NodeRole } from "../nodes/types";
-import type { PromptBehaviorParams, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
+import { createDefaultPromptBehaviorGroup } from "../workspace/promptBehavior";
+import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { useCompareRunController } from "./useCompareRunController";
 
 const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" };
+
+function behaviorGroup(): PromptBehaviorGroup {
+  return createDefaultPromptBehaviorGroup();
+}
 
 function group(role: NodeRole, count: number): RoleNodeGroup {
   const makeSlot = (slotId: string, mode: "primary" | "compare") => {
@@ -57,7 +62,7 @@ describe("useCompareRunController", () => {
     }));
     const groups = { artist: group("artist", 2), character: group("character", 1), action: group("action", 2) };
 
-    await act(async () => { await result.current.start(groups, { ...params, nt: 2 }); });
+    await act(async () => { await result.current.start(groups, { ...params, nt: 2 }, behaviorGroup()); });
 
     expect(maxActivePreviews).toBe(1);
     expect(result.current.summary.succeeded).toBe(8);
@@ -69,14 +74,14 @@ describe("useCompareRunController", () => {
       "outputs/compare_test/group_002_seed_123456790",
     ]);
     expect(result.current.results.map((item) => item.runId)).toEqual([
-      "group-001::primary-artist::primary-character::primary-action",
-      "group-001::primary-artist::primary-character::action-0",
-      "group-001::artist-0::primary-character::primary-action",
-      "group-001::artist-0::primary-character::action-0",
-      "group-002::primary-artist::primary-character::primary-action",
-      "group-002::primary-artist::primary-character::action-0",
-      "group-002::artist-0::primary-character::primary-action",
-      "group-002::artist-0::primary-character::action-0",
+      "group-001::primary-artist::primary-character::primary-action::primary-prompt-behavior",
+      "group-001::primary-artist::primary-character::action-0::primary-prompt-behavior",
+      "group-001::artist-0::primary-character::primary-action::primary-prompt-behavior",
+      "group-001::artist-0::primary-character::action-0::primary-prompt-behavior",
+      "group-002::primary-artist::primary-character::primary-action::primary-prompt-behavior",
+      "group-002::primary-artist::primary-character::action-0::primary-prompt-behavior",
+      "group-002::artist-0::primary-character::primary-action::primary-prompt-behavior",
+      "group-002::artist-0::primary-character::action-0::primary-prompt-behavior",
     ]);
   });
 
@@ -93,8 +98,8 @@ describe("useCompareRunController", () => {
     const { result } = renderHook(() => useCompareRunController({ post, outputDirFactory }));
     const groups = { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) };
 
-    await act(async () => { await result.current.start(groups, { ...params, seed: "42" }); });
-    await act(async () => { await result.current.start(groups, { ...params, seed: "42" }); });
+    await act(async () => { await result.current.start(groups, { ...params, seed: "42" }, behaviorGroup()); });
+    await act(async () => { await result.current.start(groups, { ...params, seed: "42" }, behaviorGroup()); });
 
     expect(outputDirFactory).toHaveBeenCalledTimes(2);
     expect(generateDirs).toEqual([
@@ -120,6 +125,7 @@ describe("useCompareRunController", () => {
       await result.current.start(
         { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) },
         { ...params, nt: 2, seed: "42" },
+        behaviorGroup(),
       );
     });
     expect(seeds).toEqual([42, 42, 43, 43]);
@@ -144,7 +150,7 @@ describe("useCompareRunController", () => {
     const { result } = renderHook(() => useCompareRunController({ post, get, pollIntervalMs: 1 }));
     const groups = { artist: group("artist", 1), character: group("character", 1), action: group("action", 2) };
 
-    await act(async () => { await result.current.start(groups, params); });
+    await act(async () => { await result.current.start(groups, params, behaviorGroup()); });
 
     expect(result.current.summary.failed).toBe(1);
     expect(result.current.summary.succeeded).toBe(1);
@@ -158,12 +164,12 @@ describe("useCompareRunController", () => {
       ? { status: "ready", render_request: {} }
       : { id: "job", name: "generate", status: "succeeded" });
     const { result } = renderHook(() => useCompareRunController({ post }));
-    await act(async () => { await result.current.start({ artist: group("artist", 1), character: group("character", 1), action: group("action", 1) }, params); });
+    await act(async () => { await result.current.start({ artist: group("artist", 1), character: group("character", 1), action: group("action", 1) }, params, behaviorGroup()); });
     await waitFor(() => expect(result.current.summary.succeeded).toBe(1));
     expect(JSON.stringify(localStorage)).not.toContain("job");
   });
 
-  it("uses the same prompt behavior for every compare combination", async () => {
+  it("uses each complete prompt behavior profile as its own compare combination", async () => {
     const composeRequests: Array<Record<string, unknown>> = [];
     const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
       if (path === "/compose-preview") {
@@ -172,24 +178,34 @@ describe("useCompareRunController", () => {
       }
       return { id: "job", name: "generate", status: "succeeded" };
     });
-    const promptBehavior: PromptBehaviorParams = {
-      identityMinimal: { mode: "override", sections: ["character", "role"] },
-      characterPrompts: { mode: "auto", addMaleCaption: true },
-      policyRules: { visibility_policy: { state: "disabled" } },
-    };
+    const behaviors = behaviorGroup();
+    behaviors.compares.push({
+      slotId: "behavior-off",
+      label: "No Character Prompts",
+      mode: "compare",
+      value: {
+        identityMinimal: { mode: "override", sections: ["character"] },
+        characterPrompts: { mode: "off", addMaleCaption: false },
+        policyRules: { visibility_policy: { state: "disabled" } },
+      },
+    });
     const { result } = renderHook(() => useCompareRunController({ post }));
 
     await act(async () => {
       await result.current.start(
-        { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) },
+        { artist: group("artist", 1), character: group("character", 1), action: group("action", 1) },
         params,
-        promptBehavior,
+        behaviors,
       );
     });
 
     expect(composeRequests).toHaveLength(2);
-    expect(new Set(composeRequests.map((request) => JSON.stringify((request.compose as Record<string, unknown>).prompt_policy))).size).toBe(1);
-    expect(new Set(composeRequests.map((request) => JSON.stringify((request.compose as Record<string, unknown>).identity_minimal_sections))).size).toBe(1);
-    expect(new Set(composeRequests.map((request) => JSON.stringify(((request.render as Record<string, unknown>).params as Record<string, unknown>).character_prompts))).size).toBe(1);
+    const [primaryRequest, compareRequest] = composeRequests;
+    expect(((primaryRequest.render as Record<string, unknown>).params as Record<string, unknown>).character_prompts).toEqual({ mode: "auto", add_male_caption: true });
+    expect(((compareRequest.render as Record<string, unknown>).params as Record<string, unknown>).character_prompts).toBeUndefined();
+    expect((compareRequest.compose as Record<string, unknown>).identity_minimal_sections).toEqual(["character"]);
+    expect((compareRequest.compose as Record<string, unknown>).prompt_policy).toEqual({ rules: { visibility_policy: { enabled: false } } });
+    expect(result.current.results.map((item) => item.behavior.label)).toEqual(["Default", "No Character Prompts"]);
+    expect(new Set(result.current.results.map((item) => item.behavior.fingerprint)).size).toBe(2);
   });
 });
