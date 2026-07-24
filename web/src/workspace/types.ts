@@ -44,6 +44,18 @@ export type PromptBehaviorParams = {
   }>;
 };
 
+export type PromptBehaviorVariant = {
+  slotId: string;
+  label: string;
+  mode: SlotMode;
+  value: PromptBehaviorParams;
+};
+
+export type PromptBehaviorGroup = {
+  primary: PromptBehaviorVariant;
+  compares: PromptBehaviorVariant[];
+};
+
 export type WorkspaceEditorState = {
   slotId: string | null;
   tab: "form" | "json";
@@ -54,10 +66,11 @@ export type WorkspaceEditorState = {
 };
 
 export type CustomWorkspaceState = {
-  schema: "promptatelier.custom-workspace/v1";
+  schema: "promptatelier.custom-workspace/v2";
   groups: Record<NodeRole, RoleNodeGroup>;
   params: RenderWorkspaceParams;
-  promptBehavior: PromptBehaviorParams;
+  promptBehaviorGroup: PromptBehaviorGroup;
+  activePromptBehaviorSlotId: string;
   editor: WorkspaceEditorState;
   preview: ComposePreviewResponse | null;
   revision: number;

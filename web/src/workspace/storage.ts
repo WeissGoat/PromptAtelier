@@ -2,11 +2,21 @@ import type { NodeRole } from "../nodes/types";
 import type {
   CustomWorkspaceState,
   NodeVariantSlot,
-  PromptBehaviorParams,
   RoleNodeGroup,
 } from "./types";
+import {
+  createDefaultPromptBehaviorGroup,
+  findPromptBehaviorVariant,
+  normalizePromptBehavior,
+  normalizePromptBehaviorGroup,
+  PRIMARY_PROMPT_BEHAVIOR_SLOT_ID,
+} from "./promptBehavior";
+
+export { createDefaultPromptBehavior } from "./promptBehavior";
 
 export const CUSTOM_WORKSPACE_STORAGE_KEY = "promptatelier.custom-workspace/v1";
+export const CUSTOM_WORKSPACE_SCHEMA = "promptatelier.custom-workspace/v2";
+const LEGACY_CUSTOM_WORKSPACE_SCHEMA = "promptatelier.custom-workspace/v1";
 
 const roles: NodeRole[] = ["artist", "character", "action"];
 let fallbackCounter = 0;
@@ -39,24 +49,17 @@ function createEmptyGroup(role: NodeRole): RoleNodeGroup {
   return { primary: createEmptySlot(role, "primary"), compares: [] };
 }
 
-export function createDefaultPromptBehavior(): PromptBehaviorParams {
-  return {
-    identityMinimal: { mode: "inherit", sections: [] },
-    characterPrompts: { mode: "auto", addMaleCaption: true },
-    policyRules: {},
-  };
-}
-
 export function createEmptyWorkspace(): CustomWorkspaceState {
   return {
-    schema: CUSTOM_WORKSPACE_STORAGE_KEY,
+    schema: CUSTOM_WORKSPACE_SCHEMA,
     groups: {
       artist: createEmptyGroup("artist"),
       character: createEmptyGroup("character"),
       action: createEmptyGroup("action"),
     },
     params: { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" },
-    promptBehavior: createDefaultPromptBehavior(),
+    promptBehaviorGroup: createDefaultPromptBehaviorGroup(),
+    activePromptBehaviorSlotId: PRIMARY_PROMPT_BEHAVIOR_SLOT_ID,
     editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
     preview: null,
     revision: 0,
@@ -79,54 +82,8 @@ function isSlot(value: unknown, role: NodeRole, mode: "primary" | "compare"): va
     && (value.draftEditorValues === undefined || value.draftEditorValues === null || isObject(value.draftEditorValues));
 }
 
-function normalizePromptBehavior(value: unknown): PromptBehaviorParams {
-  if (!isObject(value)) return createDefaultPromptBehavior();
-
-  const identity = isObject(value.identityMinimal) ? value.identityMinimal : {};
-  const identityMode = identity.mode === "override" ? "override" : "inherit";
-  const identitySections = Array.isArray(identity.sections)
-    ? [...new Set(identity.sections.map((item) => String(item).trim()).filter(Boolean))]
-    : [];
-
-  const character = isObject(value.characterPrompts) ? value.characterPrompts : {};
-  const characterMode = character.mode === "off" ? "off" : "auto";
-  const addMaleCaption = typeof character.addMaleCaption === "boolean"
-    ? character.addMaleCaption
-    : true;
-
-  const policyRules: PromptBehaviorParams["policyRules"] = {};
-  if (isObject(value.policyRules)) {
-    for (const [ruleId, rawRule] of Object.entries(value.policyRules)) {
-      if (!isObject(rawRule)) continue;
-      if (rawRule.state !== "inherit" && rawRule.state !== "enabled" && rawRule.state !== "disabled") continue;
-      const options = isObject(rawRule.options) ? structuredClone(rawRule.options) : undefined;
-      policyRules[ruleId] = options ? { state: rawRule.state, options } : { state: rawRule.state };
-    }
-  }
-
-  return {
-    identityMinimal: { mode: identityMode, sections: identitySections },
-    characterPrompts: { mode: characterMode, addMaleCaption },
-    policyRules,
-  };
-}
-
-function isPromptBehavior(value: unknown): value is PromptBehaviorParams {
-  if (!isObject(value)) return false;
-  const identity = value.identityMinimal;
-  const character = value.characterPrompts;
-  return isObject(identity)
-    && (identity.mode === "inherit" || identity.mode === "override")
-    && Array.isArray(identity.sections)
-    && identity.sections.every((item) => typeof item === "string")
-    && isObject(character)
-    && (character.mode === "auto" || character.mode === "off")
-    && typeof character.addMaleCaption === "boolean"
-    && isObject(value.policyRules);
-}
-
 function isWorkspace(value: unknown): value is CustomWorkspaceState {
-  if (!isObject(value) || value.schema !== CUSTOM_WORKSPACE_STORAGE_KEY) return false;
+  if (!isObject(value) || value.schema !== CUSTOM_WORKSPACE_SCHEMA) return false;
   if (!isObject(value.groups) || !isObject(value.params) || !isObject(value.editor)) return false;
   for (const role of roles) {
     const group = value.groups[role];
@@ -141,7 +98,39 @@ function isWorkspace(value: unknown): value is CustomWorkspaceState {
     && (value.editor.slotId === null || typeof value.editor.slotId === "string")
     && (value.editor.tab === "form" || value.editor.tab === "json")
     && typeof value.revision === "number"
-    && isPromptBehavior(value.promptBehavior);
+    && isObject(value.promptBehaviorGroup)
+    && typeof value.activePromptBehaviorSlotId === "string"
+    && Boolean(findPromptBehaviorVariant(
+      normalizePromptBehaviorGroup(value.promptBehaviorGroup),
+      value.activePromptBehaviorSlotId,
+    ));
+}
+
+function migrateWorkspace(value: unknown): unknown {
+  if (!isObject(value)) return value;
+  if (value.schema !== LEGACY_CUSTOM_WORKSPACE_SCHEMA && value.schema !== CUSTOM_WORKSPACE_SCHEMA) return value;
+
+  const promptBehaviorGroup = value.schema === LEGACY_CUSTOM_WORKSPACE_SCHEMA
+    ? {
+      ...createDefaultPromptBehaviorGroup(),
+      primary: {
+        ...createDefaultPromptBehaviorGroup().primary,
+        value: normalizePromptBehavior(value.promptBehavior),
+      },
+    }
+    : normalizePromptBehaviorGroup(value.promptBehaviorGroup);
+  const requestedActive = typeof value.activePromptBehaviorSlotId === "string"
+    ? value.activePromptBehaviorSlotId
+    : PRIMARY_PROMPT_BEHAVIOR_SLOT_ID;
+  const activePromptBehaviorSlotId = findPromptBehaviorVariant(promptBehaviorGroup, requestedActive)
+    ? requestedActive
+    : promptBehaviorGroup.primary.slotId;
+  return {
+    ...value,
+    schema: CUSTOM_WORKSPACE_SCHEMA,
+    promptBehaviorGroup,
+    activePromptBehaviorSlotId,
+  };
 }
 
 export function loadWorkspaceSnapshot(storage: Storage): WorkspaceLoadResult {
@@ -149,9 +138,7 @@ export function loadWorkspaceSnapshot(storage: Storage): WorkspaceLoadResult {
   if (!raw) return { status: "empty", state: createEmptyWorkspace() };
   try {
     const parsed: unknown = JSON.parse(raw);
-    const migrated = isObject(parsed)
-      ? { ...parsed, promptBehavior: normalizePromptBehavior(parsed.promptBehavior) }
-      : parsed;
+    const migrated = migrateWorkspace(parsed);
     if (!isWorkspace(migrated)) {
       return { status: "invalid", state: createEmptyWorkspace(), message: "工作台缓存格式不兼容，请重置工作台。" };
     }
@@ -179,7 +166,8 @@ export function saveWorkspaceSnapshot(storage: Storage, state: CustomWorkspaceSt
     schema: state.schema,
     groups: state.groups,
     params: state.params,
-    promptBehavior: state.promptBehavior,
+    promptBehaviorGroup: state.promptBehaviorGroup,
+    activePromptBehaviorSlotId: state.activePromptBehaviorSlotId,
     editor: state.editor,
     preview: state.preview,
     revision: state.revision,
