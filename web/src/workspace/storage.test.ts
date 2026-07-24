@@ -68,6 +68,20 @@ describe("workspace storage", () => {
     expect(createEmptyWorkspace().params.negative).toBe("");
   });
 
+  it("migrates an old workspace snapshot with prompt behavior defaults", () => {
+    const state = createEmptyWorkspace();
+    const snapshot = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+    delete snapshot.promptBehavior;
+    localStorage.setItem(CUSTOM_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+
+    const loaded = loadWorkspaceSnapshot(localStorage);
+
+    expect(loaded.status).toBe("loaded");
+    expect(loaded.state.promptBehavior.characterPrompts).toEqual({ mode: "auto", addMaleCaption: true });
+    expect(loaded.state.promptBehavior.identityMinimal).toEqual({ mode: "inherit", sections: [] });
+    expect(loaded.state.promptBehavior.policyRules).toEqual({});
+  });
+
   it("rejects malformed JSON without deleting the stored value", () => {
     localStorage.setItem(CUSTOM_WORKSPACE_STORAGE_KEY, "{broken");
     const loaded = loadWorkspaceSnapshot(localStorage);

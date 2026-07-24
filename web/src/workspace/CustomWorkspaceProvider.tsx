@@ -11,7 +11,12 @@ import {
   loadWorkspaceSnapshot,
   saveWorkspaceSnapshot,
 } from "./storage";
-import type { CustomWorkspaceState, NodeVariantSlot, RenderWorkspaceParams } from "./types";
+import type {
+  CustomWorkspaceState,
+  NodeVariantSlot,
+  PromptBehaviorParams,
+  RenderWorkspaceParams,
+} from "./types";
 
 type CustomWorkspaceContextValue = {
   state: CustomWorkspaceState;
@@ -32,6 +37,7 @@ type CustomWorkspaceContextValue = {
   setEditorDraft(node: NodeDocument): void;
   setEditorValues(values: Record<string, unknown>): void;
   setParams(patch: Partial<RenderWorkspaceParams>): void;
+  setPromptBehavior(value: PromptBehaviorParams): void;
   setPreview(preview: ComposePreviewResponse | null): void;
   resetWorkspace(): void;
 };
@@ -257,6 +263,11 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     setParams: (patch) => setState((current) => ({
       ...current,
       params: { ...current.params, ...patch },
+      revision: current.revision + 1,
+    })),
+    setPromptBehavior: (promptBehavior) => setState((current) => ({
+      ...current,
+      promptBehavior: structuredClone(promptBehavior),
       revision: current.revision + 1,
     })),
     setPreview: (preview) => setState((current) => ({ ...current, preview })),

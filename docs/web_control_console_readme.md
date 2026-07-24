@@ -145,6 +145,37 @@ outputs/compare_<timestamp>_<id>/
 
 同一普通 Job 或同一轮 Compare 的图片会组成一个详情序列。使用左右箭头按钮或键盘 `←` / `→` 切换图片，首尾位置停住且不会循环。第二张开始会显示“当前 PNG 相对上一张 PNG”的参数 Diff，包括变更、新增和移除项；reference/vibe 图片只展示 hash 与大小摘要，不展示原始 base64。
 
+## Prompt Behavior
+
+Custom 工作台的 Prompt Behavior 与生图参数分开管理。
+
+### Identity Minimal Sections
+
+默认使用 Character 节点的 `meta.yaml.identity_minimal`，没有该字段时使用系统默认 section。
+
+选择 `Override for this run` 后，可以从当前 Character 节点的 tags/Prompt roles 中选择 section，也可以输入自定义 section。覆盖模式至少保留一个 section，不能保存空列表。
+
+### Character Prompts
+
+NovelAI v4/v4.5 模型支持：
+
+- `Auto`：Renderer 根据角色节点和最终 prompt 自动拆分 Character Prompts。
+- `Off`：不拆分，角色提示词保留在 Base Prompt。
+
+Auto 模式下可以开关 `Add male caption`。默认开启。
+
+### Policy Rules
+
+Web 不提供 Policy 模板选择，始终继承项目配置中的 `legacy_compat` 基线。每条规则使用三态：
+
+- `Inherit`：使用项目配置。
+- `Enabled`：本次运行开启该规则。
+- `Disabled`：本次运行关闭该规则。
+
+当前可覆盖规则包括：`tag_normalize`、`dedupe`、`character_section_filter`、`tag_conflict`、`character_count`、`clothing_policy`、`visibility_policy`、`character_extension`、`character_weight`。
+
+Preview 会显示后端实际返回的 Policy baseline、Identity included/suppressed sections 和 Character Prompts 状态。Preview、普通 Generate、Compare Generate 使用同一份 Prompt Behavior 配置。
+
 ## Batch
 
 Batch 页继续使用现有 BatchPlanner 和 BatchExecutor。可以编辑 inline batch 参数，也可以指定 Batch YAML；`Plan Preview` 与真实运行使用同一套规划链路。

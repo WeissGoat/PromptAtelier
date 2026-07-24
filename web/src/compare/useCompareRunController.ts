@@ -4,7 +4,7 @@ import { apiGet, apiPost, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import type { NodeRole } from "../nodes/types";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
-import type { RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
+import type { PromptBehaviorParams, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { buildCompareMatrix, selectedSlots, type CompareCombination } from "./matrix";
 import { buildCompareRunPlan, type CompareRunItem } from "./runPlan";
 
@@ -128,7 +128,11 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     return current;
   }, [get, pollIntervalMs]);
 
-  const start = useCallback(async (groups: Record<NodeRole, RoleNodeGroup>, params: RenderWorkspaceParams) => {
+  const start = useCallback(async (
+    groups: Record<NodeRole, RoleNodeGroup>,
+    params: RenderWorkspaceParams,
+    promptBehavior?: PromptBehaviorParams,
+  ) => {
     if (!selectedSlots(groups.character).length && !selectedSlots(groups.action).length) {
       throw new Error("Compare Generate 至少需要一个 Character 或 Action 节点。");
     }
@@ -144,7 +148,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
       updateResult(token, item.runId, { status: "running", error: "" });
       try {
         const runParams: RenderWorkspaceParams = { ...params, seed: String(item.groupSeed) };
-        const request = buildComposeRenderRequest(item.combination, runParams, { compare: true });
+        const request = buildComposeRenderRequest(item.combination, runParams, { compare: true, promptBehavior });
         const preview = await post("/compose-preview", request) as ComposePreviewResponse;
         if (!preview.render_request) throw new Error("该组合需要外部 Agent 先完成提示词拼接。");
         const queued = await post("/generate", {
