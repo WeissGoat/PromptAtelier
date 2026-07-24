@@ -7,6 +7,7 @@ import { compareDimensions } from "../compare/matrix";
 import { compareRunCount } from "../compare/runPlan";
 import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
+import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
 import type { NodeVariantSlot } from "../workspace/types";
@@ -114,16 +115,29 @@ export function CustomGeneratePanel() {
   const workspace = useCustomWorkspace();
   const groups = workspace.state.groups;
   const params = workspace.state.params;
-  const promptBehavior = workspace.state.promptBehavior;
+  const promptBehaviorGroup = workspace.state.promptBehaviorGroup;
+  const primaryBehavior = promptBehaviorGroup.primary;
+  const activeBehavior = findPromptBehaviorVariant(
+    promptBehaviorGroup,
+    workspace.state.activePromptBehaviorSlotId,
+  ) ?? primaryBehavior;
   const primary = useMemo(() => ({
     artist: groups.artist.primary,
     character: groups.character.primary,
     action: groups.action.primary,
   }), [groups]);
-  const request = useMemo(() => buildComposeRenderRequest(primary, params, { compare: false, promptBehavior }), [params, primary, promptBehavior]);
-  const signature = useMemo(() => JSON.stringify(request), [request]);
-  const signatureRef = useRef(signature);
-  signatureRef.current = signature;
+  const previewRequest = useMemo(() => buildComposeRenderRequest(primary, params, {
+    compare: false,
+    promptBehavior: activeBehavior.value,
+  }), [activeBehavior.value, params, primary]);
+  const primaryRequest = useMemo(() => buildComposeRenderRequest(primary, params, {
+    compare: false,
+    promptBehavior: primaryBehavior.value,
+  }), [params, primary, primaryBehavior.value]);
+  const previewRequestSignature = useMemo(() => JSON.stringify(previewRequest), [previewRequest]);
+  const primaryRequestSignature = useMemo(() => JSON.stringify(primaryRequest), [primaryRequest]);
+  const signatureRef = useRef({ preview: previewRequestSignature, primary: primaryRequestSignature });
+  signatureRef.current = { preview: previewRequestSignature, primary: primaryRequestSignature };
   const [previewSignature, setPreviewSignature] = useState("");
   const [job, setJob] = useState<JobRecord | null>(null);
   const [status, setStatus] = useState("Ready");
@@ -131,8 +145,8 @@ export function CustomGeneratePanel() {
   const [busy, setBusy] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ImageSelection | null>(null);
   const pollToken = useRef(0);
-  const dimensions = compareDimensions(groups);
-  const matrixTotal = dimensions.artist * dimensions.character * dimensions.action;
+  const dimensions = compareDimensions(groups, promptBehaviorGroup);
+  const matrixTotal = dimensions.artist * dimensions.character * dimensions.action * dimensions.behavior;
   const compareTotal = compareRunCount(matrixTotal, params.nt);
   const compare = workspace.compareRun;
   const ordinaryImagePaths = job?.status === "succeeded"
@@ -142,16 +156,23 @@ export function CustomGeneratePanel() {
     ? result.job.result?.images?.map((image) => image.path) ?? []
     : []);
   const preview = workspace.state.preview;
-  const previewCurrent = previewSignature === signature;
+  const previewCurrent = previewSignature === previewRequestSignature;
   const displayPreview = previewCurrent ? preview : null;
 
   useEffect(() => () => { pollToken.current += 1; }, []);
 
-  async function compose(): Promise<ComposePreviewResponse> {
+  async function compose(
+    request: ReturnType<typeof buildComposeRenderRequest>,
+    expectedSignature: string,
+    signatureKind: "preview" | "primary",
+    persistPreview: boolean,
+  ): Promise<ComposePreviewResponse> {
     const result = await apiPost<ComposePreviewResponse>("/compose-preview", request);
-    if (signatureRef.current !== signature) throw new Error("输入已变化，请重新预览。");
-    workspace.setPreview(result);
-    setPreviewSignature(signature);
+    if (signatureRef.current[signatureKind] !== expectedSignature) throw new Error("输入已变化，请重新预览。");
+    if (persistPreview) {
+      workspace.setPreview(result);
+      setPreviewSignature(expectedSignature);
+    }
     return result;
   }
 
@@ -164,10 +185,10 @@ export function CustomGeneratePanel() {
     }
     setBusy(true);
     setError("");
-    setStatus("Previewing");
+    setStatus(`Previewing ${activeBehavior.label}`);
     try {
-      const result = await compose();
-      setStatus(result.render_request ? "Preview ready" : "Agent required");
+      const result = await compose(previewRequest, previewRequestSignature, "preview", true);
+      setStatus(result.render_request ? `Preview ready: ${activeBehavior.label}` : "Agent required");
     } catch (requestError) {
       setStatus("Preview failed");
       setError(errorMessage(requestError));
@@ -199,9 +220,17 @@ export function CustomGeneratePanel() {
     }
     setBusy(true);
     setError("");
-    setStatus("Generating");
+    setStatus("Generating Primary");
     try {
-      const ready = previewCurrent && preview?.render_request ? preview : await compose();
+      const primaryPreviewCurrent = previewSignature === primaryRequestSignature;
+      const ready = primaryPreviewCurrent && preview?.render_request
+        ? preview
+        : await compose(
+          primaryRequest,
+          primaryRequestSignature,
+          "primary",
+          activeBehavior.slotId === primaryBehavior.slotId,
+        );
       if (!ready.render_request) throw new Error("该节点组合需要外部 Agent 先完成提示词拼接。");
       const queued = await apiPost<JobRecord>("/generate", { render_request: ready.render_request });
       await pollJob(queued);
@@ -216,7 +245,7 @@ export function CustomGeneratePanel() {
   async function generateCompare() {
     setError("");
     try {
-      await compare.start(groups, params, promptBehavior);
+      await compare.start(groups, params, promptBehaviorGroup);
     } catch (requestError) {
       setError(errorMessage(requestError));
     }
@@ -237,7 +266,7 @@ export function CustomGeneratePanel() {
       />
       <div className="button-row ordinary-generate-actions">
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>
-        <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> Generate</button>
+        <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> Generate Primary</button>
       </div>
       {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
 
@@ -245,7 +274,7 @@ export function CustomGeneratePanel() {
         <div className="section-title-row">
           <div>
             <h3>Compare Matrix</h3>
-            <small>Artist {dimensions.artist} × Character {dimensions.character} × Action {dimensions.action} × Groups {params.nt} = {compareTotal}</small>
+            <small>Artist {dimensions.artist} × Character {dimensions.character} × Action {dimensions.action} × Behavior {dimensions.behavior} × Groups {params.nt} = {compareTotal}</small>
           </div>
           <div className="button-row">
             {compare.results.length ? <button disabled={compare.running} onClick={compare.reset} title="清空 Compare 结果" type="button"><RotateCcw size={15} /></button> : null}
@@ -272,6 +301,7 @@ export function CustomGeneratePanel() {
                       <dt>Artist</dt><dd>{result.labels.artist}</dd>
                       <dt>Character</dt><dd>{result.labels.character}</dd>
                       <dt>Action</dt><dd>{result.labels.action}</dd>
+                      <dt>Behavior</dt><dd>{result.behavior.label}</dd>
                     </dl>
                     {result.error ? <div className="field-error">{result.error}</div> : null}
                     {result.job ? <ImageGrid job={result.job} onOpenImage={setSelectedImage} prefix="Compare" sequencePaths={compareImagePaths} /> : null}

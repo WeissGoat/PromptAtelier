@@ -23,7 +23,15 @@ function Harness() {
     const action = workspace.addCompare("action");
     workspace.selectNode(action, "actions/sitting", node("action", "sitting"));
   }
-  return <><button onClick={configurePrimary}>configure primary</button><button onClick={configureMatrix}>configure matrix</button><CustomStudio /></>;
+  function configureBehaviorCompare() {
+    const slotId = workspace.addPromptBehaviorCompare();
+    workspace.renamePromptBehavior(slotId, "No Character Prompts");
+    workspace.setPromptBehavior({
+      ...workspace.state.promptBehaviorGroup.primary.value,
+      characterPrompts: { mode: "off", addMaleCaption: false },
+    });
+  }
+  return <><button onClick={configurePrimary}>configure primary</button><button onClick={configureMatrix}>configure matrix</button><button onClick={configureBehaviorCompare}>configure behavior compare</button><CustomStudio /></>;
 }
 
 function renderStudio() {
@@ -90,7 +98,7 @@ describe("CustomStudio", () => {
     renderStudio();
     fireEvent.click(screen.getByText("configure primary"));
     fireEvent.change(screen.getByLabelText("NT"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Generate$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Primary" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(1));
     const compose = fetchMock.mock.calls.find(([input]) => String(input).includes("/compose-preview"));
@@ -123,7 +131,7 @@ describe("CustomStudio", () => {
     const outputDirs = generateCalls.map(([, init]) => JSON.parse(String(init?.body)).output_dir);
     expect(outputDirs.slice(0, 4).every((dir) => String(dir).includes("group_001_seed_42"))).toBe(true);
     expect(outputDirs.slice(4).every((dir) => String(dir).includes("group_002_seed_43"))).toBe(true);
-    expect(screen.getByText("Artist 2 × Character 1 × Action 2 × Groups 2 = 8")).toBeTruthy();
+    expect(screen.getByText("Artist 2 × Character 1 × Action 2 × Behavior 1 × Groups 2 = 8")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("成功 8")).toBeTruthy());
     expect(screen.getByText("Group 1 · Seed 42")).toBeTruthy();
     expect(screen.getByText("Group 2 · Seed 43")).toBeTruthy();
@@ -141,5 +149,43 @@ describe("CustomStudio", () => {
     expect(screen.getByText("Model")).toBeTruthy();
     expect(screen.getByText("nai-diffusion-4-5-full")).toBeTruthy();
     expect(screen.getByText("完整生图参数")).toBeTruthy();
+  });
+
+  it("previews the active behavior but ordinary Generate uses Primary", async () => {
+    const fetchMock = mockGeneration();
+    renderStudio();
+    fireEvent.click(screen.getByText("configure primary"));
+    fireEvent.click(screen.getByText("configure behavior compare"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"))).toHaveLength(1));
+    const previewBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(previewBody.render.params.character_prompts).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Primary" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(1));
+    const composeCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"));
+    const primaryBody = JSON.parse(String(composeCalls[1][1]?.body));
+    expect(primaryBody.render.params.character_prompts).toEqual({ mode: "auto", add_male_caption: true });
+  });
+
+  it("expands prompt behavior variants in Compare Generate", async () => {
+    const fetchMock = mockGeneration();
+    renderStudio();
+    fireEvent.click(screen.getByText("configure matrix"));
+    fireEvent.click(screen.getByText("configure behavior compare"));
+    fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
+
+    const compareButton = await screen.findByRole("button", { name: "Compare Generate · 8" });
+    fireEvent.click(compareButton);
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(8));
+    const composeCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"));
+    expect(composeCalls).toHaveLength(8);
+    expect(composeCalls.map(([, init]) => JSON.parse(String(init?.body)).render.seed)).toEqual(Array(8).fill(42));
+    expect(composeCalls.filter(([, init]) => JSON.parse(String(init?.body)).render.params.character_prompts).length).toBe(4);
+    expect(screen.getByText("Artist 2 × Character 1 × Action 2 × Behavior 2 × Groups 1 = 8")).toBeTruthy();
+    expect(screen.getAllByText("Default").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No Character Prompts").length).toBeGreaterThan(0);
   });
 });
