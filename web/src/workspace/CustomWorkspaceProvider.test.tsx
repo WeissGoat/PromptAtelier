@@ -23,6 +23,11 @@ function Probe() {
       <span data-testid="character">{workspace.state.groups.character.primary.draftNode?.id ?? "empty"}</span>
       <span data-testid="primary-artist">{workspace.state.groups.artist.primary.draftNode?.name ?? "empty"}</span>
       <span data-testid="compare-artist">{workspace.state.groups.artist.compares[0]?.draftNode?.name ?? "empty"}</span>
+      <span data-testid="behavior-count">{workspace.state.promptBehaviorGroup.compares.length}</span>
+      <span data-testid="active-behavior">{workspace.state.activePromptBehaviorSlotId}</span>
+      <span data-testid="primary-behavior-mode">{workspace.state.promptBehaviorGroup.primary.value.characterPrompts.mode}</span>
+      <span data-testid="compare-behavior-mode">{workspace.state.promptBehaviorGroup.compares[0]?.value.characterPrompts.mode ?? "empty"}</span>
+      <span data-testid="compare-behavior-label">{workspace.state.promptBehaviorGroup.compares[0]?.label ?? "empty"}</span>
       <span data-testid="warning">{workspace.storageWarning}</span>
       <button onClick={() => workspace.addCompare("artist")}>add</button>
       <button onClick={() => workspace.selectNode("primary-artist", "artists/a", artistNode)}>select artist</button>
@@ -33,6 +38,19 @@ function Probe() {
       <button onClick={() => workspace.createBlank("primary-character")}>blank</button>
       <button onClick={() => workspace.updateDraft("primary-character", createTemporaryNode("character", "edited"))}>edit</button>
       <button onClick={() => workspace.setParams({ negative: "bad anatomy" })}>negative</button>
+      <button onClick={() => workspace.addPromptBehaviorCompare()}>add behavior</button>
+      <button onClick={() => workspace.setPromptBehavior({
+        ...workspace.state.promptBehaviorGroup.primary.value,
+        characterPrompts: { mode: "off", addMaleCaption: false },
+      })}>edit behavior</button>
+      <button onClick={() => {
+        const compare = workspace.state.promptBehaviorGroup.compares[0];
+        if (compare) workspace.renamePromptBehavior(compare.slotId, "No Character Prompts");
+      }}>rename behavior</button>
+      <button onClick={() => {
+        const compare = workspace.state.promptBehaviorGroup.compares[0];
+        if (compare) workspace.removePromptBehaviorCompare(compare.slotId);
+      }}>remove behavior</button>
       <button onClick={workspace.resetWorkspace}>reset</button>
     </div>
   );
@@ -68,6 +86,44 @@ describe("CustomWorkspaceProvider", () => {
     render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
     fireEvent.click(screen.getByText("negative"));
     await waitFor(() => expect(localStorage.getItem(CUSTOM_WORKSPACE_STORAGE_KEY)).toContain("bad anatomy"), { timeout: 1_000 });
+  });
+
+  it("mirrors primary prompt behavior without sharing compare state", () => {
+    render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
+    fireEvent.click(screen.getByText("add behavior"));
+
+    expect(screen.getByTestId("behavior-count").textContent).toBe("1");
+    expect(screen.getByTestId("active-behavior").textContent).not.toBe("primary-prompt-behavior");
+    expect(screen.getByTestId("primary-behavior-mode").textContent).toBe("auto");
+    expect(screen.getByTestId("compare-behavior-mode").textContent).toBe("auto");
+
+    fireEvent.click(screen.getByText("edit behavior"));
+    expect(screen.getByTestId("primary-behavior-mode").textContent).toBe("auto");
+    expect(screen.getByTestId("compare-behavior-mode").textContent).toBe("off");
+  });
+
+  it("renames and removes an active prompt behavior compare", () => {
+    render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
+    fireEvent.click(screen.getByText("add behavior"));
+    fireEvent.click(screen.getByText("rename behavior"));
+    expect(screen.getByTestId("compare-behavior-label").textContent).toBe("No Character Prompts");
+
+    fireEvent.click(screen.getByText("remove behavior"));
+    expect(screen.getByTestId("behavior-count").textContent).toBe("0");
+    expect(screen.getByTestId("active-behavior").textContent).toBe("primary-prompt-behavior");
+  });
+
+  it("persists prompt behavior compare changes after remount", async () => {
+    const first = render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
+    fireEvent.click(screen.getByText("add behavior"));
+    fireEvent.click(screen.getByText("edit behavior"));
+    fireEvent.click(screen.getByText("rename behavior"));
+    await waitFor(() => expect(localStorage.getItem(CUSTOM_WORKSPACE_STORAGE_KEY)).toContain("No Character Prompts"), { timeout: 1_000 });
+    first.unmount();
+
+    render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
+    expect(screen.getByTestId("compare-behavior-mode").textContent).toBe("off");
+    expect(screen.getByTestId("compare-behavior-label").textContent).toBe("No Character Prompts");
   });
 
   it("restores a saved workspace on remount", async () => {

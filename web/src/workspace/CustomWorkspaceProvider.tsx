@@ -8,13 +8,19 @@ import {
   clearWorkspaceSnapshot,
   createEmptySlot,
   createEmptyWorkspace,
+  createSlotId,
   loadWorkspaceSnapshot,
   saveWorkspaceSnapshot,
 } from "./storage";
+import {
+  findPromptBehaviorVariant,
+  PRIMARY_PROMPT_BEHAVIOR_SLOT_ID,
+} from "./promptBehavior";
 import type {
   CustomWorkspaceState,
   NodeVariantSlot,
   PromptBehaviorParams,
+  PromptBehaviorVariant,
   RenderWorkspaceParams,
 } from "./types";
 
@@ -37,6 +43,11 @@ type CustomWorkspaceContextValue = {
   setEditorDraft(node: NodeDocument): void;
   setEditorValues(values: Record<string, unknown>): void;
   setParams(patch: Partial<RenderWorkspaceParams>): void;
+  findPromptBehavior(slotId: string): PromptBehaviorVariant | null;
+  selectPromptBehavior(slotId: string): void;
+  addPromptBehaviorCompare(): string;
+  removePromptBehaviorCompare(slotId: string): void;
+  renamePromptBehavior(slotId: string, label: string): void;
   setPromptBehavior(value: PromptBehaviorParams): void;
   setPreview(preview: ComposePreviewResponse | null): void;
   resetWorkspace(): void;
@@ -81,6 +92,37 @@ function findSlotInState(state: CustomWorkspaceState, slotId: string): NodeVaria
   return null;
 }
 
+function mapPromptBehaviorVariant(
+  state: CustomWorkspaceState,
+  slotId: string,
+  update: (variant: PromptBehaviorVariant) => PromptBehaviorVariant,
+): CustomWorkspaceState {
+  const group = state.promptBehaviorGroup;
+  if (group.primary.slotId === slotId) {
+    return {
+      ...state,
+      promptBehaviorGroup: { ...group, primary: update(group.primary) },
+      revision: state.revision + 1,
+    };
+  }
+  const index = group.compares.findIndex((variant) => variant.slotId === slotId);
+  if (index < 0) return state;
+  const compares = [...group.compares];
+  compares[index] = update(compares[index]);
+  return {
+    ...state,
+    promptBehaviorGroup: { ...group, compares },
+    revision: state.revision + 1,
+  };
+}
+
+function nextPromptBehaviorLabel(state: CustomWorkspaceState): string {
+  const labels = new Set(state.promptBehaviorGroup.compares.map((variant) => variant.label));
+  let index = 1;
+  while (labels.has(`Compare ${index}`)) index += 1;
+  return `Compare ${index}`;
+}
+
 export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
   const initial = useMemo(() => loadWorkspaceSnapshot(window.localStorage), []);
   const [state, setState] = useState<CustomWorkspaceState>(initial.state);
@@ -110,6 +152,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     storageWarning,
     compareRun,
     findSlot: (slotId) => findSlotInState(state, slotId),
+    findPromptBehavior: (slotId) => findPromptBehaviorVariant(state.promptBehaviorGroup, slotId),
     selectNode: (slotId, ref, node, editor = null) => setState((current) => mapSlot(current, slotId, (slot) => {
       const sourceNode = cloneNode(node);
       return {
@@ -265,11 +308,56 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       params: { ...current.params, ...patch },
       revision: current.revision + 1,
     })),
-    setPromptBehavior: (promptBehavior) => setState((current) => ({
-      ...current,
-      promptBehavior: structuredClone(promptBehavior),
-      revision: current.revision + 1,
-    })),
+    selectPromptBehavior: (slotId) => setState((current) => (
+      findPromptBehaviorVariant(current.promptBehaviorGroup, slotId)
+        ? { ...current, activePromptBehaviorSlotId: slotId }
+        : current
+    )),
+    addPromptBehaviorCompare: () => {
+      const slotId = createSlotId("compare-prompt-behavior");
+      setState((current) => {
+        const variant: PromptBehaviorVariant = {
+          slotId,
+          label: nextPromptBehaviorLabel(current),
+          mode: "compare",
+          value: structuredClone(current.promptBehaviorGroup.primary.value),
+        };
+        return {
+          ...current,
+          promptBehaviorGroup: {
+            ...current.promptBehaviorGroup,
+            compares: [...current.promptBehaviorGroup.compares, variant],
+          },
+          activePromptBehaviorSlotId: slotId,
+          revision: current.revision + 1,
+        };
+      });
+      return slotId;
+    },
+    removePromptBehaviorCompare: (slotId) => setState((current) => {
+      if (!current.promptBehaviorGroup.compares.some((variant) => variant.slotId === slotId)) return current;
+      return {
+        ...current,
+        promptBehaviorGroup: {
+          ...current.promptBehaviorGroup,
+          compares: current.promptBehaviorGroup.compares.filter((variant) => variant.slotId !== slotId),
+        },
+        activePromptBehaviorSlotId: current.activePromptBehaviorSlotId === slotId
+          ? PRIMARY_PROMPT_BEHAVIOR_SLOT_ID
+          : current.activePromptBehaviorSlotId,
+        revision: current.revision + 1,
+      };
+    }),
+    renamePromptBehavior: (slotId, label) => setState((current) => {
+      const normalized = label.trim();
+      if (!normalized) return current;
+      return mapPromptBehaviorVariant(current, slotId, (variant) => ({ ...variant, label: normalized }));
+    }),
+    setPromptBehavior: (promptBehavior) => setState((current) => mapPromptBehaviorVariant(
+      current,
+      current.activePromptBehaviorSlotId,
+      (variant) => ({ ...variant, value: structuredClone(promptBehavior) }),
+    )),
     setPreview: (preview) => setState((current) => ({ ...current, preview })),
     resetWorkspace: () => {
       clearWorkspaceSnapshot(window.localStorage);
