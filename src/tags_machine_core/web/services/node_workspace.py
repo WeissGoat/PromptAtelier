@@ -85,7 +85,7 @@ class NodeWorkspace:
 
     def read_node(self, ref: str | Path, *, role: str | None = None) -> dict[str, Any]:
         path = Path(ref).resolve()
-        node = self._read_node_document(path, role=role)
+        node = self.read_runtime_node(path, role=role)
         effective_role = role or node.kind
         editor = self.adapter_registry.resolve(path, effective_role).read_editor(path)
         return {
@@ -96,6 +96,11 @@ class NodeWorkspace:
             "raw": self._raw_file(path),
             "editor": editor.model_dump(mode="json"),
         }
+
+    def read_runtime_node(self, ref: str | Path, *, role: str | None = None) -> NodeDocument:
+        """读取生图链路使用的节点，不要求源文件具备 Web 编辑适配器。"""
+        path = Path(ref).resolve()
+        return self._read_node_document(path, role=role)
 
     def preview_editor(self, ref: str | Path, *, role: str, values: dict[str, Any]) -> dict[str, Any]:
         path = self.resolve_node_path(ref)

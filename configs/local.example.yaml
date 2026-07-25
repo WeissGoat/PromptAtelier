@@ -13,6 +13,11 @@ defaults:
 generation:
   executor: "ai_image_gateway_raw"
 
+web:
+  project_requires:
+    - examples/project/collections.yaml
+    - examples/project/nai_const_action_groups.yaml
+
 artist_input_filter:
   negative_prompt:
     enabled: true

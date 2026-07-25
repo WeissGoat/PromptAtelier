@@ -37,6 +37,10 @@ class LoggingConfig(BaseModel):
     level: str = "error"
 
 
+class WebConfig(BaseModel):
+    project_requires: list[str] = Field(default_factory=list)
+
+
 class NovelAIConfig(BaseModel):
     base_url: str = "https://image.novelai.net"
     access_token: str | None = None
@@ -67,6 +71,7 @@ class AppConfig(BaseModel):
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     artist_input_filter: ArtistInputFilterConfig = Field(
         default_factory=ArtistInputFilterConfig
     )

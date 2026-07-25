@@ -16,10 +16,11 @@ from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
-from .routes import batch, compose, generate, health, jobs, nodes, results
+from .routes import batch, compose, generate, health, jobs, node_pools, nodes, results
 from .services.batch_workspace import BatchWorkspace
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
+from .services.node_pool_service import NodePoolService
 from .services.node_save_preview_store import NodeSavePreviewStore
 from .services.result_index import ResultIndex
 
@@ -57,6 +58,11 @@ def create_app(
     app.state.config = config
     app.state.config_path = resolved_config_path
     app.state.node_workspace = node_workspace or NodeWorkspace(design_root=config.legacy.design_root)
+    app.state.node_pool_service = NodePoolService(
+        workspace=app.state.node_workspace,
+        project_requires=config.web.project_requires,
+        base_dir=Path.cwd(),
+    )
     app.state.node_save_previews = NodeSavePreviewStore()
     app.state.result_index = result_index or ResultIndex(
         roots=[config.runtime.output_dir, "outputs", "examples/batches/outputs"],
@@ -83,6 +89,7 @@ def create_app(
     app.include_router(health.router, prefix="/api", tags=["health"])
     app.include_router(jobs.router, prefix="/api", tags=["jobs"])
     app.include_router(nodes.router, prefix="/api", tags=["nodes"])
+    app.include_router(node_pools.router, prefix="/api", tags=["node-pools"])
     app.include_router(compose.router, prefix="/api", tags=["compose"])
     app.include_router(generate.router, prefix="/api", tags=["generate"])
     app.include_router(results.router, prefix="/api", tags=["results"])
