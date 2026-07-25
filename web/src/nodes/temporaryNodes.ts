@@ -46,6 +46,7 @@ function sameNode(left: NodeDocument, right: NodeDocument): boolean {
 }
 
 export function nodeSlotStatus(slot: NodeSlotState): NodeSlotStatus {
+  if (slot.sourceKind === "random") return "random";
   if (!slot.draftNode) {
     return "empty";
   }
@@ -60,6 +61,9 @@ export function hasUsablePositivePrompt(node: NodeDocument | null): boolean {
 }
 
 export function serializeNodeSlot(slot: NodeSlotState): ComposeNodeInput | null {
+  if (slot.sourceKind === "random") {
+    throw new Error("随机节点必须在进入 Composer 前解析为普通节点。");
+  }
   if (!slot.draftNode) {
     return null;
   }

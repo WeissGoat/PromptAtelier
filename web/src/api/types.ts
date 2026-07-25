@@ -1,4 +1,5 @@
 import type { NodeDocument } from "../nodes/types";
+import type { NodePoolSpec } from "../workspace/types";
 
 export type NodeSummary = {
   role: string;
@@ -50,6 +51,67 @@ export type NodeListResponse = {
   offset: number;
   limit: number;
   has_more: boolean;
+};
+
+export type NodePoolCandidate = {
+  role: string;
+  ref: string;
+  name: string;
+  relative?: string | null;
+};
+
+export type NodePoolStats = {
+  raw_total: number;
+  total: number;
+  missing_classify: number;
+  invalid_classify: number;
+  classify_mismatch: number;
+  invalid_node: number;
+};
+
+export type NodePoolScanResponse = {
+  schema: "tags-machine-core.web.node-pool-scan/v1";
+  scan_id: string;
+  role: string;
+  total: number;
+  source_total: number;
+  items: NodePoolCandidate[];
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  next_offset: number | null;
+  stats: NodePoolStats;
+  facets: Record<string, string[]>;
+  warnings: string[];
+};
+
+export type NodePoolCollectionsResponse = {
+  schema: "tags-machine-core.web.node-pool-collections/v1";
+  role: string;
+  items: Array<{ name: string; item_count: number }>;
+};
+
+export type SampledNode = {
+  candidate: NodePoolCandidate;
+  node: NodeDocument;
+  draw_index: number;
+  deck_cycle: number;
+};
+
+export type NodePoolSampleResponse = {
+  schema: "tags-machine-core.web.node-pool-sample/v1";
+  role: string;
+  items: SampledNode[];
+  stats: NodePoolStats;
+};
+
+export type NodePoolScanRequest = {
+  role: string;
+  spec: NodePoolSpec;
+  q?: string;
+  offset?: number;
+  limit?: number;
+  refresh?: boolean;
 };
 
 export type ComposePreviewResponse = {

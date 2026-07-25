@@ -18,7 +18,9 @@ export type CompareCombination = {
 export type CompareDimensions = Record<NodeRole, number> & { behavior: number };
 
 export function selectedSlots(group: RoleNodeGroup): NodeVariantSlot[] {
-  return [group.primary, ...group.compares].filter((slot) => Boolean(slot.draftNode));
+  return [group.primary, ...group.compares].filter((slot) => (
+    slot.sourceKind === "random" ? Boolean(slot.randomSpec?.source.value.trim()) : Boolean(slot.draftNode)
+  ));
 }
 
 function factor(group: RoleNodeGroup): Array<NodeVariantSlot | null> {

@@ -26,7 +26,9 @@ export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot
         label={label}
         onClear={() => workspace.clearSlot(slot.slotId)}
         onCreateBlank={() => workspace.createBlank(slot.slotId)}
+        onCreateRandom={() => workspace.createRandom(slot.slotId)}
         onEdit={(response) => onEditSlot ? onEditSlot(slot.slotId, response) : workspace.openEditor(slot.slotId, response)}
+        onEditRandom={() => workspace.openRandomEditor(slot.slotId)}
         onRemove={slot.mode === "compare" ? () => {
           if (isDirty(slot) && !window.confirm("删除后将丢失当前 Compare 临时修改，是否继续？")) return;
           workspace.removeCompare(slot.slotId);

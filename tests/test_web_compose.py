@@ -4,6 +4,7 @@ from unittest import TestCase
 from fastapi.testclient import TestClient
 
 from tags_machine_core.contracts import GeneratedImage, GenerationResult
+from tags_machine_core.execution import build_core_png_text
 from tags_machine_core.web import create_app
 
 
@@ -75,3 +76,34 @@ class WebComposeTest(TestCase):
         data = response.json()
         self.assertEqual(data["error"]["code"], "compose_preview_failed")
         self.assertIn("missing_artist_ref", data["error"]["message"])
+
+    def test_generate_attaches_random_selection_to_request_result_and_png_metadata(self):
+        captured = {}
+
+        def executor(request, options):
+            captured["request"] = request
+            return GenerationResult(backend="novelai")
+
+        app = create_app(generation_executor=executor)
+        client = TestClient(app)
+        selection = {
+            "slot_id": "primary-action",
+            "role": "action",
+            "candidate": {"ref": "actions/foot", "name": "foot"},
+        }
+        response = client.post("/api/generate", json={
+            "render_request": {
+                "backend": "novelai",
+                "prompt": "1girl, sole focus",
+                "negative_prompt": "",
+            },
+            "random_selections": [selection],
+        })
+        job_id = response.json()["id"]
+        app.state.job_manager.wait(job_id, timeout=5)
+        job = client.get(f"/api/jobs/{job_id}").json()
+
+        self.assertEqual(job["status"], "succeeded")
+        self.assertEqual(job["result"]["random_selections"], [selection])
+        self.assertEqual(captured["request"].meta["random_nodes"], [selection])
+        self.assertIn("random_nodes", build_core_png_text(captured["request"])["tags_machine_core"])

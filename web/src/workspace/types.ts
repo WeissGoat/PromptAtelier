@@ -3,10 +3,38 @@ import type { NodeDocument, NodeRole } from "../nodes/types";
 
 export type SlotMode = "primary" | "compare";
 
+export type NodePoolSourceType = "folder" | "collection" | "glob";
+
+export type ClassifyFilter = {
+  phase: string[];
+  species: string[];
+  cast: string[];
+  domain: string[];
+  subtype: string[];
+  pose: string[];
+  environment: string[];
+  tone: string[];
+  flags: string[];
+  clothing: string[];
+};
+
+export type NodePoolSpec = {
+  source: {
+    type: NodePoolSourceType;
+    value: string;
+    recursive: boolean;
+    include_names: string[];
+    exclude_names: string[];
+  };
+  filters: { classify: ClassifyFilter };
+};
+
 export type NodeVariantSlot = {
   slotId: string;
   role: NodeRole;
   mode: SlotMode;
+  sourceKind?: "fixed" | "random";
+  randomSpec?: NodePoolSpec | null;
   sourceRef: string | null;
   sourceNode: NodeDocument | null;
   draftNode: NodeDocument | null;
@@ -58,6 +86,7 @@ export type PromptBehaviorGroup = {
 
 export type WorkspaceEditorState = {
   slotId: string | null;
+  kind?: "node" | "random" | null;
   tab: "form" | "json";
   draftNode: NodeDocument | null;
   baselineNode: NodeDocument | null;

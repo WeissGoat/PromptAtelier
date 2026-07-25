@@ -24,12 +24,13 @@ export type NodeDocument = {
 
 export type NodeSlotState = {
   role: NodeRole;
+  sourceKind?: "fixed" | "random";
   sourceRef: string | null;
   sourceNode: NodeDocument | null;
   draftNode: NodeDocument | null;
 };
 
-export type NodeSlotStatus = "empty" | "original" | "modified" | "temporary";
+export type NodeSlotStatus = "empty" | "original" | "modified" | "temporary" | "random";
 
 export type ComposeNodeInput = {
   role: NodeRole;

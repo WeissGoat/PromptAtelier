@@ -5,8 +5,10 @@ import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord } from "../api/types";
 import { compareDimensions } from "../compare/matrix";
 import { compareRunCount } from "../compare/runPlan";
+import { createCompareGroupOutputDir, createCompareOutputDir } from "../compare/useCompareRunController";
 import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
+import { hasRandomSlots, resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
 import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
@@ -16,6 +18,11 @@ import { ImageDetailDialog } from "./ImageDetailDialog";
 
 const terminalJobStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
 const slotLabels: Record<NodeRole, string> = { artist: "Artist", character: "Character", action: "Action" };
+
+function randomSeed(): number {
+  if (globalThis.crypto?.getRandomValues) return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+  return Math.floor(Math.random() * 0x1_0000_0000);
+}
 
 function novelaiArtistPayload(slot: NodeVariantSlot): Record<string, unknown> | null {
   const renderers = slot.draftNode?.renderers;
@@ -54,9 +61,16 @@ function seedForImage(image: GenerationImage, result: GenerationResult | undefin
 }
 
 function validateSelected(slots: Record<NodeRole, NodeVariantSlot>): string | null {
-  if (!slots.character.draftNode && !slots.action.draftNode) return "请至少选择或新建一个 Character 或 Action 节点。";
+  const selected = (slot: NodeVariantSlot) => slot.sourceKind === "random"
+    ? Boolean(slot.randomSpec?.source.value.trim())
+    : Boolean(slot.draftNode);
+  if (!selected(slots.character) && !selected(slots.action)) return "请至少选择或新建一个 Character 或 Action 节点。";
   for (const role of Object.keys(slots) as NodeRole[]) {
     const slot = slots[role];
+    if (slot.sourceKind === "random") {
+      if (!slot.randomSpec?.source.value.trim()) return `${slotLabels[role]} 随机节点尚未配置来源。`;
+      continue;
+    }
     const status = nodeSlotStatus(slot);
     if (role === "artist" && slot.draftNode && status !== "original") {
       const artistPayload = novelaiArtistPayload(slot);
@@ -126,20 +140,26 @@ export function CustomGeneratePanel() {
     character: groups.character.primary,
     action: groups.action.primary,
   }), [groups]);
-  const previewRequest = useMemo(() => buildComposeRenderRequest(primary, params, {
+  const primaryHasRandom = hasRandomSlots(primary);
+  const previewRequest = useMemo(() => primaryHasRandom ? null : buildComposeRenderRequest(primary, params, {
     compare: false,
     promptBehavior: activeBehavior.value,
-  }), [activeBehavior.value, params, primary]);
-  const primaryRequest = useMemo(() => buildComposeRenderRequest(primary, params, {
+  }), [activeBehavior.value, params, primary, primaryHasRandom]);
+  const primaryRequest = useMemo(() => primaryHasRandom ? null : buildComposeRenderRequest(primary, params, {
     compare: false,
     promptBehavior: primaryBehavior.value,
-  }), [params, primary, primaryBehavior.value]);
-  const previewRequestSignature = useMemo(() => JSON.stringify(previewRequest), [previewRequest]);
-  const primaryRequestSignature = useMemo(() => JSON.stringify(primaryRequest), [primaryRequest]);
+  }), [params, primary, primaryBehavior.value, primaryHasRandom]);
+  const previewRequestSignature = useMemo(() => primaryHasRandom
+    ? JSON.stringify({ primary, params, behavior: activeBehavior.value })
+    : JSON.stringify(previewRequest), [activeBehavior.value, params, previewRequest, primary, primaryHasRandom]);
+  const primaryRequestSignature = useMemo(() => primaryHasRandom
+    ? JSON.stringify({ primary, params, behavior: primaryBehavior.value })
+    : JSON.stringify(primaryRequest), [params, primary, primaryBehavior.value, primaryHasRandom, primaryRequest]);
   const signatureRef = useRef({ preview: previewRequestSignature, primary: primaryRequestSignature });
   signatureRef.current = { preview: previewRequestSignature, primary: primaryRequestSignature };
   const [previewSignature, setPreviewSignature] = useState("");
   const [job, setJob] = useState<JobRecord | null>(null);
+  const [randomJobs, setRandomJobs] = useState<Array<{ job: JobRecord; selections: RandomSelectionRecord[] }>>([]);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -152,6 +172,9 @@ export function CustomGeneratePanel() {
   const ordinaryImagePaths = job?.status === "succeeded"
     ? job.result?.images?.map((image) => image.path) ?? []
     : [];
+  const randomImagePaths = randomJobs.flatMap((item) => item.job.status === "succeeded"
+    ? item.job.result?.images?.map((image) => image.path) ?? []
+    : []);
   const compareImagePaths = compare.results.flatMap((result) => result.job?.status === "succeeded"
     ? result.job.result?.images?.map((image) => image.path) ?? []
     : []);
@@ -187,7 +210,14 @@ export function CustomGeneratePanel() {
     setError("");
     setStatus(`Previewing ${activeBehavior.label}`);
     try {
-      const result = await compose(previewRequest, previewRequestSignature, "preview", true);
+      const request = primaryHasRandom
+        ? buildComposeRenderRequest(
+          (await resolveRandomItems([{ value: null, slots: primary }]))[0].slots,
+          params,
+          { compare: true, promptBehavior: activeBehavior.value },
+        )
+        : previewRequest!;
+      const result = await compose(request, previewRequestSignature, "preview", true);
       setStatus(result.render_request ? `Preview ready: ${activeBehavior.label}` : "Agent required");
     } catch (requestError) {
       setStatus("Preview failed");
@@ -222,11 +252,15 @@ export function CustomGeneratePanel() {
     setError("");
     setStatus("Generating Primary");
     try {
+      if (primaryHasRandom) {
+        await generateRandomPrimary();
+        return;
+      }
       const primaryPreviewCurrent = previewSignature === primaryRequestSignature;
       const ready = primaryPreviewCurrent && preview?.render_request
         ? preview
         : await compose(
-          primaryRequest,
+          primaryRequest!,
           primaryRequestSignature,
           "primary",
           activeBehavior.slotId === primaryBehavior.slotId,
@@ -240,6 +274,42 @@ export function CustomGeneratePanel() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function generateRandomPrimary() {
+    const count = Math.max(1, Math.trunc(params.nt));
+    const resolved = await resolveRandomItems(Array.from({ length: count }, (_, index) => ({ value: index, slots: primary })));
+    const parsedSeed = Number(params.seed);
+    const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
+    const outputDir = createCompareOutputDir().replace("compare_", "random_");
+    const token = ++pollToken.current;
+    setJob(null);
+    setRandomJobs([]);
+    for (let index = 0; index < resolved.length; index += 1) {
+      if (pollToken.current !== token) return;
+      const seed = explicitSeed ? parsedSeed + index : randomSeed();
+      setStatus(`Generating random ${index + 1} / ${resolved.length}`);
+      const runParams = { ...params, nt: 1, seed: String(seed) };
+      const request = buildComposeRenderRequest(resolved[index].slots, runParams, {
+        compare: true,
+        promptBehavior: primaryBehavior.value,
+      });
+      const ready = await apiPost<ComposePreviewResponse>("/compose-preview", request);
+      if (!ready.render_request) throw new Error("该随机节点组合需要外部 Agent 先完成提示词拼接。");
+      let current = await apiPost<JobRecord>("/generate", {
+        render_request: ready.render_request,
+        output_dir: createCompareGroupOutputDir(outputDir, index + 1, seed),
+        random_selections: resolved[index].randomSelections,
+      });
+      setRandomJobs((jobs) => [...jobs, { job: current, selections: resolved[index].randomSelections }]);
+      while (!terminalJobStatuses.has(current.status) && pollToken.current === token) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        current = await apiGet<JobRecord>(`/jobs/${encodeURIComponent(current.id)}`);
+        setRandomJobs((jobs) => jobs.map((item) => item.job.id === current.id ? { ...item, job: current } : item));
+      }
+      if (current.status !== "succeeded") throw new Error(current.error || `Generation ${current.status}`);
+    }
+    setStatus(`Random Primary complete · ${resolved.length}`);
   }
 
   async function generateCompare() {
@@ -269,6 +339,7 @@ export function CustomGeneratePanel() {
         <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> Generate Primary</button>
       </div>
       {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
+      {randomJobs.length ? <section className="job-result"><strong>Random Primary</strong><span>{randomJobs.filter((item) => item.job.status === "succeeded").length} / {randomJobs.length}</span>{randomJobs.map((item) => <ImageGrid job={item.job} key={item.job.id} onOpenImage={setSelectedImage} prefix="Random" sequencePaths={randomImagePaths} />)}</section> : null}
 
       <section className="compare-generate-section">
         <div className="section-title-row">

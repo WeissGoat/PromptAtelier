@@ -4,6 +4,7 @@ import type { ComposePreviewResponse, NodeEditorDocument, NodeReadResponse } fro
 import { useCompareRunController, type CompareRunController } from "../compare/useCompareRunController";
 import { cloneNode, createTemporaryNode } from "../nodes/temporaryNodes";
 import type { NodeDocument, NodeRole } from "../nodes/types";
+import { createDefaultNodePoolSpec } from "../randomNodes/spec";
 import {
   clearWorkspaceSnapshot,
   createEmptySlot,
@@ -18,6 +19,7 @@ import {
 } from "./promptBehavior";
 import type {
   CustomWorkspaceState,
+  NodePoolSpec,
   NodeVariantSlot,
   PromptBehaviorParams,
   PromptBehaviorVariant,
@@ -32,12 +34,15 @@ type CustomWorkspaceContextValue = {
   selectNode(slotId: string, ref: string, node: NodeDocument, editor?: NodeEditorDocument | null): void;
   applySavedNode(slotId: string, response: NodeReadResponse): void;
   createBlank(slotId: string): void;
+  createRandom(slotId: string): void;
+  updateRandomSpec(slotId: string, spec: NodePoolSpec): void;
   updateDraft(slotId: string, node: NodeDocument): void;
   restoreSlot(slotId: string): void;
   clearSlot(slotId: string): void;
   addCompare(role: NodeRole): string;
   removeCompare(slotId: string): void;
   openEditor(slotId: string, response?: NodeReadResponse): void;
+  openRandomEditor(slotId: string): void;
   closeEditor(): void;
   setEditorTab(tab: "form" | "json"): void;
   setEditorDraft(node: NodeDocument): void;
@@ -157,6 +162,8 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       const sourceNode = cloneNode(node);
       return {
         ...slot,
+        sourceKind: "fixed",
+        randomSpec: null,
         sourceRef: ref,
         sourceNode,
         draftNode: cloneNode(sourceNode),
@@ -169,6 +176,8 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       const sourceEditor = response.editor ? structuredClone(response.editor) : null;
       const next = mapSlot(current, slotId, (slot) => ({
         ...slot,
+        sourceKind: "fixed",
+        randomSpec: null,
         sourceRef: response.ref,
         sourceNode,
         draftNode: cloneNode(sourceNode),
@@ -189,11 +198,42 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     }),
     createBlank: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
+      sourceKind: "fixed",
+      randomSpec: null,
       sourceRef: null,
       sourceNode: null,
       draftNode: createTemporaryNode(slot.role),
       sourceEditor: null,
       draftEditorValues: null,
+    }))),
+    createRandom: (slotId) => setState((current) => {
+      const next = mapSlot(current, slotId, (slot) => ({
+        ...slot,
+        sourceKind: "random",
+        randomSpec: slot.randomSpec ? structuredClone(slot.randomSpec) : createDefaultNodePoolSpec(),
+        sourceRef: null,
+        sourceNode: null,
+        draftNode: null,
+        sourceEditor: null,
+        draftEditorValues: null,
+      }));
+      return {
+        ...next,
+        editor: {
+          slotId,
+          kind: "random",
+          tab: "form",
+          draftNode: null,
+          baselineNode: null,
+          editValues: null,
+          baselineValues: null,
+        },
+      };
+    }),
+    updateRandomSpec: (slotId, spec) => setState((current) => mapSlot(current, slotId, (slot) => ({
+      ...slot,
+      sourceKind: "random",
+      randomSpec: structuredClone(spec),
     }))),
     updateDraft: (slotId, node) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
@@ -206,6 +246,8 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     }))),
     clearSlot: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
+      sourceKind: "fixed",
+      randomSpec: null,
       sourceRef: null,
       sourceNode: null,
       draftNode: null,
@@ -218,6 +260,8 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
         const primary = current.groups[role].primary;
         const mirrored = {
           ...slot,
+          sourceKind: primary.sourceKind,
+          randomSpec: primary.randomSpec ? structuredClone(primary.randomSpec) : null,
           sourceRef: primary.sourceRef,
           sourceNode: primary.sourceNode ? cloneNode(primary.sourceNode) : null,
           draftNode: primary.draftNode ? cloneNode(primary.draftNode) : null,
@@ -246,7 +290,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
               compares: group.compares.filter((slot) => slot.slotId !== slotId),
             } },
             editor: current.editor.slotId === slotId
-              ? { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null }
+              ? { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null }
               : current.editor,
             revision: current.revision + 1,
           };
@@ -259,6 +303,8 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
         const sourceNode = cloneNode(response.node);
         return {
           ...slot,
+          sourceKind: "fixed",
+          randomSpec: null,
           sourceRef: response.ref,
           sourceNode,
           draftNode: cloneNode(sourceNode),
@@ -270,6 +316,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       if (!slot?.draftNode) return current;
       return { ...next, editor: {
         slotId,
+        kind: "node",
         tab: "form",
         draftNode: cloneNode(slot.draftNode),
         baselineNode: cloneNode(slot.draftNode),
@@ -281,9 +328,25 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
         baselineValues: slot.sourceEditor ? structuredClone(slot.sourceEditor.values) : null,
       } };
     }),
+    openRandomEditor: (slotId) => setState((current) => {
+      const slot = findSlotInState(current, slotId);
+      if (!slot || slot.sourceKind !== "random" || !slot.randomSpec) return current;
+      return {
+        ...current,
+        editor: {
+          slotId,
+          kind: "random",
+          tab: "form",
+          draftNode: null,
+          baselineNode: null,
+          editValues: null,
+          baselineValues: null,
+        },
+      };
+    }),
     closeEditor: () => setState((current) => ({
       ...current,
-      editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
+      editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
     })),
     setEditorTab: (tab) => setState((current) => ({ ...current, editor: { ...current.editor, tab } })),
     setEditorDraft: (node) => setState((current) => ({

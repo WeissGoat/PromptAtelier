@@ -1,4 +1,4 @@
-import { FilePlus2, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Dices, FilePlus2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
@@ -14,9 +14,11 @@ type NodeSlotProps = {
   placeholder: string;
   onSelect: (response: NodeReadResponse) => void;
   onCreateBlank: () => void;
+  onCreateRandom?: () => void;
   onRestore: () => void;
   onClear: () => void;
   onEdit: (response?: NodeReadResponse) => void;
+  onEditRandom?: () => void;
   onRemove?: () => void;
 };
 
@@ -25,6 +27,7 @@ function statusLabel(slot: NodeVariantSlot): string {
   if (status === "original") return "原始节点";
   if (status === "modified") return "临时修改";
   if (status === "temporary") return "空白临时节点";
+  if (status === "random") return "随机节点";
   return "未选择";
 }
 
@@ -34,6 +37,10 @@ function requiresConfirmation(slot: NodeVariantSlot): boolean {
 }
 
 function displayName(slot: NodeVariantSlot): string {
+  if (slot.sourceKind === "random") {
+    const source = slot.randomSpec?.source;
+    return source?.value ? `Random · ${source.type} · ${source.value}` : "Random · 未配置来源";
+  }
   const name = slot.draftNode?.name || slot.sourceNode?.name || slot.draftNode?.id || "";
   const status = nodeSlotStatus(slot);
   return name && (status === "modified" || status === "temporary") ? `${name} *` : name;
@@ -45,9 +52,11 @@ export function NodeSlot({
   placeholder,
   onSelect,
   onCreateBlank,
+  onCreateRandom,
   onRestore,
   onClear,
   onEdit,
+  onEditRandom,
   onRemove,
 }: NodeSlotProps) {
   const [error, setError] = useState("");
@@ -82,6 +91,10 @@ export function NodeSlot({
   }
 
   async function handleEdit() {
+    if (slot.sourceKind === "random") {
+      onEditRandom?.();
+      return;
+    }
     if (!slot.sourceRef || slot.sourceEditor) {
       onEdit();
       return;
@@ -119,22 +132,30 @@ export function NodeSlot({
           <span className="node-status">{statusLabel(slot)}</span>
         </div>
         <div className="node-slot-actions">
-          <button aria-label={`编辑${label}节点`} className="icon-button" disabled={!slot.draftNode || loading} onClick={() => void handleEdit()} title="编辑节点" type="button"><Pencil size={16} /></button>
+          <button aria-label={`编辑${label}节点`} className="icon-button" disabled={(!slot.draftNode && slot.sourceKind !== "random") || loading} onClick={() => void handleEdit()} title="编辑节点" type="button"><Pencil size={16} /></button>
           <button aria-label={`新建空白${label}节点`} className="icon-button" onClick={() => runReplacingAction(onCreateBlank, "当前临时修改将被替换，是否继续？")} title="新建空白节点" type="button"><FilePlus2 size={16} /></button>
+          {onCreateRandom ? <button aria-label={`创建随机${label}节点`} className="icon-button" onClick={() => runReplacingAction(onCreateRandom, "当前节点将被替换为随机节点，是否继续？")} title="随机节点" type="button"><Dices size={16} /></button> : null}
           <button aria-label={`还原${label}节点`} className="icon-button" disabled={!slot.sourceNode} onClick={() => runReplacingAction(onRestore, "当前临时修改将被还原，是否继续？")} title="还原原始节点" type="button"><RotateCcw size={16} /></button>
           {onRemove ? (
             <button aria-label={`删除${label} Compare节点`} className="icon-button" onClick={onRemove} title="删除 Compare 节点" type="button"><Trash2 size={16} /></button>
           ) : null}
         </div>
       </div>
-      <NodePicker
-        label={label}
-        onClear={() => runReplacingAction(onClear, "当前临时修改将被清除，是否继续？")}
-        onSelect={(node) => void handleSelect(node)}
-        placeholder={placeholder}
-        role={slot.role}
-        value={displayName(slot)}
-      />
+      {slot.sourceKind === "random" ? (
+        <button className="random-node-summary" onClick={onEditRandom} type="button">
+          <Dices size={16} />
+          <span>{displayName(slot)}</span>
+        </button>
+      ) : (
+        <NodePicker
+          label={label}
+          onClear={() => runReplacingAction(onClear, "当前临时修改将被清除，是否继续？")}
+          onSelect={(node) => void handleSelect(node)}
+          placeholder={placeholder}
+          role={slot.role}
+          value={displayName(slot)}
+        />
+      )}
       {loading ? <small className="field-hint">正在读取节点...</small> : null}
       {error ? <small className="field-error">{error}</small> : null}
     </section>

@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import type { NodeRole } from "../nodes/types";
+import { resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
 import { promptBehaviorFingerprint } from "../workspace/promptBehavior";
 import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
@@ -25,6 +26,7 @@ export type CompareCombinationResult = {
   status: CompareCombinationStatus;
   job: JobRecord | null;
   error: string;
+  randomSelections: RandomSelectionRecord[];
 };
 
 export type CompareRunSummary = {
@@ -64,10 +66,11 @@ export function createCompareGroupOutputDir(parent: string, groupIndex: number, 
 }
 
 function slotLabel(slot: CompareCombination[NodeRole]): string {
+  if (slot?.sourceKind === "random") return `Random · ${slot.randomSpec?.source.type ?? "未配置"}`;
   return slot?.draftNode?.name || slot?.draftNode?.id || slot?.sourceNode?.name || slot?.sourceRef || "未选择";
 }
 
-function initialResult(item: CompareRunItem): CompareCombinationResult {
+function initialResult(item: CompareRunItem, randomSelections: RandomSelectionRecord[] = []): CompareCombinationResult {
   return {
     runId: item.runId,
     groupIndex: item.groupIndex,
@@ -86,6 +89,7 @@ function initialResult(item: CompareRunItem): CompareCombinationResult {
     status: "queued",
     job: null,
     error: "",
+    randomSelections,
   };
 }
 
@@ -150,12 +154,25 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     const token = ++runToken.current;
     const matrix = buildCompareMatrix(groups, promptBehaviorGroup);
     const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
+    const resolvedPlan = await resolveRandomItems(plan.items.map((item) => ({
+      value: item,
+      slots: {
+        artist: item.combination.artist,
+        character: item.combination.character,
+        action: item.combination.action,
+      },
+    })));
+    const executableItems = resolvedPlan.map(({ value, slots, randomSelections }) => ({
+      ...value,
+      combination: { ...value.combination, ...slots },
+      randomSelections,
+    }));
     const outputDir = outputDirFactory();
-    setResults(plan.items.map(initialResult));
+    setResults(executableItems.map((item) => initialResult(item, item.randomSelections)));
     setRunning(true);
     let nextIndex = 0;
 
-    async function runItem(item: CompareRunItem) {
+    async function runItem(item: CompareRunItem & { randomSelections: RandomSelectionRecord[] }) {
       updateResult(token, item.runId, { status: "running", error: "" });
       try {
         const runParams: RenderWorkspaceParams = { ...params, seed: String(item.groupSeed) };
@@ -168,6 +185,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
         const queued = await post("/generate", {
           render_request: preview.render_request,
           output_dir: createCompareGroupOutputDir(outputDir, item.groupIndex, item.groupSeed),
+          random_selections: item.randomSelections,
         }) as JobRecord;
         updateResult(token, item.runId, { job: queued });
         const completed = await pollJob(token, queued);
@@ -182,8 +200,8 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     async function worker() {
       while (runToken.current === token) {
         const index = nextIndex++;
-        if (index >= plan.items.length) return;
-        await runItem(plan.items[index]);
+        if (index >= executableItems.length) return;
+        await runItem(executableItems[index]);
       }
     }
 

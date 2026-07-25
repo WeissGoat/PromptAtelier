@@ -37,6 +37,8 @@ export function createEmptySlot(role: NodeRole, mode: "primary" | "compare"): No
     slotId: mode === "primary" ? `primary-${role}` : createSlotId(`compare-${role}`),
     role,
     mode,
+    sourceKind: "fixed",
+    randomSpec: null,
     sourceRef: null,
     sourceNode: null,
     draftNode: null,
@@ -60,7 +62,7 @@ export function createEmptyWorkspace(): CustomWorkspaceState {
     params: { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" },
     promptBehaviorGroup: createDefaultPromptBehaviorGroup(),
     activePromptBehaviorSlotId: PRIMARY_PROMPT_BEHAVIOR_SLOT_ID,
-    editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
+    editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
     preview: null,
     revision: 0,
   };
@@ -75,6 +77,8 @@ function isSlot(value: unknown, role: NodeRole, mode: "primary" | "compare"): va
   return value.role === role
     && value.mode === mode
     && typeof value.slotId === "string"
+    && (value.sourceKind === "fixed" || value.sourceKind === "random")
+    && (value.randomSpec === null || isObject(value.randomSpec))
     && (value.sourceRef === null || typeof value.sourceRef === "string")
     && (value.sourceNode === null || isObject(value.sourceNode))
     && (value.draftNode === null || isObject(value.draftNode))
@@ -96,6 +100,7 @@ function isWorkspace(value: unknown): value is CustomWorkspaceState {
     && typeof value.params.nt === "number"
     && typeof value.params.seed === "string"
     && (value.editor.slotId === null || typeof value.editor.slotId === "string")
+    && (value.editor.kind === null || value.editor.kind === "node" || value.editor.kind === "random")
     && (value.editor.tab === "form" || value.editor.tab === "json")
     && typeof value.revision === "number"
     && isObject(value.promptBehaviorGroup)
@@ -125,9 +130,31 @@ function migrateWorkspace(value: unknown): unknown {
   const activePromptBehaviorSlotId = findPromptBehaviorVariant(promptBehaviorGroup, requestedActive)
     ? requestedActive
     : promptBehaviorGroup.primary.slotId;
+  const groups = isObject(value.groups)
+    ? Object.fromEntries(roles.map((role) => {
+      const rawGroup = isObject(value.groups) ? value.groups[role] : null;
+      if (!isObject(rawGroup)) return [role, rawGroup];
+      const normalizeSlot = (slot: unknown) => isObject(slot) ? {
+        ...slot,
+        sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
+        randomSpec: isObject(slot.randomSpec) ? slot.randomSpec : null,
+      } : slot;
+      return [role, {
+        ...rawGroup,
+        primary: normalizeSlot(rawGroup.primary),
+        compares: Array.isArray(rawGroup.compares) ? rawGroup.compares.map(normalizeSlot) : rawGroup.compares,
+      }];
+    }))
+    : value.groups;
+  const editor = isObject(value.editor) ? {
+    ...value.editor,
+    kind: value.editor.kind === "random" ? "random" : value.editor.slotId ? "node" : null,
+  } : value.editor;
   return {
     ...value,
     schema: CUSTOM_WORKSPACE_SCHEMA,
+    groups,
+    editor,
     promptBehaviorGroup,
     activePromptBehaviorSlotId,
   };

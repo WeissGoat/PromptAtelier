@@ -81,6 +81,7 @@ def build_core_png_text(request: RenderRequest) -> dict[str, str]:
         "nodes": request.meta.get("node_refs") or [],
         "source_nodes": request.meta.get("source_nodes") or [],
         "character_prompts": request.meta.get("character_prompts"),
+        "random_nodes": request.meta.get("random_nodes") or [],
     }
     result = {
         CORE_PNG_INFO_KEY: json.dumps(_drop_none(core_info), ensure_ascii=False),

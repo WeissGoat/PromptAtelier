@@ -86,6 +86,22 @@ describe("workspace storage", () => {
     expect(loaded.state.promptBehaviorGroup.primary.value.policyRules).toEqual({});
   });
 
+  it("persists random node configuration without runtime scan results", () => {
+    const state = createEmptyWorkspace();
+    state.groups.action.primary.sourceKind = "random";
+    state.groups.action.primary.randomSpec = {
+      source: { type: "collection", value: "foot", recursive: false, include_names: [], exclude_names: [] },
+      filters: { classify: { phase: [], species: [], cast: [], domain: ["foot"], subtype: ["sole_focus"], pose: [], environment: [], tone: [], flags: [], clothing: [] } },
+    };
+
+    saveWorkspaceSnapshot(localStorage, state);
+    const loaded = loadWorkspaceSnapshot(localStorage);
+
+    expect(loaded.status).toBe("loaded");
+    expect(loaded.state.groups.action.primary.sourceKind).toBe("random");
+    expect(loaded.state.groups.action.primary.randomSpec?.filters.classify.subtype).toEqual(["sole_focus"]);
+  });
+
   it("migrates v1 prompt behavior into the primary behavior variant", () => {
     const state = createEmptyWorkspace();
     const snapshot = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;

@@ -132,6 +132,19 @@ class NodePoolTest(TestCase):
 
             self.assertEqual([item.name for item in result.candidates], ["a", "b"])
 
+    def test_folder_include_only_expands_matching_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._node(root / "pn_foot", "included")
+            self._node(root / "st_other", "excluded")
+            spec = NodePoolSpec.model_validate({
+                "source": {"type": "folder", "value": ".", "include_names": ["pn_*"]},
+            })
+
+            result = self._resolver(root).scan("action", spec)
+
+            self.assertEqual([item.name for item in result.candidates], ["included"])
+
     def test_classify_filter_rejects_non_action_role(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

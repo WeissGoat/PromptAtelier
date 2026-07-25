@@ -9,6 +9,7 @@ import { ActionNodeForm } from "./nodeForms/ActionNodeForm";
 import { ArtistNodeForm } from "./nodeForms/ArtistNodeForm";
 import { CharacterNodeForm } from "./nodeForms/CharacterNodeForm";
 import { NodeSaveDiffDialog } from "./NodeSaveDiffDialog";
+import { RandomNodeEditor } from "./RandomNodeEditor";
 
 type NodePreviewResponse = { node: NodeDocument };
 
@@ -85,6 +86,10 @@ export function NodeWorkspaceEditor() {
       window.clearTimeout(timer);
     };
   }, [editor.editValues, editor.tab, slot?.role, slot?.slotId, slot?.sourceEditor, slot?.sourceRef]);
+
+  if (slot?.sourceKind === "random" && editor.kind === "random") {
+    return <section className="panel node-workspace-panel"><RandomNodeEditor slot={slot} /></section>;
+  }
 
   if (!slot || !editor.draftNode) {
     return (

@@ -50,13 +50,9 @@ class NodePoolResolver:
         for raw_ref in refs:
             try:
                 ref = self._resolve_ref(role, raw_ref)
-                response = self.node_loader(role, ref)
-                node = response.get("node") if isinstance(response, dict) else None
-                if not isinstance(node, dict):
-                    raise ValueError("node loader returned no node document")
-                node_kind = str(node.get("kind") or "").strip()
-                if node_kind and node_kind not in {role, "unknown"}:
-                    raise ValueError(f"node kind {node_kind!r} does not match role {role!r}")
+                path = Path(ref)
+                if not path.is_dir():
+                    raise ValueError("node candidate is not a directory")
             except Exception as exc:
                 stats.invalid_node += 1
                 if len(warnings) < 50:
@@ -80,11 +76,10 @@ class NodePoolResolver:
                     stats.classify_mismatch += 1
                     continue
 
-            path = Path(ref)
             candidates.append(CandidateNode(
                 role=role,
                 ref=ref,
-                name=str(node.get("name") or node.get("id") or path.name),
+                name=path.name,
                 relative=self._relative(path),
             ))
         stats.total = len(candidates)
@@ -118,13 +113,21 @@ class NodePoolResolver:
             generator.shuffle(deck)
             if previous_ref and len(deck) > 1 and deck[0].ref == previous_ref:
                 deck[0], deck[1] = deck[1], deck[0]
+            added_this_cycle = 0
             for candidate in deck:
                 if len(result) >= count:
                     break
-                response = self.node_loader(role, candidate.ref)
-                node = response.get("node") if isinstance(response, dict) else None
-                if not isinstance(node, dict):
-                    raise ValueError(f"random node became unreadable: {candidate.ref}")
+                try:
+                    response = self.node_loader(role, candidate.ref)
+                    node = response.get("node") if isinstance(response, dict) else None
+                    if not isinstance(node, dict):
+                        raise ValueError("node loader returned no node document")
+                    node_kind = str(node.get("kind") or "").strip()
+                    if node_kind and node_kind not in {role, "unknown"}:
+                        raise ValueError(f"node kind {node_kind!r} does not match role {role!r}")
+                except Exception:
+                    scan.stats.invalid_node += 1
+                    continue
                 result.append(SampledNode(
                     candidate=candidate,
                     node=node,
@@ -132,6 +135,9 @@ class NodePoolResolver:
                     deck_cycle=cycle,
                 ))
                 previous_ref = candidate.ref
+                added_this_cycle += 1
+            if added_this_cycle == 0:
+                raise ValueError("random node pool has no readable nodes")
         return NodePoolSampleResult(items=result, stats=scan.stats)
 
     def _resolve_ref(self, role: str, raw_ref: str) -> str:

@@ -69,4 +69,16 @@ describe("compare matrix", () => {
     expect(matrix[0].combinationId).not.toBe(matrix[1].combinationId);
     expect(buildCompareMatrix({ artist, character: group("character", 1), action: group("action", 1) }, behaviors).map((item) => item.combinationId)).toEqual(matrix.map((item) => item.combinationId));
   });
+
+  it("counts a configured random slot as one matrix item", () => {
+    const character = group("character", 0);
+    character.primary.sourceKind = "random";
+    character.primary.randomSpec = {
+      source: { type: "folder", value: "角色/group", recursive: false, include_names: [], exclude_names: [] },
+      filters: { classify: { phase: [], species: [], cast: [], domain: [], subtype: [], pose: [], environment: [], tone: [], flags: [], clothing: [] } },
+    };
+
+    expect(selectedSlots(character)).toHaveLength(1);
+    expect(buildCompareMatrix({ artist: group("artist", 1), character, action: group("action", 1) }, behaviorGroup())).toHaveLength(1);
+  });
 });

@@ -117,11 +117,12 @@ def _discover_nodes(root: Path, source: NodePoolSource) -> list[str]:
         if _matches_any(candidate.name, source.exclude_names):
             continue
         if source.include_names and not _matches_any(candidate.name, source.include_names):
-            if candidate != root:
-                result.extend(_discover_nodes(
-                    candidate,
-                    source.model_copy(update={"include_names": [], "exclude_names": []}),
-                ))
+            continue
+        if candidate != root and source.include_names:
+            result.extend(_discover_nodes(
+                candidate,
+                source.model_copy(update={"include_names": [], "exclude_names": []}),
+            ))
             continue
         if _has_node_file(candidate):
             result.append(str(candidate))
