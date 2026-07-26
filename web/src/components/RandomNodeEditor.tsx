@@ -4,21 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../api/client";
 import type { NodePoolCandidate, NodePoolScanResponse } from "../api/types";
 import { listNodePoolCollections, scanNodePool } from "../randomNodes/api";
-import { CLASSIFY_FIELDS, CLASSIFY_OPTIONS } from "../randomNodes/spec";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
-import type { ClassifyFilter, NodePoolSpec, NodeVariantSlot } from "../workspace/types";
+import type { NodePoolSpec, NodeVariantSlot } from "../workspace/types";
+import { ClassifyFilterEditor } from "./ClassifyFilterEditor";
 
-const labels: Record<keyof ClassifyFilter, string> = {
-  phase: "Phase",
-  species: "Species",
-  cast: "Cast",
-  domain: "Domain",
-  subtype: "Subtype",
-  pose: "Pose",
-  environment: "Environment",
-  tone: "Tone",
-  flags: "Flags",
-  clothing: "Clothing",
+const roleLabels: Record<NodeVariantSlot["role"], string> = {
+  artist: "Artist",
+  character: "Character",
+  action: "Action",
 };
 
 function splitPatterns(value: string): string[] {
@@ -73,15 +66,6 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
     update({ ...spec!, source: { ...spec!.source, ...patch } });
   }
 
-  function updateFilter(field: keyof ClassifyFilter, values: string[]) {
-    update({
-      ...spec!,
-      filters: {
-        classify: { ...spec!.filters.classify, [field]: values },
-      },
-    });
-  }
-
   async function runScan(options: { refresh: boolean; append: boolean }) {
     const current = spec;
     if (!current?.source.value.trim()) return;
@@ -112,14 +96,6 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
     }
   }
 
-  function facetValues(field: keyof ClassifyFilter): string[] {
-    return [...new Set([
-      ...CLASSIFY_OPTIONS[field],
-      ...(scan?.facets[field] ?? []),
-      ...spec!.filters.classify[field],
-    ])].sort();
-  }
-
   return (
     <section className="random-node-editor">
       <div className="panel-title node-editor-title">
@@ -146,8 +122,8 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
           </label>
         ) : (
           <label className="field compact random-source-value">
-            <span>{spec.source.type === "folder" ? "相对 design_root 的目录" : "相对 design_root 的 Glob"}</span>
-            <input aria-label="随机节点来源值" onChange={(event) => updateSource({ value: event.target.value })} placeholder={spec.source.type === "folder" ? "动作改2/new" : "动作改2/new/*foot*"} value={spec.source.value} />
+            <span>{spec.source.type === "folder" ? `相对 ${roleLabels[slot.role]} 根目录` : `相对 ${roleLabels[slot.role]} 根目录的 Glob`}</span>
+            <input aria-label="随机节点来源值" onChange={(event) => updateSource({ value: event.target.value })} placeholder={spec.source.type === "folder" ? (slot.role === "action" ? "new" : ".") : (slot.role === "action" ? "new/*足部*" : "*")} value={spec.source.value} />
           </label>
         )}
         <button className="icon-button random-refresh" disabled={busy || !spec.source.value.trim()} onClick={() => void runScan({ refresh: true, append: false })} title="重新扫描" type="button"><RefreshCw className={busy ? "spin" : ""} size={17} /></button>
@@ -164,16 +140,11 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
       {slot.role === "action" ? (
         <section className="random-classify-filters">
           <div className="section-title-row"><div><h3>classify.yaml 二次过滤</h3><small>同字段任意命中，不同字段同时满足；不选择则不启用过滤。</small></div></div>
-          <div className="classify-filter-grid">
-            {CLASSIFY_FIELDS.map((field) => (
-              <label className="field compact" key={field}>
-                <span>{labels[field]}</span>
-                <select aria-label={`classify ${field}`} multiple onChange={(event) => updateFilter(field, Array.from(event.target.selectedOptions, (option) => option.value))} size={Math.min(4, Math.max(2, facetValues(field).length || 2))} value={spec.filters.classify[field]}>
-                  {facetValues(field).map((value) => <option key={value} value={value}>{value}</option>)}
-                </select>
-              </label>
-            ))}
-          </div>
+          <ClassifyFilterEditor
+            facets={scan?.facets ?? {}}
+            onChange={(classify) => update({ ...spec, filters: { classify } })}
+            value={spec.filters.classify}
+          />
         </section>
       ) : null}
 
