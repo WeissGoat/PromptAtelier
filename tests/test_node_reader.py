@@ -4,17 +4,18 @@ from pathlib import Path
 
 import yaml
 
-from tags_machine_core.nodes import (
-    NodeReader,
+from tags_machine_core.nodes import NodeReader, validate_node_tree
+from tools.legacy_migration import (
     apply_legacy_tags_migration,
     audit_legacy_tags,
     migrate_legacy_action_tags,
+    migrate_legacy_artist_tags,
     migrate_legacy_background_tags,
     migrate_legacy_character_tags,
-    migrate_legacy_style_tags,
     plan_legacy_tags_migration,
-    validate_node_tree,
 )
+
+migrate_legacy_style_tags = migrate_legacy_artist_tags
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

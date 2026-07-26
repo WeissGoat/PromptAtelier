@@ -369,7 +369,7 @@ tags:
 迁移命令：
 
 ```powershell
-uv run python -m tags_machine_core migrate-action-tags `
+uv run python -m tools.legacy_migration migrate-action-tags `
   F:\my_project\new\tags_machine\design\动作改2\next\17_20240706_1720261297 `
   --character-scope foot_detail `
   --output migrated\nodes\actions\foot_closeup\meta.yaml
@@ -541,9 +541,9 @@ clothing:
 批量填充脚本：
 
 ```powershell
-uv run python scripts/fill_action_meta_clothing.py F:\my_project\new\tags_machine\design\动作改2 --report outputs\action_clothing_scan.json
+uv run python -m tools.legacy_migration.fill_action_meta_clothing F:\my_project\new\tags_machine\design\动作改2 --report outputs\action_clothing_scan.json
 
-uv run python scripts/fill_action_meta_clothing.py F:\my_project\new\tags_machine\design\动作改2 --write --backup --report outputs\action_clothing_fill.json
+uv run python -m tools.legacy_migration.fill_action_meta_clothing F:\my_project\new\tags_machine\design\动作改2 --write --backup --report outputs\action_clothing_fill.json
 ```
 
 默认不写文件，只输出报告。加 `--write` 后才会创建或更新 action `meta.yaml`。

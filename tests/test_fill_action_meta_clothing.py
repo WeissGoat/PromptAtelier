@@ -1,23 +1,12 @@
 from pathlib import Path
-import importlib.util
-import sys
 
 import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from tags_machine_core.nodes import NodeReader
-
-SCRIPT_PATH = PROJECT_ROOT / "scripts" / "fill_action_meta_clothing.py"
-SPEC = importlib.util.spec_from_file_location("fill_action_meta_clothing", SCRIPT_PATH)
-assert SPEC is not None
-SCRIPT_MODULE = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(SCRIPT_MODULE)
-fill_action_meta_clothing = SCRIPT_MODULE.fill_action_meta_clothing
+from tools.legacy_migration.fill_action_meta_clothing import fill_action_meta_clothing
 
 
 def test_preview_does_not_write_meta_yaml(tmp_path: Path):

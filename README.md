@@ -44,10 +44,7 @@
 - `inspect-node`：读取节点文件或目录
 - `validate-node-tree`：只读校验结构化节点目录，检查 v1 文件名、关键字段和禁止字段
 - `inspect-style`：读取旧画风节点
-- `migrate-style-tags`：把旧画风 `tags.txt` 转成结构化 style `node.yaml`
-- `migrate-character-tags`：把旧角色 `tags.txt` 转成结构化 character `meta.yaml`
-- `migrate-action-tags`：把旧动作 `tags.txt` 转成结构化 action `meta.yaml`
-- `migrate-background-tags`：把旧背景 `tags.txt` 转成结构化 background `meta.yaml`
+- `tools.legacy_migration`：离线迁移 artist、character、action、background 的旧 `tags.txt`；运行时 core 不再提供任何迁移或写回命令
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
 - `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest` / `GenerationResult`
 - `compare-image-result`：生成旧图与 core `GenerationResult` 的单 case 对比报告，覆盖图片 hash、尺寸、PNG 参数和人工视觉检查字段
@@ -188,21 +185,21 @@ uv run python -m tags_machine_core api-generate api_generate.json `
 
 `generate` 是 NovelAI 的兼容快捷入口，会直接从 prompt 生成 `RenderRequest` 并保存图片；新流程优先使用 `run-prompt --dry-run` 预览完整 `PromptBundle + RenderRequest`，确认后再去掉 `--dry-run` 生图。`execute-render-request` 默认只执行 NovelAI；ComfyUI / SD WebUI / Forge 真实执行需要 `--allow-experimental-backend`，属于预研代码，不作为本阶段接入承诺。
 
-旧 `tags.txt` 节点迁移示例：
+旧 `tags.txt` 节点迁移示例。以下命令只在源码仓库中运行，属于 `tools` 离线维护工具，不是 `tags_machine_core` 运行时 CLI：
 
 ```powershell
-uv run python -m tags_machine_core audit-legacy-tags `
+uv run python -m tools.legacy_migration audit-legacy-tags `
   F:\my_project\new\tags_machine\design\动作改2 `
   --kind action `
   --output migration_audit_actions.yaml
 
-uv run python -m tags_machine_core plan-legacy-tags-migration `
+uv run python -m tools.legacy_migration plan-legacy-tags-migration `
   F:\my_project\new\tags_machine\design\动作改2 `
   --kind action `
   --output-root migrated `
   --output migration_plan_actions.yaml
 
-uv run python -m tags_machine_core apply-legacy-tags-migration `
+uv run python -m tools.legacy_migration apply-legacy-tags-migration `
   F:\my_project\new\tags_machine\design\动作改2 `
   --kind action `
   --output-root migrated `
@@ -212,21 +209,21 @@ uv run python -m tags_machine_core validate-node-tree `
   migrated\nodes `
   --output migrated_node_validation.yaml
 
-uv run python -m tags_machine_core migrate-style-tags `
+uv run python -m tools.legacy_migration migrate-artist-tags `
   F:\my_project\new\tags_machine\design\画风\sample_style `
   --output migrated\nodes\styles\sample_style\node.yaml
 
-uv run python -m tags_machine_core migrate-character-tags `
+uv run python -m tools.legacy_migration migrate-character-tags `
   F:\my_project\new\tags_machine\design\角色\danbooru_angel_beats_207\danbooru_715_tachibana_kanade_立華かなで `
   --variant school_uniform `
   --output migrated\nodes\characters\tachibana_kanade\meta.yaml
 
-uv run python -m tags_machine_core migrate-action-tags `
+uv run python -m tools.legacy_migration migrate-action-tags `
   F:\my_project\new\tags_machine\design\动作改2\next\17_20240706_1720261297 `
   --character-scope foot_detail `
   --output migrated\nodes\actions\foot_closeup\meta.yaml
 
-uv run python -m tags_machine_core migrate-background-tags `
+uv run python -m tools.legacy_migration migrate-background-tags `
   F:\my_project\new\tags_machine\design\背景\simple_room `
   --output migrated\nodes\backgrounds\simple_room\meta.yaml
 ```

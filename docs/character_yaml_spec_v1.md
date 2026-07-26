@@ -342,7 +342,7 @@ shoes, shoes|boots|loafers
 v1 提供保守迁移命令：
 
 ```powershell
-uv run python -m tags_machine_core migrate-character-tags `
+uv run python -m tools.legacy_migration migrate-character-tags `
   F:\my_project\new\tags_machine\design\角色\danbooru_angel_beats_207\danbooru_715_tachibana_kanade_立華かなで `
   --variant school_uniform `
   --output migrated\nodes\characters\tachibana_kanade\meta.yaml

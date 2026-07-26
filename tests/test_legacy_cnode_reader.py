@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from tags_machine_core.nodes import NodeReader
-from tags_machine_core.nodes.migration import migrate_legacy_character_tags
+from tools.legacy_migration import migrate_legacy_character_tags
 
 
 class LegacyCNodeReaderTest(unittest.TestCase):

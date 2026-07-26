@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tags_machine_core.nodes import NovelAIArtistRepository, migrate_legacy_artist_tags
+from tags_machine_core.nodes import NovelAIArtistRepository
+from tools.legacy_migration import migrate_legacy_artist_tags
 
 
 class NovelAIArtistRepositoryTest(unittest.TestCase):

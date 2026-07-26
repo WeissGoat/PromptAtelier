@@ -11,10 +11,11 @@ from unittest.mock import patch
 
 import yaml
 
-from tags_machine_core.cli import main
+from tags_machine_core.cli import build_parser as build_core_parser, main
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import verify_acceptance_suite
+from tools.legacy_migration.cli import main as legacy_migration_main
 
 
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -34,6 +35,19 @@ def _png_bytes_with_text(chunks: dict[str, str]) -> bytes:
 
 
 class CliNodesTest(unittest.TestCase):
+    def test_core_cli_does_not_expose_legacy_migration_commands(self):
+        help_text = build_core_parser().format_help()
+        for command in (
+            "migrate-artist-tags",
+            "migrate-action-tags",
+            "migrate-character-tags",
+            "migrate-background-tags",
+            "audit-legacy-tags",
+            "plan-legacy-tags-migration",
+            "apply-legacy-tags-migration",
+        ):
+            self.assertNotIn(command, help_text)
+
     def _write_sample_nodes(self, root: Path) -> tuple[Path, Path]:
         character = root / "character"
         action = root / "action"
@@ -1299,7 +1313,7 @@ gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multipl
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "migrate-artist-tags",
                         str(style_dir),
@@ -1324,6 +1338,39 @@ gen_json, {"sampler": "k_euler_ancestral", "steps": 28, "reference_image_multipl
             self.assertEqual(node.renderers["novelai"]["params"]["reference_image_multiple"], ["abc"])
             self.assertEqual(node.renderers["novelai"]["params"]["reference_strength_multiple"], [0.2])
 
+    def test_legacy_migration_output_requires_explicit_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            style_dir = root / "legacy_style"
+            style_dir.mkdir()
+            (style_dir / "tags.txt").write_text("style prompt", encoding="utf-8")
+            output = style_dir / "node.yaml"
+            output.write_text("existing", encoding="utf-8")
+
+            with self.assertRaises(FileExistsError):
+                legacy_migration_main(
+                    [
+                        "migrate-artist-tags",
+                        str(style_dir),
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertEqual(output.read_text(encoding="utf-8"), "existing")
+
+            with redirect_stdout(io.StringIO()):
+                exit_code = legacy_migration_main(
+                    [
+                        "migrate-artist-tags",
+                        str(style_dir),
+                        "--output",
+                        str(output),
+                        "--overwrite",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(NodeReader().read(output).kind, "artist")
+
     def test_migrate_background_tags_command_writes_structured_meta(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1344,7 +1391,7 @@ gen_json, {"sampler": "ignored_for_background"}
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "migrate-background-tags",
                         str(background_dir),
@@ -1385,7 +1432,7 @@ gen_json, {"sampler": "ignored_for_action"}
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "migrate-action-tags",
                         str(action_dir),
@@ -1439,7 +1486,7 @@ shoes, shoes|boots|loafers
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "migrate-character-tags",
                         str(character_dir),
@@ -1501,7 +1548,7 @@ node_background, flower field
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "audit-legacy-tags",
                         str(action_root),
@@ -1564,7 +1611,7 @@ gen_json, {"reference_image_multiple": ["abc"], "reference_strength_multiple": [
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "plan-legacy-tags-migration",
                         str(style_root),
@@ -1626,7 +1673,7 @@ signature_motif
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = main(
+                exit_code = legacy_migration_main(
                     [
                         "apply-legacy-tags-migration",
                         str(character_root),

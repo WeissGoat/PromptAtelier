@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from tags_machine_core.nodes.migration import migrate_legacy_action_tags
+from .migration import migrate_legacy_action_tags
 
 
 VALID_CLOTHING_STATES = {"nude", "clothed", "specific_outfit"}

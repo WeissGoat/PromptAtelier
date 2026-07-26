@@ -3,7 +3,8 @@ import unittest
 from pathlib import Path
 
 from tags_machine_core.composers import ScriptComposer
-from tags_machine_core.nodes import NovelAIArtistRepository, migrate_legacy_artist_tags
+from tags_machine_core.nodes import NovelAIArtistRepository
+from tools.legacy_migration import migrate_legacy_artist_tags
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.renderers import NovelAIRenderAdapter
 
