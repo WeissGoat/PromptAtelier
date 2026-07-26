@@ -66,8 +66,9 @@ class NodePoolTest(TestCase):
     def test_folder_scan_does_not_require_classify_when_filter_is_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._node(root, "a")
-            self._node(root, "b")
+            action_root = root / "动作改2"
+            self._node(action_root, "a")
+            self._node(action_root, "b")
 
             result = self._resolver(root).scan(
                 "action",
@@ -80,7 +81,8 @@ class NodePoolTest(TestCase):
     def test_classify_filters_use_or_within_field_and_and_across_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._node(root, "foot", {
+            action_root = root / "动作改2"
+            self._node(action_root, "foot", {
                 "phase": "core",
                 "species": "human",
                 "cast": "1boy1girl",
@@ -92,7 +94,7 @@ class NodePoolTest(TestCase):
                 "flags": [],
                 "clothing": "clothed",
             })
-            self._node(root, "mouth", {
+            self._node(action_root, "mouth", {
                 "phase": "core",
                 "species": "human",
                 "cast": "1boy1girl",
@@ -104,7 +106,7 @@ class NodePoolTest(TestCase):
                 "flags": [],
                 "clothing": "nude",
             })
-            self._node(root, "missing")
+            self._node(action_root, "missing")
             spec = NodePoolSpec.model_validate({
                 "source": {"type": "folder", "value": "."},
                 "filters": {"classify": {
@@ -124,8 +126,9 @@ class NodePoolTest(TestCase):
     def test_sample_avoids_repeats_until_pool_is_exhausted(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._node(root, "a")
-            self._node(root, "b")
+            character_root = root / "角色"
+            self._node(character_root, "a")
+            self._node(character_root, "b")
             spec = NodePoolSpec.model_validate({"source": {"type": "folder", "value": "."}})
 
             result = self._resolver(root).sample("character", spec, 5, rng=random.Random(3))
@@ -157,8 +160,9 @@ class NodePoolTest(TestCase):
     def test_folder_include_only_expands_matching_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._node(root / "pn_foot", "included")
-            self._node(root / "st_other", "excluded")
+            action_root = root / "动作改2"
+            self._node(action_root / "pn_foot", "included")
+            self._node(action_root / "st_other", "excluded")
             spec = NodePoolSpec.model_validate({
                 "source": {"type": "folder", "value": ".", "include_names": ["pn_*"]},
             })
@@ -170,7 +174,7 @@ class NodePoolTest(TestCase):
     def test_classify_filter_rejects_non_action_role(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self._node(root, "a")
+            self._node(root / "角色", "a")
             spec = NodePoolSpec.model_validate({
                 "source": {"type": "folder", "value": "."},
                 "filters": {"classify": {"domain": ["foot"]}},
@@ -178,3 +182,40 @@ class NodePoolTest(TestCase):
 
             with self.assertRaisesRegex(ValueError, "only supported for action"):
                 self._resolver(root).scan("character", spec)
+
+    def test_folder_and_glob_sources_are_relative_to_the_role_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            new_root = root / "动作改2" / "new"
+            self._node(new_root, "01_足部特写")
+            self._node(new_root, "02_站立")
+
+            folder = self._resolver(root).scan(
+                "action",
+                NodePoolSpec.model_validate({"source": {"type": "folder", "value": "new"}}),
+            )
+            globbed = self._resolver(root).scan(
+                "action",
+                NodePoolSpec.model_validate({"source": {"type": "glob", "value": "new/*足部*"}}),
+            )
+
+            self.assertEqual([item.relative for item in folder.candidates], ["new/01_足部特写", "new/02_站立"])
+            self.assertEqual([item.name for item in globbed.candidates], ["01_足部特写"])
+
+    def test_direct_source_rejects_absolute_and_escaped_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            action_root = root / "动作改2"
+            action_root.mkdir()
+            resolver = self._resolver(root)
+
+            with self.assertRaisesRegex(ValueError, "相对 action 根目录"):
+                resolver.scan(
+                    "action",
+                    NodePoolSpec.model_validate({"source": {"type": "folder", "value": str(action_root)}}),
+                )
+            with self.assertRaisesRegex(ValueError, "位于 action 根目录内"):
+                resolver.scan(
+                    "action",
+                    NodePoolSpec.model_validate({"source": {"type": "glob", "value": "../角色/*"}}),
+                )

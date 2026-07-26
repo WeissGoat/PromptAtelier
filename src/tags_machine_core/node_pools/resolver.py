@@ -4,6 +4,8 @@ import random
 from pathlib import Path
 from typing import Any, Callable
 
+from tags_machine_core.nodes.role_paths import primary_role_root, resolve_role_relative_path
+
 from .classify import MissingClassifyError, load_classify_tags
 from .models import (
     CLASSIFY_FIELDS,
@@ -35,9 +37,18 @@ class NodePoolResolver:
     def scan(self, role: str, spec: NodePoolSpec) -> NodePoolScanResult:
         if spec.filters.classify.enabled() and role != "action":
             raise ValueError("classify.yaml filters are only supported for action random nodes")
+        source = spec.source
+        relative_root: Path | None = None
+        if source.type in {"folder", "glob"}:
+            relative_root = primary_role_root(self.design_root, role).resolve()
+            if not relative_root.is_dir():
+                raise FileNotFoundError(f"{role} node root not found: {relative_root}")
+            source = source.model_copy(update={
+                "value": str(resolve_role_relative_path(self.design_root, role, source.value)),
+            })
         refs = expand_node_pool_source(
             role=role,
-            source=spec.source,
+            source=source,
             context=NodePoolSelectorContext(
                 base_dir=self.design_root,
                 collections=self.collections,
@@ -80,7 +91,7 @@ class NodePoolResolver:
                 role=role,
                 ref=ref,
                 name=path.name,
-                relative=self._relative(path),
+                relative=self._relative(path, root=relative_root),
             ))
         stats.total = len(candidates)
         return NodePoolScanResult(
@@ -156,9 +167,9 @@ class NodePoolResolver:
             raise ValueError("node pool candidate must be inside design_root") from exc
         return str(resolved)
 
-    def _relative(self, path: Path) -> str | None:
+    def _relative(self, path: Path, *, root: Path | None = None) -> str | None:
         try:
-            return path.resolve().relative_to(self.design_root).as_posix()
+            return path.resolve().relative_to(root or self.design_root).as_posix()
         except ValueError:
             return None
 

@@ -90,7 +90,7 @@ class WebNodePoolTest(TestCase):
 
             response = client.post("/api/node-pools/sample", json={
                 "role": "action",
-                "spec": {"source": {"type": "folder", "value": "动作改2"}},
+                "spec": {"source": {"type": "folder", "value": "."}},
                 "count": 2,
             })
 
@@ -99,6 +99,30 @@ class WebNodePoolTest(TestCase):
             self.assertEqual(len(items), 2)
             self.assertEqual(len({item["candidate"]["ref"] for item in items}), 2)
             self.assertTrue(all(item["node"]["kind"] == "action" for item in items))
+            self.assertTrue(all("动作改2/" not in item["candidate"]["relative"] for item in items))
+
+    def test_direct_folder_rejects_absolute_and_escaped_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            actions = root / "design" / "动作改2"
+            actions.mkdir(parents=True)
+            collections = root / "collections.yaml"
+            collections.write_text(yaml.safe_dump({"collections": {}}, sort_keys=False), encoding="utf-8")
+            client = self._client(root, collections)
+
+            absolute = client.post("/api/node-pools/scan", json={
+                "role": "action",
+                "spec": {"source": {"type": "folder", "value": str(actions)}},
+            })
+            escaped = client.post("/api/node-pools/scan", json={
+                "role": "action",
+                "spec": {"source": {"type": "glob", "value": "../角色/*"}},
+            })
+
+            self.assertEqual(absolute.status_code, 400)
+            self.assertIn("相对 action 根目录", absolute.json()["error"]["message"])
+            self.assertEqual(escaped.status_code, 400)
+            self.assertIn("位于 action 根目录内", escaped.json()["error"]["message"])
 
     def test_collection_endpoint_uses_project_requires(self):
         with tempfile.TemporaryDirectory() as tmp:
