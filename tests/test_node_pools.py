@@ -6,9 +6,31 @@ from unittest import TestCase
 import yaml
 
 from tags_machine_core.node_pools import NodePoolResolver, NodePoolSpec
+from tags_machine_core.nodes.role_paths import (
+    primary_role_root,
+    resolve_role_relative_path,
+    role_roots,
+)
 
 
 class NodePoolTest(TestCase):
+    def test_role_paths_reuse_existing_role_directories_and_reject_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design_root = Path(tmp)
+            action_root = design_root / "动作改2"
+            action_root.mkdir()
+
+            self.assertEqual(primary_role_root(design_root, "action"), action_root.resolve())
+            self.assertEqual(role_roots(design_root, "action")[0], action_root.resolve())
+            self.assertEqual(
+                resolve_role_relative_path(design_root, "action", "new"),
+                action_root.resolve() / "new",
+            )
+            with self.assertRaisesRegex(ValueError, "相对 action 根目录"):
+                resolve_role_relative_path(design_root, "action", str(action_root))
+            with self.assertRaisesRegex(ValueError, "位于 action 根目录内"):
+                resolve_role_relative_path(design_root, "action", "../角色")
+
     def _node(self, root: Path, name: str, classify: dict | None = None) -> Path:
         path = root / name
         path.mkdir(parents=True)

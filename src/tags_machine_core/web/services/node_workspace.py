@@ -10,17 +10,10 @@ import yaml
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.nodes.reader import NodeReader
+from tags_machine_core.nodes.role_paths import role_roots
 from tags_machine_core.web.node_editing import FileMutation, NodeSourceAdapterRegistry, create_default_registry
 from tags_machine_core.web.node_editing.text_utils import source_hash
 from tags_machine_core.web.services.node_save_preview_store import SourceChangedError
-
-
-ROLE_DIRS = {
-    "artist": ["画风", "artist", "artists"],
-    "character": ["角色", "character", "characters"],
-    "action": ["动作改2", "动作", "action", "actions"],
-    "background": ["背景", "background", "backgrounds"],
-}
 
 
 class NodeWorkspace:
@@ -54,7 +47,7 @@ class NodeWorkspace:
         offset: int = 0,
         limit: int = 20,
     ) -> tuple[list[dict[str, Any]], bool]:
-        roots = [self.design_root / item for item in ROLE_DIRS.get(role, [role])]
+        roots = role_roots(self.design_root, role)
         result: list[dict[str, Any]] = []
         needle = (query or "").strip().lower()
         offset = max(0, offset)
