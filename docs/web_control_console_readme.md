@@ -7,10 +7,20 @@ PromptAtelier Web 是 `tags_machine_core` 的本地控制台。前端负责节�
 在 `refactor` 目录执行：
 
 ```powershell
-uv run python scripts\dev_web.py --backend-port 8877
+uv run python scripts\dev_web.py
 ```
 
-启动后终端会打印前端地址。当前机器的 `8765` 位于 Windows 保留端口范围内，推荐固定使用 `8877`。
+启动命令默认执行受控重启：先关闭上一轮由本项目启动的 uvicorn、Vite、esbuild 等进程树，再使用相同端口启动新实例。实例信息记录在不会提交的 `runtime/dev_web.json`。
+
+只停止服务、不重新启动：
+
+```powershell
+uv run python scripts\dev_web.py --stop
+```
+
+如果端口被其他项目或无法确认归属的进程占用，脚本会拒绝启动并打印 PID 和命令行，不会直接结束未知进程。需要改端口时仍可使用 `--backend-port` 和 `--frontend-port`。
+
+启动后终端会打印前端地址。
 开发脚本默认启用后端热重载，Python 源码更新后会自动重启 Uvicorn；如需关闭可传入 `--no-reload-backend`。
 
 配置读取顺序：
