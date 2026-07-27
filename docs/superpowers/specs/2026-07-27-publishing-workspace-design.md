@@ -25,6 +25,7 @@
 
 - 支持 NeeView `.nvpls`、普通目录、快捷方式目录等多种输入。
 - 所有输入适配器向下游输出相同的数据结构。
+- 通过统一 Reader 接口读取新版和旧版图片节点信息，并向 classify 输出相同结构。
 - 建立长期存在的公共 workspace，可持续导入图片并创建多个投稿任务。
 - 使用 SQLite 管理大规模图片索引，不依赖文件夹作为业务事实来源。
 - 按 `artist / character / action_group / action` 建立可配置分类视图。
@@ -71,6 +72,10 @@ NeeView 用于浏览和初选；文件夹用于二次筛选；Bridge 通过重�
 
 预处理和打包只写入缓存、临时构建目录和正式 build。任何失败都不能污染原图或留下看似成功的半成品。
 
+### 4.6 可插拔 Strategy/Adapter
+
+Reader 和 Exporter 都采用可插拔 Strategy/Adapter 结构：调用方依赖稳定接口，Registry 管理具体实现。增加新的图片节点格式或视图输出格式时，只新增实现并注册，不修改 classify、Catalog 和投稿任务代码。
+
 ## 5. 总体架构
 
 ```text
@@ -87,7 +92,13 @@ NeeView 用于浏览和初选；文件夹用于二次筛选；Bridge 通过重�
     SelectionSet
         |
         v
-    AssetCatalog <---- MetadataEnricher / ActionResolver
+ ImageNodeReaderRegistry
+        |
+        v
+   ImageNodeInfo
+        |
+        v
+    AssetCatalog <---- ActionResolver
         |
         v
  ClassificationViewBuilder
@@ -138,7 +149,12 @@ src/tags_machine_core/publishing/
     directory.py
     shortcut.py
   metadata/
-    enricher.py
+    models.py
+    registry.py
+    readers/
+      base.py
+      core.py
+      legacy.py
   views/
     builder.py
     models.py
@@ -291,14 +307,59 @@ warnings: []
 
 `artist`、`character`、`action_group`、`action` 均使用列表，不能假设一张图只有一个角色或一个分类来源。
 
-### 7.4 asset_id 与哈希缓存
+### 7.4 ImageNodeInfo
+
+所有图片节点 Reader 输出相同结构：
+
+```yaml
+format: core
+reader: core
+
+nodes:
+  - role: artist
+    id: "20260412"
+    ref: "F:/design/画风/20260412"
+    index: 0
+
+  - role: character
+    id: akemi_homura
+    ref: "F:/design/角色/akemi_homura"
+    index: 0
+
+  - role: action
+    id: foot_detail_001
+    ref: "F:/design/动作改2/new/foot_detail_001"
+    index: 0
+
+warnings: []
+```
+
+统一模型：
+
+```text
+ImageNodeInfo
+  format: core | legacy | unknown
+  reader: str
+  nodes: list[ImageNodeRef]
+  warnings: list[str]
+
+ImageNodeRef
+  role: str
+  id: str | null
+  ref: str | null
+  index: int
+```
+
+`role` 第一阶段支持 `artist`、`character`、`action_group`、`action` 和 `background`，模型本身不使用枚举封死未来角色。
+
+### 7.5 asset_id 与哈希缓存
 
 - `asset_id` 使用图片内容 SHA-256，保证图片移动后仍可识别。
 - Catalog 按绝对路径、文件大小和修改时间缓存哈希。
 - 文件状态未变化时不重新读取完整图片计算哈希。
 - 同内容不同路径合并为同一 Asset，但保留可用路径列表和来源记录。
 
-### 7.5 ViewEntry 与 ExportPlan
+### 7.6 ViewEntry 与 ExportPlan
 
 ```yaml
 hierarchy:
@@ -371,7 +432,7 @@ InputAdapter
 - 目标不存在时记录 broken item；是否阻止导入由 strict 配置决定。
 - 该适配器用于读取旧数据，不意味着新系统默认输出 `.lnk`。
 
-## 9. 公共 Catalog 与元数据补全
+## 9. 公共 Catalog 与图片节点 Reader
 
 ### 9.1 Catalog 职责
 
@@ -386,17 +447,82 @@ InputAdapter
 - Exporter 导出状态和输出清单。
 - 图片处理缓存状态。
 
-### 9.2 MetadataEnricher
+### 9.2 ImageNodeReader 接口
 
-补全顺序：
+```text
+ImageNodeReader
+  id
+  priority
+  supports(image_metadata) -> bool
+  read(image_path, image_metadata) -> ImageNodeInfo
+```
 
-1. 读取 refactor 图片归档元数据。
-2. 读取旧 tags_machine 写入的 PNG 顶层节点信息。
-3. 读取 `Comment` 等兼容元数据。
-4. 通过现有 Action Resolver 将分类引用定位到原始 Action。
-5. 无法解析时保留图片，但记录缺失字段和原因。
+Reader 只负责把一种图片节点格式转换成统一 `ImageNodeInfo`，不创建分类目录，不执行 Exporter，也不包含投稿任务规则。
 
-节点缺失不阻止素材进入 Catalog；分类时使用 `unknown` 占位或按配置跳过该维度。
+### 9.3 CoreImageNodeReader
+
+读取新版图片内嵌的结构化字段：
+
+```text
+tags_machine_core
+  schema
+  nodes
+  source_nodes
+```
+
+规则：
+
+- 第一阶段支持 `tags-machine-core.png-info/v1`。
+- `nodes` 中的 role、id、ref、index 原样标准化为 `ImageNodeRef`。
+- 保留多个 character 和其他重复 role，不压缩成单值。
+- 未识别 schema 时返回 warning，不按已知新版结构强行解析。
+- 新版图片同时存在旧兼容字段时，以合法的结构化字段为准。
+
+### 9.4 LegacyImageNodeReader
+
+读取旧 tags_machine 图片顶层字段：
+
+```text
+artist
+artist_path
+character
+action
+topic
+background
+```
+
+映射规则：
+
+- `artist` 和 `artist_path` 合并为 artist 的 id/ref。
+- `character` 映射为 character。
+- `action` 映射为 action。
+- `topic` 映射为 action_group。
+- `background` 映射为 background。
+- 字段兼容普通字符串和 JSON 数组字符串。
+- 缺少某个字段时只省略对应节点，不阻止读取其他字段。
+
+### 9.5 ImageNodeReaderRegistry
+
+```text
+ImageNodeReaderRegistry
+  |- CoreImageNodeReader
+  `- LegacyImageNodeReader
+```
+
+选择规则：
+
+1. 存在合法 `tags_machine_core` 时使用 Core Reader。
+2. 否则，存在任意旧版节点字段时使用 Legacy Reader。
+3. 新版结构存在但损坏时，可以 fallback 到 Legacy Reader，并在结果中记录 warning。
+4. 两个 Reader 都不支持时返回 `format: unknown`、空 nodes 和明确 warning。
+
+第一阶段不同时运行两个 Reader，也不引入 Evidence 合并、置信度或冲突投票系统。未来支持新图片格式时，实现并注册新的 Reader 即可。
+
+### 9.6 节点解析与 classify
+
+Reader 输出后，可以通过现有 Action Resolver 将旧 action/action_group 引用定位到原始 Action。该解析属于 Reader 下游，不写进 Core 或 Legacy Reader。
+
+节点缺失不阻止素材进入 Catalog；classify 使用统一 `ImageNodeInfo.nodes`，缺失维度进入 `unknown` 或按配置跳过。classify 不判断 `format` 和具体 Reader 类型。
 
 ## 10. 分类视图
 
@@ -870,7 +996,7 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 | 旧版能力 | 新模块 |
 | --- | --- |
 | NeeView 收藏列表 | `NeeViewPlaylistInput` |
-| `new_lnk_character_type` | `ImportService + MetadataEnricher + ClassificationViewBuilder` |
+| `new_lnk_character_type` | `ImportService + ImageNodeReaderRegistry + ClassificationViewBuilder` |
 | 分类快捷方式树 | `ExportPlan + 可配置 ViewExporter` |
 | 旧 `.lnk` 输出 | `WindowsShortcutExporter` |
 | 人工二次筛选 | PublishTask `selection/all/post/cover` |
@@ -894,7 +1020,21 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 - 非法项显示明确路径和原因。
 - 重复导入不会重复创建 Asset。
 
-### 24.2 分类对比
+### 24.2 图片节点 Reader 验收
+
+使用真实旧版图片和新版 core 图片：
+
+- Core Reader 从 `tags_machine_core.nodes` 读取 artist、character、action 和 background。
+- Core Reader 保留多个 character 及其 index。
+- Legacy Reader 正确读取 artist、artist_path、character、action、topic 和 background。
+- Legacy Reader 将 topic 输出为 action_group。
+- 旧字段为字符串和 JSON 数组字符串时均能读取。
+- 新版图片同时包含兼容字段时只使用 Core Reader 主结果。
+- 新版结构损坏但旧兼容字段存在时 fallback 成功并记录 warning。
+- 无节点信息图片进入 Catalog，但输出 unknown warning。
+- 两种 Reader 的结果都能直接交给同一 ClassificationViewBuilder。
+
+### 24.3 分类对比
 
 选择固定真实图片样本，同时运行旧 `new_lnk_character_type` 与新分类链路：
 
@@ -906,7 +1046,7 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 
 不要求目录命名细节与旧版完全相同，但业务分类必须一致。
 
-### 24.3 Exporter 验收
+### 24.4 Exporter 验收
 
 - 自动导出全部非空叶子 `.nvpls`。
 - 每个播放列表成员数量、路径和顺序与逻辑 ViewEntry 一致。
@@ -916,7 +1056,7 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 - 支持环境下符号链接目标正确；不支持环境下给出明确错误。
 - Exporter 清理不会删除人工未知文件。
 
-### 24.4 投稿任务验收
+### 24.5 投稿任务验收
 
 - 从真实 NeeView 列表创建 candidates 快照。
 - 修改原播放列表后任务 candidates 不自动变化。
@@ -925,7 +1065,7 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 - 同一图片可进入两个任务，并产生复用提示。
 - Bridge 数字前缀重命名后，系统按 natural sort 读取正确顺序。
 
-### 24.5 图片处理真实验收
+### 24.6 图片处理真实验收
 
 使用同一组真实图片运行旧 `process_all` 与新处理链路：
 
@@ -937,7 +1077,7 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 - 输出顺序与人工文件名一致。
 - 对外目录和 ZIP 不包含私有 manifest 和生成参数。
 
-### 24.6 缓存与失败验收
+### 24.7 缓存与失败验收
 
 - 同任务重复构建命中处理缓存。
 - 跨任务复用相同图片时命中处理缓存。
@@ -951,7 +1091,9 @@ Output: G:\AI\publish\tasks\...\builds\...\output
 - Workspace 初始化与配置。
 - SQLite Catalog。
 - NeeView、目录、快捷方式 Input Adapter。
-- MetadataEnricher。
+- ImageNodeReader 接口与 Registry。
+- CoreImageNodeReader。
+- LegacyImageNodeReader。
 - ClassificationViewBuilder。
 - ExportCoordinator。
 - NeeViewPlaylistExporter。
