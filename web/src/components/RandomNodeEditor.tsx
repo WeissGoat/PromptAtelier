@@ -99,7 +99,7 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
   return (
     <section className="random-node-editor">
       <div className="panel-title node-editor-title">
-        <div><h2>Random {slot.role}</h2><small>{slot.mode === "compare" ? "Compare" : "Primary"} · 每个实际任务独立抽取</small></div>
+        <div><h2>Random {slot.role}</h2><small>{slot.mode === "compare" ? "Compare" : "Primary"} · 普通生成逐任务抽取，Compare 组内共享</small></div>
         <button aria-label="关闭随机节点编辑器" className="icon-button" onClick={workspace.closeEditor} title="关闭" type="button"><X size={17} /></button>
       </div>
 

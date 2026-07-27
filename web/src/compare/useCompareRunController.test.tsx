@@ -1,11 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import type { NodeDocument, NodeRole } from "../nodes/types";
+import { createDefaultNodePoolSpec } from "../randomNodes/spec";
 import { createDefaultPromptBehaviorGroup } from "../workspace/promptBehavior";
 import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { useCompareRunController } from "./useCompareRunController";
+
+const sampleNodePool = vi.fn();
+
+vi.mock("../randomNodes/api", () => ({ sampleNodePool: (...args: unknown[]) => sampleNodePool(...args) }));
 
 const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" };
 
@@ -25,6 +30,8 @@ function group(role: NodeRole, count: number): RoleNodeGroup {
 }
 
 describe("useCompareRunController", () => {
+  beforeEach(() => sampleNodePool.mockReset());
+
   it("runs NovelAI combinations serially and previews before generate", async () => {
     let activePreviews = 0;
     let maxActivePreviews = 0;
@@ -207,5 +214,54 @@ describe("useCompareRunController", () => {
     expect((compareRequest.compose as Record<string, unknown>).prompt_policy).toEqual({ rules: { visibility_policy: { enabled: false } } });
     expect(result.current.results.map((item) => item.behavior.label)).toEqual(["Default", "No Character Prompts"]);
     expect(new Set(result.current.results.map((item) => item.behavior.fingerprint)).size).toBe(2);
+  });
+
+  it("shares a random action inside each NT group and redraws for the next group", async () => {
+    const actions = group("action", 1);
+    actions.primary.sourceKind = "random";
+    actions.primary.randomSpec = createDefaultNodePoolSpec();
+    actions.primary.randomSpec.source.value = "new";
+    actions.primary.sourceRef = null;
+    actions.primary.sourceNode = null;
+    actions.primary.draftNode = null;
+    sampleNodePool.mockResolvedValue({
+      items: [
+        {
+          candidate: { role: "action", ref: "action-a", name: "Action A" },
+          node: { schema: "tags-machine-core.node/v1", kind: "action", id: "action-a", prompt: { positive: [{ text: "action a" }], negative: [] } },
+          draw_index: 0,
+          deck_cycle: 1,
+        },
+        {
+          candidate: { role: "action", ref: "action-b", name: "Action B" },
+          node: { schema: "tags-machine-core.node/v1", kind: "action", id: "action-b", prompt: { positive: [{ text: "action b" }], negative: [] } },
+          draw_index: 1,
+          deck_cycle: 1,
+        },
+      ],
+      stats: { raw_total: 2, total: 2, missing_classify: 0, invalid_classify: 0, classify_mismatch: 0, invalid_node: 0 },
+    });
+    const randomSeed = vi.fn().mockReturnValueOnce(101).mockReturnValueOnce(202);
+    const post = vi.fn(async (path: string): Promise<unknown> => path === "/compose-preview"
+      ? { status: "ready", render_request: {} }
+      : { id: "job", name: "generate", status: "succeeded" });
+    const { result } = renderHook(() => useCompareRunController({ post, randomSeed }));
+
+    await act(async () => {
+      await result.current.start(
+        { artist: group("artist", 2), character: group("character", 1), action: actions },
+        { ...params, nt: 2 },
+        behaviorGroup(),
+      );
+    });
+
+    expect(sampleNodePool).toHaveBeenCalledWith("action", actions.primary.randomSpec, 2);
+    expect(result.current.results.map((item) => item.randomSelections[0].candidate.ref)).toEqual([
+      "action-a",
+      "action-a",
+      "action-b",
+      "action-b",
+    ]);
+    expect(result.current.results.map((item) => item.groupSeed)).toEqual([101, 101, 202, 202]);
   });
 });

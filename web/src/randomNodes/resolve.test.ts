@@ -39,4 +39,29 @@ describe("random node resolution", () => {
     expect(result.map((item) => item.slots.character?.draftNode?.id)).toEqual(["A", "B"]);
     expect(result.map((item) => item.randomSelections[0].candidate.ref)).toEqual(["a", "b"]);
   });
+
+  it("reuses one draw inside a scope and draws again for the next scope", async () => {
+    const slot = createEmptySlot("character", "primary");
+    slot.sourceKind = "random";
+    slot.randomSpec = createDefaultNodePoolSpec();
+    slot.randomSpec.source.value = "group";
+    sampleNodePool.mockResolvedValue({
+      items: [
+        { candidate: { role: "character", ref: "a", name: "A" }, node: node("A"), draw_index: 0, deck_cycle: 1 },
+        { candidate: { role: "character", ref: "b", name: "B" }, node: node("B"), draw_index: 1, deck_cycle: 1 },
+      ],
+      stats: { raw_total: 2, total: 2, missing_classify: 0, invalid_classify: 0, classify_mismatch: 0, invalid_node: 0 },
+    });
+
+    const result = await resolveRandomItems([
+      { value: 1, randomScope: "group-1", slots: { artist: null, character: slot, action: null } },
+      { value: 2, randomScope: "group-1", slots: { artist: null, character: slot, action: null } },
+      { value: 3, randomScope: "group-2", slots: { artist: null, character: slot, action: null } },
+    ]);
+
+    expect(sampleNodePool).toHaveBeenCalledOnce();
+    expect(sampleNodePool).toHaveBeenCalledWith("character", slot.randomSpec, 2);
+    expect(result.map((item) => item.slots.character?.draftNode?.id)).toEqual(["A", "A", "B"]);
+    expect(result.map((item) => item.randomSelections[0].candidate.ref)).toEqual(["a", "a", "b"]);
+  });
 });

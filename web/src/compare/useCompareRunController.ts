@@ -156,6 +156,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
     const resolvedPlan = await resolveRandomItems(plan.items.map((item) => ({
       value: item,
+      randomScope: `group-${item.groupIndex}`,
       slots: {
         artist: item.combination.artist,
         character: item.combination.character,

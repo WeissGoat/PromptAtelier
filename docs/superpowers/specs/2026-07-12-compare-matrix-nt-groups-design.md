@@ -48,6 +48,15 @@ Seed 规则：
 - 界面指定非负整数 Seed：第一组使用该 Seed，后续组依次使用 `baseSeed + groupIndex - 1`。
 - seed 超出渲染层允许范围时，按现有 seed 范围规则归一化；归一化后仍需保证本轮各组不同。
 
+### Group Random Nodes
+
+同一 Group 内除 seed 外，随机节点抽取结果也必须保持一致。Compare 展开矩阵后，以 `groupIndex + slotId` 作为随机抽取共享键：同一随机槽位在一个 Group 内只抽取一次，所有组合复用该节点；进入下一个 Group 后重新抽取。
+
+- 同组比较 Artist、Character 或 Prompt Behavior 时，不得因矩阵组合数量改变随机 Action。
+- 同组存在多个不同随机槽位时，每个槽位分别抽取一次。
+- 不同 Group 允许抽到不同节点，用于覆盖不同随机样本。
+- Primary Generate 不使用 Group 共享语义，继续按实际生成任务逐次抽取。
+
 ## 前端架构
 
 ### Compare Matrix
