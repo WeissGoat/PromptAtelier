@@ -64,11 +64,14 @@ class WindowsShortcutExporter:
 def _create_windows_shortcut(output: Path, target: Path) -> None:
     script = (
         "$ErrorActionPreference='Stop';"
-        "$shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($args[0]);"
-        "$shortcut.TargetPath=$args[1];"
-        "$shortcut.WorkingDirectory=(Split-Path -Parent $args[1]);"
+        "$shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($env:TMC_SHORTCUT_OUTPUT);"
+        "$shortcut.TargetPath=$env:TMC_SHORTCUT_TARGET;"
+        "$shortcut.WorkingDirectory=(Split-Path -Parent $env:TMC_SHORTCUT_TARGET);"
         "$shortcut.Save()"
     )
+    environment = os.environ.copy()
+    environment["TMC_SHORTCUT_OUTPUT"] = str(output)
+    environment["TMC_SHORTCUT_TARGET"] = str(target)
     try:
         subprocess.run(
             [
@@ -77,8 +80,6 @@ def _create_windows_shortcut(output: Path, target: Path) -> None:
                 "-NonInteractive",
                 "-Command",
                 script,
-                str(output),
-                str(target),
             ],
             check=True,
             capture_output=True,
@@ -86,9 +87,13 @@ def _create_windows_shortcut(output: Path, target: Path) -> None:
             encoding="utf-8",
             errors="replace",
             timeout=15,
+            env=environment,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except OSError as exc:
         raise RuntimeError(f"创建快捷方式失败：{output} -> {target}：{exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"创建快捷方式失败：{output} -> {target}：{detail}") from exc
 
 
 def _leaf_file(root: Path, path: list[str], suffix: str) -> Path:

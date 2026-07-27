@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -16,19 +17,22 @@ def resolve_shortcut(path: Path) -> Path:
         return path.resolve()
     script = (
         "$ErrorActionPreference='Stop';"
-        "$shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($args[0]);"
+        "$shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($env:TMC_SHORTCUT_PATH);"
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
         "Write-Output $shortcut.TargetPath"
     )
+    environment = os.environ.copy()
+    environment["TMC_SHORTCUT_PATH"] = str(path)
     try:
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script, str(path)],
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=10,
+            env=environment,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ShortcutResolutionError(f"无法解析快捷方式：{path}：{exc}") from exc

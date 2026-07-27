@@ -15,7 +15,7 @@ from .config import (
     load_workspace,
 )
 from .inputs import InputContext, default_input_registry
-from .metadata import default_image_node_reader_registry
+from .metadata import ActionGroupManifestEnricher, default_image_node_reader_registry
 from .models import ExportPlan, ExportSummary, ImportResult
 from .views import (
     ClassificationViewBuilder,
@@ -66,6 +66,7 @@ class PublishingService:
         stats = repository.import_selection(
             selection,
             readers=default_image_node_reader_registry(),
+            enrichers=[ActionGroupManifestEnricher()],
             strict=strict,
         )
         snapshot_path = paths.imports / f"{selection.id}.json"

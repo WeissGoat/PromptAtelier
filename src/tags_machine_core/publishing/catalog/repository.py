@@ -14,6 +14,7 @@ from tags_machine_core.logging_config import get_logger
 from tags_machine_core.verification import read_png_text_chunks
 
 from ..metadata.registry import ImageNodeReaderRegistry
+from ..metadata.enrichers import ImageNodeInfoEnricher
 from ..models import (
     AssetFingerprint,
     AssetImageInfo,
@@ -66,6 +67,7 @@ class CatalogRepository:
         selection: SelectionSet,
         *,
         readers: ImageNodeReaderRegistry,
+        enrichers: list[ImageNodeInfoEnricher] | None = None,
         strict: bool = False,
     ) -> dict[str, Any]:
         stats: dict[str, Any] = {
@@ -90,7 +92,15 @@ class CatalogRepository:
                 ),
             )
             for item in selection.items:
-                self._import_item(connection, selection.id, item, readers, strict, stats)
+                self._import_item(
+                    connection,
+                    selection.id,
+                    item,
+                    readers,
+                    enrichers or [],
+                    strict,
+                    stats,
+                )
         return stats
 
     def _import_item(
@@ -99,6 +109,7 @@ class CatalogRepository:
         import_id: str,
         item: ImportedItem,
         readers: ImageNodeReaderRegistry,
+        enrichers: list[ImageNodeInfoEnricher],
         strict: bool,
         stats: dict[str, Any],
     ) -> None:
@@ -110,7 +121,7 @@ class CatalogRepository:
 
         path = Path(item.resolved_path)
         try:
-            asset = self._read_or_reuse_asset(connection, path, readers)
+            asset = self._read_or_reuse_asset(connection, path, readers, enrichers)
         except Exception as exc:
             if strict:
                 raise
@@ -151,6 +162,7 @@ class CatalogRepository:
         connection: sqlite3.Connection,
         path: Path,
         readers: ImageNodeReaderRegistry,
+        enrichers: list[ImageNodeInfoEnricher],
     ) -> AssetRecord:
         resolved = path.resolve(strict=True)
         stat = resolved.stat()
@@ -180,6 +192,8 @@ class CatalogRepository:
                 # core 的兼容文本块可能位于 IDAT 之后，Pillow 延迟加载时不会出现在 image.info。
                 metadata.update(read_png_text_chunks(resolved))
             node_info = readers.read(resolved, metadata)
+            for enricher in enrichers:
+                node_info = enricher.enrich(resolved, node_info)
             now = utc_now_iso()
             connection.execute(
                 "INSERT INTO assets(asset_id, sha256, size, width, height, image_format, "
