@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.11、Pydantic 2、Pillow、PyYAML、SQLite、pytest、Windows PowerShell/COM（仅可选 `.lnk` 导出）。
 
+**Implementation Status (2026-07-27):** 第一阶段已完成。实际交付包含公共 Catalog 默认聚合导出、局部 import 隔离导出，以及通过 `category_view_manifest.json` 补全新版图片缺失的 `action_group`；这些是实现期业务验收后对原计划的必要修正。
+
 ## Global Constraints
 
 - 所有新增注释和用户可见错误信息使用中文。
@@ -293,4 +295,3 @@ docs/publishing_readme.md     # 中文使用说明和结果结构
 - [ ] **Step 6: Commit**
 
   `git commit -m "docs(publishing): record phase one acceptance"`
-
