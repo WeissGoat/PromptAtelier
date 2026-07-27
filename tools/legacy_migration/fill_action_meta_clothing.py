@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import yaml
 
@@ -55,12 +57,19 @@ def main() -> int:
     return 0 if not result["summary"]["errors"] else 1
 
 
-def fill_action_meta_clothing(root: Path, *, write: bool = False, backup: bool = False) -> dict[str, Any]:
+def fill_action_meta_clothing(
+    root: Path,
+    *,
+    write: bool = False,
+    backup: bool = False,
+    ensure_meta: bool = False,
+) -> dict[str, Any]:
     root = root.resolve()
     items: list[dict[str, Any]] = []
     summary: dict[str, Any] = {
         "mode": "write" if write else "preview",
         "root": str(root),
+        "ensure_meta": ensure_meta,
         "scanned": 0,
         "created": 0,
         "updated": 0,
@@ -80,7 +89,13 @@ def fill_action_meta_clothing(root: Path, *, write: bool = False, backup: bool =
     for node_dir in _candidate_dirs(root):
         summary["scanned"] += 1
         try:
-            item = _process_node(node_dir, root=root, write=write, backup=backup)
+            item = _process_node(
+                node_dir,
+                root=root,
+                write=write,
+                backup=backup,
+                ensure_meta=ensure_meta,
+            )
         except Exception as exc:  # noqa: BLE001 - 脚本需要继续扫描并在报告里标记坏节点。
             summary["errors"] += 1
             item = {
@@ -132,10 +147,16 @@ def _process_node(
     root: Path,
     write: bool,
     backup: bool,
+    ensure_meta: bool,
 ) -> dict[str, Any]:
     classify_path = node_dir / "classify.yaml"
     tags_path = node_dir / "tags.txt"
     meta_path = node_dir / "meta.yaml"
+    source_signatures = {
+        classify_path: _file_signature(classify_path),
+        tags_path: _file_signature(tags_path),
+        meta_path: _file_signature(meta_path),
+    }
 
     classify = _read_yaml_mapping(classify_path) if classify_path.exists() else {}
     state, state_warning = _read_clothing_state(classify)
@@ -146,7 +167,10 @@ def _process_node(
     if state_warning:
         conflicts.append(state_warning)
 
-    if not state and not type_info["type_dress"] and not type_info["type_no_dress"]:
+    has_clothing_signals = bool(
+        state or type_info["type_dress"] or type_info["type_no_dress"]
+    )
+    if not has_clothing_signals and not ensure_meta:
         return {
             "node_dir": str(node_dir),
             "relative": _safe_relative(node_dir, root),
@@ -155,28 +179,43 @@ def _process_node(
         }
 
     existed = meta_path.exists()
-    meta = _load_or_create_meta(node_dir, meta_path=meta_path, tags_path=tags_path)
-    meta_changed = _clean_legacy_type_sections(meta)
-    before = meta.get("clothing")
-    meta["clothing"] = clothing
-    status = "unchanged" if before == clothing and not meta_changed else ("updated" if existed else "created")
+    if ensure_meta and not existed and not tags_path.exists():
+        raise FileNotFoundError(f"missing tags.txt for new action node: {node_dir}")
 
-    if write and status != "unchanged":
+    meta = _load_or_create_meta(node_dir, meta_path=meta_path, tags_path=tags_path)
+    meta_changed = False
+    if has_clothing_signals:
+        meta_changed = _clean_legacy_type_sections(meta)
+        if meta.get("clothing") != clothing:
+            meta["clothing"] = clothing
+            meta_changed = True
+
+    if not existed:
+        status = "created"
+    elif meta_changed:
+        status = "updated"
+    else:
+        status = "unchanged"
+
+    should_write = write and status in {"created", "updated"}
+    if should_write:
         if backup and existed:
             backup_path = meta_path.with_name(meta_path.name + ".bak")
             if not backup_path.exists():
                 backup_path.write_text(meta_path.read_text(encoding="utf-8"), encoding="utf-8")
-        _write_yaml(meta_path, meta)
+        _write_yaml(meta_path, meta, expected_signatures=source_signatures)
 
-    return {
+    item = {
         "node_dir": str(node_dir),
         "relative": _safe_relative(node_dir, root),
         "status": status,
         "meta_path": str(meta_path),
-        "clothing": clothing,
         "conflicts": conflicts,
-        "write": write and status != "unchanged",
+        "write": should_write,
     }
+    if has_clothing_signals:
+        item["clothing"] = clothing
+    return item
 
 
 def _candidate_dirs(root: Path) -> list[Path]:
@@ -349,11 +388,31 @@ def _detect_conflicts(*, state: str | None, type_info: dict[str, Any]) -> list[s
     return conflicts
 
 
-def _write_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(
-        yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1000),
-        encoding="utf-8",
-    )
+def _write_yaml(
+    path: Path,
+    data: dict[str, Any],
+    *,
+    expected_signatures: dict[Path, tuple[int, int] | None] | None = None,
+) -> None:
+    text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1000)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        for source_path, expected in (expected_signatures or {}).items():
+            actual = _file_signature(source_path)
+            if actual != expected:
+                raise RuntimeError(f"source changed during action meta sync: {source_path}")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _file_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
 
 
 def _dedupe(items: list[str]) -> list[str]:

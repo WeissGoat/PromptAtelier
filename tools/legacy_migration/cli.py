@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from .migration import (
     migrate_legacy_character_tags,
     plan_legacy_tags_migration,
 )
+from .sync_action_meta import ActionMetaSyncLockedError, sync_action_meta
 
 
 def _write_output(data: dict[str, Any], path: Path, output_format: str) -> None:
@@ -84,6 +86,17 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--kind", required=True, choices=("artist", "character", "action", "background"))
     apply.add_argument("--output-root", required=True)
     _add_output_options(apply)
+
+    sync = subparsers.add_parser(
+        "sync-action-meta",
+        help="同步动作目录的 meta.yaml 与 clothing 元数据",
+    )
+    sync.add_argument("root", help="动作根目录或单个动作节点目录")
+    sync.add_argument("--write", action="store_true", help="写入 meta.yaml；默认只预览")
+    sync.add_argument("--backup", action="store_true", help="更新已有 meta.yaml 前创建 .bak")
+    sync.add_argument("--no-lock", action="store_true", help="关闭写模式的根目录运行锁")
+    sync.add_argument("--report", help="写入完整 JSON 报告")
+    sync.add_argument("--full", action="store_true", help="在标准输出显示完整报告")
     return parser
 
 
@@ -105,6 +118,23 @@ def _migrate(args) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "sync-action-meta":
+        try:
+            data = sync_action_meta(
+                Path(args.root),
+                write=args.write,
+                backup=args.backup,
+                lock=not args.no_lock,
+            )
+        except (ActionMetaSyncLockedError, FileNotFoundError, ValueError) as exc:
+            print(f"sync-action-meta failed: {exc}", file=sys.stderr)
+            return 2
+        if args.report:
+            _write_output(data, Path(args.report), "json")
+            _print(data["summary"], full=True)
+        else:
+            _print(data, full=args.full)
+        return 1 if data["summary"]["errors"] else 0
     if args.command.startswith("migrate-"):
         data = _migrate(args)
     elif args.command == "audit-legacy-tags":

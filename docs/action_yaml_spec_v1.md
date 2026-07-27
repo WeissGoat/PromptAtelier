@@ -538,7 +538,17 @@ clothing:
 - `tags.txt` 出现 `type,no dress` / `type,no_dress` 时，`action_outfit: false`，优先级最高。
 - 如果 `state: nude` 同时出现 `type,dress`，迁移报告会标记 `nude_with_type_dress`，但仍保留事实来源，交给人工复核。
 
-批量填充脚本：
+每天扫描动作 `new` 目录时，推荐使用统一同步命令。它会先生成缺失的 `meta.yaml`，再按相同规则补齐 Clothing：
+
+```powershell
+uv run python -m tools.legacy_migration sync-action-meta F:\my_project\new\tags_machine\design\动作改2\new --report outputs\action_meta_preview.json
+
+uv run python -m tools.legacy_migration sync-action-meta F:\my_project\new\tags_machine\design\动作改2\new --write --backup --report outputs\action_meta_sync.json
+```
+
+该命令可重复执行。已有 `meta.yaml` 不重新迁移，只更新 `clothing` 和旧 `type` 指令归档；缺少 `tags.txt` 的新节点记录为错误。写模式默认使用 `.action-meta-sync.lock`，并在源文件处理期间发生变化时放弃覆盖。
+
+仅补齐 Clothing 的底层命令：
 
 ```powershell
 uv run python -m tools.legacy_migration.fill_action_meta_clothing F:\my_project\new\tags_machine\design\动作改2 --report outputs\action_clothing_scan.json

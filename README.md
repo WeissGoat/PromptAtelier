@@ -228,6 +228,35 @@ uv run python -m tools.legacy_migration migrate-background-tags `
   --output migrated\nodes\backgrounds\simple_room\meta.yaml
 ```
 
+每天同步动作 `new` 目录时，使用统一的 `sync-action-meta` 命令。默认是 preview，只生成报告，不写动作目录：
+
+```powershell
+uv run python -m tools.legacy_migration sync-action-meta `
+  F:\my_project\new\tags_machine\design\动作改2\new `
+  --report outputs\action-meta-sync\preview.json
+```
+
+确认后启用写入：
+
+```powershell
+$date = Get-Date -Format "yyyyMMdd"
+
+uv run --frozen python -m tools.legacy_migration sync-action-meta `
+  F:\my_project\new\tags_machine\design\动作改2\new `
+  --write `
+  --backup `
+  --report "outputs\action-meta-sync\$date.json"
+```
+
+同步行为：
+
+- 缺少 `meta.yaml` 且存在 `tags.txt`：生成基础 action `meta.yaml`，即使没有 Clothing 信号也会生成。
+- 已有 `meta.yaml`：保留人工和 Agent 字段，只更新工具负责的 `clothing` 与旧 `type` 指令归档。
+- 缺少 `meta.yaml` 和 `tags.txt`：记录为 error，不生成残缺节点。
+- 写入使用同目录临时文件原子替换；如果源文件在处理期间发生变化，本节点报错并放弃覆盖。
+- `--write` 默认使用根目录 `.action-meta-sync.lock` 防止定时任务重叠；只有明确处理遗留锁时才使用 `--no-lock`。
+- 同一目录可以每天重复执行；没有变化的节点记录为 `unchanged`。
+
 `audit-legacy-tags` 用于迁移前预检，可以扫描单个 `tags.txt`、单个旧节点目录或一个旧节点根目录；它只读源目录，不会生成 `meta.yaml` / `node.yaml`。报告里的 `summary` 会统计 `ok`、`needs_review`、`errors` 和 issue code 数量；`items` 会列出每个旧节点的迁移风险，例如 character 的 `unclassified`、action 的默认 `character_scope`、疑似混入角色外观词、旧扩展字段是否只归档不执行。
 
 `plan-legacy-tags-migration` 在预检基础上生成批量迁移计划，只写计划文件，不写节点 YAML。计划会把旧 `tags.txt` 映射到 `--output-root\nodes\{styles|characters|actions|backgrounds}\...\{node.yaml|meta.yaml}`，并标出 `ready`、`needs_review`、`target_exists`、`blocked`、`error` 状态；遇到目标文件已存在或目标路径冲突时不会覆盖，需要人工处理。

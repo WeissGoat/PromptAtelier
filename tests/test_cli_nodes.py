@@ -45,6 +45,7 @@ class CliNodesTest(unittest.TestCase):
             "audit-legacy-tags",
             "plan-legacy-tags-migration",
             "apply-legacy-tags-migration",
+            "sync-action-meta",
         ):
             self.assertNotIn(command, help_text)
 
