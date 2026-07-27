@@ -267,15 +267,19 @@ class CatalogRepository:
 
     def assets_for_import(self, import_id: str | None = None) -> list[AssetRecord]:
         with self.connection() as connection:
-            selected_id = import_id or self.latest_import_id(connection)
-            if not selected_id:
-                return []
-            rows = connection.execute(
-                "SELECT ii.asset_id, ii.resolved_path, ii.source_order, ii.display_name "
-                "FROM import_items ii WHERE ii.import_id=? AND ii.asset_id IS NOT NULL "
-                "ORDER BY ii.source_order",
-                (selected_id,),
-            ).fetchall()
+            if import_id:
+                rows = connection.execute(
+                    "SELECT ii.asset_id, ii.resolved_path, ii.source_order, ii.display_name "
+                    "FROM import_items ii WHERE ii.import_id=? AND ii.asset_id IS NOT NULL "
+                    "ORDER BY ii.source_order",
+                    (import_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT ii.asset_id, ii.resolved_path, ii.source_order, ii.display_name "
+                    "FROM import_items ii JOIN imports i ON i.import_id=ii.import_id "
+                    "WHERE ii.asset_id IS NOT NULL ORDER BY i.rowid, ii.source_order"
+                ).fetchall()
             records: list[AssetRecord] = []
             seen: set[str] = set()
             for row in rows:

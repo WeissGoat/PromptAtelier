@@ -110,19 +110,19 @@ class PublishingService:
     ) -> tuple[ExportPlan, Path]:
         paths, config = load_workspace(root)
         repository = CatalogRepository(paths.catalog)
-        selected_import_id = import_id or repository.latest_import_id()
-        if not selected_import_id:
+        if repository.latest_import_id() is None:
             raise ValueError("Publishing Catalog 尚无可分类的导入记录")
-        assets = repository.assets_for_import(selected_import_id)
+        assets = repository.assets_for_import(import_id)
         classification = config.classification
         plan = ClassificationViewBuilder().build(
             assets,
             hierarchy=hierarchy or classification.hierarchy,
-            import_id=selected_import_id,
+            import_id=import_id,
             missing_value=classification.missing_value,
             skip_missing=classification.skip_missing,
         )
-        plan_path = paths.state / f"export_plan_{selected_import_id}.json"
+        scope_name = import_id or "catalog"
+        plan_path = paths.state / f"export_plan_{scope_name}.json"
         _write_json_atomic(plan_path, plan.model_dump(mode="json", by_alias=True))
         _write_json_atomic(
             paths.state / "latest_export_plan.json",
@@ -130,7 +130,7 @@ class PublishingService:
         )
         logger.info(
             "Publishing 分类完成 import_id=%s assets=%s views=%s",
-            selected_import_id,
+            import_id or "catalog",
             len(assets),
             len(plan.views),
         )
@@ -146,7 +146,7 @@ class PublishingService:
     ) -> tuple[ExportPlan, ExportSummary]:
         paths, config = load_workspace(root)
         plan, _ = self.classify(root, import_id=import_id, hierarchy=hierarchy)
-        jobs = self._export_jobs(paths, config, exporter_types)
+        jobs = self._export_jobs(paths, config, exporter_types, import_id=import_id)
         if not jobs:
             raise ValueError("没有启用任何 Publishing Exporter")
         summary = ViewExportCoordinator(CatalogRepository(paths.catalog)).export(plan, jobs)
@@ -157,6 +157,8 @@ class PublishingService:
         paths: WorkspacePaths,
         config: PublishingWorkspaceConfig,
         requested: list[str] | None,
+        *,
+        import_id: str | None,
     ) -> list[tuple[object, Path]]:
         enabled = requested or [
             name
@@ -172,14 +174,20 @@ class PublishingService:
                 jobs.append(
                     (
                         NeeViewPlaylistExporter(),
-                        _config_path(paths.root, config.exporters.neev.root),
+                        _scoped_export_path(
+                            _config_path(paths.root, config.exporters.neev.root),
+                            import_id,
+                        ),
                     )
                 )
             elif name == "windows_shortcut":
                 jobs.append(
                     (
                         WindowsShortcutExporter(),
-                        _config_path(paths.root, config.exporters.windows_shortcut.root),
+                        _scoped_export_path(
+                            _config_path(paths.root, config.exporters.windows_shortcut.root),
+                            import_id,
+                        ),
                     )
                 )
             else:
@@ -190,6 +198,10 @@ class PublishingService:
 def _config_path(root: Path, value: str) -> Path:
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (root / path).resolve()
+
+
+def _scoped_export_path(root: Path, import_id: str | None) -> Path:
+    return root / "_imports" / import_id if import_id else root
 
 
 def _write_json_atomic(path: Path, data: dict) -> None:

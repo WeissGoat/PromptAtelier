@@ -71,7 +71,10 @@ def add_publishing_subparser(subparsers, *, output_parent: argparse.ArgumentPars
 
 def _add_plan_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("root", help="Publishing 根目录")
-    parser.add_argument("--import-id", help="指定导入快照；默认使用最近一次导入")
+    parser.add_argument(
+        "--import-id",
+        help="只处理指定导入快照；默认处理整个公共 Catalog，局部导出写入 _imports/<id>",
+    )
     parser.add_argument(
         "--hierarchy",
         nargs="+",
