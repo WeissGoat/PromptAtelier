@@ -1,0 +1,21 @@
+schema: publishing-workspace.workspace/v1
+classification:
+  hierarchy:
+  - artist
+  - character
+  - action_group
+  - action
+  missing_value: unknown
+  skip_missing: false
+exporters:
+  neev:
+    enabled: true
+    root: workspace/exports/neev
+  windows_shortcut:
+    enabled: false
+    root: workspace/exports/shortcuts
+image_extensions:
+- .png
+- .jpg
+- .jpeg
+- .webp

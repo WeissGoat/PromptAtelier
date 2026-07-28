@@ -1,0 +1,13 @@
+workspace/catalog.sqlite*
+workspace/imports/*
+workspace/exports/*
+workspace/state/*
+workspace/cache/*
+!workspace/imports/
+!workspace/exports/
+!workspace/state/
+!workspace/cache/
+!workspace/imports/.gitkeep
+!workspace/exports/.gitkeep
+!workspace/state/.gitkeep
+!workspace/cache/.gitkeep
