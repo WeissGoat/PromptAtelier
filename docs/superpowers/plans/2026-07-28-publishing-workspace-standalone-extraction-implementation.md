@@ -36,12 +36,12 @@
 - Produces: `read_png_text_chunks(path) -> dict[str, str]`。
 - Produces: `publishing-workspace` console script 和 `python -m publishing_workspace`。
 
-- [ ] 创建独立 `pyproject.toml`，只依赖 Pillow、Pydantic 和 PyYAML，开发依赖 pytest。
-- [ ] 把 PNG `tEXt/zTXt/iTXt` 解析迁入 `png_metadata.py`，测试 UTF-8 JSON 文本块。
-- [ ] 使用标准库 logging 实现 `trace/info/warning/error` 配置。
-- [ ] 执行 `uv sync` 生成并提交独立 `uv.lock`。
-- [ ] 运行 `uv run pytest tests/test_png_metadata.py -q`，预期通过。
-- [ ] 精确暂存并提交：`feat(publishing-tool): scaffold standalone project`。
+- [x] 创建独立 `pyproject.toml`，只依赖 Pillow、Pydantic 和 PyYAML，开发依赖 pytest。
+- [x] 把 PNG `tEXt/zTXt/iTXt` 解析迁入 `png_metadata.py`，测试 UTF-8 JSON 文本块。
+- [x] 使用标准库 logging 实现 `trace/info/warning/error` 配置。
+- [x] 执行 `uv sync` 生成并提交独立 `uv.lock`。
+- [x] 运行 `uv run pytest tests/test_png_metadata.py -q`，预期通过。
+- [x] 精确暂存并提交：`feat(publishing-tool): scaffold standalone project`。
 
 ### Task 2: 迁移 Publishing 领域代码并解除 Core 依赖
 
@@ -59,13 +59,13 @@
 - Consumes: 独立 `logging.py` 和 `png_metadata.py`。
 - Produces: 原有 `PublishingService.initialize/import_source/classify/export` 行为。
 
-- [ ] 改写所有包导入为 `publishing_workspace.*` 或相对导入。
-- [ ] Catalog 使用独立 `read_png_text_chunks` 和 `get_logger`。
-- [ ] 把内部 schema 改为 `publishing-workspace.*`，外部 Core PNG schema 保持不变。
-- [ ] 迁移现有 Pipeline 测试，测试不 import Core 的执行模块；自行生成带文本块 PNG fixture。
-- [ ] 运行 `rg "from tags_machine_core|import tags_machine_core" tools/publishing_workspace/src`，预期无结果。
-- [ ] 运行 `uv run pytest -q`，预期独立项目测试通过。
-- [ ] 精确暂存并提交：`feat(publishing-tool): migrate workspace domain`。
+- [x] 改写所有包导入为 `publishing_workspace.*` 或相对导入。
+- [x] Catalog 使用独立 `read_png_text_chunks` 和 `get_logger`。
+- [x] 把内部 schema 改为 `publishing-workspace.*`，外部 Core PNG schema 保持不变。
+- [x] 迁移现有 Pipeline 测试，测试不 import Core 的执行模块；自行生成带文本块 PNG fixture。
+- [x] 运行 `rg "from tags_machine_core|import tags_machine_core" tools/publishing_workspace/src`，预期无结果。
+- [x] 运行 `uv run pytest -q`，预期独立项目测试通过。
+- [x] 精确暂存并提交：`feat(publishing-tool): migrate workspace domain`。
 
 ### Task 3: 迁移 CLI、文档和示例工作区
 
@@ -83,12 +83,12 @@
 - Produces: `publishing-workspace init/import/classify/export`。
 - Produces: 已初始化的 `examples/workspace`。
 
-- [ ] 把嵌套 argparse 子命令改为独立顶层 CLI，不依赖 Core parser。
-- [ ] 更新 README 中所有命令和路径。
-- [ ] 配置 examples `.gitignore` 忽略 SQLite、imports、exports、state、cache 运行数据。
-- [ ] 运行 `uv run publishing-workspace init examples/workspace`，确认本机生成有效 `catalog.sqlite`。
-- [ ] 运行 `uv run publishing-workspace --help` 和 `uv run python -m publishing_workspace --help`。
-- [ ] 精确暂存并提交：`feat(publishing-tool): expose standalone cli and example`。
+- [x] 把嵌套 argparse 子命令改为独立顶层 CLI，不依赖 Core parser。
+- [x] 更新 README 中所有命令和路径。
+- [x] 配置 examples `.gitignore` 忽略 SQLite、imports、exports、state、cache 运行数据。
+- [x] 运行 `uv run publishing-workspace init examples/workspace`，确认本机生成有效 `catalog.sqlite`。
+- [x] 运行 `uv run publishing-workspace --help` 和 `uv run python -m publishing_workspace --help`。
+- [x] 精确暂存并提交：`feat(publishing-tool): expose standalone cli and example`。
 
 ### Task 4: 清理 Core 集成
 
@@ -102,11 +102,11 @@
 - Removes: `python -m tags_machine_core publish`。
 - Preserves: 其他 Core CLI、AgentComposer、Batch、Renderer 和 Web 行为。
 
-- [ ] 删除 Core CLI 的 Publishing import 和 parser 注册。
-- [ ] 删除原包与原测试，确认独立项目已有等价覆盖。
-- [ ] 运行 `uv run python -m tags_machine_core publish --help`，预期 argparse 返回未知命令。
-- [ ] 运行 `uv run pytest tests -q`，预期根项目回归通过。
-- [ ] 精确暂存并提交：`refactor: extract publishing workspace from core`。
+- [x] 删除 Core CLI 的 Publishing import 和 parser 注册。
+- [x] 删除原包与原测试，确认独立项目已有等价覆盖。
+- [x] 运行 `uv run python -m tags_machine_core publish --help`，预期 argparse 返回未知命令。
+- [x] 运行 `uv run pytest tests -q`，预期根项目回归通过。
+- [x] 精确暂存并提交：`refactor: extract publishing workspace from core`。
 
 ### Task 5: 真实业务验收和最终边界检查
 
@@ -118,14 +118,22 @@
 - Consumes: 真实 NeeView、Legacy PNG、Core PNG、Action manifest 和 Windows `.lnk`。
 - Produces: 独立项目业务验收记录。
 
-- [ ] 导入 `E:/NeeView41.3/Profile/Playlists/post_20251210.nvpls`，核对条目数和顺序。
-- [ ] 导入真实 Legacy PNG，确认 `reader_counts.legacy`。
-- [ ] 使用当前 Core RenderRequest 写入协议生成验收 PNG，确认 `reader_counts.core`。
-- [ ] 确认真实 `category_view_manifest.json` 补出 action_group。
-- [ ] 连续导出两次 `.nvpls`，第二次为 skipped。
-- [ ] 执行 `.lnk` 导出和重新导入往返。
-- [ ] 运行独立项目 `uv run pytest -q`。
-- [ ] 运行根项目 `uv run pytest tests -q`。
-- [ ] 确认 `git status` 只保留用户原有未提交修改。
-- [ ] 精确暂存并提交：`test(publishing-tool): verify standalone business workflow`。
+- [x] 导入 `E:/NeeView41.3/Profile/Playlists/post_20251210.nvpls`，核对条目数和顺序。
+- [x] 导入真实 Legacy PNG，确认 `reader_counts.legacy`。
+- [x] 使用当前 Core RenderRequest 写入协议生成验收 PNG，确认 `reader_counts.core`。
+- [x] 确认真实 `category_view_manifest.json` 补出 action_group。
+- [x] 连续导出两次 `.nvpls`，第二次为 skipped。
+- [x] 执行 `.lnk` 导出和重新导入往返。
+- [x] 运行独立项目 `uv run pytest -q`。
+- [x] 运行根项目 `uv run pytest tests -q`。
+- [x] 确认 `git status` 只保留用户原有未提交修改。
+- [x] 精确暂存并提交：`test(publishing-tool): verify standalone business workflow`。
 
+## 实施结果
+
+- 独立工具提交：`a370f92 feat(publishing-tool): extract standalone workspace`
+- Core 清理提交：`6728ad8 refactor: remove publishing workspace from core`
+- 示例与迁移文档提交：`500539c docs(publishing-tool): add example and migration guide`
+- 独立项目测试：`15 passed`
+- Core 回归：`574 passed, 34 subtests passed`
+- 真实业务验收：NeeView、Legacy/Core PNG、action_group 补全、`.nvpls` 幂等导出、Windows 长路径 `.lnk` 往返均已执行。
