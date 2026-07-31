@@ -131,3 +131,37 @@ uv run pytest tests -q
 - 示例 `workspace.yaml` 可进入 Git，`catalog.sqlite`、导入快照和导出结果均被忽略。
 - 旧 `tags-machine-core.publish-workspace/v1` 配置会备份原文件，并保留未知字段后升级为新 schema。
 - 旧 Catalog 的 `schema_meta(version)` 会在事务内补充 `schema_id`，已有导入记录保持不变；中断后的 `schema_id=NULL` 状态可以续跑恢复。
+
+## 7. unknown 节点投影真实验收（2026-07-31）
+
+工作区：
+
+```text
+G:/ai_publish
+```
+
+执行：
+
+```powershell
+uv run publishing-workspace classify G:\ai_publish --log-level info
+uv run publishing-workspace export G:\ai_publish --exporter neev --log-level info
+uv run publishing-workspace export G:\ai_publish --exporter neev --log-level info
+```
+
+分类结果：
+
+- Catalog 资产：`9987`
+- 生成视图：`4626`
+- 包含 `unknown` 的视图：`25`
+- 完全缺失节点的视图：`1`
+- 含 `unknown` 视图成员总数：`54`
+- 分类层级：`artist/character/action_group/action`
+
+导出结果：
+
+- 第一次重跑：`written = 0`，`skipped = 4626`，`removed = 0`
+- 第二次重跑：`written = 0`，`skipped = 4626`，`removed = 0`
+- `G:/ai_publish/workspace/exports/neev/unknown/unknown/unknown/unknown.nvpls` 存在
+- 该播放列表格式为 `NeeView.Playlist/2.0.0`，包含 `11` 项
+
+由于该工作区之前已经生成过同内容导出，本次真实验收验证的是未知节点路径可被正常读取、分类和幂等跳过；没有重新写入已有播放列表。

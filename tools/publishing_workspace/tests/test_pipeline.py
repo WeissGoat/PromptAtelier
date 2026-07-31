@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from publishing_workspace.catalog import CatalogRepository
-from publishing_workspace.config import init_workspace, load_workspace
+from publishing_workspace.config import ClassificationConfig, init_workspace, load_workspace
 from publishing_workspace.inputs import InputContext, default_input_registry
 from publishing_workspace.inputs.shortcut import resolve_shortcut
 from publishing_workspace.metadata import default_image_node_reader_registry
@@ -135,6 +135,11 @@ def test_asset_node_projection_rejects_empty_missing_value():
 
     with pytest.raises(ValueError, match="missing_value"):
         asset.node_projection(["artist"], missing_value=" ")
+
+
+def test_classification_config_rejects_empty_missing_value():
+    with pytest.raises(ValueError, match="missing_value"):
+        ClassificationConfig(missing_value=" ")
 
 
 def test_classification_builds_full_unknown_path_for_asset_without_nodes():
@@ -422,6 +427,33 @@ def test_full_pipeline_deduplicates_and_exports_multi_character_views(tmp_path: 
 
     repository = CatalogRepository(paths.catalog)
     assert len(repository.assets_for_import(imported.import_id)) == 1
+
+
+def test_full_pipeline_exports_unknown_nodes_and_skips_on_repeat(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _image(source / "unknown.png")
+    root = tmp_path / "publish"
+    service = PublishingService()
+    service.initialize(root)
+
+    imported = service.import_source(root, source)
+    plan, first_export = service.export(root)
+    _, second_export = service.export(root)
+
+    assert imported.imported_items == 1
+    assert [view.key for view in plan.views] == [
+        "unknown/unknown/unknown/unknown",
+    ]
+    assert first_export.results[0].written == 1
+    assert second_export.results[0].skipped == 1
+
+    paths, _ = load_workspace(root)
+    playlist = paths.exports / "neev" / "unknown" / "unknown" / "unknown" / "unknown.nvpls"
+    assert playlist.is_file()
+    assert json.loads(playlist.read_text(encoding="utf-8"))["Items"] == [
+        {"Path": str((source / "unknown.png").resolve())}
+    ]
 
 
 def test_catalog_export_keeps_assets_from_previous_imports(tmp_path: Path):

@@ -83,6 +83,17 @@ image_extensions:
 - `classification.hierarchy`：分类层级，可使用图片中存在的任意节点 role。
 - `classification.missing_value`：图片缺少某一层节点时使用的目录名。
 - `classification.skip_missing`：为 `true` 时，只要缺少任一层就不生成该图片的分类视图。
+
+`classification.missing_value` 默认是 `unknown`。分类层级中的任意节点缺失时，Publishing Workspace 会在运行时投影该值；原始 Reader 和 Catalog 不会被修改。
+
+默认 `skip_missing: false`，所以没有节点信息的图片也会导出到：
+
+```text
+unknown/unknown/unknown/unknown
+```
+
+只有显式设置 `skip_missing: true`，缺少任意分类节点的图片才会被排除。Reader 结果中的 `unknown` 表示没有 Reader 成功解析元数据；分类路径中的 `unknown` 表示某个分类 role 缺失，两者含义不同。
+
 - `exporters.neev.enabled`：默认自动导出 NeeView `.nvpls`。
 - `exporters.windows_shortcut.enabled`：是否同时导出旧式 Windows `.lnk` 分类树。
 - `exporters.*.root`：绝对路径，或相对于 Publishing 根目录的路径。
