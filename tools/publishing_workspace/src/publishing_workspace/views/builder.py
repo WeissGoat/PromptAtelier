@@ -17,18 +17,13 @@ class ClassificationViewBuilder:
     ) -> ExportPlan:
         views: dict[tuple[str, ...], list[ViewItem]] = {}
         for asset in assets:
-            dimensions: list[list[str]] = []
-            should_skip = False
-            for role in hierarchy:
-                values = asset.node_values(role)
-                if not values:
-                    if skip_missing:
-                        should_skip = True
-                        break
-                    values = [missing_value]
-                dimensions.append(values)
-            if should_skip:
+            projection = asset.node_projection(
+                hierarchy,
+                missing_value=missing_value,
+            )
+            if skip_missing and projection.has_missing:
                 continue
+            dimensions = [projection.values_for(role) for role in projection.hierarchy]
             for path in product(*dimensions):
                 views.setdefault(tuple(path), []).append(
                     ViewItem(

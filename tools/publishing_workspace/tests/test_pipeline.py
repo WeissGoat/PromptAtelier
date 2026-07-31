@@ -28,6 +28,7 @@ from publishing_workspace.models import (
     ViewItem,
 )
 from publishing_workspace.service import PublishingService
+from publishing_workspace.views.builder import ClassificationViewBuilder
 from publishing_workspace.views.exporters import (
     WindowsShortcutExporter,
     _create_windows_shortcut,
@@ -134,6 +135,50 @@ def test_asset_node_projection_rejects_empty_missing_value():
 
     with pytest.raises(ValueError, match="missing_value"):
         asset.node_projection(["artist"], missing_value=" ")
+
+
+def test_classification_builds_full_unknown_path_for_asset_without_nodes():
+    asset = _asset_with_nodes([])
+
+    plan = ClassificationViewBuilder().build(
+        [asset],
+        hierarchy=["artist", "character", "action_group", "action"],
+        missing_value="unknown",
+        skip_missing=False,
+    )
+
+    assert [view.key for view in plan.views] == [
+        "unknown/unknown/unknown/unknown",
+    ]
+    assert plan.views[0].items[0].asset_id == asset.asset_id
+
+
+def test_classification_can_explicitly_skip_missing_projection():
+    asset = _asset_with_nodes([ImageNodeRef(role="artist", id="artist_a")])
+
+    plan = ClassificationViewBuilder().build(
+        [asset],
+        hierarchy=["artist", "character", "action"],
+        missing_value="unknown",
+        skip_missing=True,
+    )
+
+    assert plan.views == []
+
+
+def test_classification_uses_custom_missing_value_in_each_missing_dimension():
+    asset = _asset_with_nodes([ImageNodeRef(role="action", id="standing")])
+
+    plan = ClassificationViewBuilder().build(
+        [asset],
+        hierarchy=["artist", "character", "action"],
+        missing_value="未分类",
+        skip_missing=False,
+    )
+
+    assert [view.key for view in plan.views] == [
+        "未分类/未分类/standing",
+    ]
 
 
 def test_workspace_init_is_idempotent(tmp_path: Path):
