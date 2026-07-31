@@ -74,6 +74,20 @@ class ImageNodeInfo(BaseModel):
         return values
 
 
+class NodeValueProjection(BaseModel):
+    hierarchy: list[str]
+    missing_value: str
+    values: dict[str, list[str]]
+    missing_roles: list[str] = Field(default_factory=list)
+
+    def values_for(self, role: str) -> list[str]:
+        return list(self.values.get(role, []))
+
+    @property
+    def has_missing(self) -> bool:
+        return bool(self.missing_roles)
+
+
 class AssetFingerprint(BaseModel):
     size: int
     modified_ns: int
@@ -98,6 +112,37 @@ class AssetRecord(BaseModel):
 
     def node_values(self, role: str) -> list[str]:
         return self.node_info.values_for(role)
+
+    def node_projection(
+        self,
+        hierarchy: list[str],
+        *,
+        missing_value: str = "unknown",
+    ) -> NodeValueProjection:
+        normalized_hierarchy = [
+            str(role).strip()
+            for role in hierarchy
+            if str(role).strip()
+        ]
+        normalized_missing = str(missing_value or "").strip()
+        if not normalized_missing:
+            raise ValueError("missing_value 不能为空")
+
+        values: dict[str, list[str]] = {}
+        missing_roles: list[str] = []
+        for role in normalized_hierarchy:
+            role_values = self.node_info.values_for(role)
+            if role_values:
+                values[role] = role_values
+            else:
+                values[role] = [normalized_missing]
+                missing_roles.append(role)
+        return NodeValueProjection(
+            hierarchy=normalized_hierarchy,
+            missing_value=normalized_missing,
+            values=values,
+            missing_roles=missing_roles,
+        )
 
 
 class ViewItem(BaseModel):

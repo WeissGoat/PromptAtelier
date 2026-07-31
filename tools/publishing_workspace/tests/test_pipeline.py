@@ -18,7 +18,15 @@ from publishing_workspace.config import init_workspace, load_workspace
 from publishing_workspace.inputs import InputContext, default_input_registry
 from publishing_workspace.inputs.shortcut import resolve_shortcut
 from publishing_workspace.metadata import default_image_node_reader_registry
-from publishing_workspace.models import ViewEntry, ViewItem
+from publishing_workspace.models import (
+    AssetFingerprint,
+    AssetImageInfo,
+    AssetRecord,
+    ImageNodeInfo,
+    ImageNodeRef,
+    ViewEntry,
+    ViewItem,
+)
 from publishing_workspace.service import PublishingService
 from publishing_workspace.views.exporters import (
     WindowsShortcutExporter,
@@ -84,6 +92,48 @@ def _core_chunks(*, characters: list[str] | None = None) -> dict[str, str]:
             ensure_ascii=False,
         )
     }
+
+
+def _asset_with_nodes(nodes: list[ImageNodeRef]) -> AssetRecord:
+    return AssetRecord(
+        asset_id="sha256:test",
+        path="F:/images/test.png",
+        fingerprint=AssetFingerprint(size=1, modified_ns=1, sha256="test"),
+        image=AssetImageInfo(width=32, height=48, format="PNG"),
+        node_info=ImageNodeInfo(format="core", reader="core", nodes=nodes),
+    )
+
+
+def test_asset_node_projection_fills_missing_roles_and_keeps_multiple_values():
+    asset = _asset_with_nodes(
+        [
+            ImageNodeRef(role="artist", id="artist_a"),
+            ImageNodeRef(role="character", id="homura", index=0),
+            ImageNodeRef(role="character", id="madoka", index=1),
+            ImageNodeRef(role="action", id="standing"),
+        ]
+    )
+
+    projection = asset.node_projection(
+        ["artist", "character", "action_group", "action"],
+        missing_value="unknown",
+    )
+
+    assert projection.values == {
+        "artist": ["artist_a"],
+        "character": ["homura", "madoka"],
+        "action_group": ["unknown"],
+        "action": ["standing"],
+    }
+    assert projection.missing_roles == ["action_group"]
+    assert projection.has_missing is True
+
+
+def test_asset_node_projection_rejects_empty_missing_value():
+    asset = _asset_with_nodes([])
+
+    with pytest.raises(ValueError, match="missing_value"):
+        asset.node_projection(["artist"], missing_value=" ")
 
 
 def test_workspace_init_is_idempotent(tmp_path: Path):

@@ -23,6 +23,14 @@ class ClassificationConfig(BaseModel):
     missing_value: str = "unknown"
     skip_missing: bool = False
 
+    @field_validator("missing_value")
+    @classmethod
+    def validate_missing_value(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("classification.missing_value 不能为空")
+        return normalized
+
     @field_validator("hierarchy")
     @classmethod
     def validate_hierarchy(cls, value: list[str]) -> list[str]:
