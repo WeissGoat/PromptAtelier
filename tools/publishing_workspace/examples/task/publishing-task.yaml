@@ -1,0 +1,21 @@
+version: 1
+task_id: 20260801_homura_foot
+title: homura foot
+
+processing:
+  profile: pixiv_default
+  operations:
+    strip_metadata:
+      enabled: true
+    mosaic:
+      enabled: false
+
+packages:
+  directories:
+    enabled: true
+  zip:
+    enabled: true
+    targets:
+      - all
+      - post
+      - cover

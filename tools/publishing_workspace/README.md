@@ -301,6 +301,101 @@ Windows 快捷方式 Reader 和 Exporter 会通过同卷短临时路径调用 `W
 
 ## 7. 当前边界
 
-当前已支持公共工作区、持久化 ImportRun、分批恢复导入、ProblemQueue、新旧 Reader、Catalog、分类视图、增量 `.nvpls` 和可选 `.lnk`。阶段 1 的分类与导出仍是全量模式。
+当前已支持公共工作区、持久化 ImportRun、分批恢复导入、ProblemQueue、新旧 Reader、Catalog、分类视图、任务选择集合、图片清参数和 `all/post/cover` 投稿包构建。
 
-投稿任务、二次筛选、Bridge 排序回读、图片清参数、自动打码以及 `all/post/cover` 打包属于后续阶段。
+## 7. 投稿任务
+
+公共 `workspace/` 是长期素材池；投稿任务位于同一根目录下的 `tasks/<task_id>/`，任务创建后复制进去的图片成为该任务自己的快照。
+
+创建空任务：
+
+```powershell
+uv run publishing-workspace task create G:\ai_publish 20260801_homura_foot
+```
+
+从 NeeView 收藏创建任务，并自动复制到 `selection/all/`：
+
+```powershell
+uv run publishing-workspace task create G:\ai_publish 20260801_homura_foot --candidates E:\NeeView41.3\Profile\Playlists\homura_foot.nvpls --log-level info
+```
+
+替换或追加 `post`、`cover`：
+
+```powershell
+uv run publishing-workspace task import-selection G:\ai_publish 20260801_homura_foot --set post --source E:\NeeView41.3\Profile\Playlists\post.nvpls --mode replace
+uv run publishing-workspace task import-selection G:\ai_publish 20260801_homura_foot --set cover --source E:\NeeView41.3\Profile\Playlists\cover.nvpls --mode replace
+```
+
+三个选择集合也可以从普通目录或快捷方式目录导入：
+
+```powershell
+uv run publishing-workspace task import-selection G:\ai_publish 20260801_homura_foot --set all --source G:\ai_select\homura --input-type directory
+```
+
+任务目录结构：
+
+```text
+tasks/<task_id>/
+  task.yaml
+  selection/
+    candidates.snapshot.json
+    candidates.nvpls
+    history/
+      <time>-all-<history_id>.json
+    all/
+    post/
+    cover/
+  builds/<build_id>/
+    selection_snapshot.json
+    build_manifest.json
+    output/all/
+    output/post/
+    output/cover/
+    archives/
+```
+
+`selection/all`、`selection/post`、`selection/cover` 只放图片。可以直接删除、重命名或用 Adobe Bridge 调整文件名；构建时当前目录内容和自然文件名顺序优先，历史导入记录不会把删除的图片恢复回来。
+
+查看任务状态：
+
+```powershell
+uv run publishing-workspace task status G:\ai_publish 20260801_homura_foot
+```
+
+构建投稿包：
+
+```powershell
+uv run publishing-workspace task build G:\ai_publish 20260801_homura_foot
+```
+
+构建始终生成 `output/all`、`output/post`、`output/cover`。任务配置中的 ZIP 开关打开后，`archives/` 下按集合生成 ZIP。`post` 不要求是 `all` 的子集，`cover` 不要求属于 `post`，这些关系只记录 warning。
+
+默认 `strip_metadata` 开启，输出图片会清除 prompt、negative prompt、seed 等 PNG 内部参数；公共 workspace 原图和任务 selection 图片都不会被修改。构建期间会生成 `selection_snapshot.json`，该文件和 `build_manifest.json` 不会进入对外目录或 ZIP。
+
+### 7.1 task.yaml
+
+```yaml
+version: 1
+task_id: 20260801_homura_foot
+title: homura foot
+
+processing:
+  profile: pixiv_default
+  operations:
+    strip_metadata:
+      enabled: true
+    mosaic:
+      enabled: false
+
+packages:
+  directories:
+    enabled: true
+  zip:
+    enabled: true
+    targets:
+      - all
+      - post
+      - cover
+```
+
+`mosaic` 默认关闭；开启时必须提供已注册的适配器，否则 build 会失败且不会生成正式 build。

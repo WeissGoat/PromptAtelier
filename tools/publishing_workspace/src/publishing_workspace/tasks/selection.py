@@ -4,19 +4,30 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from uuid import uuid4
 
 from ..inputs.directory import natural_key
+from ..logging import get_logger
 from ..models import SelectionSet
 from .models import ImportMode, MaterializeResult
 from .naming import OutputNamePolicy
 from .paths import TaskPaths
 
 
+logger = get_logger(__name__)
+
+
 class SelectionMaterializer:
-    def __init__(self, name_policy: OutputNamePolicy | None = None):
+    def __init__(
+        self,
+        name_policy: OutputNamePolicy | None = None,
+        *,
+        progress_every: int = 200,
+    ):
         self.name_policy = name_policy or OutputNamePolicy()
+        self.progress_every = max(1, progress_every)
 
     def materialize(
         self,
@@ -99,7 +110,8 @@ class SelectionMaterializer:
         warnings = list(selection.warnings)
         skipped_duplicates = 0
         next_index = start_index
-        for item in selection.items:
+        started_at = time.monotonic()
+        for item_index, item in enumerate(selection.items, start=1):
             source = Path(item.resolved_path) if item.resolved_path else None
             if source is None or not source.is_file():
                 warnings.append(f"图片不存在，未物化：{item.source_path}")
@@ -120,6 +132,26 @@ class SelectionMaterializer:
             copied.append(output_name)
             input_hashes.add(digest)
             next_index += 1
+            if (
+                item_index % self.progress_every == 0
+                or time.monotonic() - started_at >= 5
+            ):
+                logger.info(
+                    "任务选择物化进度：processed=%s total=%s copied=%s skipped=%s",
+                    item_index,
+                    len(selection.items),
+                    len(copied),
+                    skipped_duplicates,
+                )
+                started_at = time.monotonic()
+        logger.info(
+            "任务选择物化完成：processed=%s total=%s copied=%s skipped=%s warnings=%s",
+            len(selection.items),
+            len(selection.items),
+            len(copied),
+            skipped_duplicates,
+            len(warnings),
+        )
         return MaterializeResult(
             materialized_files=copied,
             skipped_duplicates=skipped_duplicates,

@@ -5,8 +5,12 @@ from pathlib import Path
 from typing import Any
 
 from ..models import SelectionSet
+from ..logging import get_logger
 from .base import InputContext
 from .shortcut import imported_item_from_path
+
+
+logger = get_logger(__name__)
 
 
 class NeeViewPlaylistInputAdapter:
@@ -45,6 +49,20 @@ class NeeViewPlaylistInputAdapter:
             )
             items.append(item)
             warnings.extend(item.warnings)
+            if (index + 1) % 500 == 0:
+                logger.info(
+                    "NeeView 播放列表解析进度：processed=%s total=%s warnings=%s",
+                    index + 1,
+                    len(raw_items),
+                    len(warnings),
+                )
+        logger.info(
+            "NeeView 播放列表解析完成：items=%s total=%s warnings=%s source=%s",
+            len(items),
+            len(raw_items),
+            len(warnings),
+            source,
+        )
         return SelectionSet(
             source_type=self.type,
             source_ref=str(source),
