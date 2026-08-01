@@ -161,6 +161,43 @@ def test_resume_does_not_reload_input_adapter(tmp_path: Path, monkeypatch):
     assert result.status == "completed"
 
 
+def test_resume_takes_over_expired_running_run(tmp_path: Path):
+    root = tmp_path / "publish"
+    source = tmp_path / "images"
+    source.mkdir()
+    image = source / "a.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    init_workspace(root)
+    paths, config = load_workspace(root)
+    workflow = ImportWorkflowService(paths, config)
+    run = workflow.runs.create_run(
+        source_type="directory", source_ref=str(source), mode="import", strict=False
+    )
+    workflow.runs.persist_selection(
+        run.import_id,
+        SelectionSet(
+            id=run.import_id,
+            source_type="directory",
+            source_ref=str(source),
+            items=[_item(0, str(image))],
+        ),
+    )
+    ImportPlanner(workflow.catalog, workflow.runs, workflow.problems).plan(run.import_id)
+    workflow.runs.transition(run.import_id, status="planned", pipeline_stage="execution")
+    workflow.runs.transition(run.import_id, status="running", pipeline_stage="execution")
+    workflow.leases.acquire(run.import_id, allow_takeover=False)
+    with workflow.catalog.connection() as connection:
+        connection.execute(
+            "UPDATE workspace_locks SET lease_expires_at=? WHERE lock_name=?",
+            ("2000-01-01T00:00:00+00:00", "publishing_import"),
+        )
+
+    result = workflow.resume(run.import_id)
+
+    assert result.status == "completed"
+    assert result.parsed_new_items == 1
+
+
 def test_retry_problems_resolves_original_problem_after_fix(tmp_path: Path):
     root = tmp_path / "publish"
     source = tmp_path / "images"

@@ -28,7 +28,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "created": {"scanning", "failed"},
     "scanning": {"planned", "interrupted", "failed"},
     "planned": {"running", "interrupted", "failed"},
-    "running": {"completed", "completed_with_errors", "interrupted", "failed"},
+    "running": {"planned", "completed", "completed_with_errors", "interrupted", "failed"},
     "interrupted": {"scanning", "planned", "running", "failed"},
     "completed": set(),
     "completed_with_errors": set(),

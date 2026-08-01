@@ -93,6 +93,9 @@ class ImportWorkflowService:
             self.runs.reset_processing_to_planned(run_id)
             if run.status == "interrupted":
                 self.runs.transition(run_id, status="scanning", pipeline_stage="planning")
+            elif run.status == "running":
+                # 外部终止进程不会触发 KeyboardInterrupt，租约过期后状态仍可能是 running。
+                self.runs.transition(run_id, status="planned", pipeline_stage="execution")
             return self._run_planning_and_execution(
                 run_id,
                 lease=lease,
