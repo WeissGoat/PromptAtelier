@@ -317,6 +317,7 @@ PRIMARY KEY (import_id, source_order)
 `decision`：
 
 ```text
+pending
 reuse_path
 parse
 missing_path
@@ -328,6 +329,7 @@ legacy
 `status`：
 
 ```text
+pending
 planned
 processing
 reused_path
@@ -422,6 +424,8 @@ PRIMARY KEY (profile_hash, asset_id, view_key)
 
 CLI 在调用 InputAdapter 前先创建最小 ImportRun，记录 source_type、source_ref 和 mode。这样输入 JSON 损坏或 InputAdapter 失败时仍有可查询的 failed Run。SelectionSnapshot 成功创建后再补充来源指纹和 total_items。
 
+InputAdapter 成功后，在一个短事务中把 SelectionSnapshot 的全部项目写入 import_items，初始 `decision=pending`、`status=pending`。之后 Planner 分批读取 pending 项并写入正式决策。这样 planning 阶段中断后可以直接从数据库继续，不重新调用 InputAdapter，也不需要在运行中反复写大 JSON。
+
 ```text
 created
   -> scanning
@@ -499,6 +503,8 @@ normalized path_key
       -> parse
 ```
 
+Planner 完成一个批次后把对应 import_items 从 `pending` 更新为 `planned`，并保存正式 decision、observed_size 和 observed_modified_ns。
+
 `parse` 执行：
 
 ```text
@@ -527,6 +533,7 @@ normalized path_key
 
 恢复规则：
 
+- planning 阶段从最小 `decision=pending` 的 source_order 继续；
 - `reused_path / reused_content / parsed_new / missing / failed / held_problem` 不重复执行；
 - 残留 `processing` 项在恢复时重置为 `planned`；
 - 从最小未完成 `source_order` 继续；
