@@ -3,10 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from publishing_workspace.catalog import CatalogRepository
+from publishing_workspace.config import init_workspace, load_workspace
 from publishing_workspace.importing import ImportRunRepository
+from publishing_workspace.importing.planner import ImportPlanner
+from publishing_workspace.importing.service import ImportWorkflowService
 from publishing_workspace.models import ImportedItem, SelectionSet
+from publishing_workspace.service import PublishingService
 
 
 def _item(order: int, path: str) -> ImportedItem:
@@ -102,3 +107,55 @@ def test_import_run_counters_are_recomputed_from_item_status(tmp_path: Path):
     assert counters.processed_items == 1
     assert counters.missing_items == 1
     assert counters.planned_items == 1
+
+
+def test_workflow_imports_then_reuses_same_selection(tmp_path: Path):
+    root = tmp_path / "publish"
+    source = tmp_path / "images"
+    source.mkdir()
+    Image.new("RGB", (2, 2), "white").save(source / "a.png")
+    init_workspace(root)
+
+    first = PublishingService().import_source(root, source, input_type="directory")
+    second = PublishingService().import_source(root, source, input_type="directory")
+
+    assert first.status == "completed"
+    assert first.parsed_new_items == 1
+    assert second.status == "completed"
+    assert second.reused_path_items == 1
+    assert second.parsed_new_items == 0
+    assert Path(second.snapshot_path).is_file()
+
+
+def test_resume_does_not_reload_input_adapter(tmp_path: Path, monkeypatch):
+    root = tmp_path / "publish"
+    source = tmp_path / "images"
+    source.mkdir()
+    image = source / "a.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    init_workspace(root)
+    paths, config = load_workspace(root)
+    workflow = ImportWorkflowService(paths, config)
+    run = workflow.runs.create_run(
+        source_type="directory", source_ref=str(source), mode="import", strict=False
+    )
+    workflow.runs.persist_selection(
+        run.import_id,
+        SelectionSet(
+            id=run.import_id,
+            source_type="directory",
+            source_ref=str(source),
+            items=[_item(0, str(image))],
+        ),
+    )
+    ImportPlanner(workflow.catalog, workflow.runs, workflow.problems).plan(run.import_id)
+    workflow.runs.transition(run.import_id, status="planned", pipeline_stage="execution")
+    workflow.runs.transition(run.import_id, status="running", pipeline_stage="execution")
+    workflow.runs.interrupt(run.import_id, reason="test interruption")
+
+    monkeypatch.setattr(
+        "publishing_workspace.importing.service.default_input_registry",
+        lambda: (_ for _ in ()).throw(AssertionError("resume 不应读取 InputAdapter")),
+    )
+    result = workflow.resume(run.import_id)
+    assert result.status == "completed"

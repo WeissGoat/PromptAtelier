@@ -122,3 +122,11 @@ class ImportRunSummary(BaseModel):
     reader_counts: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     snapshot_path: str | None = None
+
+    @property
+    def import_id(self) -> str:
+        return self.run_id
+
+    @property
+    def imported_items(self) -> int:
+        return self.reused_path_items + self.reused_content_items + self.parsed_new_items

@@ -12,10 +12,10 @@ from .config import (
     init_workspace,
     load_workspace,
 )
-from .inputs import InputContext, default_input_registry
-from .metadata import ActionGroupManifestEnricher, default_image_node_reader_registry
 from .logging import get_logger
-from .models import ExportPlan, ExportSummary, ImportResult
+from .models import ExportPlan, ExportSummary
+from .importing.models import ImportRunRecord, ImportRunSummary
+from .importing.service import ImportWorkflowService
 from .views import (
     ClassificationViewBuilder,
     NeeViewPlaylistExporter,
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 class PublishingService:
     def initialize(self, root: str | Path) -> dict:
         paths, config, created = init_workspace(root)
-        CatalogRepository(paths.catalog)
+        CatalogRepository(paths.catalog, backups_dir=paths.backups)
         return {
             "root": str(paths.root),
             "workspace": str(paths.workspace),
@@ -49,56 +49,26 @@ class PublishingService:
         recursive: bool = False,
         strict: bool = False,
         legacy_tolerant: bool = False,
-    ) -> ImportResult:
+        retry_failed: bool = False,
+    ) -> ImportRunSummary:
         paths, config = load_workspace(root)
-        selection = default_input_registry().load(
+        return ImportWorkflowService(paths, config).import_source(
             source,
             input_type=input_type,
-            context=InputContext(
-                recursive=recursive,
-                strict=strict,
-                legacy_tolerant=legacy_tolerant,
-                image_extensions=set(config.image_extensions),
-            ),
-        )
-        repository = CatalogRepository(paths.catalog)
-        stats = repository.import_selection(
-            selection,
-            readers=default_image_node_reader_registry(),
-            enrichers=[ActionGroupManifestEnricher()],
+            recursive=recursive,
             strict=strict,
+            legacy_tolerant=legacy_tolerant,
+            retry_failed=retry_failed,
         )
-        snapshot_path = paths.imports / f"{selection.id}.json"
-        snapshot = {
-            "schema": "publishing-workspace.import/v1",
-            "selection": selection.model_dump(mode="json"),
-            "items": stats["items"],
-            "reader_counts": stats["reader_counts"],
-            "warnings": _ordered_unique(stats["warnings"]),
-        }
-        _write_json_atomic(snapshot_path, snapshot)
-        result = ImportResult(
-            import_id=selection.id,
-            source_type=selection.source_type,
-            source_ref=selection.source_ref,
-            total_items=len(selection.items),
-            imported_items=stats["imported"],
-            missing_items=stats["missing"],
-            failed_items=stats["failed"],
-            unique_assets=len(stats["asset_ids"]),
-            reader_counts=stats["reader_counts"],
-            warnings=_ordered_unique(stats["warnings"]),
-            snapshot_path=str(snapshot_path),
-        )
-        logger.info(
-            "Publishing 导入完成 import_id=%s total=%s imported=%s missing=%s failed=%s",
-            result.import_id,
-            result.total_items,
-            result.imported_items,
-            result.missing_items,
-            result.failed_items,
-        )
-        return result
+
+    def resume_import(self, root: str | Path, run_id: str) -> ImportRunSummary:
+        paths, config = load_workspace(root)
+        return ImportWorkflowService(paths, config).resume(run_id)
+
+    def import_status(self, root: str | Path, run_id: str | None = None) -> ImportRunRecord:
+        paths, config = load_workspace(root)
+        workflow = ImportWorkflowService(paths, config)
+        return workflow.runs.get_run(run_id) if run_id else workflow.runs.latest_run()
 
     def classify(
         self,
@@ -108,7 +78,7 @@ class PublishingService:
         hierarchy: list[str] | None = None,
     ) -> tuple[ExportPlan, Path]:
         paths, config = load_workspace(root)
-        repository = CatalogRepository(paths.catalog)
+        repository = CatalogRepository(paths.catalog, backups_dir=paths.backups)
         if repository.latest_import_id() is None:
             raise ValueError("Publishing Catalog 尚无可分类的导入记录")
         assets = repository.assets_for_import(import_id)
@@ -148,7 +118,9 @@ class PublishingService:
         jobs = self._export_jobs(paths, config, exporter_types, import_id=import_id)
         if not jobs:
             raise ValueError("没有启用任何 Publishing Exporter")
-        summary = ViewExportCoordinator(CatalogRepository(paths.catalog)).export(plan, jobs)
+        summary = ViewExportCoordinator(
+            CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        ).export(plan, jobs)
         return plan, summary
 
     def _export_jobs(
