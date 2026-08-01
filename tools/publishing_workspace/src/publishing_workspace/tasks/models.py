@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..models import utc_now_iso
 
@@ -68,9 +68,14 @@ class TaskConfig(BaseModel):
 
 
 class SelectionImportHistory(BaseModel):
-    schema: Literal["publishing-workspace.selection-import/v1"] = (
-        "publishing-workspace.selection-import/v1"
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_id: Literal["publishing-workspace.selection-import/v1"] = Field(
+        default="publishing-workspace.selection-import/v1",
+        alias="schema",
     )
+    """对外序列化为 schema，避免覆盖 Pydantic 的 BaseModel.schema 方法。"""
+
     history_id: str
     selection: SelectionName
     mode: ImportMode
@@ -99,8 +104,11 @@ class SelectionFile(BaseModel):
 
 
 class SelectionSnapshot(BaseModel):
-    schema: Literal["publishing-workspace.selection-snapshot/v1"] = (
-        "publishing-workspace.selection-snapshot/v1"
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_id: Literal["publishing-workspace.selection-snapshot/v1"] = Field(
+        default="publishing-workspace.selection-snapshot/v1",
+        alias="schema",
     )
     build_id: str
     created_at: str = Field(default_factory=utc_now_iso)

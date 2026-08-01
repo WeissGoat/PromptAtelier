@@ -136,7 +136,7 @@ class SelectionSnapshotWriter:
         paths.ensure_layout()
         _write_json_atomic(
             paths.candidates_snapshot,
-            selection.model_dump(mode="json"),
+            selection.model_dump(mode="json", by_alias=True),
         )
         files = sorted(
             _image_files(paths.selection_dirs["all"], None),

@@ -307,7 +307,7 @@ def cmd_task_import_selection(args) -> int:
         recursive=args.recursive,
         mode=args.mode,
     )
-    _print_json(history.model_dump(mode="json"))
+    _print_json(history.model_dump(mode="json", by_alias=True))
     return 0
 
 

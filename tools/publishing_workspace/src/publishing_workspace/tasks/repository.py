@@ -50,7 +50,7 @@ class TaskRepository:
         timestamp = re.sub(r"[^0-9A-Za-z_-]", "", record.imported_at)
         filename = f"{timestamp}-{record.selection}-{record.history_id}.json"
         target = paths.history_dir / filename
-        _write_json_atomic(target, record.model_dump(mode="json"))
+        _write_json_atomic(target, record.model_dump(mode="json", by_alias=True))
         return target
 
 
