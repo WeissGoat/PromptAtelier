@@ -11,6 +11,7 @@ from .models import (
 )
 from .paths import TaskPaths
 from .repository import TaskRepository
+from .selection import SelectionHistoryWriter, SelectionMaterializer, SelectionSnapshotWriter
 
 __all__ = [
     "ImportMode",
@@ -24,4 +25,7 @@ __all__ = [
     "TaskConfig",
     "TaskPaths",
     "TaskRepository",
+    "SelectionHistoryWriter",
+    "SelectionMaterializer",
+    "SelectionSnapshotWriter",
 ]
