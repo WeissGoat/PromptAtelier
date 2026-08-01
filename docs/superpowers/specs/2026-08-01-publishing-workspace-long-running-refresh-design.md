@@ -338,6 +338,7 @@ parsed_new
 missing
 failed
 held_problem
+legacy
 ```
 
 ### 8.3 import_problems
@@ -830,7 +831,7 @@ workspace/backups/catalog-v1-<timestamp>.sqlite
 历史转换：
 
 - 旧 imports：`mode=legacy`、`status=completed`、`pipeline_stage=completed`；
-- 旧 imported item：`decision=legacy`，保留 asset_id；
+- 旧 imported item：`decision=legacy`、`status=legacy`，保留 asset_id；历史记录不伪装成 parsed_new 或 reused_content；
 - 旧 failed item：创建 `legacy_failure` open problem；
 - 旧 missing item：创建 `missing_path` open problem；
 - 现有 asset_paths 缓存立即可用；
