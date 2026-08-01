@@ -233,6 +233,19 @@ class ImportRunRepository:
             ),
         )
 
+    def reset_item_to_pending(
+        self,
+        connection: sqlite3.Connection,
+        import_id: str,
+        source_order: int,
+    ) -> None:
+        connection.execute(
+            "UPDATE import_items SET decision='pending', status='pending', "
+            "observed_size=NULL, observed_modified_ns=NULL, updated_at=? "
+            "WHERE import_id=? AND source_order=?",
+            (utc_now_iso(), import_id, source_order),
+        )
+
     def reset_processing_to_planned(self, import_id: str) -> int:
         with self.catalog.connection() as connection:
             cursor = connection.execute(
