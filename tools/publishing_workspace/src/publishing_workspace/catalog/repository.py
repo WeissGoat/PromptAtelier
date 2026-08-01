@@ -6,9 +6,10 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from PIL import Image
+from pydantic import BaseModel
 
 from ..metadata.registry import ImageNodeReaderRegistry
 from ..metadata.enrichers import ImageNodeInfoEnricher
@@ -29,6 +30,15 @@ from .schema import SCHEMA_ID, SCHEMA_SQL, SCHEMA_VERSION
 
 
 logger = get_logger(__name__)
+
+
+class AssetChangedAfterPlanningError(RuntimeError):
+    pass
+
+
+class CatalogIngestResult(BaseModel):
+    asset: AssetRecord
+    outcome: Literal["reused_path", "reused_content", "parsed_new"]
 
 
 class CatalogRepository:
@@ -257,19 +267,47 @@ class CatalogRepository:
         readers: ImageNodeReaderRegistry,
         enrichers: list[ImageNodeInfoEnricher],
     ) -> AssetRecord:
+        stat = path.resolve(strict=True).stat()
+        return self.ingest_asset(
+            connection,
+            path,
+            expected_size=stat.st_size,
+            expected_modified_ns=stat.st_mtime_ns,
+            readers=readers,
+            enrichers=enrichers,
+        ).asset
+
+    def ingest_asset(
+        self,
+        connection: sqlite3.Connection,
+        path: Path,
+        *,
+        expected_size: int,
+        expected_modified_ns: int,
+        readers: ImageNodeReaderRegistry,
+        enrichers: list[ImageNodeInfoEnricher],
+    ) -> CatalogIngestResult:
         resolved = path.resolve(strict=True)
         stat = resolved.stat()
+        if stat.st_size != expected_size or stat.st_mtime_ns != expected_modified_ns:
+            raise AssetChangedAfterPlanningError(
+                f"图片在规划后发生变化：{resolved}"
+            )
         path_key = normalize_path_key(resolved)
-        cached = connection.execute(
-            "SELECT asset_id FROM asset_paths WHERE path_key=? AND size=? AND modified_ns=?",
-            (path_key, stat.st_size, stat.st_mtime_ns),
-        ).fetchone()
-        if cached is not None:
+        cached_asset_id = self.lookup_path_asset(
+            connection, path_key, stat.st_size, stat.st_mtime_ns
+        )
+        if cached_asset_id is not None:
             connection.execute(
                 "UPDATE asset_paths SET available=1, last_seen_at=? WHERE path_key=?",
                 (utc_now_iso(), path_key),
             )
-            return self._asset_from_db(connection, cached["asset_id"], preferred_path=resolved)
+            return CatalogIngestResult(
+                asset=self._asset_from_db(
+                    connection, cached_asset_id, preferred_path=resolved
+                ),
+                outcome="reused_path",
+            )
 
         digest = _sha256_file(resolved)
         asset_id = f"sha256:{digest}"
@@ -307,8 +345,10 @@ class CatalogRepository:
                 ),
             )
             self._replace_nodes(connection, asset_id, node_info)
+            outcome: Literal["reused_content", "parsed_new"] = "parsed_new"
         else:
             asset_id = existing["asset_id"]
+            outcome = "reused_content"
 
         connection.execute(
             "INSERT INTO asset_paths(path_key, path, asset_id, size, modified_ns, available, last_seen_at) "
@@ -318,7 +358,10 @@ class CatalogRepository:
             "last_seen_at=excluded.last_seen_at",
             (path_key, str(resolved), asset_id, stat.st_size, stat.st_mtime_ns, utc_now_iso()),
         )
-        return self._asset_from_db(connection, asset_id, preferred_path=resolved)
+        return CatalogIngestResult(
+            asset=self._asset_from_db(connection, asset_id, preferred_path=resolved),
+            outcome=outcome,
+        )
 
     def _replace_nodes(
         self,
