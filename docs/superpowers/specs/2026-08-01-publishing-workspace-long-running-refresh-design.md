@@ -265,6 +265,7 @@ source_type            TEXT NOT NULL
 source_ref             TEXT NOT NULL
 source_fingerprint     TEXT
 mode                   TEXT NOT NULL
+strict                 INTEGER NOT NULL DEFAULT 0
 status                 TEXT NOT NULL
 pipeline_stage         TEXT NOT NULL
 total_items            INTEGER NOT NULL DEFAULT 0
