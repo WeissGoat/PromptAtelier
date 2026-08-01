@@ -35,6 +35,7 @@ G:/ai_publish/
   workspace/
     workspace.yaml
     catalog.sqlite
+    backups/
     imports/
     exports/
       neev/
@@ -143,6 +144,7 @@ uv run publishing-workspace import `
 - `--strict`：图片缺失、损坏或格式不支持时立即终止整次导入。
 - `--legacy-tolerant`：显式使用 JSON 宽松控制字符模式读取旧 NeeView 列表；恢复行为会写入 warning。
 - `--log-level info`：显示导入数量、Reader 命中和导出过程。
+- `--retry-failed`：强制重试本次输入中与 open problem 指纹相同的项目；默认保持为 `held_problem`。
 
 导入结果示例：
 
@@ -165,7 +167,62 @@ uv run publishing-workspace import `
 
 `unique_assets` 按图片内容 SHA-256 去重。同一图片来自多个路径或多个播放列表时，只建立一个 Asset，但保留全部来源记录。
 
-## 4. 图片节点 Reader
+## 4. 可恢复导入与问题队列
+
+默认每批提交 200 项。`info` 日志每 200 项或 5 秒输出一次，运行状态和每个输入项都保存在 SQLite 中；进程中断后不需要重新读取 NeeView 列表。
+
+查看最近 Run：
+
+```powershell
+uv run publishing-workspace status G:\ai_publish --log-level info
+uv run publishing-workspace status G:\ai_publish <run_id>
+```
+
+恢复中断或租约过期的 Run：
+
+```powershell
+uv run publishing-workspace resume G:\ai_publish <run_id> --log-level info
+```
+
+查询问题：
+
+```powershell
+uv run publishing-workspace problems G:\ai_publish --status open
+uv run publishing-workspace problems G:\ai_publish --code empty_file
+uv run publishing-workspace problems G:\ai_publish --run-id <run_id>
+```
+
+修复原始图片后，按问题类型创建新的重试 Run：
+
+```powershell
+uv run publishing-workspace retry-problems G:\ai_publish --code empty_file --log-level info
+uv run publishing-workspace retry-problems G:\ai_publish --run-id <run_id>
+```
+
+问题状态包括 `open`、`resolved`、`ignored`。相同路径、大小和修改时间的问题默认不重复解析；文件变化或显式重试后才重新进入解析。有效但没有节点信息的图片不是问题，会以 `reader=unknown` 进入 Catalog。
+
+导入结果的核心字段：
+
+```json
+{
+  "run_id": "...",
+  "status": "completed_with_errors",
+  "total_items": 10010,
+  "processed_items": 10010,
+  "reused_path_items": 9780,
+  "reused_content_items": 12,
+  "parsed_new_items": 195,
+  "missing_items": 0,
+  "failed_items": 23,
+  "held_problem_items": 0,
+  "open_problems": 23,
+  "snapshot_path": "G:\\ai_publish\\workspace\\imports\\<run_id>.json"
+}
+```
+
+同一 workspace 同时只允许一个写入型 ImportRun。`status`、`problems` 等查询命令不获取写锁；活动 Run 的租约未过期时，另一个写入命令会直接拒绝。
+
+## 5. 图片节点 Reader
 
 Reader Registry 按以下顺序工作：
 
@@ -187,7 +244,7 @@ Reader 之后会运行 `ActionGroupManifestEnricher`。如果新版图片只有 
 
 新版优先，不会把新版和旧版节点混合投票。新版损坏后回退旧版时，导入快照会记录 warning。
 
-## 5. 分类与导出
+## 6. 分类与导出
 
 只构建分类计划：
 
@@ -242,8 +299,8 @@ Exporter 对“视图路径、成员、顺序、Exporter 版本”计算哈希�
 
 Windows 快捷方式 Reader 和 Exporter 会通过同卷短临时路径调用 `WScript.Shell`，因此分类目录中包含中文、日文或较长节点名称时也可以正常往返。
 
-## 6. 当前边界
+## 7. 当前边界
 
-第一阶段已经支持公共工作区、输入快照、新旧 Reader、Catalog、分类视图、增量 `.nvpls` 和可选 `.lnk`。
+当前已支持公共工作区、持久化 ImportRun、分批恢复导入、ProblemQueue、新旧 Reader、Catalog、分类视图、增量 `.nvpls` 和可选 `.lnk`。阶段 1 的分类与导出仍是全量模式。
 
 投稿任务、二次筛选、Bridge 排序回读、图片清参数、自动打码以及 `all/post/cover` 打包属于后续阶段。

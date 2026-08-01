@@ -129,6 +129,18 @@ class ProblemRepository:
         )
         return cursor.rowcount
 
+    def resolve_ids(self, connection: sqlite3.Connection, problem_ids: list[str]) -> int:
+        if not problem_ids:
+            return 0
+        now = utc_now_iso()
+        placeholders = ",".join("?" for _ in problem_ids)
+        cursor = connection.execute(
+            f"UPDATE import_problems SET status='resolved', resolved_at=?, updated_at=? "
+            f"WHERE status='open' AND problem_id IN ({placeholders})",
+            [now, now, *problem_ids],
+        )
+        return cursor.rowcount
+
     def list(
         self,
         *,

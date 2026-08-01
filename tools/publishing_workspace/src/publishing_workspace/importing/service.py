@@ -9,7 +9,8 @@ from ..config import PublishingWorkspaceConfig, WorkspacePaths
 from ..inputs import InputContext, default_input_registry
 from ..logging import get_logger
 from ..metadata import ActionGroupManifestEnricher, default_image_node_reader_registry
-from ..problems import ProblemRepository
+from ..models import ImportedItem, SelectionSet
+from ..problems import ProblemCode, ProblemRepository
 from .executor import ImportExecutor, ImportStrictFailure
 from .locks import WorkspaceLeaseRepository
 from .models import ImportRunSummary
@@ -106,6 +107,73 @@ class ImportWorkflowService:
             return self._snapshot(run_id)
         except Exception as exc:
             self.runs.fail(run_id, exc)
+            raise
+        finally:
+            self.leases.release(lease)
+
+    def retry_problems(
+        self,
+        *,
+        run_id: str | None = None,
+        error_code: ProblemCode | None = None,
+    ) -> ImportRunSummary:
+        selected = self.problems.list(status="open", run_id=run_id, error_code=error_code)
+        if not selected:
+            raise ValueError("没有匹配的 open problem")
+        source_ref = f"retry-problems:{run_id or 'all'}"
+        run = self.runs.create_run(
+            source_type="retry_problems",
+            source_ref=source_ref,
+            mode="retry_problems",
+            strict=False,
+        )
+        lease = self.leases.acquire(run.import_id, allow_takeover=False)
+        reporter = ProgressReporter(logger=logger)
+        try:
+            items = [
+                ImportedItem(
+                    source_path=problem.source_path,
+                    resolved_path=(
+                        problem.source_path
+                        if Path(problem.source_path).is_file()
+                        else None
+                    ),
+                    source_type="retry_problems",
+                    source_ref=source_ref,
+                    source_order=index,
+                    display_name=Path(problem.source_path).name,
+                )
+                for index, problem in enumerate(selected)
+            ]
+            self.runs.persist_selection(
+                run.import_id,
+                SelectionSet(
+                    id=run.import_id,
+                    source_type="retry_problems",
+                    source_ref=source_ref,
+                    items=items,
+                ),
+            )
+            summary = self._run_planning_and_execution(
+                run.import_id,
+                lease=lease,
+                reporter=reporter,
+                retry_failed=True,
+            )
+            retry_items = [self.runs.get_item(run.import_id, index) for index in range(len(selected))]
+            resolved_ids = [
+                problem.problem_id
+                for problem, item in zip(selected, retry_items)
+                if item.status in {"reused_path", "reused_content", "parsed_new"}
+            ]
+            with self.catalog.connection() as connection:
+                self.problems.resolve_ids(connection, resolved_ids)
+            return summary
+        except KeyboardInterrupt:
+            self.runs.interrupt(run.import_id, reason="keyboard_interrupt")
+            raise
+        except Exception as exc:
+            self.runs.fail(run.import_id, exc)
             raise
         finally:
             self.leases.release(lease)

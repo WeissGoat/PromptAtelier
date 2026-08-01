@@ -159,3 +159,24 @@ def test_resume_does_not_reload_input_adapter(tmp_path: Path, monkeypatch):
     )
     result = workflow.resume(run.import_id)
     assert result.status == "completed"
+
+
+def test_retry_problems_resolves_original_problem_after_fix(tmp_path: Path):
+    root = tmp_path / "publish"
+    source = tmp_path / "images"
+    source.mkdir()
+    broken = source / "broken.png"
+    broken.touch()
+    init_workspace(root)
+    service = PublishingService()
+
+    first = service.import_source(root, source, input_type="directory")
+    assert first.failed_items == 1
+    assert len(service.list_problems(root, error_code="empty_file")) == 1
+
+    Image.new("RGB", (2, 2), "white").save(broken)
+    retry = service.retry_problems(root, error_code="empty_file")
+
+    assert retry.parsed_new_items == 1
+    assert service.list_problems(root, error_code="empty_file") == []
+    assert len(service.list_problems(root, status="resolved", error_code="empty_file")) == 1

@@ -43,7 +43,52 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="显式允许旧 NeeView JSON 的宽松控制字符解析",
     )
+    import_parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="强制重试相同文件指纹的 open problem",
+    )
     import_parser.set_defaults(func=cmd_import)
+
+    status_parser = commands.add_parser("status", help="查看 ImportRun 状态")
+    _add_log_argument(status_parser)
+    status_parser.add_argument("root", help="Publishing 根目录")
+    status_parser.add_argument("run_id", nargs="?", help="可选 ImportRun id")
+    status_parser.set_defaults(func=cmd_status)
+
+    resume_parser = commands.add_parser("resume", help="恢复中断的 ImportRun")
+    _add_log_argument(resume_parser)
+    resume_parser.add_argument("root", help="Publishing 根目录")
+    resume_parser.add_argument("run_id", help="ImportRun id")
+    resume_parser.set_defaults(func=cmd_resume)
+
+    problems_parser = commands.add_parser("problems", help="查询导入问题")
+    _add_log_argument(problems_parser)
+    problems_parser.add_argument("root", help="Publishing 根目录")
+    problems_parser.add_argument(
+        "--status", choices=("open", "resolved", "ignored"), default="open"
+    )
+    problems_parser.add_argument("--run-id")
+    problems_parser.add_argument(
+        "--code",
+        choices=(
+            "missing_path",
+            "empty_file",
+            "unreadable_image",
+            "unsupported_format",
+            "metadata_read_error",
+            "shortcut_resolve_error",
+            "legacy_failure",
+        ),
+    )
+    problems_parser.set_defaults(func=cmd_problems)
+
+    retry_parser = commands.add_parser("retry-problems", help="重试问题队列")
+    _add_log_argument(retry_parser)
+    retry_parser.add_argument("root", help="Publishing 根目录")
+    retry_parser.add_argument("--run-id")
+    retry_parser.add_argument("--code")
+    retry_parser.set_defaults(func=cmd_retry_problems)
 
     classify_parser = commands.add_parser("classify", help="构建分类视图计划")
     _add_log_argument(classify_parser)
@@ -97,6 +142,45 @@ def cmd_import(args) -> int:
         recursive=args.recursive,
         strict=args.strict,
         legacy_tolerant=args.legacy_tolerant,
+        retry_failed=args.retry_failed,
+    )
+    _print_json(result.model_dump(mode="json"))
+    return 0
+
+
+def cmd_status(args) -> int:
+    result = PublishingService().import_status(args.root, args.run_id)
+    _print_json(result.model_dump(mode="json"))
+    return 0
+
+
+def cmd_resume(args) -> int:
+    result = PublishingService().resume_import(args.root, args.run_id)
+    _print_json(result.model_dump(mode="json"))
+    return 0
+
+
+def cmd_problems(args) -> int:
+    problems = PublishingService().list_problems(
+        args.root,
+        status=args.status,
+        run_id=args.run_id,
+        error_code=args.code,
+    )
+    _print_json(
+        {
+            "count": len(problems),
+            "items": [problem.model_dump(mode="json") for problem in problems],
+        }
+    )
+    return 0
+
+
+def cmd_retry_problems(args) -> int:
+    result = PublishingService().retry_problems(
+        args.root,
+        run_id=args.run_id,
+        error_code=args.code,
     )
     _print_json(result.model_dump(mode="json"))
     return 0
@@ -145,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(getattr(args, "log_level", None))
     try:
         return args.func(args)
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (KeyError, OSError, ValueError, RuntimeError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
 

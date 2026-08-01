@@ -16,6 +16,7 @@ from .logging import get_logger
 from .models import ExportPlan, ExportSummary
 from .importing.models import ImportRunRecord, ImportRunSummary
 from .importing.service import ImportWorkflowService
+from .problems import ProblemCode, ProblemRepository, ProblemStatus
 from .views import (
     ClassificationViewBuilder,
     NeeViewPlaylistExporter,
@@ -68,7 +69,35 @@ class PublishingService:
     def import_status(self, root: str | Path, run_id: str | None = None) -> ImportRunRecord:
         paths, config = load_workspace(root)
         workflow = ImportWorkflowService(paths, config)
-        return workflow.runs.get_run(run_id) if run_id else workflow.runs.latest_run()
+        result = workflow.runs.get_run(run_id) if run_id else workflow.runs.latest_run()
+        if result is None:
+            raise ValueError("Publishing Catalog 尚无 ImportRun")
+        return result
+
+    def list_problems(
+        self,
+        root: str | Path,
+        *,
+        status: ProblemStatus | None = "open",
+        run_id: str | None = None,
+        error_code: ProblemCode | None = None,
+    ):
+        paths, config = load_workspace(root)
+        workflow = ImportWorkflowService(paths, config)
+        return workflow.problems.list(status=status, run_id=run_id, error_code=error_code)
+
+    def retry_problems(
+        self,
+        root: str | Path,
+        *,
+        run_id: str | None = None,
+        error_code: ProblemCode | None = None,
+    ) -> ImportRunSummary:
+        paths, config = load_workspace(root)
+        return ImportWorkflowService(paths, config).retry_problems(
+            run_id=run_id,
+            error_code=error_code,
+        )
 
     def classify(
         self,
