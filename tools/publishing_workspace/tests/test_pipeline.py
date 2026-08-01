@@ -245,10 +245,11 @@ def test_catalog_migrates_legacy_schema_meta_without_losing_imports(tmp_path: Pa
             "SELECT source_ref FROM imports WHERE import_id='legacy'"
         ).fetchone()
     assert dict(schema) == {
-        "schema_id": "publishing-workspace.catalog/v1",
-        "version": 1,
+        "schema_id": "publishing-workspace.catalog/v2",
+        "version": 2,
     }
     assert imported["source_ref"] == "F:/images"
+    assert len(list((catalog.parent / "backups").glob("catalog-v1-*.sqlite"))) == 1
 
 
 def test_catalog_recovers_interrupted_legacy_schema_migration(tmp_path: Path):
@@ -266,9 +267,10 @@ def test_catalog_recovers_interrupted_legacy_schema_migration(tmp_path: Path):
             "SELECT schema_id, version FROM schema_meta"
         ).fetchone()
     assert dict(row) == {
-        "schema_id": "publishing-workspace.catalog/v1",
-        "version": 1,
+        "schema_id": "publishing-workspace.catalog/v2",
+        "version": 2,
     }
+    assert len(list((catalog.parent / "backups").glob("catalog-v1-*.sqlite"))) == 1
 
 
 def test_catalog_schema_migration_rolls_back_on_failure(tmp_path: Path, monkeypatch):
@@ -277,25 +279,16 @@ def test_catalog_schema_migration_rolls_back_on_failure(tmp_path: Path, monkeypa
         connection.execute("CREATE TABLE schema_meta(version INTEGER NOT NULL)")
         connection.execute("INSERT INTO schema_meta(version) VALUES (1)")
 
-    def fail_after_alter(self, connection):
-        connection.execute("ALTER TABLE schema_meta ADD COLUMN schema_id TEXT")
-        raise RuntimeError("模拟迁移中断")
-
     monkeypatch.setattr(
-        CatalogRepository,
-        "_migrate_legacy_schema_meta",
-        fail_after_alter,
+        "publishing_workspace.catalog.repository.migrate_catalog_v1_to_v2",
+        lambda path, backups_dir: (_ for _ in ()).throw(RuntimeError("模拟迁移中断")),
     )
 
     with pytest.raises(RuntimeError, match="模拟迁移中断"):
         CatalogRepository(catalog)
 
     with sqlite3.connect(catalog) as connection:
-        columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(schema_meta)").fetchall()
-        }
-    assert columns == {"version"}
+        assert connection.execute("SELECT version FROM schema_meta").fetchone()[0] == 1
 
 
 def test_neev_input_keeps_order_and_reports_missing(tmp_path: Path):

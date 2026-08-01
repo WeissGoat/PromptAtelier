@@ -83,6 +83,7 @@ class WorkspacePaths(BaseModel):
     workspace: Path
     config: Path
     catalog: Path
+    backups: Path
     imports: Path
     exports: Path
     cache: Path
@@ -100,6 +101,7 @@ class WorkspacePaths(BaseModel):
             workspace=workspace,
             config=workspace / "workspace.yaml",
             catalog=workspace / "catalog.sqlite",
+            backups=workspace / "backups",
             imports=workspace / "imports",
             exports=workspace / "exports",
             cache=workspace / "cache",
@@ -113,6 +115,7 @@ def init_workspace(root: str | Path) -> tuple[WorkspacePaths, PublishingWorkspac
     for directory in (
         paths.root,
         paths.workspace,
+        paths.backups,
         paths.imports,
         paths.exports,
         paths.cache,

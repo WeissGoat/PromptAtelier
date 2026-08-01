@@ -24,6 +24,7 @@ from ..models import (
     utc_now_iso,
 )
 from ..png_metadata import read_png_text_chunks
+from .migrations import migrate_catalog_v1_to_v2
 from .schema import SCHEMA_ID, SCHEMA_SQL, SCHEMA_VERSION
 
 
@@ -31,8 +32,11 @@ logger = get_logger(__name__)
 
 
 class CatalogRepository:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, backups_dir: str | Path | None = None):
         self.path = Path(path)
+        self.backups_dir = (
+            Path(backups_dir) if backups_dir is not None else self.path.parent / "backups"
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
 
@@ -51,23 +55,39 @@ class CatalogRepository:
             connection.close()
 
     def initialize(self) -> None:
-        with self.connection() as connection:
-            connection.executescript(SCHEMA_SQL)
-            connection.execute("BEGIN IMMEDIATE")
-            self._migrate_legacy_schema_meta(connection)
-            row = connection.execute(
-                "SELECT schema_id, version FROM schema_meta LIMIT 1"
-            ).fetchone()
-            if row is None:
+        version = self._read_version()
+        if version is None:
+            with self.connection() as connection:
+                connection.executescript(SCHEMA_SQL)
                 connection.execute(
                     "INSERT INTO schema_meta(schema_id, version) VALUES (?, ?)",
                     (SCHEMA_ID, SCHEMA_VERSION),
                 )
-            elif row["schema_id"] != SCHEMA_ID or int(row["version"]) != SCHEMA_VERSION:
-                raise RuntimeError(
-                    "不支持的 Publishing Catalog schema："
-                    f"{row['schema_id']} version={row['version']}"
-                )
+            return
+        if version == 1:
+            backup = migrate_catalog_v1_to_v2(self.path, self.backups_dir)
+            logger.warning("Publishing Catalog 已从 v1 升级到 v2，备份：%s", backup)
+            return
+        if version != SCHEMA_VERSION:
+            raise RuntimeError(f"不支持的 Publishing Catalog schema version：{version}")
+        with self.connection() as connection:
+            connection.executescript(SCHEMA_SQL)
+
+    def _read_version(self) -> int | None:
+        if not self.path.exists():
+            return None
+        with sqlite3.connect(self.path) as connection:
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(schema_meta)").fetchall()
+            }
+            if not columns:
+                return None
+            if "version" not in columns:
+                raise RuntimeError("无法识别的 Publishing Catalog schema_meta")
+            row = connection.execute("SELECT version FROM schema_meta LIMIT 1").fetchone()
+            if row is None:
+                return None
+            return int(row[0])
 
     def _migrate_legacy_schema_meta(self, connection: sqlite3.Connection) -> None:
         columns = {
@@ -131,14 +151,19 @@ class CatalogRepository:
         }
         with self.connection() as connection:
             connection.execute(
-                "INSERT INTO imports(import_id, source_type, source_ref, created_at, warnings_json) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO imports(import_id, source_type, source_ref, source_fingerprint, mode, strict, "
+                "status, pipeline_stage, total_items, warnings_json, created_at, started_at, updated_at) "
+                "VALUES (?, ?, ?, NULL, 'import', ?, 'running', 'execution', ?, ?, ?, ?, ?)",
                 (
                     selection.id,
                     selection.source_type,
                     selection.source_ref,
-                    selection.created_at,
+                    int(strict),
+                    len(selection.items),
                     _json(selection.warnings),
+                    selection.created_at,
+                    selection.created_at,
+                    selection.created_at,
                 ),
             )
             for item in selection.items:
@@ -151,6 +176,24 @@ class CatalogRepository:
                     strict,
                     stats,
                 )
+            connection.execute(
+                "UPDATE imports SET status=?, pipeline_stage='completed', processed_items=?, "
+                "planned_items=?, reused_path_items=0, reused_content_items=0, "
+                "parsed_new_items=?, missing_items=?, failed_items=?, warnings_json=?, "
+                "updated_at=?, completed_at=? WHERE import_id=?",
+                (
+                    "completed_with_errors" if stats["failed"] or stats["missing"] else "completed",
+                    stats["imported"] + stats["missing"] + stats["failed"],
+                    len(selection.items),
+                    stats["imported"],
+                    stats["missing"],
+                    stats["failed"],
+                    _json(stats["warnings"]),
+                    utc_now_iso(),
+                    utc_now_iso(),
+                    selection.id,
+                ),
+            )
         return stats
 
     def _import_item(
@@ -302,16 +345,20 @@ class CatalogRepository:
     ) -> None:
         connection.execute(
             "INSERT INTO import_items(import_id, source_order, source_path, resolved_path, "
-            "display_name, asset_id, status, warnings_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "display_name, decision, status, attempts, asset_id, warnings_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
             (
                 import_id,
                 item.source_order,
                 item.source_path,
                 item.resolved_path,
                 item.display_name,
-                asset_id,
+                "legacy" if status == "imported" else ("missing_path" if status == "missing" else "parse"),
                 status,
+                asset_id,
                 _json(item.warnings),
+                utc_now_iso(),
+                utc_now_iso(),
             ),
         )
 
