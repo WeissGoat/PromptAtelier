@@ -259,7 +259,7 @@ class CatalogRepository:
     ) -> AssetRecord:
         resolved = path.resolve(strict=True)
         stat = resolved.stat()
-        path_key = _path_key(resolved)
+        path_key = normalize_path_key(resolved)
         cached = connection.execute(
             "SELECT asset_id FROM asset_paths WHERE path_key=? AND size=? AND modified_ns=?",
             (path_key, stat.st_size, stat.st_mtime_ns),
@@ -333,6 +333,20 @@ class CatalogRepository:
                 "VALUES (?, ?, ?, ?, ?)",
                 (asset_id, node.role, node.index, node.id or "", node.ref or ""),
             )
+
+    def lookup_path_asset(
+        self,
+        connection: sqlite3.Connection,
+        path_key: str,
+        size: int,
+        modified_ns: int,
+    ) -> str | None:
+        row = connection.execute(
+            "SELECT asset_id FROM asset_paths WHERE path_key=? AND size=? AND modified_ns=? "
+            "AND available=1",
+            (path_key, size, modified_ns),
+        ).fetchone()
+        return str(row["asset_id"]) if row is not None else None
 
     def _insert_import_item(
         self,
@@ -421,7 +435,7 @@ class CatalogRepository:
             raise KeyError(f"Catalog 中找不到资产：{asset_id}")
         path_row = connection.execute(
             "SELECT * FROM asset_paths WHERE path_key=? AND asset_id=?",
-            (_path_key(preferred_path), asset_id),
+            (normalize_path_key(preferred_path), asset_id),
         ).fetchone()
         if path_row is None:
             path_row = connection.execute(
@@ -508,8 +522,11 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _path_key(path: Path) -> str:
+def normalize_path_key(path: Path) -> str:
     return str(path.expanduser().resolve()).casefold()
+
+
+_path_key = normalize_path_key
 
 
 def _json(value: Any) -> str:
