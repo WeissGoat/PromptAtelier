@@ -23,6 +23,7 @@ from .views import (
     ViewExportCoordinator,
     WindowsShortcutExporter,
 )
+from .tasks.service import TaskWorkflowService
 
 
 logger = get_logger(__name__)
@@ -40,6 +41,56 @@ class PublishingService:
             "created": created,
             "schema": config.schema_id,
         }
+
+    def create_task(
+        self,
+        root: str | Path,
+        task_id: str,
+        *,
+        title: str | None = None,
+        candidates: str | Path | None = None,
+        input_type: str | None = None,
+        recursive: bool = False,
+    ):
+        return TaskWorkflowService().create(
+            root,
+            task_id,
+            title=title,
+            candidates=candidates,
+            input_type=input_type,
+            recursive=recursive,
+        )
+
+    def import_task_selection(
+        self,
+        root: str | Path,
+        task_id: str,
+        selection_name: str,
+        source: str | Path,
+        *,
+        input_type: str | None = None,
+        recursive: bool = False,
+        mode: str = "replace",
+    ):
+        if selection_name not in {"all", "post", "cover"}:
+            raise ValueError(f"未知选择集合：{selection_name}")
+        if mode not in {"replace", "append"}:
+            raise ValueError(f"未知导入模式：{mode}")
+        return TaskWorkflowService().import_selection(
+            root,
+            task_id,
+            selection_name,
+            source,
+            input_type=input_type,
+            recursive=recursive,
+            mode=mode,
+        )
+
+    def task_status(self, root: str | Path, task_id: str) -> dict:
+        return TaskWorkflowService().status(root, task_id)
+
+    def build_task(self, root: str | Path, task_id: str):
+        return TaskWorkflowService().build(root, task_id)
 
     def import_source(
         self,
