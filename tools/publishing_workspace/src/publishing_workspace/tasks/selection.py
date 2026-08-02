@@ -67,7 +67,8 @@ class SelectionMaterializer:
             if backup.exists():
                 shutil.rmtree(backup)
             return result
-        except Exception:
+        # Ctrl+C 属于 BaseException；也必须清理未提交的临时目录，避免下次任务看到残留文件。
+        except BaseException:
             if temporary.exists():
                 shutil.rmtree(temporary)
             raise

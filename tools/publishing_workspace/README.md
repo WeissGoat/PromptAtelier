@@ -47,6 +47,8 @@ G:/ai_publish/
 
 `workspace` 是长期公共素材池，不属于某一个投稿任务。后续可以在同一个根目录下建立多个 `tasks/<task_id>`。
 
+完整 NeeView 收藏列表应先导入公共 `workspace`，不要直接作为一次投稿任务的 `candidates`。投稿任务只接收本次人工筛选后的子集；如果需要从公共 Catalog 选图，先通过分类视图、NeeView 播放列表或目录整理出一个较小输入，再导入 `tasks/<task_id>/selection/`。
+
 ## 2. workspace.yaml
 
 初始化后的默认配置：
@@ -355,6 +357,8 @@ tasks/<task_id>/
 ```
 
 `selection/all`、`selection/post`、`selection/cover` 只放图片。可以直接删除、重命名或用 Adobe Bridge 调整文件名；构建时当前目录内容和自然文件名顺序优先，历史导入记录不会把删除的图片恢复回来。
+
+一次投稿任务建议只包含本次要处理的图片。公共 workspace 可以长期保存数千或更多图片，但它和单次投稿任务的生命周期、选择范围不同。
 
 查看任务状态：
 
