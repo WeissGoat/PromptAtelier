@@ -1,0 +1,30 @@
+version: 1
+task_id: 20260802_mosaic_demo
+title: mosaic demo
+
+processing:
+  profile: pixiv_default
+  operations:
+    strip_metadata:
+      enabled: true
+    mosaic:
+      enabled: true
+      version: "2"
+      adapter: anr_plugin_auto_mosaics
+      options:
+        detector: yolo_sam
+        method: pixel
+        parts:
+          - penis
+          - pussy
+        pixel_size: 15
+
+packages:
+  directories:
+    enabled: true
+  zip:
+    enabled: true
+    targets:
+      - all
+      - post
+      - cover

@@ -49,6 +49,89 @@ G:/ai_publish/
 
 完整 NeeView 收藏列表应先导入公共 `workspace`，不要直接作为一次投稿任务的 `candidates`。投稿任务只接收本次人工筛选后的子集；如果需要从公共 Catalog 选图，先通过分类视图、NeeView 播放列表或目录整理出一个较小输入，再导入 `tasks/<task_id>/selection/`。
 
+## 自动打码集成
+
+Publishing Workspace 通过 `mosaic` Operation 接入 `anr_plugin_auto_mosaics`。普通任务不启用该 Operation 时不会加载 YOLO、SAM 或 PyTorch；需要真实打码时安装可选依赖：
+
+```powershell
+cd F:\my_project\new\tags_machine\refactor\tools\publishing_workspace
+uv sync --extra mosaic
+```
+
+模型由 workspace CLI 管理。先查看状态：
+
+```powershell
+uv run publishing-workspace mosaic status G:\ai_publish
+```
+
+默认模型目录是项目内的 `tools/publishing_workspace/models/anr_plugin_auto_mosaics`。可以从已有模型目录做一次性迁移，复制后会按 manifest 的 SHA-256 校验：
+
+```powershell
+uv run publishing-workspace mosaic install G:\ai_publish `
+  --source F:\ThreeState\anr_plugin_auto_mosaics\models
+```
+
+也可以不传 `--source`，让 CLI 按 workspace manifest 中的 URL 下载。后续 build 只读取已配置的模型目录，不会访问 `--source` 路径。
+
+`workspace.yaml` 可以显式覆盖模型目录或 manifest：
+
+```yaml
+integrations:
+  mosaic:
+    provider: anr_plugin_auto_mosaics
+    model_root: null
+    models:
+      yolo:
+        filename: yolo/censor.pt
+        url: https://github.com/zhulinyv/anr_plugin_auto_mosaics/raw/main/models/yolo/censor.pt
+        sha256: 62b18176b005ec5b8918d3fdd99323193ba2dd99c06e150de808087d37ebe009
+      sam:
+        filename: sams/sam_vit_b_01ec64.pth
+        url: https://huggingface.co/datasets/Xytpz/SAM_Models/resolve/main/sam_vit_b_01ec64.pth?download=true
+        sha256: ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
+```
+
+`model_root: null` 使用项目内默认目录；相对路径按 Publishing 根目录解析，绝对路径也可以使用。模型缺失、SHA-256 不匹配或依赖未安装时，正式 build 会失败，不会生成正式 build 目录。
+
+投稿任务在 `task.yaml` 中启用打码。Operation 的 YAML 顺序就是处理顺序，推荐先清除 PNG 元数据，再执行打码：
+
+```yaml
+version: 1
+task_id: 20260802_mosaic_demo
+title: mosaic demo
+
+processing:
+  profile: pixiv_default
+  operations:
+    strip_metadata:
+      enabled: true
+    mosaic:
+      enabled: true
+      version: "2"
+      adapter: anr_plugin_auto_mosaics
+      options:
+        detector: yolo_sam
+        method: pixel
+        parts:
+          - penis
+          - pussy
+        pixel_size: 15
+
+packages:
+  directories:
+    enabled: true
+  zip:
+    enabled: true
+    targets:
+      - all
+      - post
+      - cover
+```
+
+支持的 `detector` 是 `yolo` 和 `yolo_sam`；支持的 `method` 是 `pixel`、`blur`、`line`、`solid`、`emoji`。`parts` 支持 `penis`、`pussy`、`female_nipple`、`anus`。当前 YOLO 和 YOLO+SAM 都不支持 `anus`，会记录 warning 并忽略该部位；如果只配置 `anus`，输出保持原图，不会错误地处理全部检测结果。
+
+常用参数为：`pixel_size` 取 1-100，`blur_radius` 取 1-100，`line_width_range` 和 `line_spacing_range` 是两个整数的范围，`color` 是三个 0-255 整数，`emoji_dir` 是表情图片目录。输出图片写入 build 的 `output/all`、`output/post` 和 `output/cover`，不会修改 selection 中的原图。首次成功处理后，处理缓存会复用结果；mosaic 实现版本变化会自动使用新的缓存键。
+
 ## 2. workspace.yaml
 
 初始化后的默认配置：

@@ -14,6 +14,19 @@ exporters:
   windows_shortcut:
     enabled: false
     root: workspace/exports/shortcuts
+integrations:
+  mosaic:
+    provider: anr_plugin_auto_mosaics
+    model_root: null
+    models:
+      yolo:
+        filename: yolo/censor.pt
+        url: https://github.com/zhulinyv/anr_plugin_auto_mosaics/raw/main/models/yolo/censor.pt
+        sha256: 62b18176b005ec5b8918d3fdd99323193ba2dd99c06e150de808087d37ebe009
+      sam:
+        filename: sams/sam_vit_b_01ec64.pth
+        url: https://huggingface.co/datasets/Xytpz/SAM_Models/resolve/main/sam_vit_b_01ec64.pth?download=true
+        sha256: ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
 image_extensions:
 - .png
 - .jpg
