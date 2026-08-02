@@ -45,10 +45,17 @@ class ImageProcessingPipeline:
         input_hash = _sha256(source)
         cache_path = None
         if self.cache is not None:
+            cache_operations = [
+                (
+                    name,
+                    _cache_operation_config(name, operation_config, operation),
+                )
+                for name, operation_config, operation in resolved
+            ]
             cache_key = self.cache.key(
                 input_hash,
                 config.profile,
-                [(name, item) for name, item, _ in resolved],
+                cache_operations,
             )
             cache_path = self.cache.path(cache_key, source.suffix.casefold())
             if cache_path.is_file():
@@ -97,6 +104,19 @@ def _operation_options(config: OperationConfig) -> dict:
     if config.adapter:
         options["adapter"] = config.adapter
     return options
+
+
+def _cache_operation_config(
+    name: str,
+    config: OperationConfig,
+    operation,
+) -> OperationConfig:
+    if name != "mosaic":
+        return config
+    implementation_version = str(getattr(operation, "version", "1"))
+    return config.model_copy(
+        update={"version": f"{implementation_version}:{config.version}"}
+    )
 
 
 def _verify_image(path: Path) -> None:

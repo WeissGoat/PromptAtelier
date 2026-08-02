@@ -11,7 +11,9 @@ from uuid import uuid4
 from PIL import Image
 
 from ..config import load_workspace
+from ..integrations.anr_mosaic import AnrAutoMosaicsAdapter
 from ..processing import ImageProcessingPipeline
+from ..processing.operations import default_operation_registry
 from ..tasks.models import SelectionSnapshot, SelectionName
 from ..tasks.paths import TaskPaths
 from ..tasks.repository import TaskRepository
@@ -57,9 +59,7 @@ class PackageBuilder:
                 temporary / "selection_snapshot.json",
                 snapshot.model_dump(mode="json", by_alias=True),
             )
-            pipeline = self.pipeline or ImageProcessingPipeline(
-                cache_root=paths.cache / "processing",
-            )
+            pipeline = self.pipeline or _default_pipeline(paths, workspace_config)
             stats = {
                 "cache_hit": 0,
                 "processed": 0,
@@ -137,6 +137,16 @@ class PackageBuilder:
 def _build_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"{timestamp}_{uuid4().hex[:6]}"
+
+
+def _default_pipeline(paths, workspace_config) -> ImageProcessingPipeline:
+    mosaic_config = workspace_config.integrations.mosaic
+    adapter = AnrAutoMosaicsAdapter(paths, mosaic_config)
+    registry = default_operation_registry({adapter.name: adapter})
+    return ImageProcessingPipeline(
+        cache_root=paths.cache / "processing",
+        registry=registry,
+    )
 
 
 def _validate_input_images(selections: dict[SelectionName, list]) -> None:

@@ -32,7 +32,7 @@ class StripMetadataOperation:
 
 class MosaicOperation:
     type = "mosaic"
-    version = "1"
+    version = "2"
 
     def __init__(self, adapters: dict[str, MosaicAdapter] | None = None):
         self.adapters = adapters or {}
@@ -43,6 +43,10 @@ class MosaicOperation:
             raise ValueError("mosaic 已启用，但没有配置 adapter")
         if adapter_name not in self.adapters:
             raise ValueError(f"mosaic adapter 不存在：{adapter_name}")
+
+        validator = getattr(self.adapters[adapter_name], "validate", None)
+        if callable(validator):
+            validator(dict(options.get("options") or {}))
 
     def process(
         self,
