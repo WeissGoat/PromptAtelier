@@ -69,6 +69,8 @@ uv run python tools/check_duplicate_tag_files.py `
 
 该脚本只读扫描，不会修改节点。标签比较会忽略标签顺序、大小写、空格与下划线差异；括号权重和 `type`、`extension`、`gen_json` 等控制行会参与比较。发现重复时输出 `WARNING`，但仍返回退出码 `0`；读取错误返回 `1`，输入路径错误返回 `2`。
 
+每个重复组会详细输出规范化标签、控制行、节点文件夹相对路径和对应的 `tags.txt` 路径。汇总中的 `duplicate_groups` 是重复内容组数量，`duplicate_files` 是所有重复组涉及的 `tags.txt` 文件总数。
+
 NovelAI 默认使用：
 
 - 环境变量：`NAI_ACCESS_TOKEN`

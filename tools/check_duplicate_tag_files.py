@@ -35,15 +35,33 @@ class ScanError:
 
 
 @dataclass(frozen=True)
+class DuplicateGroup:
+    signature: TagSignature
+    paths: tuple[Path, ...]
+
+    @property
+    def tags(self) -> tuple[str, ...]:
+        return self.signature[0]
+
+    @property
+    def control_lines(self) -> tuple[str, ...]:
+        return self.signature[1]
+
+    @property
+    def folder_count(self) -> int:
+        return len({path.parent for path in self.paths})
+
+
+@dataclass(frozen=True)
 class ScanResult:
     root: Path
     scanned: int
-    duplicate_groups: tuple[tuple[Path, ...], ...]
+    duplicate_groups: tuple[DuplicateGroup, ...]
     errors: tuple[ScanError, ...]
 
     @property
     def duplicate_files(self) -> int:
-        return sum(len(group) for group in self.duplicate_groups)
+        return sum(len(group.paths) for group in self.duplicate_groups)
 
 
 def scan_tag_files(root: Path) -> ScanResult:
@@ -70,11 +88,11 @@ def scan_tag_files(root: Path) -> ScanResult:
         grouped[_build_signature(text)].append(path)
 
     duplicate_groups = [
-        tuple(group)
-        for group in grouped.values()
-        if len(group) >= 2
+        DuplicateGroup(signature=signature, paths=tuple(paths))
+        for signature, paths in grouped.items()
+        if len(paths) >= 2
     ]
-    duplicate_groups.sort(key=lambda group: _relative_sort_key(group[0], root))
+    duplicate_groups.sort(key=lambda group: _relative_sort_key(group.paths[0], root))
     return ScanResult(
         root=root,
         scanned=len(paths),
@@ -185,19 +203,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    for group in result.duplicate_groups:
+    for index, group in enumerate(result.duplicate_groups, start=1):
         print(
-            f"WARNING duplicate tags content ({len(group)} files):",
+            f"WARNING duplicate tags content group={index} "
+            f"(files={len(group.paths)}, folders={group.folder_count}):",
             file=sys.stderr,
         )
-        for path in group:
-            print(f"  {_display_path(path, result.root)}", file=sys.stderr)
+        print(
+            "  normalized_tags: "
+            f"{', '.join(group.tags) if group.tags else '(empty)'}",
+            file=sys.stderr,
+        )
+        print(
+            "  control_lines: "
+            f"{'; '.join(group.control_lines) if group.control_lines else '(none)'}",
+            file=sys.stderr,
+        )
+        for path in group.paths:
+            folder = path.parent.relative_to(result.root).as_posix() or "."
+            print(f"  folder: {folder}", file=sys.stderr)
+            print(f"  tags_file: {_display_path(path, result.root)}", file=sys.stderr)
 
     print(
         f"scanned={result.scanned} "
         f"duplicate_groups={len(result.duplicate_groups)} "
         f"duplicate_files={result.duplicate_files} "
         f"errors={len(result.errors)}"
+    )
+    print(
+        "说明: duplicate_groups=重复内容组数量；"
+        "duplicate_files=参与重复的 tags.txt 文件总数"
     )
     return 1 if result.errors else 0
 

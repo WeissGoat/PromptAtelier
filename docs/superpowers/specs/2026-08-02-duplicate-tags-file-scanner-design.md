@@ -58,17 +58,25 @@ black_hair
 每个重复签名输出一组 warning：
 
 ```text
-WARNING duplicate tags content (3 files):
-  path/to/first/tags.txt
-  path/to/second/tags.txt
-  path/to/third/tags.txt
+WARNING duplicate tags content group=1 (files=3, folders=3):
+  normalized_tags: 1girl, black_hair
+  control_lines: (none)
+  folder: path/to/first
+  tags_file: path/to/first/tags.txt
+  folder: path/to/second
+  tags_file: path/to/second/tags.txt
+  folder: path/to/third
+  tags_file: path/to/third/tags.txt
 ```
 
 最后输出汇总：
 
 ```text
 scanned=1200 duplicate_groups=3 duplicate_files=7 errors=0
+说明: duplicate_groups=重复内容组数量；duplicate_files=参与重复的 tags.txt 文件总数
 ```
+
+`duplicate_groups` 表示不同的重复内容组数量；`duplicate_files` 表示所有重复组中涉及的 `tags.txt` 文件总数。每个组还会列出规范化标签、控制行、节点文件夹和文件路径。
 
 没有重复时只输出汇总。
 
