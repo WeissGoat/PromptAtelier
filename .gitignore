@@ -24,4 +24,8 @@ configs/local.yaml
 # 批量跑图/验收运行产物，只保留 YAML 配置和源码。
 examples/batches/*/
 acceptance_compare*/
+
+# Mosaic 模型体积较大，只保留目录占位文件。
+tools/publishing_workspace/models/anr_plugin_auto_mosaics/**/*.pt
+tools/publishing_workspace/models/anr_plugin_auto_mosaics/**/*.pth
 参考项目/

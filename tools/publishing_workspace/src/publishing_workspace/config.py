@@ -57,6 +57,67 @@ class ExportersConfig(BaseModel):
     windows_shortcut: ShortcutExporterConfig = Field(default_factory=ShortcutExporterConfig)
 
 
+class MosaicModelConfig(BaseModel):
+    filename: str
+    url: str
+    sha256: str
+
+    @field_validator("filename", "url")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("mosaic model filename/url 不能为空")
+        return normalized
+
+    @field_validator("sha256")
+    @classmethod
+    def normalize_sha256(cls, value: str) -> str:
+        normalized = str(value or "").strip().casefold()
+        if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
+            raise ValueError("mosaic model sha256 必须是 64 位十六进制字符串")
+        return normalized
+
+
+def _default_mosaic_models() -> dict[str, MosaicModelConfig]:
+    return {
+        "yolo": MosaicModelConfig(
+            filename="yolo/censor.pt",
+            url=(
+                "https://github.com/zhulinyv/anr_plugin_auto_mosaics/raw/main/"
+                "models/yolo/censor.pt"
+            ),
+            sha256="62b18176b005ec5b8918d3fdd99323193ba2dd99c06e150de808087d37ebe009",
+        ),
+        "sam": MosaicModelConfig(
+            filename="sams/sam_vit_b_01ec64.pth",
+            url=(
+                "https://huggingface.co/datasets/Xytpz/SAM_Models/resolve/main/"
+                "sam_vit_b_01ec64.pth?download=true"
+            ),
+            sha256="ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912",
+        ),
+    }
+
+
+class MosaicIntegrationConfig(BaseModel):
+    provider: str = "anr_plugin_auto_mosaics"
+    model_root: str | None = None
+    models: dict[str, MosaicModelConfig] = Field(default_factory=_default_mosaic_models)
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("integrations.mosaic.provider 不能为空")
+        return normalized
+
+
+class IntegrationsConfig(BaseModel):
+    mosaic: MosaicIntegrationConfig = Field(default_factory=MosaicIntegrationConfig)
+
+
 class PublishingWorkspaceConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -66,6 +127,7 @@ class PublishingWorkspaceConfig(BaseModel):
     )
     classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
     exporters: ExportersConfig = Field(default_factory=ExportersConfig)
+    integrations: IntegrationsConfig = Field(default_factory=IntegrationsConfig)
     image_extensions: list[str] = Field(
         default_factory=lambda: [".png", ".jpg", ".jpeg", ".webp"]
     )
@@ -108,6 +170,19 @@ class WorkspacePaths(BaseModel):
             state=workspace / "state",
             tasks=resolved / "tasks",
         )
+
+    @property
+    def default_mosaic_models(self) -> Path:
+        """返回随 publishing_workspace 分发的默认模型目录。"""
+        return Path(__file__).resolve().parents[2] / "models" / "anr_plugin_auto_mosaics"
+
+    def resolve_mosaic_model_root(self, configured_root: str | None) -> Path:
+        if configured_root is None or not str(configured_root).strip():
+            return self.default_mosaic_models
+        root = Path(configured_root).expanduser()
+        if not root.is_absolute():
+            root = self.root / root
+        return root.resolve()
 
 
 def init_workspace(root: str | Path) -> tuple[WorkspacePaths, PublishingWorkspaceConfig, bool]:

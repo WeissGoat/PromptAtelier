@@ -9,6 +9,17 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+mosaic = [
+    "numpy",
+    "opencv-python",
+    "requests",
+    "scipy",
+    "segment-anything",
+    "torch",
+    "ultralytics",
+]
+
 [project.scripts]
 publishing-workspace = "publishing_workspace.cli:main"
 
