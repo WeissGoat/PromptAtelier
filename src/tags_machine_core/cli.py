@@ -22,6 +22,7 @@ from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
+from tags_machine_core.knowledge_base.cli import add_knowledge_base_subparser
 from tags_machine_core.logging_config import configure_logging, get_logger
 from tags_machine_core.nodes import (
     ArtistInputFilter,
@@ -1831,6 +1832,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_task_tools_subparser(subparsers, output_parent=output_parent)
     add_action_resolver_subparser(subparsers, output_parent=output_parent)
+    add_knowledge_base_subparser(subparsers, output_parent=output_parent)
 
     compose = subparsers.add_parser("compose", parents=[output_parent], help="Build a PromptBundle")
     compose.add_argument("--prompt", required=True)

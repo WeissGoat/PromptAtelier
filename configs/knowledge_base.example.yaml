@@ -1,0 +1,12 @@
+schema: tags-machine-core.knowledge-base/v1
+action_root: "F:/my_project/new/tags_machine/design/动作改2"
+catalog_dir: "../cache/action_catalog"
+
+sources:
+  - id: action_new
+    path: new
+    enabled: true
+
+  - id: legacy_action_folders
+    pattern: st_*
+    enabled: true
