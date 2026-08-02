@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from .config import load_workspace
+from .integrations.anr_mosaic import MosaicModelManager
 from .logging import configure_logging
 from .service import PublishingService
 
@@ -106,6 +108,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="指定 Exporter，可重复；默认使用 workspace.yaml 中启用项",
     )
     export_parser.set_defaults(func=cmd_export)
+
+    mosaic_parser = commands.add_parser("mosaic", help="管理自动打码模型")
+    mosaic_commands = mosaic_parser.add_subparsers(dest="mosaic_command")
+
+    mosaic_status_parser = mosaic_commands.add_parser("status", help="检查打码模型")
+    _add_log_argument(mosaic_status_parser)
+    mosaic_status_parser.add_argument("root", help="Publishing 根目录")
+    mosaic_status_parser.set_defaults(func=cmd_mosaic_status)
+
+    mosaic_install_parser = mosaic_commands.add_parser("install", help="安装打码模型")
+    _add_log_argument(mosaic_install_parser)
+    mosaic_install_parser.add_argument("root", help="Publishing 根目录")
+    mosaic_install_parser.add_argument(
+        "--source",
+        help="一次性迁移用的模型目录；不传时按 manifest URL 下载",
+    )
+    mosaic_install_parser.set_defaults(func=cmd_mosaic_install)
 
     task_parser = commands.add_parser("task", help="投稿任务管理")
     task_commands = task_parser.add_subparsers(dest="task_command")
@@ -267,6 +286,33 @@ def cmd_export(args) -> int:
             "import_id": plan.import_id,
             "hierarchy": plan.hierarchy,
             "export": summary.model_dump(mode="json"),
+        }
+    )
+    return 0
+
+
+def cmd_mosaic_status(args) -> int:
+    paths, config = load_workspace(args.root)
+    manager = MosaicModelManager(paths, config.integrations.mosaic)
+    _print_json(
+        {
+            "provider": config.integrations.mosaic.provider,
+            "model_root": str(manager.model_root),
+            "models": [item.as_dict() for item in manager.status()],
+        }
+    )
+    return 0
+
+
+def cmd_mosaic_install(args) -> int:
+    paths, config = load_workspace(args.root)
+    manager = MosaicModelManager(paths, config.integrations.mosaic)
+    statuses = manager.install(args.source)
+    _print_json(
+        {
+            "provider": config.integrations.mosaic.provider,
+            "model_root": str(manager.model_root),
+            "models": [item.as_dict() for item in statuses],
         }
     )
     return 0
