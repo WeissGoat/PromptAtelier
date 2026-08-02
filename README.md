@@ -45,6 +45,7 @@
 - `validate-node-tree`：只读校验结构化节点目录，检查 v1 文件名、关键字段和禁止字段
 - `inspect-style`：读取旧画风节点
 - `tools.legacy_migration`：离线迁移 artist、character、action、background 的旧 `tags.txt`；运行时 core 不再提供任何迁移或写回命令
+- `tools/check_duplicate_tag_files.py`：只读递归扫描 `tags.txt`，按归一化标签集合警告内容重复的文件
 - `inspect-image-params`：读取 PNG 内嵌生图参数，可输出归一化结果
 - `compare-render-params`：对比旧项目 PNG/request 和 core `RenderRequest` / `GenerationResult`
 - `compare-image-result`：生成旧图与 core `GenerationResult` 的单 case 对比报告，覆盖图片 hash、尺寸、PNG 参数和人工视觉检查字段
@@ -58,6 +59,15 @@
 - `config`：查看配置解析结果
 
 默认输出会截断图片/base64 字段，避免调试输出过大。需要完整 JSON 时使用 `--full`。
+
+扫描重复的 `tags.txt`：
+
+```powershell
+uv run python tools/check_duplicate_tag_files.py `
+  F:\my_project\new\tags_machine\design\动作改2\new
+```
+
+该脚本只读扫描，不会修改节点。标签比较会忽略标签顺序、大小写、空格与下划线差异；括号权重和 `type`、`extension`、`gen_json` 等控制行会参与比较。发现重复时输出 `WARNING`，但仍返回退出码 `0`；读取错误返回 `1`，输入路径错误返回 `2`。
 
 NovelAI 默认使用：
 
