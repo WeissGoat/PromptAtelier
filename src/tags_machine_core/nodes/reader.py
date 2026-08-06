@@ -27,6 +27,7 @@ class NodeReader:
         if path.is_file():
             if path.suffix.lower() in {".yaml", ".yml"}:
                 return self._read_yaml(path)
+            path = self._preferred_tags_path(path)
             return self._read_tags_txt(path)
 
         for name in self.yaml_names:
@@ -34,7 +35,7 @@ class NodeReader:
             if candidate.exists():
                 return self._read_yaml(candidate, node_dir=path)
 
-        tags_txt = path / "tags.txt"
+        tags_txt = self._preferred_tags_path(path / "tags.txt")
         if tags_txt.exists():
             return self._read_tags_txt(tags_txt, node_dir=path)
 
@@ -98,7 +99,7 @@ class NodeReader:
         return self._attach_action_profile(node, node_dir)
 
     def _attach_legacy_tags_txt(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
-        tags_txt = node_dir / "tags.txt"
+        tags_txt = self._preferred_tags_path(node_dir / "tags.txt")
         if not tags_txt.exists():
             return node
         lines = [
@@ -121,6 +122,12 @@ class NodeReader:
             }
         )
         return node.model_copy(update={"legacy": legacy})
+
+    def _preferred_tags_path(self, tags_txt: Path) -> Path:
+        if tags_txt.name.lower() != "tags.txt":
+            return tags_txt
+        compiled = tags_txt.with_name("tags.compiled.txt")
+        return compiled if compiled.is_file() else tags_txt
 
     def _attach_action_profile(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
         profile = load_action_profile(node_dir)
