@@ -1,0 +1,40 @@
+legacy:
+  tags_machine_root: "F:/my_project/new/tags_machine"
+  design_root: "F:/my_project/new/tags_machine/design"
+
+runtime:
+  cache_dir: "cache"
+  output_dir: "outputs"
+
+defaults:
+  backend: "novelai"
+  image_format: "png"
+
+generation:
+  executor: "ai_image_gateway_raw"
+
+web:
+  project_requires:
+    - examples/project/collections.yaml
+    - examples/project/nai_const_action_groups.yaml
+
+novelai:
+  base_url: "https://image.novelai.net"
+  access_token: "pst-NzeqsCCmBsy3mXqaR5W76ee-gQCv3SonlNvR6FdW5RNXXNVi4UPpqY1cImmGzcxF"
+  access_token_env: "pst-NzeqsCCmBsy3mXqaR5W76ee-gQCv3SonlNvR6FdW5RNXXNVi4UPpqY1cImmGzcxF"
+  timeout: 120
+  retry: 3
+  retry_interval: 8
+  request_interval: 3
+
+comfyui:
+  base_url: "http://127.0.0.1:8188"
+  timeout: 300
+  poll_interval: 1.0
+  max_wait_seconds: 600
+  retry: 3
+  retry_interval: 2.0
+
+sd:
+  base_url: "http://127.0.0.1:7860"
+  timeout: 120
