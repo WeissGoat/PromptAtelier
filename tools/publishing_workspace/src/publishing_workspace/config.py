@@ -16,12 +16,29 @@ LEGACY_WORKSPACE_SCHEMA = "tags-machine-core.publish-workspace/v1"
 logger = get_logger(__name__)
 
 
+class ActionResolutionConfig(BaseModel):
+    enabled: bool = True
+    design_root: str | None = None
+    action_root_name: str = "动作改2"
+
+    @field_validator("action_root_name")
+    @classmethod
+    def validate_action_root_name(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError(
+                "classification.action_resolution.action_root_name 不能为空"
+            )
+        return normalized
+
+
 class ClassificationConfig(BaseModel):
     hierarchy: list[str] = Field(
         default_factory=lambda: ["artist", "character", "action_group", "action"]
     )
     missing_value: str = "unknown"
     skip_missing: bool = False
+    action_resolution: ActionResolutionConfig = Field(default_factory=ActionResolutionConfig)
 
     @field_validator("missing_value")
     @classmethod
@@ -44,12 +61,12 @@ class ClassificationConfig(BaseModel):
 
 class NeeViewExporterConfig(BaseModel):
     enabled: bool = True
-    root: str = "workspace/exports/neev"
+    root: str = "workspace/exports"
 
 
 class ShortcutExporterConfig(BaseModel):
     enabled: bool = False
-    root: str = "workspace/exports/shortcuts"
+    root: str = "workspace/exports"
 
 
 class ExportersConfig(BaseModel):
@@ -151,6 +168,7 @@ class WorkspacePaths(BaseModel):
     cache: Path
     state: Path
     tasks: Path
+    plans: Path
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -169,6 +187,7 @@ class WorkspacePaths(BaseModel):
             cache=workspace / "cache",
             state=workspace / "state",
             tasks=resolved / "tasks",
+            plans=resolved / "plans",
         )
 
     @property
@@ -196,6 +215,7 @@ def init_workspace(root: str | Path) -> tuple[WorkspacePaths, PublishingWorkspac
         paths.cache,
         paths.state,
         paths.tasks,
+        paths.plans,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
