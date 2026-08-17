@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
+from pathlib import PurePosixPath
 from uuid import uuid4
+from datetime import date, datetime
 
+from .action_resolution import ActionNodeValueResolver
 from .catalog import CatalogRepository
 from .config import (
     PublishingWorkspaceConfig,
@@ -24,6 +28,11 @@ from .views import (
     WindowsShortcutExporter,
 )
 from .tasks.service import TaskWorkflowService
+from .plans.executor import SubmissionExecutor
+from .plans.models import MonthlyPlan, ScheduleEntry
+from .plans.paths import PlanPaths
+from .plans.repository import PlanRepository
+from .plans.service import ScheduleService
 
 
 logger = get_logger(__name__)
@@ -91,6 +100,135 @@ class PublishingService:
 
     def build_task(self, root: str | Path, task_id: str):
         return TaskWorkflowService().build(root, task_id)
+
+    def schedule_create(
+        self,
+        root: str | Path,
+        month: str,
+        *,
+        default_import_id: str | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().create_plan(
+            root,
+            month,
+            default_import_id=default_import_id,
+        )
+
+    def schedule_show(self, root: str | Path, month: str) -> MonthlyPlan:
+        return ScheduleService().get_plan(root, month)
+
+    def schedule_add_entry(
+        self,
+        root: str | Path,
+        month: str,
+        entry: ScheduleEntry,
+        *,
+        expected_revision: int | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().add_entry(
+            root,
+            month,
+            entry,
+            expected_revision=expected_revision,
+        )
+
+    def schedule_update_entry(
+        self,
+        root: str | Path,
+        month: str,
+        entry: ScheduleEntry,
+        *,
+        expected_revision: int | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().update_entry(
+            root,
+            month,
+            entry,
+            expected_revision=expected_revision,
+        )
+
+    def schedule_move_date(
+        self,
+        root: str | Path,
+        month: str,
+        entry_id: str,
+        target_date: date,
+        *,
+        expected_revision: int | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().move_entry_date(
+            root,
+            month,
+            entry_id,
+            target_date,
+            expected_revision=expected_revision,
+        )
+
+    def schedule_delete_entry(
+        self,
+        root: str | Path,
+        month: str,
+        entry_id: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().delete_entry(
+            root,
+            month,
+            entry_id,
+            expected_revision=expected_revision,
+        )
+
+    def schedule_lock(
+        self,
+        root: str | Path,
+        month: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().lock(
+            root,
+            month,
+            expected_revision=expected_revision,
+        )
+
+    def schedule_unlock(
+        self,
+        root: str | Path,
+        month: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> MonthlyPlan:
+        return ScheduleService().unlock(
+            root,
+            month,
+            expected_revision=expected_revision,
+        )
+
+    def schedule_status(self, root: str | Path, month: str) -> dict:
+        paths, _ = load_workspace(root)
+        plan = ScheduleService().get_plan(root, month)
+        executions = PlanRepository().list_executions(
+            PlanPaths.from_workspace(paths, month)
+        )
+        return {
+            "plan": plan.model_dump(mode="json", by_alias=True),
+            "executions": [item.model_dump(mode="json") for item in executions],
+        }
+
+    def schedule_run_due(
+        self,
+        root: str | Path,
+        *,
+        now: datetime | None = None,
+    ):
+        return SubmissionExecutor().run_due(root, now=now)
+
+    def schedule_build_now(self, root: str | Path, month: str, entry_id: str):
+        return SubmissionExecutor().build_now(root, month, entry_id)
+
+    def schedule_retry(self, root: str | Path, month: str, entry_id: str):
+        return SubmissionExecutor().retry(root, month, entry_id)
 
     def import_source(
         self,
@@ -163,12 +301,24 @@ class PublishingService:
             raise ValueError("Publishing Catalog 尚无可分类的导入记录")
         assets = repository.assets_for_import(import_id)
         classification = config.classification
+        action_resolution = classification.action_resolution
+        configured_design_root = (
+            _config_path(paths.root, action_resolution.design_root)
+            if action_resolution.design_root
+            else None
+        )
+        node_value_resolver = ActionNodeValueResolver(
+            design_root=configured_design_root,
+            action_root_name=action_resolution.action_root_name,
+            enabled=action_resolution.enabled,
+        )
         plan = ClassificationViewBuilder().build(
             assets,
             hierarchy=hierarchy or classification.hierarchy,
             import_id=import_id,
             missing_value=classification.missing_value,
             skip_missing=classification.skip_missing,
+            node_value_resolver=node_value_resolver,
         )
         scope_name = import_id or "catalog"
         plan_path = paths.state / f"export_plan_{scope_name}.json"
@@ -183,6 +333,11 @@ class PublishingService:
             len(assets),
             len(plan.views),
         )
+        if plan.warnings:
+            logger.warning(
+                "Publishing action resolution produced warnings=%s",
+                len(plan.warnings),
+            )
         return plan, plan_path
 
     def export(
@@ -195,12 +350,17 @@ class PublishingService:
     ) -> tuple[ExportPlan, ExportSummary]:
         paths, config = load_workspace(root)
         plan, _ = self.classify(root, import_id=import_id, hierarchy=hierarchy)
-        jobs = self._export_jobs(paths, config, exporter_types, import_id=import_id)
+        repository = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        scope_name = _export_scope_name(repository, import_id)
+        jobs = self._export_jobs(
+            paths,
+            config,
+            exporter_types,
+            scope_name=scope_name,
+        )
         if not jobs:
             raise ValueError("没有启用任何 Publishing Exporter")
-        summary = ViewExportCoordinator(
-            CatalogRepository(paths.catalog, backups_dir=paths.backups)
-        ).export(plan, jobs)
+        summary = ViewExportCoordinator(repository).export(plan, jobs)
         return plan, summary
 
     def _export_jobs(
@@ -209,7 +369,7 @@ class PublishingService:
         config: PublishingWorkspaceConfig,
         requested: list[str] | None,
         *,
-        import_id: str | None,
+        scope_name: str,
     ) -> list[tuple[object, Path]]:
         enabled = requested or [
             name
@@ -227,7 +387,7 @@ class PublishingService:
                         NeeViewPlaylistExporter(),
                         _scoped_export_path(
                             _config_path(paths.root, config.exporters.neev.root),
-                            import_id,
+                            scope_name,
                         ),
                     )
                 )
@@ -237,7 +397,7 @@ class PublishingService:
                         WindowsShortcutExporter(),
                         _scoped_export_path(
                             _config_path(paths.root, config.exporters.windows_shortcut.root),
-                            import_id,
+                            scope_name,
                         ),
                     )
                 )
@@ -251,8 +411,47 @@ def _config_path(root: Path, value: str) -> Path:
     return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
-def _scoped_export_path(root: Path, import_id: str | None) -> Path:
-    return root / "_imports" / import_id if import_id else root
+def _scoped_export_path(root: Path, scope_name: str) -> Path:
+    return root / scope_name
+
+
+def _export_scope_name(
+    repository: CatalogRepository,
+    import_id: str | None,
+) -> str:
+    if import_id is None:
+        return "total"
+
+    sources = repository.import_sources()
+    source_ref = next(
+        (source_ref for current_id, source_ref in sources if current_id == import_id),
+        None,
+    )
+    if source_ref is None:
+        raise ValueError(f"ImportRun 不存在：{import_id}")
+
+    candidate = _safe_scope_name(source_ref)
+    collision = any(
+        current_id != import_id
+        and str(other_ref).casefold() != str(source_ref).casefold()
+        and _safe_scope_name(other_ref).casefold() == candidate.casefold()
+        for current_id, other_ref in sources
+    )
+    if collision:
+        return f"{candidate}_{import_id[:8]}"
+    return candidate
+
+
+def _safe_scope_name(source_ref: str) -> str:
+    normalized = str(source_ref).replace("\\", "/").rstrip("/")
+    path = PurePosixPath(normalized)
+    name = path.stem if path.suffix.casefold() == ".nvpls" else path.name
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
+    if not cleaned:
+        return "import"
+    if cleaned.casefold() in {"con", "prn", "aux", "nul"}:
+        return f"_{cleaned}"
+    return cleaned
 
 
 def _write_json_atomic(path: Path, data: dict) -> None:

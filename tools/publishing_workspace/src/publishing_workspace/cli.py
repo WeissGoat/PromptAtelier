@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 from .config import load_workspace
 from .integrations.anr_mosaic import MosaicModelManager
 from .logging import configure_logging
 from .service import PublishingService
+from .plans.models import ScheduleEntry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -176,6 +178,88 @@ def build_parser() -> argparse.ArgumentParser:
     task_build_parser.add_argument("root", help="Publishing 根目录")
     task_build_parser.add_argument("task_id", help="任务目录名")
     task_build_parser.set_defaults(func=cmd_task_build)
+
+    schedule_parser = commands.add_parser("schedule", help="月度投稿计划管理")
+    schedule_commands = schedule_parser.add_subparsers(dest="schedule_command")
+
+    schedule_create_parser = schedule_commands.add_parser("create", help="创建月度计划")
+    _add_log_argument(schedule_create_parser)
+    schedule_create_parser.add_argument("root", help="Publishing 根目录")
+    schedule_create_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_create_parser.add_argument("--default-import-id")
+    schedule_create_parser.set_defaults(func=cmd_schedule_create)
+
+    schedule_show_parser = schedule_commands.add_parser("show", help="查看月度计划")
+    _add_log_argument(schedule_show_parser)
+    schedule_show_parser.add_argument("root", help="Publishing 根目录")
+    schedule_show_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_show_parser.set_defaults(func=cmd_schedule_show)
+
+    for command, help_text, function in (
+        ("add-entry", "增加投稿", cmd_schedule_add_entry),
+        ("update-entry", "更新投稿", cmd_schedule_update_entry),
+    ):
+        entry_parser = schedule_commands.add_parser(command, help=help_text)
+        _add_log_argument(entry_parser)
+        entry_parser.add_argument("root", help="Publishing 根目录")
+        entry_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+        entry_parser.add_argument("--entry-json", required=True, help="ScheduleEntry JSON 文件")
+        entry_parser.add_argument("--expected-revision", type=int)
+        entry_parser.set_defaults(func=function)
+
+    schedule_move_parser = schedule_commands.add_parser("move-date", help="拖拽投稿到其他日期")
+    _add_log_argument(schedule_move_parser)
+    schedule_move_parser.add_argument("root", help="Publishing 根目录")
+    schedule_move_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_move_parser.add_argument("entry_id")
+    schedule_move_parser.add_argument("target_date", help="目标日期，格式 YYYY-MM-DD")
+    schedule_move_parser.add_argument("--expected-revision", type=int)
+    schedule_move_parser.set_defaults(func=cmd_schedule_move_date)
+
+    schedule_delete_parser = schedule_commands.add_parser("delete-entry", help="删除投稿")
+    _add_log_argument(schedule_delete_parser)
+    schedule_delete_parser.add_argument("root", help="Publishing 根目录")
+    schedule_delete_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_delete_parser.add_argument("entry_id")
+    schedule_delete_parser.add_argument("--expected-revision", type=int)
+    schedule_delete_parser.set_defaults(func=cmd_schedule_delete_entry)
+
+    for command, help_text, function in (
+        ("lock", "锁定月度计划", cmd_schedule_lock),
+        ("unlock", "解锁月度计划", cmd_schedule_unlock),
+    ):
+        lock_parser = schedule_commands.add_parser(command, help=help_text)
+        _add_log_argument(lock_parser)
+        lock_parser.add_argument("root", help="Publishing 根目录")
+        lock_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+        lock_parser.add_argument("--expected-revision", type=int)
+        lock_parser.set_defaults(func=function)
+
+    schedule_run_parser = schedule_commands.add_parser("run-due", help="执行到期投稿")
+    _add_log_argument(schedule_run_parser)
+    schedule_run_parser.add_argument("root", help="Publishing 根目录")
+    schedule_run_parser.add_argument("--now", help="测试或手工执行时指定当前时间，必须含时区")
+    schedule_run_parser.set_defaults(func=cmd_schedule_run_due)
+
+    schedule_build_parser = schedule_commands.add_parser("build-now", help="立即构建指定投稿")
+    _add_log_argument(schedule_build_parser)
+    schedule_build_parser.add_argument("root", help="Publishing 根目录")
+    schedule_build_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_build_parser.add_argument("entry_id")
+    schedule_build_parser.set_defaults(func=cmd_schedule_build_now)
+
+    schedule_retry_parser = schedule_commands.add_parser("retry", help="重试失败投稿")
+    _add_log_argument(schedule_retry_parser)
+    schedule_retry_parser.add_argument("root", help="Publishing 根目录")
+    schedule_retry_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_retry_parser.add_argument("entry_id")
+    schedule_retry_parser.set_defaults(func=cmd_schedule_retry)
+
+    schedule_status_parser = schedule_commands.add_parser("status", help="查看计划和执行记录")
+    _add_log_argument(schedule_status_parser)
+    schedule_status_parser.add_argument("root", help="Publishing 根目录")
+    schedule_status_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
+    schedule_status_parser.set_defaults(func=cmd_schedule_status)
     return parser
 
 
@@ -191,7 +275,7 @@ def _add_plan_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("root", help="Publishing 根目录")
     parser.add_argument(
         "--import-id",
-        help="只处理指定导入快照；默认处理整个 Catalog，局部结果写入 _imports/<id>",
+        help="只处理指定导入快照；默认处理整个 Catalog，局部结果写入 exports/total，局部结果按导入名称写入 exports/<name>",
     )
     parser.add_argument(
         "--hierarchy",
@@ -366,6 +450,129 @@ def cmd_task_build(args) -> int:
     result = PublishingService().build_task(args.root, args.task_id)
     _print_json(result.model_dump(mode="json"))
     return 0
+
+
+def cmd_schedule_create(args) -> int:
+    result = PublishingService().schedule_create(
+        args.root,
+        args.month,
+        default_import_id=args.default_import_id,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_show(args) -> int:
+    result = PublishingService().schedule_show(args.root, args.month)
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_add_entry(args) -> int:
+    entry = _read_schedule_entry(args.entry_json)
+    result = PublishingService().schedule_add_entry(
+        args.root,
+        args.month,
+        entry,
+        expected_revision=args.expected_revision,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_update_entry(args) -> int:
+    entry = _read_schedule_entry(args.entry_json)
+    result = PublishingService().schedule_update_entry(
+        args.root,
+        args.month,
+        entry,
+        expected_revision=args.expected_revision,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_move_date(args) -> int:
+    result = PublishingService().schedule_move_date(
+        args.root,
+        args.month,
+        args.entry_id,
+        date.fromisoformat(args.target_date),
+        expected_revision=args.expected_revision,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_delete_entry(args) -> int:
+    result = PublishingService().schedule_delete_entry(
+        args.root,
+        args.month,
+        args.entry_id,
+        expected_revision=args.expected_revision,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_lock(args) -> int:
+    result = PublishingService().schedule_lock(
+        args.root,
+        args.month,
+        expected_revision=args.expected_revision,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_unlock(args) -> int:
+    result = PublishingService().schedule_unlock(
+        args.root,
+        args.month,
+        expected_revision=args.expected_revision,
+    )
+    _print_json(result.model_dump(mode="json", by_alias=True))
+    return 0
+
+
+def cmd_schedule_run_due(args) -> int:
+    now = datetime.fromisoformat(args.now) if args.now else None
+    records = PublishingService().schedule_run_due(args.root, now=now)
+    _print_json([record.model_dump(mode="json") for record in records])
+    return 0
+
+
+def cmd_schedule_build_now(args) -> int:
+    result = PublishingService().schedule_build_now(
+        args.root,
+        args.month,
+        args.entry_id,
+    )
+    _print_json(result.model_dump(mode="json"))
+    return 0
+
+
+def cmd_schedule_retry(args) -> int:
+    result = PublishingService().schedule_retry(
+        args.root,
+        args.month,
+        args.entry_id,
+    )
+    _print_json(result.model_dump(mode="json") if result is not None else None)
+    return 0
+
+
+def cmd_schedule_status(args) -> int:
+    _print_json(PublishingService().schedule_status(args.root, args.month))
+    return 0
+
+
+def _read_schedule_entry(path: str | Path) -> ScheduleEntry:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"无法读取 ScheduleEntry JSON：{path}：{exc}") from exc
+    return ScheduleEntry.model_validate(data)
 
 
 def main(argv: list[str] | None = None) -> int:
