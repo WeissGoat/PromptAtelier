@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 from publishing_workspace.config import init_workspace
 from publishing_workspace.plans.service import ScheduleService
+from publishing_workspace.tasks.paths import TaskPaths
+from publishing_workspace.tasks.repository import TaskRepository
 from publishing_workspace.web.schedule_api import create_app
 
 
@@ -72,3 +74,23 @@ def test_asset_search_api_returns_empty_result_for_empty_catalog(tmp_path: Path)
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_schedule_api_serves_static_calendar(tmp_path: Path):
+    client = client_for(tmp_path)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "月度投稿计划" in response.text
+
+
+def test_schedule_api_lists_existing_tasks(tmp_path: Path):
+    paths, _, _ = init_workspace(tmp_path)
+    TaskRepository.create(TaskPaths.from_workspace(paths, "demo-task"), title="演示任务")
+    client = TestClient(create_app(tmp_path))
+
+    response = client.get("/api/tasks")
+
+    assert response.status_code == 200
+    assert response.json() == [{"task_id": "demo-task", "title": "演示任务"}]

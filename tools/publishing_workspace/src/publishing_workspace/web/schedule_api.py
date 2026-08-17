@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..catalog.repository import CatalogRepository
@@ -15,6 +16,12 @@ from ..plans.repository import PlanRevisionConflictError
 from ..plans.search import AssetSearchFilter, AssetSearchService, FACET_FIELDS
 from ..plans.service import PlanLockedError, PlanValidationError
 from ..service import PublishingService
+from ..tasks.paths import TaskPaths
+from ..tasks.repository import TaskRepository
+from ..logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class EntryMutation(BaseModel):
@@ -54,6 +61,18 @@ def create_app(root: str | Path) -> FastAPI:
     @app.exception_handler(ValueError)
     async def invalid_request(_, exc: ValueError):
         return _json_error(422, "invalid_request", str(exc))
+
+    @app.exception_handler(FileExistsError)
+    async def resource_exists(_, exc: FileExistsError):
+        return _json_error(409, "already_exists", str(exc))
+
+    @app.post("/api/plans/{month}")
+    def create_plan(month: str, default_import_id: str | None = None):
+        return PublishingService().schedule_create(
+            app.state.publishing_root,
+            month,
+            default_import_id=default_import_id,
+        ).model_dump(mode="json", by_alias=True)
 
     @app.get("/api/plans/{month}")
     def get_plan(month: str):
@@ -158,6 +177,34 @@ def create_app(root: str | Path) -> FastAPI:
     def asset_facets(import_id: str | None = None):
         return AssetSearchService().facets(app.state.publishing_root, import_id=import_id)
 
+    @app.get("/api/imports")
+    def list_imports():
+        paths, _ = load_workspace(app.state.publishing_root)
+        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        return [
+            {"import_id": import_id, "source_ref": source_ref}
+            for import_id, source_ref in catalog.import_sources()
+        ]
+
+    @app.get("/api/tasks")
+    def list_tasks():
+        """返回可被月历引用的已有投稿任务，不读取任务选择图片。"""
+        paths, _ = load_workspace(app.state.publishing_root)
+        tasks_root = paths.tasks
+        if not tasks_root.is_dir():
+            return []
+        result = []
+        for task_root in sorted(tasks_root.iterdir(), key=lambda item: item.name.casefold()):
+            if not task_root.is_dir() or not (task_root / "task.yaml").is_file():
+                continue
+            try:
+                task = TaskRepository.load(TaskPaths.from_workspace(paths, task_root.name))
+            except (OSError, UnicodeError, ValueError) as exc:
+                logger.warning("Web 任务列表跳过损坏任务：%s：%s", task_root, exc)
+                continue
+            result.append({"task_id": task.task_id, "title": task.title})
+        return result
+
     @app.get("/api/assets/{asset_id}/preview")
     def asset_preview(asset_id: str):
         paths, _ = load_workspace(app.state.publishing_root)
@@ -169,6 +216,14 @@ def create_app(root: str | Path) -> FastAPI:
         if asset is None or not Path(asset.path).is_file():
             raise KeyError(f"Catalog 中找不到可预览资产：{asset_id}")
         return FileResponse(asset.path)
+
+    static_root = Path(__file__).with_name("static")
+    if static_root.is_dir() and (static_root / "schedule.html").is_file():
+        @app.get("/", include_in_schema=False)
+        def schedule_page():
+            return FileResponse(static_root / "schedule.html")
+    if static_root.is_dir():
+        app.mount("/", StaticFiles(directory=static_root, html=True), name="static")
 
     return app
 

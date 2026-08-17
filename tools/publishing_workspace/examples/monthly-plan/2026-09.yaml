@@ -1,0 +1,53 @@
+schema: publishing-workspace.monthly-plan/v1
+plan_id: 2026-09
+month: 2026-09
+timezone: Asia/Shanghai
+status: draft
+default_import_id: import-from-neeview
+revision: 1
+entries:
+  - entry_id: weekday-single
+    scheduled_at: 2026-09-03T20:00:00+08:00
+    title: 工作日散图
+    content:
+      kind: inline_selection
+      source_import_id: import-from-neeview
+      sets:
+        all:
+          - sha256:replace-with-asset-a
+          - sha256:replace-with-asset-b
+        post:
+          - sha256:replace-with-asset-b
+          - sha256:replace-with-asset-a
+        cover:
+          - sha256:replace-with-asset-b
+    execution:
+      build_on_due: true
+      notify_on_complete: true
+      publish: false
+  - entry_id: weekend-album
+    scheduled_at: 2026-09-06T20:00:00+08:00
+    title: 周末图集
+    content:
+      kind: task
+      task_id: 202609_weekend_album
+    execution:
+      build_on_due: true
+      notify_on_complete: true
+      publish: false
+  - entry_id: weekend-single
+    scheduled_at: 2026-09-06T22:00:00+08:00
+    title: 周末补充散图
+    content:
+      kind: inline_selection
+      source_import_id: import-from-neeview
+      sets:
+        all:
+          - sha256:replace-with-asset-c
+        post:
+          - sha256:replace-with-asset-c
+        cover: []
+    execution:
+      build_on_due: true
+      notify_on_complete: true
+      publish: false

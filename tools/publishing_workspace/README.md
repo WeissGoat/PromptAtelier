@@ -151,10 +151,10 @@ classification:
 exporters:
   neev:
     enabled: true
-    root: workspace/exports/neev
+    root: workspace/exports
   windows_shortcut:
     enabled: false
-    root: workspace/exports/shortcuts
+    root: workspace/exports
 
 image_extensions:
   - .png
@@ -357,7 +357,7 @@ uv run publishing-workspace classify `
 uv run publishing-workspace export G:\ai_publish --log-level info
 ```
 
-显式使用 `--import-id` 时，局部结果写入 `workspace/exports/<exporter>/_imports/<import_id>`，不会覆盖公共 Catalog 视图。
+默认导出整个 Catalog 到 `workspace/exports/total`。显式使用 `--import-id` 时，局部结果写入 `workspace/exports/<导入名称>`；导入名称来自源 `.nvpls` 文件名或源目录名。同名导入会自动追加短 ID，避免覆盖。
 
 只导出指定格式：
 
@@ -371,7 +371,11 @@ uv run publishing-workspace export `
 NeeView 输出示例：
 
 ```text
-workspace/exports/neev/
+workspace/exports/
+    total/
+    合_20260728/
+    合_20260329/
+    合_20260730/
   20260412/
     akemi_homura/
       st_foot/
@@ -486,3 +490,126 @@ packages:
 ```
 
 `mosaic` 默认关闭；开启时必须提供已注册的适配器，否则 build 会失败且不会生成正式 build。
+
+## 8. 月度投稿计划
+
+月度计划是公共 `workspace/` 之上的人工编排层，文件位于根目录的：
+
+```text
+G:/ai_publish/
+  plans/
+    2026-09/
+      plan.yaml
+      executions/
+```
+
+它只保存投稿时间、标题、已有 task 引用或有序 `asset_id`。它不会复制公共 Catalog，也不会把绝对图片路径写进计划。
+
+### 8.1 Web 月历
+
+启动本地页面：
+
+```powershell
+cd F:\my_project\new\tags_machine\refactor\tools\publishing_workspace
+uv run publishing-workspace web G:\ai_publish --host 127.0.0.1 --port 61300 --log-level info
+```
+
+浏览器打开 `http://127.0.0.1:61300/`。页面支持：
+
+- 创建空月计划，切换月份和查看锁定状态；
+- 按 import、文件名、artist、character、action_group、action 和 `classify.yaml` facet 搜索素材；
+- 新建散图投稿，把搜索结果分别加入 `all`、`post`、`cover`，并独立调整三组顺序；
+- 选择已有 `tasks/<task_id>` 图集作为投稿内容；
+- 同一天增加多个时间槽，拖拽投稿卡片改期，时间保持不变；
+- 点击素材查看大图，查看素材已使用或 Reader warning 角标；
+- 保存、删除、锁定和解锁计划。
+
+页面没有自动排期和复制投稿功能。锁定前可以编辑，锁定后需要先解锁；发生 revision 冲突时页面会重新读取计划，不会静默覆盖其他编辑器的修改。
+
+散图保存时要求 `post` 至少有一张图片。`all` 和 `cover` 可以为空，三组关系不会被强制校验为子集关系。
+
+### 8.2 计划 YAML
+
+可以用 [月历示例](examples/monthly-plan/2026-09.yaml) 作为 CLI 或人工检查时的参考。核心结构如下：
+
+```yaml
+schema: publishing-workspace.monthly-plan/v1
+plan_id: 2026-09
+month: 2026-09
+timezone: Asia/Shanghai
+status: draft
+entries:
+  - entry_id: weekday-single
+    scheduled_at: 2026-09-03T20:00:00+08:00
+    title: 工作日散图
+    content:
+      kind: inline_selection
+      source_import_id: import-id
+      sets:
+        all: [sha256:...]
+        post: [sha256:...]
+        cover: []
+    execution:
+      build_on_due: true
+      notify_on_complete: true
+      publish: false
+  - entry_id: weekend-album
+    scheduled_at: 2026-09-06T20:00:00+08:00
+    title: 周末图集
+    content:
+      kind: task
+      task_id: 202609_weekend_album
+```
+
+`content.kind` 只有两种：
+
+- `task`：运行已有投稿任务，构建结果位于该 task 的 `builds/`；
+- `inline_selection`：从 Catalog 按 `asset_id` 物化一次性临时 task，成功或失败后清理临时目录，正式 build 保存在 `plans/<month>/executions/`。
+
+### 8.3 CLI 执行
+
+不使用 UI 时可通过 CLI 管理：
+
+```powershell
+uv run publishing-workspace schedule create G:\ai_publish 2026-09
+uv run publishing-workspace schedule show G:\ai_publish 2026-09
+uv run publishing-workspace schedule add-entry G:\ai_publish 2026-09 --entry-json entry.json
+uv run publishing-workspace schedule move-date G:\ai_publish 2026-09 weekday-single 2026-09-04
+uv run publishing-workspace schedule lock G:\ai_publish 2026-09
+uv run publishing-workspace schedule run-due G:\ai_publish --now 2026-09-06T20:01:00+08:00
+uv run publishing-workspace schedule status G:\ai_publish 2026-09
+```
+
+`run-due` 只消费已锁定且到期的计划；每条投稿独立执行，某条失败不会阻塞同计划其他条目。相同计划 revision 的成功 entry 具有幂等保护，重复执行不会重复构建。失败条目可使用：
+
+```powershell
+uv run publishing-workspace schedule retry G:\ai_publish 2026-09 <entry_id>
+```
+
+执行记录保存在 `plans/<month>/executions/<entry_id>/`，包含运行状态、build ID、失败原因和通知状态。当前 `publish: false`，计划层只负责构建和记录，不直接投稿 Pixiv。
+
+### 8.4 Web API
+
+页面使用的 API 也可以被其他前端复用：
+
+```text
+GET    /api/plans/{month}
+POST   /api/plans/{month}
+POST   /api/plans/{month}/entries
+PUT    /api/plans/{month}/entries/{entry_id}
+PATCH  /api/plans/{month}/entries/{entry_id}/date
+DELETE /api/plans/{month}/entries/{entry_id}
+POST   /api/plans/{month}/lock
+POST   /api/plans/{month}/unlock
+GET    /api/imports
+GET    /api/tasks
+GET    /api/assets/search
+GET    /api/assets/facets
+GET    /api/assets/{asset_id}/preview
+```
+
+所有修改请求的 body 都可以带 `revision`。版本过期时返回 HTTP 409，并由调用方重新读取计划。
+
+## 9. 当前边界与验收
+
+月历功能的业务验收记录见 [acceptance-monthly-publishing-calendar.md](docs/acceptance-monthly-publishing-calendar.md)。验收使用 3 张临时图片、1 个已有 task 和 1 条 inline 散图，不读取公共工作区的大型原始文件集。

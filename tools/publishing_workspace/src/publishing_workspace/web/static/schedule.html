@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Publishing Workspace 月历</title>
+  <link rel="stylesheet" href="/schedule.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Publishing Workspace</p>
+        <h1>月度投稿计划</h1>
+      </div>
+      <div class="month-controls">
+        <button id="previous-month" class="icon-button" type="button" title="上个月" aria-label="上个月">&#8249;</button>
+        <input id="month-picker" type="month" aria-label="选择月份">
+        <button id="next-month" class="icon-button" type="button" title="下个月" aria-label="下个月">&#8250;</button>
+        <span id="plan-status" class="status-badge">未加载</span>
+        <button id="create-plan" class="primary-button" type="button">创建空计划</button>
+        <button id="toggle-lock" class="secondary-button" type="button" disabled>锁定计划</button>
+      </div>
+    </header>
+
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+
+    <section class="workspace-layout">
+      <aside class="panel library-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Catalog</p>
+            <h2>素材库</h2>
+          </div>
+          <span id="asset-count" class="muted">0</span>
+        </div>
+        <label class="field-label" for="import-select">导入快照</label>
+        <select id="import-select" class="field-control">
+          <option value="">全部导入</option>
+        </select>
+        <div class="search-row">
+          <input id="text-filter" class="field-control" type="search" placeholder="搜索文件名或节点">
+          <button id="search-assets" class="icon-button search-button" type="button" title="搜索" aria-label="搜索">&#8981;</button>
+        </div>
+        <div class="node-filters">
+          <input id="artist-filter" class="field-control" type="search" placeholder="artist">
+          <input id="character-filter" class="field-control" type="search" placeholder="character">
+          <input id="group-filter" class="field-control" type="search" placeholder="action_group">
+          <input id="action-filter" class="field-control" type="search" placeholder="action">
+        </div>
+        <div class="facet-heading">
+          <span class="field-label">classify.yaml 筛选</span>
+          <button id="clear-facets" class="text-button" type="button">清空</button>
+        </div>
+        <div id="facet-filters" class="facet-filters"></div>
+        <div class="selection-toolbar">
+          <select id="add-to-set" class="field-control" aria-label="加入选择集合">
+            <option value="post">加入 post</option>
+            <option value="all">加入 all</option>
+            <option value="cover">加入 cover</option>
+          </select>
+          <button id="add-selected-assets" class="secondary-button" type="button">加入已选</button>
+        </div>
+        <div id="asset-results" class="asset-results empty-state">请先选择导入或搜索素材</div>
+      </aside>
+
+      <section class="calendar-panel">
+        <div class="panel-heading calendar-heading">
+          <div>
+            <p id="calendar-subtitle" class="eyebrow">Asia/Shanghai</p>
+            <h2 id="calendar-title">月历</h2>
+          </div>
+          <button id="new-entry" class="primary-button" type="button" disabled>新建投稿</button>
+        </div>
+        <div class="weekday-row" aria-hidden="true">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+        </div>
+        <div id="calendar-grid" class="calendar-grid"></div>
+      </section>
+
+      <aside class="panel editor-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Submission</p>
+            <h2 id="editor-title">新建投稿</h2>
+          </div>
+          <button id="reset-editor" class="icon-button" type="button" title="清空编辑器" aria-label="清空编辑器">&#8635;</button>
+        </div>
+        <form id="entry-form">
+          <input id="entry-id" type="hidden">
+          <label class="field-label" for="entry-title">标题</label>
+          <input id="entry-title" class="field-control" type="text" required placeholder="例如：Homura 足部图集">
+          <div class="form-grid">
+            <div>
+              <label class="field-label" for="entry-date">日期</label>
+              <input id="entry-date" class="field-control" type="date" required>
+            </div>
+            <div>
+              <label class="field-label" for="entry-time">时间</label>
+              <input id="entry-time" class="field-control" type="time" required value="20:00">
+            </div>
+          </div>
+          <label class="field-label" for="content-kind">内容来源</label>
+          <select id="content-kind" class="field-control">
+            <option value="inline_selection">散图选择</option>
+            <option value="task">已有投稿任务</option>
+          </select>
+          <div id="task-source" class="source-block hidden">
+            <label class="field-label" for="task-select">投稿任务</label>
+            <select id="task-select" class="field-control">
+              <option value="">选择已有任务</option>
+            </select>
+            <input id="task-id-input" class="field-control" type="text" placeholder="或输入任务 ID">
+          </div>
+          <div id="inline-source" class="source-block">
+            <div class="set-tabs" role="tablist" aria-label="选择集合">
+              <button class="set-tab active" type="button" data-set="post">post <span id="post-count">0</span></button>
+              <button class="set-tab" type="button" data-set="all">all <span id="all-count">0</span></button>
+              <button class="set-tab" type="button" data-set="cover">cover <span id="cover-count">0</span></button>
+            </div>
+            <p class="helper-text">先在左侧勾选素材，再加入当前集合。三个集合顺序独立保存。</p>
+            <div id="set-lists" class="set-lists"></div>
+          </div>
+          <div class="form-actions">
+            <button id="save-entry" class="primary-button" type="submit" disabled>保存投稿</button>
+            <button id="delete-entry" class="danger-button" type="button" disabled>删除</button>
+          </div>
+        </form>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="preview-dialog" class="preview-dialog">
+    <button id="close-preview" class="dialog-close" type="button" title="关闭预览" aria-label="关闭预览">&#10005;</button>
+    <img id="preview-image" alt="素材预览">
+    <p id="preview-caption"></p>
+  </dialog>
+  <script src="/schedule.js" defer></script>
+</body>
+</html>
