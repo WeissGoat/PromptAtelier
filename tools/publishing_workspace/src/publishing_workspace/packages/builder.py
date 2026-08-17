@@ -28,11 +28,24 @@ class PackageBuilder:
     def build(self, root: str | Path, task_id: str) -> BuildResult:
         paths, workspace_config = load_workspace(root)
         task_paths = TaskPaths.from_workspace(paths, task_id)
+        return self.build_paths(task_paths, workspace_config=workspace_config)
+
+    def build_paths(
+        self,
+        task_paths: TaskPaths,
+        *,
+        output_root: str | Path | None = None,
+        workspace_config=None,
+    ) -> BuildResult:
+        paths, loaded_config = load_workspace(task_paths.workspace.root)
+        workspace_config = workspace_config or loaded_config
         config = TaskRepository.load(task_paths)
         task_paths.ensure_layout()
         build_id = _build_id()
-        build_root = task_paths.builds_root / build_id
-        temporary = task_paths.builds_root / f".{build_id}.tmp"
+        builds_root = Path(output_root) if output_root is not None else task_paths.builds_root
+        builds_root.mkdir(parents=True, exist_ok=True)
+        build_root = builds_root / build_id
+        temporary = builds_root / f".{build_id}.tmp"
         if build_root.exists() or temporary.exists():
             raise ValueError(f"build 目录已存在：{build_id}")
 
@@ -97,7 +110,7 @@ class PackageBuilder:
             }
             manifest = BuildManifest(
                 build_id=build_id,
-                task_id=task_id,
+                task_id=task_paths.task_id,
                 status="success",
                 processing_profile=config.processing.profile,
                 selection=selection_counts,

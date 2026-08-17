@@ -10,10 +10,23 @@ _TASK_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
 
 class TaskPaths:
-    def __init__(self, workspace: WorkspacePaths, task_id: str):
+    def __init__(
+        self,
+        workspace: WorkspacePaths,
+        task_id: str,
+        *,
+        task_root: str | Path | None = None,
+    ):
         self.workspace = workspace
         self.task_id = _validate_task_id(task_id)
-        self.task_root = workspace.tasks / self.task_id
+        self.task_root = (
+            Path(task_root).expanduser().resolve()
+            if task_root is not None
+            else workspace.tasks / self.task_id
+        )
+        self._set_paths()
+
+    def _set_paths(self) -> None:
         self.task_yaml = self.task_root / "task.yaml"
         self.selection_root = self.task_root / "selection"
         self.history_dir = self.selection_root / "history"
@@ -28,6 +41,16 @@ class TaskPaths:
     @classmethod
     def from_workspace(cls, workspace: WorkspacePaths, task_id: str) -> "TaskPaths":
         return cls(workspace, task_id)
+
+    @classmethod
+    def from_task_root(
+        cls,
+        workspace: WorkspacePaths,
+        task_root: str | Path,
+        *,
+        task_id: str,
+    ) -> "TaskPaths":
+        return cls(workspace, task_id, task_root=task_root)
 
     def ensure_layout(self) -> None:
         self.task_root.mkdir(parents=True, exist_ok=True)
