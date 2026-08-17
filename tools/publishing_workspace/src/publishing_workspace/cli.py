@@ -260,6 +260,13 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_status_parser.add_argument("root", help="Publishing 根目录")
     schedule_status_parser.add_argument("month", help="计划月份，格式 YYYY-MM")
     schedule_status_parser.set_defaults(func=cmd_schedule_status)
+
+    web_parser = commands.add_parser("web", help="启动本地 Publishing Workspace Web UI")
+    _add_log_argument(web_parser)
+    web_parser.add_argument("root", help="Publishing 根目录")
+    web_parser.add_argument("--host", default="127.0.0.1")
+    web_parser.add_argument("--port", type=int, default=61300)
+    web_parser.set_defaults(func=cmd_web)
     return parser
 
 
@@ -564,6 +571,20 @@ def cmd_schedule_retry(args) -> int:
 
 def cmd_schedule_status(args) -> int:
     _print_json(PublishingService().schedule_status(args.root, args.month))
+    return 0
+
+
+def cmd_web(args) -> int:
+    import uvicorn
+
+    from .web.schedule_api import create_app
+
+    uvicorn.run(
+        create_app(args.root),
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level or "error",
+    )
     return 0
 
 

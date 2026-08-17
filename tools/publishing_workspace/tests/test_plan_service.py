@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from pathlib import Path
 
@@ -74,6 +75,7 @@ def test_lock_requires_post_images(tmp_path: Path):
 
 
 def test_same_time_entries_are_allowed(tmp_path: Path, caplog):
+    caplog.set_level(logging.WARNING)
     create_task(tmp_path)
     service = ScheduleService()
     service.create_plan(tmp_path, "2026-09")

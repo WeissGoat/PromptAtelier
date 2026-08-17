@@ -11,7 +11,7 @@ from ..tasks.repository import TaskRepository
 from ..tasks.scanner import CurrentSelectionScanner
 from .models import InlineContent, MonthlyPlan, ScheduleEntry, TaskContent
 from .paths import PlanPaths
-from .repository import PlanRepository
+from .repository import PlanRepository, PlanRevisionConflictError
 
 
 logger = get_logger(__name__)
@@ -58,6 +58,7 @@ class ScheduleService:
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
         self._ensure_editable(plan)
+        self._ensure_revision(plan, expected_revision)
         if any(item.entry_id == entry.entry_id for item in plan.entries):
             raise ValueError(f"entry_id 已存在：{entry.entry_id}")
         updated = plan.model_copy(update={"entries": [*plan.entries, entry]})
@@ -80,6 +81,7 @@ class ScheduleService:
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
         self._ensure_editable(plan)
+        self._ensure_revision(plan, expected_revision)
         if not any(item.entry_id == entry.entry_id for item in plan.entries):
             raise KeyError(f"投稿不存在：{entry.entry_id}")
         updated = plan.model_copy(
@@ -110,6 +112,7 @@ class ScheduleService:
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
         self._ensure_editable(plan)
+        self._ensure_revision(plan, expected_revision)
         self._ensure_target_date(plan, target_date)
         if not any(item.entry_id == entry_id for item in plan.entries):
             raise KeyError(f"投稿不存在：{entry_id}")
@@ -150,6 +153,7 @@ class ScheduleService:
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
         self._ensure_editable(plan)
+        self._ensure_revision(plan, expected_revision)
         entries = [item for item in plan.entries if item.entry_id != entry_id]
         if len(entries) == len(plan.entries):
             raise KeyError(f"投稿不存在：{entry_id}")
@@ -170,6 +174,7 @@ class ScheduleService:
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
         self._ensure_editable(plan)
+        self._ensure_revision(plan, expected_revision)
         self._validate_lock_references(paths, config.image_extensions, plan)
         self._warn_schedule_conflicts(plan)
         return self.repository.save(
@@ -188,6 +193,7 @@ class ScheduleService:
         paths, _ = load_workspace(root)
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
+        self._ensure_revision(plan, expected_revision)
         return self.repository.save(
             plan_paths,
             plan.model_copy(update={"status": "draft"}),
@@ -198,6 +204,13 @@ class ScheduleService:
     def _ensure_editable(plan: MonthlyPlan) -> None:
         if plan.status == "locked":
             raise PlanLockedError(f"月度计划已锁定：{plan.plan_id}")
+
+    @staticmethod
+    def _ensure_revision(plan: MonthlyPlan, expected_revision: int | None) -> None:
+        if expected_revision is not None and plan.revision != expected_revision:
+            raise PlanRevisionConflictError(
+                f"月度计划 revision 已变化：expected={expected_revision} actual={plan.revision}"
+            )
 
     @staticmethod
     def _ensure_target_date(plan: MonthlyPlan, target_date: date) -> None:
