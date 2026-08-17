@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PIL import Image
+
+from publishing_workspace.catalog.repository import CatalogRepository
+from publishing_workspace.config import init_workspace
+from publishing_workspace.metadata.registry import ImageNodeReaderRegistry
+from publishing_workspace.models import ImageNodeInfo, ImageNodeRef, ImportedItem, SelectionSet
+from publishing_workspace.plans.models import InlineContent, MonthlyPlan, ScheduleEntry
+from publishing_workspace.plans.paths import PlanPaths
+from publishing_workspace.plans.repository import PlanRepository
+from publishing_workspace.plans.search import AssetSearchFilter, AssetSearchService
+
+
+class StaticNodeReader:
+    id = "static-test"
+    priority = 100
+
+    def __init__(self, action_root: Path, character: str):
+        self.action_root = action_root
+        self.character = character
+
+    def supports(self, metadata):
+        return True
+
+    def read(self, image_path, metadata):
+        return ImageNodeInfo(
+            format="core",
+            reader=self.id,
+            nodes=[
+                ImageNodeRef(role="artist", id="artist_a"),
+                ImageNodeRef(role="character", id=self.character),
+                ImageNodeRef(role="action_group", id="st_foot"),
+                ImageNodeRef(role="action", id="foot_detail", ref=str(self.action_root)),
+            ],
+        )
+
+
+def png(path: Path, color: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), color).save(path)
+    return path
+
+
+def seed_catalog(root: Path):
+    paths, _, _ = init_workspace(root)
+    action_root = root / "design" / "动作改2" / "st_foot" / "foot_detail"
+    action_root.mkdir(parents=True)
+    (action_root / "classify.yaml").write_text(
+        "phase: core\ncast: solo\ndomain: body\nclothing: nude\nflags:\n  - foot_focus\n",
+        encoding="utf-8",
+    )
+    first = png(root / "images" / "first.png", "red")
+    second = png(root / "images" / "second.png", "blue")
+    selection = SelectionSet(
+        id="import-1",
+        source_type="directory",
+        source_ref="test-images",
+        items=[
+            ImportedItem(
+                source_path=str(first),
+                resolved_path=str(first),
+                source_type="directory",
+                source_ref="test-images",
+                source_order=0,
+                display_name=first.name,
+            ),
+            ImportedItem(
+                source_path=str(second),
+                resolved_path=str(second),
+                source_type="directory",
+                source_ref="test-images",
+                source_order=1,
+                display_name=second.name,
+            ),
+        ],
+    )
+    reader = ImageNodeReaderRegistry(
+        [StaticNodeReader(action_root, "akemi_homura")]
+    )
+    stats = CatalogRepository(paths.catalog).import_selection(
+        selection,
+        readers=reader,
+        enrichers=[],
+    )
+    assets = CatalogRepository(paths.catalog).assets_for_import("import-1")
+    return paths, stats, assets
+
+
+def test_search_filters_by_import_nodes_and_classify_facets(tmp_path: Path):
+    seed_catalog(tmp_path)
+    service = AssetSearchService()
+
+    result = service.search(
+        tmp_path,
+        AssetSearchFilter(
+            import_id="import-1",
+            character="homura",
+            facets={"clothing": {"nude"}},
+        ),
+    )
+
+    assert len(result) == 2
+    assert result[0].values["character"] == ["akemi_homura"]
+    assert result[0].facets["phase"] == ["core"]
+    assert result[0].facets["flags"] == ["foot_focus"]
+
+
+def test_search_empty_filters_return_all_assets(tmp_path: Path):
+    seed_catalog(tmp_path)
+
+    result = AssetSearchService().search(tmp_path, AssetSearchFilter())
+
+    assert len(result) == 2
+    assert {item.display_name for item in result} == {"first.png", "second.png"}
+
+
+def test_search_reports_plan_usage_by_asset_id(tmp_path: Path):
+    paths, _, assets = seed_catalog(tmp_path)
+    plan = MonthlyPlan(
+        plan_id="2026-09",
+        month="2026-09",
+        entries=[
+            ScheduleEntry(
+                entry_id="entry-1",
+                scheduled_at="2026-09-05T20:00:00+08:00",
+                title="已安排散图",
+                content=InlineContent(
+                    sets={
+                        "all": [assets[0].asset_id],
+                        "post": [assets[0].asset_id],
+                        "cover": [],
+                    }
+                ),
+            )
+        ],
+    )
+    repository = PlanRepository()
+    repository.create(PlanPaths.from_workspace(paths, "2026-09"))
+    repository.save(PlanPaths.from_workspace(paths, "2026-09"), plan)
+
+    result = AssetSearchService().search(tmp_path, AssetSearchFilter())
+    used = next(item for item in result if item.asset_id == assets[0].asset_id)
+    unused = next(item for item in result if item.asset_id == assets[1].asset_id)
+
+    assert "plan:2026-09/entry-1" in used.usage
+    assert unused.usage == []
+
+
+def test_facets_are_aggregated_from_matching_assets(tmp_path: Path):
+    seed_catalog(tmp_path)
+
+    facets = AssetSearchService().facets(tmp_path, import_id="import-1")
+
+    assert facets["clothing"] == ["nude"]
+    assert facets["domain"] == ["body"]
