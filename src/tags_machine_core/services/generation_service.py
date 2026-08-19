@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from tags_machine_core.backends import ensure_backend_can_build_render_plan
@@ -16,6 +17,7 @@ from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.policies import (
+    PolicyTarget,
     PromptPolicyConfig,
     PromptPolicyPipeline,
     PromptPolicyProvider,
@@ -37,6 +39,8 @@ class GenerationService:
         sd_adapter: SDRenderAdapter | None = None,
         policy_pipeline: PromptPolicyPipeline | None = None,
         policy_provider: PromptPolicyProvider | None = None,
+        design_root: str | Path | None = None,
+        policy_relative_to: str | Path | None = None,
     ):
         self.composer = composer or ScriptComposer()
         self.agent_composer = agent_composer or AgentComposer()
@@ -45,6 +49,10 @@ class GenerationService:
         self.sd_adapter = sd_adapter or SDRenderAdapter()
         self.policy_pipeline = policy_pipeline or PromptPolicyPipeline()
         self.policy_provider = policy_provider or PromptPolicyProvider.with_builtin_defaults()
+        self.design_root = Path(design_root).resolve() if design_root else None
+        self.policy_relative_to = (
+            Path(policy_relative_to).resolve() if policy_relative_to else None
+        )
 
     def compose_full_prompt(
         self,
@@ -265,6 +273,8 @@ class GenerationService:
         model: str = "nai-diffusion-4-5-full",
         action: str = "generate",
         params: dict[str, Any] | None = None,
+        prompt_policy: PromptPolicyConfig | PromptPolicySource | dict[str, Any] | None = None,
+        policy_target: PolicyTarget = "script",
     ) -> RenderRequest:
         logger.info(
             "build_novelai_request started model=%s size=%sx%s composer=%s",
@@ -273,6 +283,7 @@ class GenerationService:
             height,
             bundle.meta.composer_type,
         )
+        policy = self.policy_provider.resolve(prompt_policy)
         return self.novelai_adapter.build_request(
             bundle,
             seed=seed,
@@ -283,6 +294,12 @@ class GenerationService:
             params=params,
             artist=artist,
             resolved_nodes=resolved_nodes,
+            prompt_policy=policy,
+            design_root=str(self.design_root) if self.design_root else None,
+            policy_relative_to=(
+                str(self.policy_relative_to) if self.policy_relative_to else None
+            ),
+            policy_target=policy_target,
         )
 
     def build_render_request(
@@ -298,6 +315,8 @@ class GenerationService:
         model: str | None = None,
         action: str = "render-plan",
         params: dict[str, Any] | None = None,
+        prompt_policy: PromptPolicyConfig | PromptPolicySource | dict[str, Any] | None = None,
+        policy_target: PolicyTarget = "script",
     ) -> RenderRequest:
         ensure_backend_can_build_render_plan(
             backend,
@@ -312,6 +331,7 @@ class GenerationService:
             bundle.meta.composer_type,
         )
         if backend == "novelai":
+            policy = self.policy_provider.resolve(prompt_policy)
             return self.novelai_adapter.build_request(
                 bundle,
                 seed=seed,
@@ -322,6 +342,12 @@ class GenerationService:
                 params=params,
                 artist=artist,
                 resolved_nodes=resolved_nodes,
+                prompt_policy=policy,
+                design_root=str(self.design_root) if self.design_root else None,
+                policy_relative_to=(
+                    str(self.policy_relative_to) if self.policy_relative_to else None
+                ),
+                policy_target=policy_target,
             )
         if backend == "comfyui":
             return self.comfyui_adapter.build_request(

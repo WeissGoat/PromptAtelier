@@ -73,7 +73,11 @@ def create_app(
         config_path=resolved_config_path,
     )
     app.state.generation_api = GenerationJsonApi(
-        service=GenerationService(policy_provider=policy_provider),
+        service=GenerationService(
+            policy_provider=policy_provider,
+            design_root=config.legacy.design_root,
+            policy_relative_to=resolved_config_path.resolve().parent,
+        ),
         artist_loader=NovelAIArtistRepository(config.legacy.design_root).load_node,
         generation_executor=generation_executor or _default_generation_executor(config),
     )

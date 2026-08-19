@@ -97,14 +97,14 @@ def _policy_provider_from_config(path: str | Path, args=None):
 
 
 def cmd_compose(args) -> int:
-    service = GenerationService()
+    service = _generation_service_for_args(args)
     bundle = _build_bundle(service, args)
     print_json(bundle, full=args.full)
     return 0
 
 
 def cmd_compose_nodes(args) -> int:
-    service = GenerationService()
+    service = _generation_service_for_args(args)
     bundle = _build_bundle_from_nodes(service, args)
     print_json(bundle, full=args.full)
     return 0
@@ -145,7 +145,7 @@ def cmd_compose_agent_nodes(args) -> int:
 
 
 def cmd_render_plan(args) -> int:
-    service = GenerationService()
+    service = _generation_service_for_args(args)
     artist_ref, artist = _load_render_artist(args)
     bundle = _build_bundle(service, args)
     resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
@@ -160,13 +160,15 @@ def cmd_render_plan(args) -> int:
         model=args.model,
         action=_render_action(args.backend),
         params=_load_json_arg(args.params_json),
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
+        policy_target="full_prompt",
     )
     print_json(request, full=args.full)
     return 0
 
 
 def cmd_render_plan_nodes(args) -> int:
-    service = GenerationService()
+    service = _generation_service_for_args(args)
     artist_ref, artist = _load_render_artist(args)
     resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
     bundle = service.compose_resolved_nodes(
@@ -186,13 +188,15 @@ def cmd_render_plan_nodes(args) -> int:
         model=args.model,
         action=_render_action(args.backend),
         params=_load_json_arg(args.params_json),
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
+        policy_target="script",
     )
     print_json(request, full=args.full)
     return 0
 
 
 def cmd_run_prompt(args) -> int:
-    service = GenerationService()
+    service = _generation_service_for_args(args)
     logger.info(
         "run-prompt start backend=%s composer=%s dry_run=%s artist=%s model=%s nt=%s",
         getattr(args, "backend", "novelai"),
@@ -242,7 +246,7 @@ def cmd_run_prompt(args) -> int:
 
 
 def cmd_run_action(args) -> int:
-    service = GenerationService()
+    service = _generation_service_for_args(args)
     logger.info(
         "run-action start backend=%s dry_run=%s artist=%s model=%s nt=%s",
         getattr(args, "backend", "novelai"),
@@ -276,7 +280,7 @@ def cmd_run_action(args) -> int:
 
 def cmd_generate(args) -> int:
     config = _load_command_config(args.config, args)
-    service = GenerationService()
+    service = _generation_service_for_args(args, config=config)
     artist_ref, artist = _load_render_artist(args)
     bundle = _build_bundle(service, args)
     resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
@@ -289,6 +293,8 @@ def cmd_generate(args) -> int:
         height=args.height,
         model=args.model,
         params=_load_json_arg(args.params_json),
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
+        policy_target="full_prompt",
     )
     result = _execute_render_request(
         config,
@@ -782,6 +788,7 @@ def cmd_api_run_batch(args) -> int:
         archive_config=spec.archive,
         report_config=spec.report,
         limit=_optional_request_int(data, "limit"),
+        policy_relative_to=spec_path.resolve().parent,
     )
     _emit_api_result(
         {
@@ -843,6 +850,7 @@ def cmd_api_resume_batch(args) -> int:
         archive_config=spec.archive,
         report_config=spec.report,
         limit=_optional_request_int(data, "limit"),
+        policy_relative_to=spec_path.resolve().parent,
     )
     _emit_api_result(
         {
@@ -966,6 +974,7 @@ def cmd_run_batch(args) -> int:
         archive_config=spec.archive,
         report_config=spec.report,
         limit=args.limit,
+        policy_relative_to=spec_path.resolve().parent,
     )
     print_json(
         {
@@ -1016,6 +1025,7 @@ def cmd_resume_batch(args) -> int:
         archive_config=spec.archive,
         report_config=spec.report,
         limit=args.limit,
+        policy_relative_to=spec_path.resolve().parent,
     )
     print_json(
         {
@@ -1503,6 +1513,8 @@ def _build_prompt_artifacts(service: GenerationService, args):
         model=_backend_model_arg(args, backend=backend),
         action=_render_action(backend),
         params=params,
+        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
+        policy_target="full_prompt",
     )
     return bundle, request
 
@@ -1544,6 +1556,8 @@ def _build_backend_agent_prompt_artifacts(service: GenerationService, args, *, b
         model=_backend_model_arg(args, backend=backend),
         action=_render_action(backend),
         params=params,
+        prompt_policy=_prompt_policy_from_args(args, target="agent"),
+        policy_target="agent",
     )
     return bundle, request
 
@@ -1575,6 +1589,8 @@ def _build_action_artifacts(service: GenerationService, args):
         model=_backend_model_arg(args, backend=backend),
         action=_render_action(backend),
         params=params,
+        prompt_policy=_prompt_policy_from_args(args, target="script"),
+        policy_target="script",
     )
     return bundle, request
 
@@ -1593,10 +1609,11 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
         raise ValueError("run-prompt requires --prompt or --prompt-file unless --composer agent is used")
     artist_ref, artist = _load_novelai_artist_for_prompt(args)
     resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
+    policy = _prompt_policy_from_args(args, target="full_prompt")
     bundle = service.compose_full_prompt(
         prompt=prompt,
         negative=args.negative or "",
-        prompt_policy=_prompt_policy_from_args(args, target="full_prompt"),
+        prompt_policy=policy,
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -1608,6 +1625,8 @@ def _build_novelai_prompt_artifacts(service: GenerationService, args):
         height=args.height,
         model=args.model,
         params=params,
+        prompt_policy=policy,
+        policy_target="full_prompt",
         resolved_nodes=resolved_nodes,
     )
     return bundle, request
@@ -1648,6 +1667,8 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
         model=args.model,
         params=params,
         resolved_nodes=resolved_nodes,
+        prompt_policy=_prompt_policy_from_args(args, target="agent"),
+        policy_target="agent",
     )
     return bundle, request
 
@@ -1655,12 +1676,13 @@ def _build_novelai_agent_prompt_artifacts(service: GenerationService, args):
 def _build_novelai_action_artifacts(service: GenerationService, args):
     artist_ref, artist = _load_novelai_artist_for_nodes(args)
     resolved_nodes = _read_resolved_nodes(args, artist_ref=artist_ref, artist=artist)
+    policy = _prompt_policy_from_args(args, target="script")
     bundle = service.compose_resolved_nodes(
         resolved_nodes,
         extra_prompt=args.extra_prompt or "",
         negative=args.negative or "",
         character_scope=args.character_scope or args.body_scope,
-        prompt_policy=_prompt_policy_from_args(args, target="script"),
+        prompt_policy=policy,
     )
     params = _load_json_arg(args.params_json)
     params["n_samples"] = args.nt
@@ -1673,6 +1695,8 @@ def _build_novelai_action_artifacts(service: GenerationService, args):
         model=args.model,
         params=params,
         resolved_nodes=resolved_nodes,
+        prompt_policy=policy,
+        policy_target="script",
     )
     return bundle, request
 
@@ -1702,6 +1726,23 @@ def _prompt_policy_from_args(args, *, target: str):
             "output_style": getattr(args, "prompt_policy_output_style", "underscore"),
         },
     }
+
+
+def _generation_service_for_args(args, *, config=None) -> GenerationService:
+    """为命令入口注入旧 design 根目录和 Policy 相对路径上下文。"""
+    config_path = getattr(args, "config", None)
+    if config is None and config_path:
+        config = _load_command_config(config_path, args)
+    if config is None:
+        return GenerationService()
+    return GenerationService(
+        policy_provider=build_prompt_policy_provider(
+            config,
+            config_path=config_path,
+        ),
+        design_root=config.legacy.design_root,
+        policy_relative_to=(Path(config_path).resolve().parent if config_path else None),
+    )
 
 
 def _read_node_inputs(args):
@@ -1882,6 +1923,7 @@ def build_parser() -> argparse.ArgumentParser:
     render_plan.add_argument("--model")
     render_plan.add_argument("--params-json", help="Extra renderer params as a JSON object")
     render_plan.add_argument("--config", help="Load artist nodes through this config file")
+    _add_prompt_policy_arguments(render_plan)
     render_plan.set_defaults(func=cmd_render_plan)
 
     render_plan_nodes = subparsers.add_parser(
@@ -2144,6 +2186,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--params-json", help="Extra renderer params as a JSON object")
     generate.add_argument("--config", required=True, help="Load runtime and NovelAI config")
     generate.add_argument("--output-dir", help="Override output directory")
+    _add_prompt_policy_arguments(generate)
     generate.set_defaults(func=cmd_generate)
 
     execute_render_request = subparsers.add_parser(

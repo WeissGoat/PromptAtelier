@@ -1,0 +1,19 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: novelai_vibe_image
+require: default
+
+# 相对 path 以引用该模板的配置文件或 Batch YAML 所在目录解析。
+enabled: true
+apply_to:
+  script: true
+  full_prompt: true
+  agent: false
+rules:
+  novelai_vibe:
+    enabled: true
+    options:
+      source:
+        type: image
+        path: ./vibe.png
+      strength: 0.35
+      information_extracted: 0.85

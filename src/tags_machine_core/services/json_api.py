@@ -157,6 +157,8 @@ class GenerationJsonApi:
             model=_optional_string(data.get("model")),
             action=str(data.get("action") or _default_render_action(backend)),
             params=dict(_optional_mapping(data.get("params")) or {}),
+            prompt_policy=_optional_mapping(data.get("prompt_policy")),
+            policy_target=_render_policy_target(bundle, data),
         )
         return to_jsonable(request_model)
 
@@ -171,6 +173,10 @@ class GenerationJsonApi:
                 render_request["artist_node"] = compose_request["artist_node"]
         bundle = self.compose(compose_request)
         render_request["prompt_bundle"] = bundle
+        if "prompt_policy" not in render_request and "prompt_policy" in compose_request:
+            render_request["prompt_policy"] = compose_request["prompt_policy"]
+        if "policy_target" not in render_request:
+            render_request["policy_target"] = _compose_policy_target(compose_request)
         self._copy_render_context_nodes(compose_request, render_request)
         result = ComposeRenderPlanResult(
             prompt_bundle=PromptBundle.model_validate(bundle),
@@ -395,6 +401,23 @@ def _int_or_default(value: Any, default: int) -> int:
 
 def _default_render_action(backend: str) -> str:
     return "generate" if backend == "novelai" else "render-plan"
+
+
+def _compose_policy_target(data: Mapping[str, Any]) -> str:
+    if _is_agent_compose_request(data):
+        return "agent"
+    if "prompt" in data and not data.get("nodes"):
+        return "full_prompt"
+    return "script"
+
+
+def _render_policy_target(bundle: PromptBundle, data: Mapping[str, Any]) -> str:
+    explicit = _optional_string(data.get("policy_target"))
+    if explicit in {"script", "agent", "full_prompt"}:
+        return explicit
+    if bundle.meta.composer_type == "agent":
+        return "agent"
+    return "script"
 
 
 def _is_agent_compose_request(data: Mapping[str, Any]) -> bool:

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from tags_machine_core.policies.config import PromptPolicyConfig
 from tags_machine_core.policies.ordering import resolve_rule_order
 from tags_machine_core.policies.rules import DEFAULT_RULES, PromptRule
+from tags_machine_core.policies.rules.base import policy_backend, policy_scope
 
 
 @dataclass(frozen=True)
@@ -17,8 +18,20 @@ class PromptPolicyPlan:
 
 
 class PromptPolicyRegistry:
-    def __init__(self, rules: Iterable[PromptRule] | None = None):
-        self.rules = list(rules or DEFAULT_RULES)
+    def __init__(
+        self,
+        rules: Iterable[PromptRule] | None = None,
+        renderer_rules: Iterable[object] | None = None,
+    ):
+        self.prompt_rules = list(rules or DEFAULT_RULES)
+        if renderer_rules is None:
+            try:
+                from tags_machine_core.policies.rendering.novelai import DEFAULT_RENDER_RULES
+            except ImportError:
+                DEFAULT_RENDER_RULES = []
+            renderer_rules = DEFAULT_RENDER_RULES
+        self.renderer_rules = list(renderer_rules)
+        self.rules = [*self.prompt_rules, *self.renderer_rules]
         self._by_id: dict[str, PromptRule] = {}
         for rule in self.rules:
             if rule.id in self._by_id:
@@ -52,11 +65,26 @@ class PromptPolicyRegistry:
                 rule_config.options = validated.model_dump(mode="python")
         return updated
 
-    def build_plan(self, config: PromptPolicyConfig) -> PromptPolicyPlan:
-        validated = self.validate_config(config)
-        enabled = [
+    def rules_for(self, *, scope: str = "prompt", backend: str | None = None) -> list[object]:
+        return [
             rule
             for rule in self.rules
+            if policy_scope(rule) == scope
+            and (backend is None or policy_backend(rule) in (None, backend))
+        ]
+
+    def build_plan(
+        self,
+        config: PromptPolicyConfig,
+        *,
+        scope: str = "prompt",
+        backend: str | None = None,
+    ) -> PromptPolicyPlan:
+        validated = self.validate_config(config)
+        selected_rules = self.rules_for(scope=scope, backend=backend)
+        enabled = [
+            rule
+            for rule in selected_rules
             if validated.rule_enabled(rule.id, default_enabled=rule.default_enabled)
         ]
         return PromptPolicyPlan(
@@ -64,7 +92,7 @@ class PromptPolicyRegistry:
             effective_rules=resolve_rule_order(enabled, validated),
         )
 
-    def rule(self, rule_id: str) -> PromptRule:
+    def rule(self, rule_id: str) -> object:
         try:
             return self._by_id[rule_id]
         except KeyError as exc:

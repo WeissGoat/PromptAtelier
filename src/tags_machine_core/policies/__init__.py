@@ -1,4 +1,5 @@
 from .config import (
+    PolicyTarget,
     PromptNormalizationConfig,
     PromptPolicyApplyTo,
     PromptPolicyConfig,
@@ -10,9 +11,11 @@ from .provider import PromptPolicyProvider
 from .registry import PromptPolicyRegistry
 from .source import PromptPolicySource
 from .template_resolver import PromptPolicyTemplateResolver
+from .rendering import RenderPolicy, RenderPolicyContext, ResolvedVibeSource
 
 __all__ = [
     "PromptNormalizationConfig",
+    "PolicyTarget",
     "PromptPolicyApplyTo",
     "PromptPolicyConfig",
     "PromptPolicyPipeline",
@@ -22,4 +25,7 @@ __all__ = [
     "PromptPolicyRuleOrder",
     "PromptPolicySource",
     "PromptPolicyTemplateResolver",
+    "RenderPolicy",
+    "RenderPolicyContext",
+    "ResolvedVibeSource",
 ]

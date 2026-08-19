@@ -1,0 +1,19 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: novelai_vibe_artist
+require: default
+
+# Renderer Policy 只在 NovelAI 请求阶段替换 vibe/reference 参数。
+enabled: true
+apply_to:
+  script: true
+  full_prompt: true
+  agent: false
+rules:
+  novelai_vibe:
+    enabled: true
+    options:
+      source:
+        type: artist
+        ref: 20260412
+      # 不填写时沿用源 artist 的对应参数。
+      strength: 0.35

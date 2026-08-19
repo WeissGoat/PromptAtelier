@@ -81,6 +81,9 @@ def build_core_png_text(request: RenderRequest) -> dict[str, str]:
         "nodes": request.meta.get("node_refs") or [],
         "source_nodes": request.meta.get("source_nodes") or [],
         "character_prompts": request.meta.get("character_prompts"),
+        "novelai_render_policy": _safe_novelai_render_policy_meta(
+            request.meta.get("novelai_render_policy")
+        ),
         "random_nodes": request.meta.get("random_nodes") or [],
     }
     result = {
@@ -175,6 +178,26 @@ def _drop_none(value: Any) -> Any:
     if isinstance(value, list):
         return [_drop_none(item) for item in value]
     return value
+
+
+def _safe_novelai_render_policy_meta(value: Any) -> dict[str, Any] | None:
+    """只把 renderer policy 摘要写入 PNG，避免泄露实际 reference base64。"""
+    if not isinstance(value, dict):
+        return None
+    allowed = {
+        "enabled",
+        "rules",
+        "source_type",
+        "source_ref",
+        "image_count",
+        "source_sha256",
+        "source_sizes",
+        "strength",
+        "information_extracted",
+        "replaced_fields",
+        "signature",
+    }
+    return {key: value[key] for key in allowed if key in value}
 
 
 def _png_iend_offset(data: bytes) -> int | None:

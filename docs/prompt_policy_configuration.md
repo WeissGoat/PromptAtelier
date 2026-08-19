@@ -377,7 +377,68 @@ bundle = service.compose_resolved_nodes(
 
 自定义模板目录时，通过项目配置构造 Provider，再注入 `GenerationService`。
 
-## 12. 输出与排查
+## 12. NovelAI Vibe Renderer Policy
+
+`novelai_vibe` 是 Renderer 层规则，不修改 PromptBundle 的 prompt，也不改变当前 artist 的 model、采样器、步数、scale、negative 或尺寸。它只替换 NovelAI 的三个请求字段：
+
+```text
+reference_image_multiple
+reference_strength_multiple
+reference_information_extracted_multiple
+```
+
+Artist source：
+
+```yaml
+prompt_policy:
+  require: examples/prompt_policies/novelai_vibe_artist.yaml
+```
+
+或者在 Batch 内直接配置：
+
+```yaml
+defaults:
+  prompt_policy:
+    require: ../prompt_policies/novelai_vibe_artist.yaml
+```
+
+Image source：
+
+```yaml
+prompt_policy:
+  require: examples/prompt_policies/novelai_vibe_image.yaml
+```
+
+`type: artist` 只读取源 artist 的三类 vibe 参数，不会把源 artist 的 prompt、negative、model 或采样参数带入当前请求；`type: image` 读取本地图片并在请求中转换为 base64。图片 base64 不写入日志、Policy trace 或 PNG 摘要，摘要只保留来源、数量、大小和 SHA-256。
+
+Renderer Policy 的 target 与 Prompt Policy 分开判断：
+
+- ScriptComposer 节点链路使用 `script`；
+- 完整 prompt 链路使用 `full_prompt`；
+- AgentComposer 组合仍绕过 PromptPolicyPipeline，默认 `agent: false`，因此不会默认执行该 Renderer Policy。
+
+对应示例：`examples/prompt_policies/novelai_vibe_artist.yaml`、`examples/prompt_policies/novelai_vibe_image.yaml`。
+
+### Web Custom 中的 Vibe Artist
+
+Web Custom 的 Prompt Behavior 提供一个默认关闭的 `NovelAI Vibe Artist` 开关。开启后，界面通过 Artist 节点搜索框选择一个独立的 artist 作为 NovelAI vibe 来源；它不会替换主 Artist，也不会把该 artist 的 prompt、negative、model 或采样参数拼进当前请求。
+
+Web 保存的行为名称是 `novelai_vibe_artist`，选中的 ref 位于：
+
+```json
+{
+  "policyRules": {
+    "novelai_vibe_artist": {
+      "state": "enabled",
+      "options": { "artist_ref": "20260412" }
+    }
+  }
+}
+```
+
+请求桥接层会把它转换成后端 renderer rule `novelai_vibe`，并生成 `source.type: artist`。关闭开关时，即使浏览器快照中仍保留已选 ref，也不会把该规则发送到后端；启用但没有选择 artist 时，Preview 和 Generate 会在前端提示并阻止提交。
+
+## 13. 输出与排查
 
 `PromptBundle.meta.extra.policy` 会记录：
 

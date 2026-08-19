@@ -8,6 +8,23 @@
 
 **Tech Stack:** Python 3.10+、Pydantic、PyYAML、现有 `GenerationService`、NovelAI Renderer/Client、unittest/pytest、现有 Mock Client 和真实 NovelAI 配置。
 
+## 当前实施状态（2026-08-19）
+
+已完成：
+
+- Registry 已支持 `prompt` / `renderer` scope 和 NovelAI backend 筛选；原有 PromptPolicyPipeline 仍只执行 prompt rules。
+- `NovelAIRenderPolicyPipeline` 已接入 `NovelAIRenderAdapter`，`novelai_vibe` 可从 artist 或本地图片替换三个 NovelAI reference 字段。
+- `GenerationService`、CLI、Batch、JSON API、Web 已传递同一份 Policy 配置和路径上下文。
+- AgentComposer 仍绕过 PromptPolicyPipeline；默认 `agent: false` 时也不执行该 Renderer Policy。
+- PNG Core metadata 已加入不含 base64 的 `novelai_render_policy` 摘要。
+- 已增加 artist/image 配置示例和业务级 Mock 集成验收。
+
+验证结果：
+
+- `47 passed`：NovelAI renderer policy、GenerationService、Batch mock、PNG metadata、CLI/Web 回归集成测试。
+- `compileall`、CLI 根命令和相关入口 `--help` 通过。
+- 已实际尝试 NovelAI 真实出图；当前环境在服务请求阶段发生代理 TLS `httpx.ConnectError`，因此真实图片验收保持未完成，不能标记为通过。
+
 ## Global Constraints
 
 - 只修改 `refactor` 子模块，不修改父项目旧 `tags_machine`。

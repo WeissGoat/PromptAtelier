@@ -57,7 +57,7 @@ class PromptPolicyPipeline:
             positive_tokens=parse_prompt_tokens(working.prompt.positive),
             negative_tokens=parse_prompt_tokens(working.prompt.negative),
         )
-        plan = self.registry.build_plan(policy)
+        plan = self.registry.build_plan(policy, scope="prompt")
         enabled_rules = plan.effective_rules
         if not enabled_rules:
             logger.warning(
