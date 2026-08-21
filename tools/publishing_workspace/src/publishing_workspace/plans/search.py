@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 from typing import Any, Literal
@@ -181,6 +182,19 @@ class ClassifyFacetReader:
         return found
 
 
+@dataclass
+class _PrecomputedSearchEntry:
+    asset: AssetRecord
+    values: dict[str, list[str]]
+    facets: dict[str, list[str]]
+    facet_warnings: list[str]
+    sort_key: tuple
+    combined_text: str
+
+
+_SEARCH_ENTRIES_CACHE: dict[tuple[str, int, str | None], list[_PrecomputedSearchEntry]] = {}
+
+
 class AssetSearchService:
     def __init__(self, *, facet_reader: ClassifyFacetReader | None = None):
         self.facet_reader = facet_reader or ClassifyFacetReader()
@@ -212,35 +226,118 @@ class AssetSearchService:
             next_offset=next_offset,
         )
 
-    def _search_matches(
+    def _get_search_entries(
         self,
-        root: str | Path,
-        filters: AssetSearchFilter,
-    ) -> list[AssetSearchResult]:
-        paths, config = load_workspace(root)
+        paths,
+        config,
+        import_id: str | None,
+    ) -> list[_PrecomputedSearchEntry]:
         catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
-        assets = catalog.assets_for_import(filters.import_id)
+        try:
+            stat = catalog.path.stat()
+            mtime_ns = stat.st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+
+        cache_key = (str(catalog.path.resolve()), mtime_ns, import_id)
+        cached = _SEARCH_ENTRIES_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        assets = catalog.assets_for_import(import_id)
         action_config = config.classification.action_resolution
         action_resolver = ActionNodeValueResolver(
             design_root=action_config.design_root,
             action_root_name=action_config.action_root_name,
             enabled=action_config.enabled,
         )
-        usage = self._usage_index(paths, config.image_extensions)
-        sort_keys = {
-            asset.asset_id: (
+
+        entries: list[_PrecomputedSearchEntry] = []
+        for asset in assets:
+            values = self._node_values(asset, action_resolver)
+            facets, facet_warnings = self.facet_reader.read(asset)
+            sort_key = (
                 asset.source_order,
                 asset.display_name.casefold(),
                 asset.asset_id,
             )
-            for asset in assets
+            combined_text = " ".join(
+                [asset.display_name, *[value for items in values.values() for value in items]]
+            ).casefold()
+            entries.append(
+                _PrecomputedSearchEntry(
+                    asset=asset,
+                    values=values,
+                    facets=facets,
+                    facet_warnings=facet_warnings,
+                    sort_key=sort_key,
+                    combined_text=combined_text,
+                )
+            )
+
+        entries.sort(key=lambda item: item.sort_key)
+
+        for k in list(_SEARCH_ENTRIES_CACHE):
+            if k[0] == cache_key[0] and k[1] != cache_key[1]:
+                del _SEARCH_ENTRIES_CACHE[k]
+
+        _SEARCH_ENTRIES_CACHE[cache_key] = entries
+        return entries
+
+    def _search_matches(
+        self,
+        root: str | Path,
+        filters: AssetSearchFilter,
+    ) -> list[AssetSearchResult]:
+        paths, config = load_workspace(root)
+        entries = self._get_search_entries(paths, config, filters.import_id)
+
+        text_filter = filters.text.casefold() if filters.text else ""
+        artist_filter = filters.artist.casefold() if filters.artist else ""
+        char_filter = filters.character.casefold() if filters.character else ""
+        group_filter = filters.action_group.casefold() if filters.action_group else ""
+        act_filter = filters.action.casefold() if filters.action else ""
+        facets_filter = {
+            k: {v.casefold() for v in vals}
+            for k, vals in filters.facets.items()
+            if vals
         }
-        result: list[AssetSearchResult] = []
-        for asset in assets:
-            values = self._node_values(asset, action_resolver)
-            facets, facet_warnings = self.facet_reader.read(asset)
-            if not self._matches(asset, values, facets, filters):
+
+        has_text = bool(text_filter)
+        has_artist = bool(artist_filter)
+        has_char = bool(char_filter)
+        has_group = bool(group_filter)
+        has_act = bool(act_filter)
+        has_facets = bool(facets_filter)
+
+        matched_entries: list[_PrecomputedSearchEntry] = []
+        for entry in entries:
+            if has_text and text_filter not in entry.combined_text:
                 continue
+            if has_artist and not any(artist_filter in v.casefold() for v in entry.values["artist"]):
+                continue
+            if has_char and not any(char_filter in v.casefold() for v in entry.values["character"]):
+                continue
+            if has_group and not any(group_filter in v.casefold() for v in entry.values["action_group"]):
+                continue
+            if has_act and not any(act_filter in v.casefold() for v in entry.values["action"]):
+                continue
+            if has_facets:
+                mismatch = False
+                for field, expected_set in facets_filter.items():
+                    actual = {v.casefold() for v in entry.facets.get(field, [])}
+                    if not actual.intersection(expected_set):
+                        mismatch = True
+                        break
+                if mismatch:
+                    continue
+
+            matched_entries.append(entry)
+
+        usage = self._usage_index(paths, config.image_extensions)
+        result: list[AssetSearchResult] = []
+        for entry in matched_entries:
+            asset = entry.asset
             result.append(
                 AssetSearchResult(
                     asset_id=asset.asset_id,
@@ -249,13 +346,12 @@ class AssetSearchService:
                     width=asset.image.width,
                     height=asset.image.height,
                     image_format=asset.image.format,
-                    values=values,
-                    facets=facets,
-                    warnings=[*asset.warnings, *facet_warnings],
+                    values=entry.values,
+                    facets=entry.facets,
+                    warnings=[*asset.warnings, *entry.facet_warnings],
                     usage=usage.get(asset.asset_id, []),
                 )
             )
-        result.sort(key=lambda item: sort_keys[item.asset_id])
         return result
 
     def facets(
@@ -264,12 +360,11 @@ class AssetSearchService:
         *,
         import_id: str | None = None,
     ) -> dict[str, list[str]]:
-        paths, _ = load_workspace(root)
-        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        paths, config = load_workspace(root)
+        entries = self._get_search_entries(paths, config, import_id)
         result = {field: set() for field in FACET_FIELDS}
-        for asset in catalog.assets_for_import(import_id):
-            facets, _ = self.facet_reader.read(asset)
-            for field, values in facets.items():
+        for entry in entries:
+            for field, values in entry.facets.items():
                 result[field].update(values)
         return {field: sorted(values, key=str.casefold) for field, values in result.items()}
 

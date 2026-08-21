@@ -139,6 +139,11 @@ h2 { margin-bottom: 0; font-size: 16px; line-height: 1.2; }
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 12px;
   margin-top: 12px;
+  transition: opacity 0.15s ease;
+}
+.asset-waterfall.loading {
+  opacity: 0.55;
+  pointer-events: none;
 }
 .asset-card {
   border: 1px solid var(--line); border-radius: 5px; background: #fff; overflow: hidden;

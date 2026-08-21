@@ -164,7 +164,6 @@
         if (!state.filters.facets[field]) {
           state.filters.facets[field] = [];
           renderFacetGroups();
-          loadAssetPage({ reset: true });
         }
         elements.facetFieldMenu.hidden = true;
       });
@@ -190,9 +189,12 @@
       removeFieldBtn.type = "button";
       removeFieldBtn.textContent = "移除";
       removeFieldBtn.addEventListener("click", () => {
+        const hadValues = (state.filters.facets[field] || []).length > 0;
         delete state.filters.facets[field];
         renderFacetGroups();
-        loadAssetPage({ reset: true });
+        if (hadValues) {
+          loadAssetPage({ reset: true });
+        }
       });
       heading.appendChild(removeFieldBtn);
       group.appendChild(heading);
@@ -267,8 +269,8 @@
       state.hasMore = true;
       state.loadedAssets.clear();
       state.selectedAssetIds.clear();
-      elements.assetWaterfall.innerHTML = "";
       updateSelectionBadge();
+      elements.assetWaterfall.classList.add("loading");
     }
 
     if (!state.hasMore) return;
@@ -317,6 +319,10 @@
       state.hasMore = page.has_more;
       state.offset = page.next_offset !== null ? page.next_offset : state.offset + page.items.length;
 
+      if (reset) {
+        elements.assetWaterfall.innerHTML = "";
+      }
+
       for (const item of page.items) {
         if (!state.loadedAssets.has(item.asset_id)) {
           state.loadedAssets.set(item.asset_id, item);
@@ -324,7 +330,11 @@
         }
       }
 
-      if (!state.hasMore) {
+      if (!state.loadedAssets.size) {
+        elements.assetWaterfall.innerHTML = '<div class="helper-text" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">没有找到符合当前筛选条件的素材</div>';
+      }
+
+      if (!state.hasMore && state.loadedAssets.size > 0) {
         elements.endOfResults.classList.remove("hidden");
       }
     } catch (err) {
@@ -332,6 +342,7 @@
     } finally {
       state.loadingPage = false;
       elements.loadingSpinner.classList.add("hidden");
+      elements.assetWaterfall.classList.remove("loading");
     }
   }
 
@@ -977,10 +988,12 @@
       clearTimeout(timer);
       timer = setTimeout(async () => {
         const query = inputEl.value.trim();
-        state.filters[role] = query;
         if (!query) {
           optionsEl.classList.remove("open");
-          loadAssetPage({ reset: true });
+          if (state.filters[role] !== "") {
+            state.filters[role] = "";
+            loadAssetPage({ reset: true });
+          }
           return;
         }
         try {
@@ -1004,22 +1017,34 @@
               }
               optionsEl.classList.add("open");
             } else {
-              optionsEl.innerHTML = '<div class="node-options-empty">无匹配节点</div>';
+              optionsEl.innerHTML = '<div class="node-options-empty">无匹配节点（回车应用自由文本）</div>';
               optionsEl.classList.add("open");
             }
           }
         } catch (err) {
           console.warn("节点搜索失败", err);
         }
-        loadAssetPage({ reset: true });
-      }, 250);
+      }, 200);
+    });
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        optionsEl.classList.remove("open");
+        const query = inputEl.value.trim();
+        if (state.filters[role] !== query) {
+          state.filters[role] = query;
+          loadAssetPage({ reset: true });
+        }
+      }
     });
 
     clearEl.addEventListener("click", () => {
       inputEl.value = "";
-      state.filters[role] = "";
       optionsEl.classList.remove("open");
-      loadAssetPage({ reset: true });
+      if (state.filters[role] !== "") {
+        state.filters[role] = "";
+        loadAssetPage({ reset: true });
+      }
     });
 
     document.addEventListener("click", (e) => {
