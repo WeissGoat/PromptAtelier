@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -55,6 +55,9 @@ class CatalogRepository:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA temp_store = MEMORY")
+        connection.execute("PRAGMA cache_size = -131072")
+        connection.execute("PRAGMA mmap_size = 268435456")
         try:
             yield connection
             connection.commit()
@@ -434,26 +437,166 @@ class CatalogRepository:
                     "FROM import_items ii JOIN imports i ON i.import_id=ii.import_id "
                     "WHERE ii.asset_id IS NOT NULL ORDER BY i.rowid, ii.source_order"
                 ).fetchall()
-            records: list[AssetRecord] = []
-            seen: set[str] = set()
+            unique_rows: dict[str, sqlite3.Row] = {}
             for row in rows:
-                if row["asset_id"] in seen:
-                    continue
-                seen.add(row["asset_id"])
-                record = self._asset_from_db(
-                    connection,
-                    row["asset_id"],
-                    preferred_path=Path(row["resolved_path"]),
+                unique_rows.setdefault(row["asset_id"], row)
+            if not unique_rows:
+                return []
+
+            asset_ids = list(unique_rows)
+            assets = self._rows_by_asset_id(connection, "assets", asset_ids)
+            paths = self._group_rows_by_asset_id(
+                connection,
+                "asset_paths",
+                asset_ids,
+                order_by="asset_id, available DESC, rowid",
+            )
+            nodes = self._group_rows_by_asset_id(
+                connection,
+                "asset_nodes",
+                asset_ids,
+                order_by="asset_id, role, node_index, rowid",
+            )
+
+            records: list[AssetRecord] = []
+            for asset_id, source_row in unique_rows.items():
+                asset = assets.get(asset_id)
+                if asset is None:
+                    raise KeyError(f"Catalog 中找不到资产：{asset_id}")
+                preferred_path = str(source_row["resolved_path"]).casefold()
+                path_rows = paths.get(asset_id, [])
+                path_row = next(
+                    (row for row in path_rows if str(row["path"]).casefold() == preferred_path),
+                    path_rows[0] if path_rows else None,
+                )
+                if path_row is None:
+                    raise KeyError(f"Catalog 中找不到资产路径：{asset_id}")
+                node_rows = nodes.get(asset_id, [])
+                node_info = ImageNodeInfo(
+                    format=asset["metadata_format"],
+                    reader=asset["reader"],
+                    nodes=[
+                        ImageNodeRef(
+                            role=row["role"],
+                            id=row["node_id"] or None,
+                            ref=row["ref"] or None,
+                            index=row["node_index"],
+                        )
+                        for row in node_rows
+                    ],
+                    warnings=json.loads(asset["warnings_json"]),
                 )
                 records.append(
-                    record.model_copy(
-                        update={
-                            "source_order": row["source_order"],
-                            "display_name": row["display_name"],
-                        }
+                    AssetRecord(
+                        asset_id=asset_id,
+                        path=path_row["path"],
+                        fingerprint=AssetFingerprint(
+                            size=path_row["size"],
+                            modified_ns=path_row["modified_ns"],
+                            sha256=asset["sha256"],
+                        ),
+                        image=AssetImageInfo(
+                            width=asset["width"],
+                            height=asset["height"],
+                            format=asset["image_format"],
+                        ),
+                        node_info=node_info,
+                        display_name=source_row["display_name"],
+                        source_order=source_row["source_order"],
+                        warnings=list(node_info.warnings),
                     )
                 )
             return records
+
+    def assets_by_ids(
+        self,
+        asset_ids: Collection[str],
+        *,
+        import_id: str | None = None,
+    ) -> dict[str, AssetRecord]:
+        """按资产 ID 批量读取记录；返回值仅包含当前作用域内存在的资产。"""
+        requested = _ordered_unique_text(asset_ids)
+        if not requested:
+            return {}
+
+        with self.connection() as connection:
+            source_rows: dict[str, sqlite3.Row] = {}
+            for chunk in _chunks(requested):
+                placeholders = ",".join("?" for _ in chunk)
+                if import_id is not None:
+                    rows = connection.execute(
+                        "SELECT asset_id, resolved_path, source_order, display_name "
+                        "FROM import_items "
+                        f"WHERE import_id=? AND asset_id IN ({placeholders}) "
+                        "ORDER BY source_order, rowid",
+                        [import_id, *chunk],
+                    ).fetchall()
+                else:
+                    rows = connection.execute(
+                        "SELECT asset_id, path AS resolved_path, 0 AS source_order, "
+                        "path AS display_name FROM asset_paths "
+                        f"WHERE asset_id IN ({placeholders}) "
+                        "ORDER BY available DESC, rowid",
+                        chunk,
+                    ).fetchall()
+                for row in rows:
+                    source_rows.setdefault(str(row["asset_id"]), row)
+
+            result: dict[str, AssetRecord] = {}
+            for asset_id in requested:
+                source_row = source_rows.get(asset_id)
+                if source_row is None:
+                    continue
+                record = self._asset_from_db(
+                    connection,
+                    asset_id,
+                    preferred_path=Path(source_row["resolved_path"]),
+                )
+                if import_id is not None:
+                    record = record.model_copy(
+                        update={
+                            "source_order": int(source_row["source_order"]),
+                            "display_name": str(source_row["display_name"]),
+                        }
+                    )
+                result[asset_id] = record
+            return result
+
+    def _rows_by_asset_id(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        asset_ids: list[str],
+    ) -> dict[str, sqlite3.Row]:
+        result: dict[str, sqlite3.Row] = {}
+        for chunk in _chunks(asset_ids):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = connection.execute(
+                f"SELECT * FROM {table} WHERE asset_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            result.update({row["asset_id"]: row for row in rows})
+        return result
+
+    def _group_rows_by_asset_id(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        asset_ids: list[str],
+        *,
+        order_by: str,
+    ) -> dict[str, list[sqlite3.Row]]:
+        result: dict[str, list[sqlite3.Row]] = {}
+        for chunk in _chunks(asset_ids):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = connection.execute(
+                f"SELECT rowid, * FROM {table} WHERE asset_id IN ({placeholders}) "
+                f"ORDER BY {order_by}",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                result.setdefault(row["asset_id"], []).append(row)
+        return result
 
     def latest_import_id(self, connection: sqlite3.Connection | None = None) -> str | None:
         if connection is None:
@@ -463,6 +606,110 @@ class CatalogRepository:
             "SELECT import_id FROM imports ORDER BY rowid DESC LIMIT 1"
         ).fetchone()
         return row["import_id"] if row else None
+
+    def import_sources(self) -> list[tuple[str, str]]:
+        """返回已导入来源，用于生成稳定的用户可读导出目录名。"""
+        with self.connection() as connection:
+            rows = connection.execute(
+                "SELECT import_id, source_ref FROM imports ORDER BY rowid"
+            ).fetchall()
+        return [(str(row["import_id"]), str(row["source_ref"])) for row in rows]
+
+    def node_candidates(
+        self,
+        role: str,
+        import_id: str | None = None,
+    ) -> list[tuple[str, str | None]]:
+        """直接从节点索引读取候选，供交互式节点选择使用。"""
+        normalized_role = str(role).strip()
+        if not normalized_role:
+            raise ValueError("节点 role 不能为空")
+        with self.connection() as connection:
+            if import_id:
+                rows = connection.execute(
+                    "SELECT DISTINCT n.node_id, n.ref "
+                    "FROM asset_nodes n "
+                    "JOIN import_items ii ON ii.asset_id=n.asset_id "
+                    "WHERE ii.import_id=? AND ii.asset_id IS NOT NULL AND n.role=? "
+                    "ORDER BY LOWER(n.node_id), n.node_id, n.ref",
+                    (import_id, normalized_role),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT DISTINCT n.node_id, n.ref "
+                    "FROM asset_nodes n "
+                    "JOIN import_items ii ON ii.asset_id=n.asset_id "
+                    "JOIN imports i ON i.import_id=ii.import_id "
+                    "WHERE ii.asset_id IS NOT NULL AND n.role=? "
+                    "ORDER BY LOWER(n.node_id), n.node_id, n.ref",
+                    (normalized_role,),
+                ).fetchall()
+        return [
+            (str(row["node_id"] or ""), str(row["ref"]) if row["ref"] else None)
+            for row in rows
+        ]
+
+    def set_asset_marks(
+        self,
+        asset_ids: list[str],
+        mark: str,
+        note: str = "",
+    ) -> int:
+        """为一组资产打上特定标记（如 'posted' 或 'posted:20260322'）。"""
+        clean_mark = str(mark or "").strip()
+        if not clean_mark:
+            raise ValueError("mark 不能为空")
+        now = utc_now_iso()
+        count = 0
+        with self.connection() as connection:
+            self.initialize()
+            for aid in asset_ids:
+                clean_aid = str(aid or "").strip()
+                if not clean_aid:
+                    continue
+                connection.execute(
+                    "INSERT INTO asset_marks (asset_id, mark, note, created_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(asset_id, mark) DO UPDATE SET note=excluded.note, created_at=excluded.created_at",
+                    (clean_aid, clean_mark, str(note or "").strip(), now),
+                )
+                count += 1
+        return count
+
+    def remove_asset_marks(
+        self,
+        asset_ids: list[str],
+        mark: str | None = None,
+    ) -> int:
+        """移除资产的标记。"""
+        with self.connection() as connection:
+            self.initialize()
+            if mark:
+                clean_mark = str(mark).strip()
+                cursor = connection.executemany(
+                    "DELETE FROM asset_marks WHERE asset_id=? AND mark=?",
+                    [(str(aid).strip(), clean_mark) for aid in asset_ids if str(aid).strip()],
+                )
+            else:
+                cursor = connection.executemany(
+                    "DELETE FROM asset_marks WHERE asset_id=?",
+                    [(str(aid).strip(),) for aid in asset_ids if str(aid).strip()],
+                )
+            return cursor.rowcount
+
+    def all_asset_marks(self) -> dict[str, list[str]]:
+        """获取所有资产的标记映射 {asset_id: [mark1, mark2, ...]}。"""
+        result: dict[str, list[str]] = {}
+        with self.connection() as connection:
+            self.initialize()
+            rows = connection.execute(
+                "SELECT asset_id, mark FROM asset_marks ORDER BY created_at"
+            ).fetchall()
+            for row in rows:
+                aid = str(row["asset_id"])
+                m = str(row["mark"])
+                result.setdefault(aid, []).append(m)
+        return result
 
     def _asset_from_db(
         self,
@@ -555,6 +802,23 @@ class CatalogRepository:
                         utc_now_iso(),
                     ),
                 )
+
+
+def _chunks(values: list[str], size: int = 800) -> Iterator[list[str]]:
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+def _ordered_unique_text(values: Collection[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _sha256_file(path: Path) -> str:

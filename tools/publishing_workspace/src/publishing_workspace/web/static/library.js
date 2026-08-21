@@ -457,9 +457,15 @@
     const ratio = item.width && item.height ? `${item.width} / ${item.height}` : "1 / 1";
     const previewUrl = `/api/assets/${encodeURIComponent(item.asset_id)}/preview`;
 
+    const hasUsage = item.usage && item.usage.length > 0;
+    const usageBadgeHtml = hasUsage
+      ? `<span class="asset-usage-badge" title="已投稿/使用: ${escapeHtml(item.usage.join(", "))}">已投稿</span>`
+      : "";
+
     card.innerHTML = `
       <div class="asset-thumb-wrap" style="aspect-ratio: ${ratio};">
         <input type="checkbox" class="asset-checkbox" ${state.selectedAssetIds.has(item.asset_id) ? "checked" : ""}>
+        ${usageBadgeHtml}
         <img class="asset-thumb" loading="lazy" src="${previewUrl}" alt="${escapeHtml(item.display_name)}">
       </div>
       <div class="asset-info">

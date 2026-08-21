@@ -146,4 +146,13 @@ CREATE TABLE IF NOT EXISTS export_states (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (exporter, view_key)
 );
+
+CREATE TABLE IF NOT EXISTS asset_marks (
+    asset_id TEXT NOT NULL REFERENCES assets(asset_id) ON DELETE CASCADE,
+    mark TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (asset_id, mark)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_marks_mark ON asset_marks(mark);
 """

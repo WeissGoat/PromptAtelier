@@ -417,6 +417,17 @@ class AssetSearchService:
     @staticmethod
     def _usage_index(paths, image_extensions: list[str]) -> dict[str, list[str]]:
         usage: dict[str, list[str]] = {}
+
+        # 1. Catalog 资产独立标记 (如 mark='posted' / 'posted:20260322')
+        try:
+            catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+            for asset_id, marks in catalog.all_asset_marks().items():
+                for m in marks:
+                    _append_usage(usage, asset_id, m)
+        except Exception as exc:
+            logger.warning("Catalog asset_marks 加载跳过：%s", exc)
+
+        # 2. 月度计划
         repository = PlanRepository()
         if paths.plans.is_dir():
             for plan_yaml in sorted(paths.plans.glob("*/plan.yaml")):
