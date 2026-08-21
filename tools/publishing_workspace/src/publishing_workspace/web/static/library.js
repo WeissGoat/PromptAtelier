@@ -511,6 +511,39 @@
         <span class="set-item-title" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
       `;
 
+      const actionsWrap = document.createElement("div");
+      actionsWrap.style.display = "flex";
+      actionsWrap.style.alignItems = "center";
+      actionsWrap.style.gap = "2px";
+
+      if (index > 0) {
+        const upBtn = document.createElement("button");
+        upBtn.className = "set-item-remove";
+        upBtn.type = "button";
+        upBtn.textContent = "↑";
+        upBtn.title = "上移";
+        upBtn.addEventListener("click", () => {
+          const item = state.currentSubmission.sets[activeSet].splice(index, 1)[0];
+          state.currentSubmission.sets[activeSet].splice(index - 1, 0, item);
+          syncSubmissionFormUI();
+        });
+        actionsWrap.appendChild(upBtn);
+      }
+
+      if (index < assetIds.length - 1) {
+        const downBtn = document.createElement("button");
+        downBtn.className = "set-item-remove";
+        downBtn.type = "button";
+        downBtn.textContent = "↓";
+        downBtn.title = "下移";
+        downBtn.addEventListener("click", () => {
+          const item = state.currentSubmission.sets[activeSet].splice(index, 1)[0];
+          state.currentSubmission.sets[activeSet].splice(index + 1, 0, item);
+          syncSubmissionFormUI();
+        });
+        actionsWrap.appendChild(downBtn);
+      }
+
       const removeBtn = document.createElement("button");
       removeBtn.className = "set-item-remove";
       removeBtn.type = "button";
@@ -520,8 +553,9 @@
         state.currentSubmission.sets[activeSet].splice(index, 1);
         syncSubmissionFormUI();
       });
+      actionsWrap.appendChild(removeBtn);
 
-      row.appendChild(removeBtn);
+      row.appendChild(actionsWrap);
       elements.setItemsContainer.appendChild(row);
     }
   }
