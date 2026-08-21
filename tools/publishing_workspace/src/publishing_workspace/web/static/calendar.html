@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Publishing Workspace 月度计划</title>
+  <link rel="stylesheet" href="/calendar.css?v=20260821-1">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-group">
+        <p class="eyebrow">Publishing Workspace</p>
+        <h1>月度投稿计划</h1>
+      </div>
+      <nav class="nav-tabs" aria-label="页面导航">
+        <a href="/calendar" class="nav-tab active" aria-current="page">月度计划</a>
+        <a href="/library" class="nav-tab">素材库与投稿</a>
+      </nav>
+      <div class="month-controls">
+        <button id="previous-month" class="icon-button" type="button" title="上个月" aria-label="上个月">&#8249;</button>
+        <input id="month-picker" type="month" aria-label="选择月份">
+        <button id="next-month" class="icon-button" type="button" title="下个月" aria-label="下个月">&#8250;</button>
+        <span id="plan-status" class="status-badge">未加载</span>
+      </div>
+    </header>
+
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+
+    <section class="workspace-layout">
+      <section class="calendar-panel panel">
+        <div class="panel-heading calendar-heading">
+          <div>
+            <p id="calendar-subtitle" class="eyebrow">Asia/Shanghai</p>
+            <h2 id="calendar-title">月历</h2>
+          </div>
+          <button id="new-entry" class="primary-button" type="button" disabled>新建排期</button>
+        </div>
+        <div class="weekday-row" aria-hidden="true">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+        </div>
+        <div id="calendar-grid" class="calendar-grid"></div>
+      </section>
+
+      <aside class="panel editor-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Schedule Entry</p>
+            <h2 id="editor-title">排期设置</h2>
+          </div>
+          <button id="reset-editor" class="icon-button" type="button" title="清空排期表单" aria-label="清空排期表单">&#8635;</button>
+        </div>
+        <form id="entry-form">
+          <input id="entry-id" type="hidden">
+          <label class="field-label" for="entry-title">标题</label>
+          <input id="entry-title" class="field-control" type="text" required placeholder="例如：Homura 足部图集">
+          <div class="form-grid">
+            <div>
+              <label class="field-label" for="entry-date">日期</label>
+              <input id="entry-date" class="field-control" type="date" required>
+            </div>
+            <div>
+              <label class="field-label" for="entry-time">时间</label>
+              <input id="entry-time" class="field-control" type="time" required value="20:00">
+            </div>
+          </div>
+          <label class="field-label" for="task-select">关联投稿任务</label>
+          <select id="task-select" class="field-control">
+            <option value="">-- 选择已有投稿任务 --</option>
+          </select>
+          <div id="legacy-notice" class="legacy-box hidden">
+            <p class="legacy-badge">旧格式散图排期</p>
+            <p class="helper-text">此排期基于旧散图格式。点击下方按钮可在素材库中转换为正式投稿任务。</p>
+            <a id="convert-legacy-link" href="#" class="secondary-button compact-button" style="display:inline-block;text-align:center;text-decoration:none;line-height:28px;">在素材库中编辑/转换</a>
+          </div>
+          <div id="task-link-box" class="task-link-box hidden">
+            <a id="goto-library-link" href="#" class="text-button" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+              <span>进入素材库编辑投稿素材 &rarr;</span>
+            </a>
+          </div>
+          <div class="form-actions">
+            <button id="save-entry" class="primary-button" type="submit" disabled>保存排期</button>
+            <button id="delete-entry" class="danger-button" type="button" disabled>删除</button>
+          </div>
+        </form>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/calendar.js?v=20260821-1" defer></script>
+</body>
+</html>

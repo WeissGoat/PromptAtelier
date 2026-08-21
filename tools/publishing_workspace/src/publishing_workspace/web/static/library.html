@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Publishing Workspace 素材库与投稿</title>
+  <link rel="stylesheet" href="/library.css?v=20260821-1">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-group">
+        <p class="eyebrow">Publishing Workspace</p>
+        <h1>素材库与投稿管理</h1>
+      </div>
+      <nav class="nav-tabs" aria-label="页面导航">
+        <a href="/calendar" class="nav-tab">月度计划</a>
+        <a href="/library" class="nav-tab active" aria-current="page">素材库与投稿</a>
+      </nav>
+      <div class="topbar-actions">
+        <button id="refresh-all" class="icon-button" type="button" title="刷新页面数据" aria-label="刷新页面数据">&#8635;</button>
+      </div>
+    </header>
+
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+
+    <section class="workspace-layout">
+      <!-- 左栏：导入选择与筛选 -->
+      <aside class="panel filter-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Catalog</p>
+            <h2>素材筛选</h2>
+          </div>
+          <button id="reset-filters" class="text-button" type="button">重置筛选</button>
+        </div>
+
+        <label class="field-label" for="import-select">导入快照</label>
+        <select id="import-select" class="field-control">
+          <option value="">全部导入</option>
+        </select>
+
+        <div class="search-row">
+          <input id="text-filter" class="field-control" type="search" placeholder="搜索文件名或节点">
+          <button id="search-assets-btn" class="icon-button search-button" type="button" title="搜索素材" aria-label="搜索素材">&#8981;</button>
+        </div>
+
+        <div class="node-filters">
+          <div class="node-picker" data-node-role="artist">
+            <div class="node-picker-control">
+              <input id="artist-filter" class="field-control" type="search" placeholder="artist">
+              <button class="node-clear" type="button" title="清除 artist" aria-label="清除 artist">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+          <div class="node-picker" data-node-role="character">
+            <div class="node-picker-control">
+              <input id="character-filter" class="field-control" type="search" placeholder="character">
+              <button class="node-clear" type="button" title="清除 character" aria-label="清除 character">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+          <div class="node-picker" data-node-role="action_group">
+            <div class="node-picker-control">
+              <input id="group-filter" class="field-control" type="search" placeholder="action_group">
+              <button class="node-clear" type="button" title="清除 action_group" aria-label="清除 action_group">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+          <div class="node-picker" data-node-role="action">
+            <div class="node-picker-control">
+              <input id="action-filter" class="field-control" type="search" placeholder="action">
+              <button class="node-clear" type="button" title="清除 action" aria-label="清除 action">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+        </div>
+
+        <div class="facet-heading">
+          <div class="facet-heading-main">
+            <strong>classify.yaml 二次过滤</strong>
+            <small class="facet-supported-fields">Phase · Species · Cast · Domain · Subtype · Pose · Environment · Tone · Flags · Clothing</small>
+          </div>
+          <div class="facet-heading-actions">
+            <div class="facet-add-wrap">
+              <button id="add-facet-btn" class="secondary-button compact-button" type="button" aria-expanded="false">＋ 添加筛选</button>
+              <div id="facet-field-menu" class="facet-field-menu" role="menu" hidden></div>
+            </div>
+            <button id="clear-facets-btn" class="text-button" type="button">清空</button>
+          </div>
+        </div>
+        <div id="facet-filters-container" class="facet-filters" aria-live="polite"></div>
+      </aside>
+
+      <!-- 中栏：瀑布流素材卡片 -->
+      <section class="panel assets-panel">
+        <div class="panel-heading assets-heading">
+          <div>
+            <p class="eyebrow">Gallery</p>
+            <h2>素材检索结果</h2>
+          </div>
+          <div class="assets-actions">
+            <span id="selected-count-badge" class="muted">已选 0 项</span>
+            <button id="select-all-visible-btn" class="secondary-button compact-button" type="button">全选当前</button>
+            <button id="clear-selection-btn" class="text-button" type="button">清选</button>
+            <button id="add-to-set-btn" class="primary-button compact-button" type="button">加入当前集合</button>
+          </div>
+        </div>
+
+        <div id="asset-waterfall" class="asset-waterfall"></div>
+        <div id="scroll-sentinel" class="scroll-sentinel">
+          <span id="loading-spinner" class="loading-spinner hidden">加载中...</span>
+          <span id="end-of-results" class="end-of-results hidden">已加载全部素材</span>
+        </div>
+      </section>
+
+      <!-- 右栏：历史投稿与 Submission 编辑器 -->
+      <aside class="panel editor-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Submission Editor</p>
+            <h2 id="submission-editor-title">新建投稿</h2>
+          </div>
+          <button id="new-submission-btn" class="secondary-button compact-button" type="button">＋ 新建投稿</button>
+        </div>
+
+        <div class="history-select-row">
+          <label class="field-label" for="history-submission-select">加载历史投稿</label>
+          <select id="history-submission-select" class="field-control">
+            <option value="">-- 选择历史投稿进行编辑 --</option>
+          </select>
+        </div>
+
+        <div id="legacy-convert-banner" class="legacy-convert-box hidden">
+          <strong>计划散图待转换</strong>
+          <p class="helper-text">正在编辑来自计划的散图。保存时将自动创建正式 Task 并关联回月度计划。</p>
+        </div>
+
+        <form id="submission-form">
+          <label class="field-label" for="submission-title">投稿标题</label>
+          <input id="submission-title" class="field-control" type="text" required placeholder="例如：Homura 动作系列精选">
+
+          <div id="submission-meta-row" class="submission-meta-row">
+            <span id="submission-task-badge" class="meta-badge">未生成任务</span>
+            <span id="submission-rev-badge" class="meta-badge">Rev 1</span>
+          </div>
+
+          <div class="set-tabs-wrap">
+            <div class="set-tabs" role="tablist" aria-label="选择集合">
+              <button id="tab-all" class="set-tab active" type="button" data-set="all">all <span id="badge-count-all">0</span></button>
+              <button id="tab-post" class="set-tab" type="button" data-set="post">post <span id="badge-count-post">0</span></button>
+              <button id="tab-cover" class="set-tab" type="button" data-set="cover">cover <span id="badge-count-cover">0</span></button>
+            </div>
+            <small class="helper-text">post 默认自动补齐 all，cover 默认取 post[0]。</small>
+          </div>
+
+          <div id="set-items-container" class="set-items-container"></div>
+
+          <div class="submission-form-actions">
+            <button id="save-submission-btn" class="primary-button" type="submit">保存投稿 (生成 Task)</button>
+          </div>
+        </form>
+
+        <!-- 导出发布包区域 -->
+        <div id="export-section" class="export-section">
+          <div class="export-heading">
+            <strong>导出发布包</strong>
+            <button id="start-export-btn" class="primary-button compact-button" type="button" disabled>开始导出</button>
+          </div>
+
+          <div id="export-progress-box" class="export-progress-box hidden">
+            <div class="progress-bar-wrap">
+              <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="progress-phase">准备中...</span>
+              <span id="progress-percent">0%</span>
+            </div>
+            <div id="progress-file" class="progress-file"></div>
+          </div>
+
+          <div id="export-completed-box" class="export-completed-box hidden">
+            <p class="export-success-text">导出已完成！</p>
+            <button id="open-export-dir-btn" class="secondary-button compact-button" type="button">打开导出目录</button>
+          </div>
+
+          <div id="export-error-box" class="export-error-box hidden">
+            <p id="export-error-text" class="export-error-text"></p>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="preview-dialog" class="preview-dialog">
+    <button id="close-preview" class="dialog-close" type="button" title="关闭预览" aria-label="关闭预览">&#10005;</button>
+    <img id="preview-image" alt="素材预览">
+    <p id="preview-caption"></p>
+  </dialog>
+
+  <script src="/library.js?v=20260821-1" defer></script>
+</body>
+</html>
