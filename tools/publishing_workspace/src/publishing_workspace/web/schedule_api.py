@@ -13,12 +13,13 @@ from ..catalog.repository import CatalogRepository
 from ..config import load_workspace
 from ..plans.models import ScheduleEntry
 from ..plans.repository import PlanRevisionConflictError
-from ..plans.search import AssetSearchFilter, AssetSearchService, FACET_FIELDS
+from ..plans.search import AssetSearchFilter, AssetSearchService, NodeSearchService
 from ..plans.service import PlanLockedError, PlanValidationError
 from ..service import PublishingService
 from ..tasks.paths import TaskPaths
 from ..tasks.repository import TaskRepository
 from ..logging import get_logger
+from .library_api import register_library_routes
 
 
 logger = get_logger(__name__)
@@ -173,6 +174,23 @@ def create_app(root: str | Path) -> FastAPI:
             for item in AssetSearchService().search(app.state.publishing_root, query)
         ]
 
+    @app.get("/api/nodes")
+    def search_nodes(
+        role: str,
+        q: str = "",
+        import_id: str | None = None,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=20, ge=1, le=100),
+    ):
+        return NodeSearchService().search(
+            app.state.publishing_root,
+            role=role,
+            query=q,
+            import_id=import_id,
+            offset=offset,
+            limit=limit,
+        ).model_dump(mode="json", by_alias=True)
+
     @app.get("/api/assets/facets")
     def asset_facets(import_id: str | None = None):
         return AssetSearchService().facets(app.state.publishing_root, import_id=import_id)
@@ -217,12 +235,28 @@ def create_app(root: str | Path) -> FastAPI:
             raise KeyError(f"Catalog 中找不到可预览资产：{asset_id}")
         return FileResponse(asset.path)
 
+    register_library_routes(app)
+
     static_root = Path(__file__).with_name("static")
-    if static_root.is_dir() and (static_root / "schedule.html").is_file():
-        @app.get("/", include_in_schema=False)
-        def schedule_page():
-            return FileResponse(static_root / "schedule.html")
     if static_root.is_dir():
+        if (static_root / "calendar.html").is_file():
+            @app.get("/calendar", include_in_schema=False)
+            def calendar_page():
+                return FileResponse(static_root / "calendar.html")
+
+            @app.get("/", include_in_schema=False)
+            def root_calendar_page():
+                return FileResponse(static_root / "calendar.html")
+        elif (static_root / "schedule.html").is_file():
+            @app.get("/", include_in_schema=False)
+            def schedule_page():
+                return FileResponse(static_root / "schedule.html")
+
+        if (static_root / "library.html").is_file():
+            @app.get("/library", include_in_schema=False)
+            def library_page():
+                return FileResponse(static_root / "library.html")
+
         app.mount("/", StaticFiles(directory=static_root, html=True), name="static")
 
     return app

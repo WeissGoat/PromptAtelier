@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -39,6 +40,18 @@ def test_plan_api_returns_revision_and_entries(tmp_path: Path):
     assert response.json()["entries"] == []
 
 
+def test_plan_api_get_creates_missing_month(tmp_path: Path):
+    init_workspace(tmp_path)
+    client = TestClient(create_app(tmp_path))
+
+    response = client.get("/api/plans/2026-10")
+
+    assert response.status_code == 200
+    assert response.json()["month"] == "2026-10"
+    assert response.json()["status"] == "draft"
+    assert (tmp_path / "plans" / "2026-10" / "plan.yaml").is_file()
+
+
 def test_plan_api_adds_and_moves_entry(tmp_path: Path):
     client = client_for(tmp_path)
 
@@ -76,6 +89,37 @@ def test_asset_search_api_returns_empty_result_for_empty_catalog(tmp_path: Path)
     assert response.json() == []
 
 
+def test_asset_search_api_accepts_subtype_facet(tmp_path: Path):
+    client = client_for(tmp_path)
+
+    response = client.get(
+        "/api/assets/search",
+        params={"facets": json.dumps({"subtype": ["kiss"]})},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_node_search_api_returns_paginated_candidates(tmp_path: Path):
+    client = client_for(tmp_path)
+
+    response = client.get(
+        "/api/nodes",
+        params={"role": "character", "q": "hom", "offset": 0, "limit": 20},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema": "publishing-workspace.web.node-list/v1",
+        "role": "character",
+        "nodes": [],
+        "offset": 0,
+        "limit": 20,
+        "has_more": False,
+    }
+
+
 def test_schedule_api_serves_static_calendar(tmp_path: Path):
     client = client_for(tmp_path)
 
@@ -83,6 +127,11 @@ def test_schedule_api_serves_static_calendar(tmp_path: Path):
 
     assert response.status_code == 200
     assert "月度投稿计划" in response.text
+    assert "classify.yaml 二次过滤" in response.text
+    assert "添加筛选" in response.text
+    assert "Subtype" in response.text
+    assert "创建空计划" not in response.text
+    assert "锁定计划" not in response.text
 
 
 def test_schedule_api_lists_existing_tasks(tmp_path: Path):

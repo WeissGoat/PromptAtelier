@@ -28,6 +28,8 @@ from .views import (
     WindowsShortcutExporter,
 )
 from .tasks.service import TaskWorkflowService
+from .submissions.service import SubmissionService
+from .submissions.models import SubmissionDetail, SubmissionSummary
 from .plans.executor import SubmissionExecutor
 from .plans.models import MonthlyPlan, ScheduleEntry
 from .plans.paths import PlanPaths
@@ -39,6 +41,31 @@ logger = get_logger(__name__)
 
 
 class PublishingService:
+    def submission_create_or_update(
+        self,
+        root: str | Path,
+        *,
+        task_id: str | None = None,
+        title: str,
+        source_import_id: str | None = None,
+        sets: dict[str, list[str]],
+        expected_revision: int | None = None,
+    ) -> SubmissionDetail:
+        return SubmissionService().create_or_update(
+            root,
+            task_id=task_id,
+            title=title,
+            source_import_id=source_import_id,
+            sets=sets,
+            expected_revision=expected_revision,
+        )
+
+    def submission_get(self, root: str | Path, task_id: str) -> SubmissionDetail:
+        return SubmissionService().get(root, task_id)
+
+    def submission_list(self, root: str | Path) -> list[SubmissionSummary]:
+        return SubmissionService().list(root)
+
     def initialize(self, root: str | Path) -> dict:
         paths, config, created = init_workspace(root)
         CatalogRepository(paths.catalog, backups_dir=paths.backups)
