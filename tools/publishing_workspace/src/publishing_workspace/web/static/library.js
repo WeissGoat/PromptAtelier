@@ -983,8 +983,15 @@
     const picker = inputEl.closest(".node-picker");
     const optionsEl = picker.querySelector(".node-options");
 
+    function updateClearButton() {
+      if (clearEl) {
+        clearEl.hidden = !inputEl.value.trim();
+      }
+    }
+
     let timer = null;
     inputEl.addEventListener("input", () => {
+      updateClearButton();
       clearTimeout(timer);
       timer = setTimeout(async () => {
         const query = inputEl.value.trim();
@@ -1003,13 +1010,15 @@
             optionsEl.innerHTML = "";
             if (data.nodes?.length) {
               for (const n of data.nodes) {
+                const val = n.name || n.value || "";
                 const optBtn = document.createElement("button");
                 optBtn.type = "button";
                 optBtn.className = "node-option";
-                optBtn.innerHTML = `<strong>${escapeHtml(n.value)}</strong><span class="node-option-ref">${escapeHtml(n.ref || "")}</span>`;
+                optBtn.innerHTML = `<strong>${escapeHtml(val)}</strong><span class="node-option-ref">${escapeHtml(n.ref || "")}</span>`;
                 optBtn.addEventListener("click", () => {
-                  inputEl.value = n.value;
-                  state.filters[role] = n.value;
+                  inputEl.value = val;
+                  state.filters[role] = val;
+                  updateClearButton();
                   optionsEl.classList.remove("open");
                   loadAssetPage({ reset: true });
                 });
@@ -1033,6 +1042,7 @@
         const query = inputEl.value.trim();
         if (state.filters[role] !== query) {
           state.filters[role] = query;
+          updateClearButton();
           loadAssetPage({ reset: true });
         }
       }
@@ -1040,6 +1050,7 @@
 
     clearEl.addEventListener("click", () => {
       inputEl.value = "";
+      updateClearButton();
       optionsEl.classList.remove("open");
       if (state.filters[role] !== "") {
         state.filters[role] = "";
@@ -1052,6 +1063,8 @@
         optionsEl.classList.remove("open");
       }
     });
+
+    updateClearButton();
   }
 
   bindNodePicker("artist", elements.artistFilter, document.querySelector('[data-node-role="artist"] .node-clear'));
