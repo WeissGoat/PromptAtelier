@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -33,6 +34,8 @@ class ActionResolutionIndex:
         if not self.action_root.is_dir():
             raise FileNotFoundError(f"Action root not found: {self.action_root}")
 
+        self.action_root_str = str(self.action_root).replace("\\", "/").casefold()
+        self.action_marker = f"{self.action_root.name.casefold()}/"
         self._new_by_name: dict[str, set[str]] = defaultdict(set)
         self._source_groups: dict[str, list[str]] = defaultdict(list)
         self._dest_sources: dict[str, set[str]] = defaultdict(set)
@@ -164,16 +167,16 @@ class ActionResolutionIndex:
         if not ref:
             return ""
         value = str(ref).strip()
-        path = Path(value)
-        if path.is_absolute():
-            try:
-                return path.resolve().relative_to(self.action_root).as_posix()
-            except (OSError, ValueError):
-                return ""
+        norm = value.replace("\\", "/")
+        norm_cf = norm.casefold()
+
+        if norm_cf.startswith(self.action_root_str):
+            rel = norm[len(self.action_root_str) :].lstrip("/")
+            return rel.replace("\\", "/")
+
         normalized = _normalize_relative(value)
-        action_marker = f"{self.action_root.name}/"
-        if normalized.casefold().startswith(action_marker.casefold()):
-            return normalized[len(action_marker) :]
+        if normalized.casefold().startswith(self.action_marker):
+            return normalized[len(self.action_marker) :]
         return normalized if "/" in normalized else ""
 
     def _all_sources(self) -> set[str]:
@@ -185,21 +188,39 @@ class ActionResolutionIndex:
     def _load_new_nodes(self) -> None:
         if not self.new_root.is_dir():
             return
-        for path in sorted(self.new_root.iterdir(), key=lambda item: item.name.casefold()):
-            if path.is_dir():
-                source = f"new/{path.name}"
-                self._new_by_name[_key(path.name)].add(source)
+        try:
+            entries = sorted(os.scandir(self.new_root), key=lambda item: item.name.casefold())
+        except OSError:
+            return
+        for entry in entries:
+            if entry.is_dir():
+                source = f"new/{entry.name}"
+                self._new_by_name[_key(entry.name)].add(source)
 
     def _load_categories(self) -> None:
-        for root in sorted(self.action_root.iterdir(), key=lambda item: item.name.casefold()):
-            if not root.is_dir() or root.resolve() == self.new_root:
+        try:
+            entries = sorted(os.scandir(self.action_root), key=lambda item: item.name.casefold())
+        except OSError:
+            return
+        for root_entry in entries:
+            if not root_entry.is_dir() or root_entry.name.casefold() == "new":
                 continue
-            for child in sorted(root.iterdir(), key=lambda item: item.name.casefold()):
-                if not child.is_dir():
+            root_path = Path(root_entry.path)
+            root_key = _key(root_entry.name)
+            by_root = self._category_by_root[root_key]
+            try:
+                child_entries = sorted(
+                    os.scandir(root_entry.path), key=lambda item: item.name.casefold()
+                )
+            except OSError:
+                continue
+            for child_entry in child_entries:
+                if not child_entry.is_dir():
                     continue
-                relative = child.resolve().relative_to(self.action_root).as_posix()
-                self._category_paths[_key(relative)] = child.resolve()
-                self._category_by_root[_key(root.name)].append(child.resolve())
+                child_path = Path(child_entry.path)
+                rel_posix = f"{root_entry.name}/{child_entry.name}"
+                self._category_paths[_key(rel_posix)] = child_path
+                by_root.append(child_path)
 
     def _load_manifest(self) -> None:
         manifest = self.action_root / "category_view_manifest.json"

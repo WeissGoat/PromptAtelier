@@ -226,6 +226,14 @@ class AssetSearchService:
             next_offset=next_offset,
         )
 
+    def preload(self, root: str | Path) -> None:
+        """在后端服务启动时全量预热全局及所有导入快照的检索索引。"""
+        paths, config = load_workspace(root)
+        self._get_search_entries(paths, config, None)
+        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        for import_id, _ in catalog.import_sources():
+            self._get_search_entries(paths, config, import_id)
+
     def _get_search_entries(
         self,
         paths,

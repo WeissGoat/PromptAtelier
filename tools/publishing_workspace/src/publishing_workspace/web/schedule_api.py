@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import date
 from pathlib import Path
 
@@ -51,6 +52,13 @@ def create_app(root: str | Path, *, export_jobs: ExportJobService | None = None)
         recovered = jobs_service.recover_interrupted(publishing_root)
         if recovered:
             logger.warning("Web 启动时恢复中断导出：count=%s", recovered)
+        try:
+            t0 = time.perf_counter()
+            logger.info("Web 正在预热素材检索索引...")
+            AssetSearchService().preload(publishing_root)
+            logger.info("Web 检索索引预热完成 (耗时: %.2fs)", time.perf_counter() - t0)
+        except Exception as exc:
+            logger.warning("Web 检索索引预热跳过：%s", exc)
         try:
             yield
         finally:
