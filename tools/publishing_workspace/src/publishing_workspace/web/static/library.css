@@ -86,10 +86,63 @@ input[type="search"]::-webkit-search-results-decoration {
 .search-row { display: flex; gap: 6px; margin-top: 8px; }
 .search-button { flex: 0 0 34px; font-size: 16px; }
 
-.node-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+/* 已生效筛选条件胶囊栏 */
+.active-filter-chips {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f0f7f5;
+  border: 1px solid #c2e0d8;
+}
+.active-chips-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.active-chips-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+.active-chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: #fff;
+  border: 1px solid #a3d1c4;
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--ink);
+}
+.active-chip-role {
+  color: var(--muted);
+  font-size: 10px;
+}
+.active-chip-remove {
+  border: 0;
+  background: transparent;
+  color: #7b8893;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1;
+}
+.active-chip-remove:hover {
+  color: var(--danger);
+}
+
+.node-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .node-picker { position: relative; min-width: 0; }
+.node-picker-label { display: block; margin-bottom: 3px; font-size: 11px; font-weight: 600; color: #49535d; }
 .node-picker-control { position: relative; }
-.node-picker-control .field-control { padding-right: 26px; font-size: 12px; }
+.node-picker-control .field-control { padding-right: 26px; font-size: 12px; border-radius: 4px; }
 .node-clear {
   position: absolute; top: 50%; right: 4px; width: 22px; height: 22px; transform: translateY(-50%);
   border: 0; border-radius: 3px; background: transparent; color: var(--muted); font-size: 11px;
@@ -99,49 +152,133 @@ input[type="search"]::-webkit-search-results-decoration {
 .node-clear:hover { background: var(--surface-muted); color: var(--danger); }
 .node-options {
   position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; left: 0; display: none;
-  max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); box-shadow: var(--shadow);
+  max-height: 260px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); box-shadow: var(--shadow);
 }
 .node-options.open { display: grid; gap: 2px; }
-.node-option { width: 100%; padding: 6px 8px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); text-align: left; font-size: 12px; }
-.node-option:hover { background: #eaf3f0; color: var(--accent-dark); }
+.node-option {
+  width: 100%; padding: 6px 8px; border: 0; border-radius: 3px; background: transparent;
+  color: var(--ink); text-align: left; font-size: 12px; cursor: pointer;
+}
+.node-option:hover, .node-option.keyboard-active { background: #eaf3f0; color: var(--accent-dark); }
 .node-option-ref { display: block; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.node-options-header {
+  padding: 4px 6px; font-size: 10px; color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 2px;
+}
 
-.facet-heading { justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-.facet-heading-main strong { display: block; font-size: 13px; }
-.facet-heading-main .facet-supported-fields { margin-top: 3px; color: #89939b; font-size: 9px; line-height: 1.3; }
-.facet-heading-actions { display: flex; align-items: center; gap: 6px; }
-.facet-add-wrap { position: relative; }
-.facet-field-menu {
-  position: absolute; z-index: 25; top: calc(100% + 4px); right: 0; min-width: 160px; max-height: 220px;
-  overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); box-shadow: var(--shadow);
+/* Classify 属性二次过滤标签面板 */
+.facet-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
-.facet-field-menu[hidden] { display: none; }
-.facet-field-menu button {
-  display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 6px 8px;
-  border: 0; border-radius: 3px; background: transparent; color: var(--ink); text-align: left; font-size: 12px;
-}
-.facet-field-menu button:hover { background: #eaf3f0; color: var(--accent-dark); }
+.facet-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.facet-heading-main strong { display: block; font-size: 12px; color: var(--ink); }
+.facet-heading-main .facet-supported-fields { margin-top: 2px; color: #89939b; font-size: 10px; }
 
-.facet-filters { max-height: 260px; overflow-y: auto; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.facet-group { padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: #f8fafb; }
-.facet-group-heading { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; }
-.facet-chip-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.facet-chip {
-  display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid #bfd8ee;
-  border-radius: 3px; background: #e8f2fb; color: #245270; font-size: 11px;
+.facet-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
 }
-.facet-chip button { border: 0; background: transparent; color: inherit; padding: 0 2px; font-size: 12px; }
-.facet-value-picker { position: relative; }
-.facet-value-trigger {
-  display: inline-flex; align-items: center; padding: 2px 6px; border: 1px dashed #9db3c5;
-  border-radius: 3px; background: #fff; color: var(--accent-dark); font-size: 11px;
+.facet-tab-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: #4f5861;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s ease;
 }
-.facet-option-popover {
-  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 180px; max-height: 200px;
-  overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); box-shadow: var(--shadow);
+.facet-tab-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
 }
-.facet-option-popover button { width: 100%; text-align: left; padding: 5px 6px; border: 0; border-radius: 3px; background: transparent; font-size: 11px; }
-.facet-option-popover button:hover { background: #eaf3f0; }
+.facet-tab-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.facet-tab-badge {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.08);
+  font-size: 9px;
+}
+.facet-tab-btn.active .facet-tab-badge {
+  background: rgba(255,255,255,.3);
+}
+
+.facet-tags-panel {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fafbfc;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.facet-search-wrap {
+  margin-bottom: 6px;
+}
+.facet-search-input {
+  min-height: 28px !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+.facet-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.facet-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid #d4dde4;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: all .12s ease;
+}
+.facet-tag-chip:hover {
+  border-color: #92b8d4;
+  background: #f0f6fb;
+}
+.facet-tag-chip.active {
+  background: #2e6f68;
+  border-color: #2e6f68;
+  color: #fff;
+  font-weight: 500;
+}
+.facet-tag-count {
+  font-size: 9px;
+  color: var(--muted);
+}
+.facet-tag-chip.active .facet-tag-count {
+  color: rgba(255,255,255,.8);
+}
+.facet-empty-hint {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-count-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 8px;
+  vertical-align: middle;
+}
 
 /* 中栏瀑布流 */
 .assets-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

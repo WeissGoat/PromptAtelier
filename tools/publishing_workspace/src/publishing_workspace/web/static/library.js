@@ -31,8 +31,31 @@
 
     historicalSubmissions: [],
     availableFacets: {},
+    activeFacetCategory: "clothing",
+    facetTagSearch: "",
     activeExportJob: null,
     exportPollTimer: null,
+  };
+
+  const FACET_LABELS = {
+    clothing: "服装",
+    phase: "阶段",
+    subtype: "子分类",
+    cast: "角色类型",
+    pose: "体态姿势",
+    environment: "环境背景",
+    tone: "基调风格",
+    flags: "标记",
+    species: "物种",
+    domain: "领域",
+  };
+
+  const ROLE_LABELS = {
+    text: "关键词",
+    artist: "画风",
+    character: "角色",
+    action_group: "动作组",
+    action: "动作",
   };
 
   const elements = {
@@ -46,11 +69,18 @@
     characterFilter: document.getElementById("character-filter"),
     groupFilter: document.getElementById("group-filter"),
     actionFilter: document.getElementById("action-filter"),
-    addFacetBtn: document.getElementById("add-facet-btn"),
-    facetFieldMenu: document.getElementById("facet-field-menu"),
-    clearFacetsBtn: document.getElementById("clear-facets-btn"),
-    facetFiltersContainer: document.getElementById("facet-filters-container"),
 
+    activeFilterChips: document.getElementById("active-filter-chips"),
+    activeChipsList: document.getElementById("active-chips-list"),
+    clearAllChips: document.getElementById("clear-all-chips"),
+
+    facetCategoryTabs: document.getElementById("facet-category-tabs"),
+    facetTagsPanel: document.getElementById("facet-tags-panel"),
+    facetSearchInput: document.getElementById("facet-search-input"),
+    facetChipsContainer: document.getElementById("facet-chips-container"),
+    clearFacetsBtn: document.getElementById("clear-facets-btn"),
+
+    assetCountBadge: document.getElementById("asset-count-badge"),
     selectedCountBadge: document.getElementById("selected-count-badge"),
     selectAllVisibleBtn: document.getElementById("select-all-visible-btn"),
     clearSelectionBtn: document.getElementById("clear-selection-btn"),
@@ -133,6 +163,96 @@
     }
   }
 
+  // ================= 导入快照、Facet 筛选与已生效条件 =================
+
+  function renderActiveChips() {
+    if (!elements.activeChipsList) return;
+    elements.activeChipsList.innerHTML = "";
+    const activeItems = [];
+
+    if (state.filters.text) {
+      activeItems.push({
+        type: "text",
+        label: "关键词",
+        value: state.filters.text,
+        clear: () => {
+          state.filters.text = "";
+          elements.textFilter.value = "";
+          renderActiveChips();
+          loadAssetPage({ reset: true });
+        },
+      });
+    }
+
+    for (const role of ["artist", "character", "action_group", "action"]) {
+      if (state.filters[role]) {
+        const inputEl = {
+          artist: elements.artistFilter,
+          character: elements.characterFilter,
+          action_group: elements.groupFilter,
+          action: elements.actionFilter,
+        }[role];
+        activeItems.push({
+          type: "node",
+          role: role,
+          label: ROLE_LABELS[role] || role,
+          value: state.filters[role],
+          clear: () => {
+            state.filters[role] = "";
+            if (inputEl) {
+              inputEl.value = "";
+              const clearBtn = inputEl.closest(".node-picker")?.querySelector(".node-clear");
+              if (clearBtn) clearBtn.hidden = true;
+            }
+            renderActiveChips();
+            loadAssetPage({ reset: true });
+          },
+        });
+      }
+    }
+
+    for (const [field, values] of Object.entries(state.filters.facets)) {
+      for (const val of values) {
+        activeItems.push({
+          type: "facet",
+          field: field,
+          label: FACET_LABELS[field] || field,
+          value: val,
+          clear: () => {
+            state.filters.facets[field] = state.filters.facets[field].filter((x) => x !== val);
+            if (!state.filters.facets[field].length) {
+              delete state.filters.facets[field];
+            }
+            renderFacetCategoryTabs();
+            renderFacetChips();
+            renderActiveChips();
+            loadAssetPage({ reset: true });
+          },
+        });
+      }
+    }
+
+    if (!activeItems.length) {
+      if (elements.activeFilterChips) elements.activeFilterChips.hidden = true;
+      return;
+    }
+
+    if (elements.activeFilterChips) elements.activeFilterChips.hidden = false;
+    for (const item of activeItems) {
+      const chip = document.createElement("span");
+      chip.className = "active-chip";
+      chip.innerHTML = `<span class="active-chip-role">${escapeHtml(item.label)}:</span> <strong>${escapeHtml(item.value)}</strong>`;
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "active-chip-remove";
+      removeBtn.textContent = "✕";
+      removeBtn.title = "移除该筛选";
+      removeBtn.addEventListener("click", item.clear);
+      chip.appendChild(removeBtn);
+      elements.activeChipsList.appendChild(chip);
+    }
+  }
+
   async function loadFacets() {
     try {
       const url = state.filters.import_id
@@ -141,121 +261,96 @@
       const res = await fetch(url);
       if (res.ok) {
         state.availableFacets = await res.json();
-        renderFacetFieldMenu();
-        renderFacetGroups();
+        const categories = Object.keys(state.availableFacets);
+        if (categories.length && !categories.includes(state.activeFacetCategory)) {
+          state.activeFacetCategory = categories[0];
+        }
+        renderFacetCategoryTabs();
+        renderFacetChips();
       }
     } catch (err) {
       console.warn("加载 Facet 选项失败", err);
     }
   }
 
-  function renderFacetFieldMenu() {
-    elements.facetFieldMenu.innerHTML = "";
-    const fields = Object.keys(state.availableFacets);
-    if (!fields.length) {
-      elements.facetFieldMenu.innerHTML = '<small style="padding:6px;display:block;">无可用字段</small>';
+  function renderFacetCategoryTabs() {
+    if (!elements.facetCategoryTabs) return;
+    elements.facetCategoryTabs.innerHTML = "";
+    const categories = Object.keys(state.availableFacets);
+    if (!categories.length) {
+      elements.facetCategoryTabs.innerHTML = '<small class="muted">无可用分类属性</small>';
       return;
     }
-    for (const field of fields) {
+
+    let hasAnySelected = false;
+    for (const cat of categories) {
+      const selectedCount = (state.filters.facets[cat] || []).length;
+      if (selectedCount > 0) hasAnySelected = true;
+
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.innerHTML = `<span>${escapeHtml(field)}</span><small>${state.availableFacets[field].length}项</small>`;
+      btn.className = `facet-tab-btn ${cat === state.activeFacetCategory ? "active" : ""}`;
+      const name = FACET_LABELS[cat] || cat;
+      const countTag = selectedCount > 0 ? `<span class="facet-tab-badge">${selectedCount}</span>` : "";
+      btn.innerHTML = `${escapeHtml(name)}${countTag}`;
       btn.addEventListener("click", () => {
-        if (!state.filters.facets[field]) {
-          state.filters.facets[field] = [];
-          renderFacetGroups();
-        }
-        elements.facetFieldMenu.hidden = true;
+        state.activeFacetCategory = cat;
+        state.facetTagSearch = "";
+        if (elements.facetSearchInput) elements.facetSearchInput.value = "";
+        renderFacetCategoryTabs();
+        renderFacetChips();
       });
-      elements.facetFieldMenu.appendChild(btn);
+      elements.facetCategoryTabs.appendChild(btn);
+    }
+
+    if (elements.clearFacetsBtn) {
+      elements.clearFacetsBtn.hidden = !hasAnySelected;
     }
   }
 
-  function renderFacetGroups() {
-    elements.facetFiltersContainer.innerHTML = "";
-    const activeFields = Object.keys(state.filters.facets);
-    if (!activeFields.length) return;
+  function renderFacetChips() {
+    if (!elements.facetChipsContainer) return;
+    elements.facetChipsContainer.innerHTML = "";
+    const cat = state.activeFacetCategory;
+    if (!cat || !state.availableFacets[cat]) {
+      elements.facetChipsContainer.innerHTML = '<div class="facet-empty-hint">请选择上方分类维度</div>';
+      return;
+    }
 
-    for (const field of activeFields) {
-      const group = document.createElement("div");
-      group.className = "facet-group";
+    const allTags = state.availableFacets[cat] || [];
+    const searchNeedle = state.facetTagSearch.trim().toLowerCase();
+    const filteredTags = searchNeedle
+      ? allTags.filter((tag) => tag.toLowerCase().includes(searchNeedle))
+      : allTags;
 
-      const heading = document.createElement("div");
-      heading.className = "facet-group-heading";
-      heading.innerHTML = `<span>${escapeHtml(field)}</span>`;
+    if (!filteredTags.length) {
+      elements.facetChipsContainer.innerHTML = `<div class="facet-empty-hint">未找到匹配 "${escapeHtml(state.facetTagSearch)}" 的标签</div>`;
+      return;
+    }
 
-      const removeFieldBtn = document.createElement("button");
-      removeFieldBtn.className = "text-button";
-      removeFieldBtn.type = "button";
-      removeFieldBtn.textContent = "移除";
-      removeFieldBtn.addEventListener("click", () => {
-        const hadValues = (state.filters.facets[field] || []).length > 0;
-        delete state.filters.facets[field];
-        renderFacetGroups();
-        if (hadValues) {
-          loadAssetPage({ reset: true });
+    const selectedList = state.filters.facets[cat] || [];
+    for (const tag of filteredTags) {
+      const isSelected = selectedList.includes(tag);
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = `facet-tag-chip ${isSelected ? "active" : ""}`;
+      chip.innerHTML = `${isSelected ? "✓ " : ""}${escapeHtml(tag)}`;
+      chip.addEventListener("click", () => {
+        if (isSelected) {
+          state.filters.facets[cat] = state.filters.facets[cat].filter((x) => x !== tag);
+          if (!state.filters.facets[cat].length) {
+            delete state.filters.facets[cat];
+          }
+        } else {
+          if (!state.filters.facets[cat]) state.filters.facets[cat] = [];
+          state.filters.facets[cat].push(tag);
         }
+        renderFacetCategoryTabs();
+        renderFacetChips();
+        renderActiveChips();
+        loadAssetPage({ reset: true });
       });
-      heading.appendChild(removeFieldBtn);
-      group.appendChild(heading);
-
-      const chipList = document.createElement("div");
-      chipList.className = "facet-chip-list";
-
-      const selectedValues = state.filters.facets[field] || [];
-      for (const val of selectedValues) {
-        const chip = document.createElement("span");
-        chip.className = "facet-chip";
-        chip.innerHTML = `<span>${escapeHtml(val)}</span>`;
-        const delBtn = document.createElement("button");
-        delBtn.type = "button";
-        delBtn.textContent = "×";
-        delBtn.addEventListener("click", () => {
-          state.filters.facets[field] = state.filters.facets[field].filter((x) => x !== val);
-          renderFacetGroups();
-          loadAssetPage({ reset: true });
-        });
-        chip.appendChild(delBtn);
-        chipList.appendChild(chip);
-      }
-
-      // 添加值下拉
-      const pickerWrap = document.createElement("div");
-      pickerWrap.className = "facet-value-picker";
-      const triggerBtn = document.createElement("button");
-      triggerBtn.className = "facet-value-trigger";
-      triggerBtn.type = "button";
-      triggerBtn.textContent = "+ 选择值";
-
-      const popover = document.createElement("div");
-      popover.className = "facet-option-popover hidden";
-
-      const allFieldVals = state.availableFacets[field] || [];
-      for (const val of allFieldVals) {
-        if (selectedValues.includes(val)) continue;
-        const optBtn = document.createElement("button");
-        optBtn.type = "button";
-        optBtn.textContent = val;
-        optBtn.addEventListener("click", () => {
-          state.filters.facets[field].push(val);
-          popover.classList.add("hidden");
-          renderFacetGroups();
-          loadAssetPage({ reset: true });
-        });
-        popover.appendChild(optBtn);
-      }
-
-      triggerBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        popover.classList.toggle("hidden");
-      });
-
-      pickerWrap.appendChild(triggerBtn);
-      pickerWrap.appendChild(popover);
-      chipList.appendChild(pickerWrap);
-
-      group.appendChild(chipList);
-      elements.facetFiltersContainer.appendChild(group);
+      elements.facetChipsContainer.appendChild(chip);
     }
   }
 
@@ -318,6 +413,11 @@
 
       state.hasMore = page.has_more;
       state.offset = page.next_offset !== null ? page.next_offset : state.offset + page.items.length;
+
+      if (elements.assetCountBadge) {
+        elements.assetCountBadge.textContent = page.total !== undefined ? `(共 ${page.total.toLocaleString()} 张)` : "";
+      }
+      renderActiveChips();
 
       if (reset) {
         elements.assetWaterfall.innerHTML = "";
@@ -852,16 +952,22 @@
     loadAssetPage({ reset: true });
   });
 
-  elements.searchAssetsBtn.addEventListener("click", () => {
-    state.filters.text = elements.textFilter.value.trim();
-    loadAssetPage({ reset: true });
-  });
-  elements.textFilter.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      state.filters.text = elements.textFilter.value.trim();
+  function applyTextSearch() {
+    const val = elements.textFilter.value.trim();
+    if (state.filters.text !== val) {
+      state.filters.text = val;
+      renderActiveChips();
       loadAssetPage({ reset: true });
     }
+  }
+
+  elements.textFilter.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      applyTextSearch();
+    }
   });
+
+  elements.searchAssetsBtn.addEventListener("click", applyTextSearch);
 
   elements.resetFiltersBtn.addEventListener("click", () => {
     state.filters = {
@@ -879,23 +985,35 @@
     elements.characterFilter.value = "";
     elements.groupFilter.value = "";
     elements.actionFilter.value = "";
-    renderFacetGroups();
+    document.querySelectorAll(".node-clear").forEach((btn) => (btn.hidden = true));
+    renderFacetCategoryTabs();
+    renderFacetChips();
+    renderActiveChips();
     loadAssetPage({ reset: true });
   });
 
-  elements.addFacetBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    elements.facetFieldMenu.hidden = !elements.facetFieldMenu.hidden;
-  });
-  document.addEventListener("click", () => {
-    elements.facetFieldMenu.hidden = true;
-  });
+  if (elements.clearAllChips) {
+    elements.clearAllChips.addEventListener("click", () => {
+      elements.resetFiltersBtn.click();
+    });
+  }
 
-  elements.clearFacetsBtn.addEventListener("click", () => {
-    state.filters.facets = {};
-    renderFacetGroups();
-    loadAssetPage({ reset: true });
-  });
+  if (elements.clearFacetsBtn) {
+    elements.clearFacetsBtn.addEventListener("click", () => {
+      state.filters.facets = {};
+      renderFacetCategoryTabs();
+      renderFacetChips();
+      renderActiveChips();
+      loadAssetPage({ reset: true });
+    });
+  }
+
+  if (elements.facetSearchInput) {
+    elements.facetSearchInput.addEventListener("input", (e) => {
+      state.facetTagSearch = e.target.value;
+      renderFacetChips();
+    });
+  }
 
   // 全选 / 清选 / 加入集合
   elements.selectAllVisibleBtn.addEventListener("click", () => {
@@ -978,7 +1096,7 @@
     elements.previewDialog.close();
   });
 
-  // 节点选择器绑定
+  // 节点选择器绑定 (支持聚焦浏览、实时防抖、键盘导航)
   function bindNodePicker(role, inputEl, clearEl) {
     const picker = inputEl.closest(".node-picker");
     const optionsEl = picker.querySelector(".node-options");
@@ -989,62 +1107,117 @@
       }
     }
 
+    let keyboardIndex = -1;
+
+    async function fetchAndShowOptions(query = "") {
+      try {
+        const importParam = state.filters.import_id ? `&import_id=${encodeURIComponent(state.filters.import_id)}` : "";
+        const res = await fetch(`/api/nodes?role=${role}&q=${encodeURIComponent(query)}&limit=30${importParam}`);
+        if (res.ok) {
+          const data = await res.json();
+          optionsEl.innerHTML = "";
+          keyboardIndex = -1;
+          if (data.nodes?.length) {
+            const header = document.createElement("div");
+            header.className = "node-options-header";
+            header.textContent = query ? `匹配到 ${data.nodes.length} 个候选` : `可选 / 推荐候选 (${data.nodes.length})`;
+            optionsEl.appendChild(header);
+
+            data.nodes.forEach((n, idx) => {
+              const val = n.name || n.value || "";
+              const optBtn = document.createElement("button");
+              optBtn.type = "button";
+              optBtn.className = "node-option";
+              optBtn.dataset.index = idx;
+              optBtn.innerHTML = `<strong>${escapeHtml(val)}</strong><span class="node-option-ref">${escapeHtml(n.ref || "")}</span>`;
+              optBtn.addEventListener("click", () => {
+                inputEl.value = val;
+                state.filters[role] = val;
+                updateClearButton();
+                optionsEl.classList.remove("open");
+                renderActiveChips();
+                loadAssetPage({ reset: true });
+              });
+              optionsEl.appendChild(optBtn);
+            });
+            optionsEl.classList.add("open");
+          } else {
+            optionsEl.innerHTML = '<div class="node-options-empty">无匹配节点（回车应用自由文本）</div>';
+            optionsEl.classList.add("open");
+          }
+        }
+      } catch (err) {
+        console.warn("节点搜索失败", err);
+      }
+    }
+
+    // 聚焦或点击时直接弹出候选项列表
+    inputEl.addEventListener("focus", () => {
+      fetchAndShowOptions(inputEl.value.trim());
+    });
+    inputEl.addEventListener("click", () => {
+      if (!optionsEl.classList.contains("open")) {
+        fetchAndShowOptions(inputEl.value.trim());
+      }
+    });
+
     let timer = null;
     inputEl.addEventListener("input", () => {
       updateClearButton();
       clearTimeout(timer);
-      timer = setTimeout(async () => {
+      timer = setTimeout(() => {
         const query = inputEl.value.trim();
         if (!query) {
-          optionsEl.classList.remove("open");
           if (state.filters[role] !== "") {
             state.filters[role] = "";
+            renderActiveChips();
             loadAssetPage({ reset: true });
           }
-          return;
         }
-        try {
-          const res = await fetch(`/api/nodes?role=${role}&q=${encodeURIComponent(query)}`);
-          if (res.ok) {
-            const data = await res.json();
-            optionsEl.innerHTML = "";
-            if (data.nodes?.length) {
-              for (const n of data.nodes) {
-                const val = n.name || n.value || "";
-                const optBtn = document.createElement("button");
-                optBtn.type = "button";
-                optBtn.className = "node-option";
-                optBtn.innerHTML = `<strong>${escapeHtml(val)}</strong><span class="node-option-ref">${escapeHtml(n.ref || "")}</span>`;
-                optBtn.addEventListener("click", () => {
-                  inputEl.value = val;
-                  state.filters[role] = val;
-                  updateClearButton();
-                  optionsEl.classList.remove("open");
-                  loadAssetPage({ reset: true });
-                });
-                optionsEl.appendChild(optBtn);
-              }
-              optionsEl.classList.add("open");
-            } else {
-              optionsEl.innerHTML = '<div class="node-options-empty">无匹配节点（回车应用自由文本）</div>';
-              optionsEl.classList.add("open");
-            }
-          }
-        } catch (err) {
-          console.warn("节点搜索失败", err);
-        }
-      }, 200);
+        fetchAndShowOptions(query);
+      }, 100);
     });
 
     inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        optionsEl.classList.remove("open");
-        const query = inputEl.value.trim();
-        if (state.filters[role] !== query) {
-          state.filters[role] = query;
-          updateClearButton();
-          loadAssetPage({ reset: true });
+      const items = optionsEl.querySelectorAll(".node-option");
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (!optionsEl.classList.contains("open")) {
+          fetchAndShowOptions(inputEl.value.trim());
+          return;
         }
+        if (items.length) {
+          keyboardIndex = (keyboardIndex + 1) % items.length;
+          items.forEach((item, idx) => {
+            item.classList.toggle("keyboard-active", idx === keyboardIndex);
+          });
+          items[keyboardIndex]?.scrollIntoView({ block: "nearest" });
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (items.length) {
+          keyboardIndex = (keyboardIndex - 1 + items.length) % items.length;
+          items.forEach((item, idx) => {
+            item.classList.toggle("keyboard-active", idx === keyboardIndex);
+          });
+          items[keyboardIndex]?.scrollIntoView({ block: "nearest" });
+        }
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (keyboardIndex >= 0 && items[keyboardIndex]) {
+          items[keyboardIndex].click();
+        } else {
+          optionsEl.classList.remove("open");
+          const query = inputEl.value.trim();
+          if (state.filters[role] !== query) {
+            state.filters[role] = query;
+            updateClearButton();
+            renderActiveChips();
+            loadAssetPage({ reset: true });
+          }
+        }
+      } else if (e.key === "Escape") {
+        optionsEl.classList.remove("open");
       }
     });
 
@@ -1054,6 +1227,7 @@
       optionsEl.classList.remove("open");
       if (state.filters[role] !== "") {
         state.filters[role] = "";
+        renderActiveChips();
         loadAssetPage({ reset: true });
       }
     });

@@ -41,55 +41,75 @@
         </select>
 
         <div class="search-row">
-          <input id="text-filter" class="field-control" type="search" placeholder="搜索文件名或节点">
+          <input id="text-filter" class="field-control" type="search" placeholder="搜索文件名或自由关键词...">
           <button id="search-assets-btn" class="icon-button search-button" type="button" title="搜索素材" aria-label="搜索素材">&#8981;</button>
+        </div>
+
+        <!-- 当前已生效的筛选标签 -->
+        <div id="active-filter-chips" class="active-filter-chips" hidden>
+          <div class="active-chips-header">
+            <span class="active-chips-title">已生效条件</span>
+            <button id="clear-all-chips" class="text-button" type="button">全部清除</button>
+          </div>
+          <div id="active-chips-list" class="active-chips-list"></div>
         </div>
 
         <div class="node-filters">
           <div class="node-picker" data-node-role="artist">
+            <label class="node-picker-label" for="artist-filter">🎨 画风 (artist)</label>
             <div class="node-picker-control">
-              <input id="artist-filter" class="field-control" type="text" autocomplete="off" placeholder="artist">
+              <input id="artist-filter" class="field-control" type="text" autocomplete="off" placeholder="点击浏览或搜索画风...">
               <button class="node-clear" type="button" title="清除 artist" aria-label="清除 artist" hidden>&#10005;</button>
             </div>
             <div class="node-options" role="listbox"></div>
           </div>
           <div class="node-picker" data-node-role="character">
+            <label class="node-picker-label" for="character-filter">👤 角色 (character)</label>
             <div class="node-picker-control">
-              <input id="character-filter" class="field-control" type="text" autocomplete="off" placeholder="character">
+              <input id="character-filter" class="field-control" type="text" autocomplete="off" placeholder="点击浏览或搜索角色...">
               <button class="node-clear" type="button" title="清除 character" aria-label="清除 character" hidden>&#10005;</button>
             </div>
             <div class="node-options" role="listbox"></div>
           </div>
           <div class="node-picker" data-node-role="action_group">
+            <label class="node-picker-label" for="group-filter">📁 动作组 (action_group)</label>
             <div class="node-picker-control">
-              <input id="group-filter" class="field-control" type="text" autocomplete="off" placeholder="action_group">
+              <input id="group-filter" class="field-control" type="text" autocomplete="off" placeholder="点击浏览或搜索动作组...">
               <button class="node-clear" type="button" title="清除 action_group" aria-label="清除 action_group" hidden>&#10005;</button>
             </div>
             <div class="node-options" role="listbox"></div>
           </div>
           <div class="node-picker" data-node-role="action">
+            <label class="node-picker-label" for="action-filter">⚡ 动作 (action)</label>
             <div class="node-picker-control">
-              <input id="action-filter" class="field-control" type="text" autocomplete="off" placeholder="action">
+              <input id="action-filter" class="field-control" type="text" autocomplete="off" placeholder="点击浏览或搜索动作...">
               <button class="node-clear" type="button" title="清除 action" aria-label="清除 action" hidden>&#10005;</button>
             </div>
             <div class="node-options" role="listbox"></div>
           </div>
         </div>
 
-        <div class="facet-heading">
-          <div class="facet-heading-main">
-            <strong>classify.yaml 二次过滤</strong>
-            <small class="facet-supported-fields">Phase · Species · Cast · Domain · Subtype · Pose · Environment · Tone · Flags · Clothing</small>
-          </div>
-          <div class="facet-heading-actions">
-            <div class="facet-add-wrap">
-              <button id="add-facet-btn" class="secondary-button compact-button" type="button" aria-expanded="false">＋ 添加筛选</button>
-              <div id="facet-field-menu" class="facet-field-menu" role="menu" hidden></div>
+        <!-- Classify.yaml 属性二次过滤 -->
+        <div class="facet-section">
+          <div class="facet-heading">
+            <div class="facet-heading-main">
+              <strong>🏷️ 属性维度二次过滤</strong>
+              <small class="facet-supported-fields">按 classify.yaml 标签精准筛选</small>
             </div>
-            <button id="clear-facets-btn" class="text-button" type="button">清空</button>
+            <button id="clear-facets-btn" class="text-button" type="button" hidden>清空属性</button>
+          </div>
+
+          <!-- 分类维度选择 Tabs -->
+          <div id="facet-category-tabs" class="facet-category-tabs"></div>
+
+          <!-- 当前分类维度的可选标签面板 -->
+          <div id="facet-tags-panel" class="facet-tags-panel">
+            <div class="facet-search-wrap">
+              <input id="facet-search-input" class="field-control facet-search-input" type="text" placeholder="快速过滤当前维度标签..." autocomplete="off">
+            </div>
+            <div id="facet-chips-container" class="facet-chips-container"></div>
           </div>
         </div>
-        <div id="facet-filters-container" class="facet-filters" aria-live="polite"></div>
       </aside>
 
       <!-- 中栏：瀑布流素材卡片 -->
@@ -97,7 +117,7 @@
         <div class="panel-heading assets-heading">
           <div>
             <p class="eyebrow">Gallery</p>
-            <h2>素材检索结果</h2>
+            <h2>素材检索结果 <span id="asset-count-badge" class="asset-count-badge"></span></h2>
           </div>
           <div class="assets-actions">
             <span id="selected-count-badge" class="muted">已选 0 项</span>

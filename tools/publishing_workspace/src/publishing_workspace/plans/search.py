@@ -92,6 +92,7 @@ class AssetPageResult(BaseModel):
     items: list[AssetSearchResult]
     offset: int
     limit: int
+    total: int = 0
     has_more: bool
     next_offset: int | None
 
@@ -222,17 +223,17 @@ class AssetSearchService:
             items=items,
             offset=filters.offset,
             limit=filters.limit,
+            total=len(matches),
             has_more=next_offset is not None,
             next_offset=next_offset,
         )
 
     def preload(self, root: str | Path) -> None:
-        """在后端服务启动时全量预热全局及所有导入快照的检索索引。"""
+        """在后端服务启动时预热全局素材检索索引与节点候选。"""
         paths, config = load_workspace(root)
         self._get_search_entries(paths, config, None)
-        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
-        for import_id, _ in catalog.import_sources():
-            self._get_search_entries(paths, config, import_id)
+        for role in NODE_FIELDS:
+            NodeSearchService().search(root, role=role, limit=1)
 
     def _get_search_entries(
         self,
@@ -452,6 +453,9 @@ class AssetSearchService:
         return usage
 
 
+_NODE_CANDIDATES_CACHE: dict[tuple[str, int, str, str | None], list[NodeOption]] = {}
+
+
 class NodeSearchService:
     """从 Catalog 推导节点候选，不把节点选择状态写回 Catalog。"""
 
@@ -474,27 +478,39 @@ class NodeSearchService:
             raise ValueError("limit 必须在 1 到 100 之间")
 
         paths, _ = load_workspace(root)
-        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
-        expected = str(query or "").strip().casefold()
-        options: dict[str, NodeOption] = {}
-        for node_id, ref in catalog.node_candidates(normalized_role, import_id):
-            raw_value = node_id or _name_from_ref(ref) or ""
-            name = DEFAULT_NODE_IDENTITY_NORMALIZER.normalize(normalized_role, raw_value)
-            if not name or (expected and expected not in name.casefold()):
-                continue
-            key = name.casefold()
-            if key in options:
-                continue
-            options[key] = NodeOption(role=normalized_role, name=name, ref=ref)
+        catalog_mtime = int(paths.catalog.stat().st_mtime_ns) if paths.catalog.is_file() else 0
+        cache_key = (str(paths.catalog).casefold(), catalog_mtime, normalized_role, import_id)
 
-        ordered = sorted(options.values(), key=lambda item: (item.name.casefold(), item.name))
-        page = ordered[offset : offset + limit]
+        if cache_key not in _NODE_CANDIDATES_CACHE:
+            catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+            options: dict[str, NodeOption] = {}
+            for node_id, ref in catalog.node_candidates(normalized_role, import_id):
+                raw_value = node_id or _name_from_ref(ref) or ""
+                name = DEFAULT_NODE_IDENTITY_NORMALIZER.normalize(normalized_role, raw_value)
+                if not name:
+                    continue
+                key = name.casefold()
+                if key in options:
+                    continue
+                options[key] = NodeOption(role=normalized_role, name=name, ref=ref)
+            _NODE_CANDIDATES_CACHE[cache_key] = sorted(
+                options.values(), key=lambda item: (item.name.casefold(), item.name)
+            )
+
+        all_options = _NODE_CANDIDATES_CACHE[cache_key]
+        expected = str(query or "").strip().casefold()
+        if expected:
+            matched = [opt for opt in all_options if expected in opt.name.casefold()]
+        else:
+            matched = all_options
+
+        page = matched[offset : offset + limit]
         return NodeListResult(
             role=normalized_role,
             nodes=page,
             offset=offset,
             limit=limit,
-            has_more=offset + limit < len(ordered),
+            has_more=offset + limit < len(matched),
         )
 
 

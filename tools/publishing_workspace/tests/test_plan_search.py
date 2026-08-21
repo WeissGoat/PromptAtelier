@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from publishing_workspace.catalog.repository import CatalogRepository
@@ -11,7 +12,7 @@ from publishing_workspace.models import ImageNodeInfo, ImageNodeRef, ImportedIte
 from publishing_workspace.plans.models import InlineContent, MonthlyPlan, ScheduleEntry
 from publishing_workspace.plans.paths import PlanPaths
 from publishing_workspace.plans.repository import PlanRepository
-from publishing_workspace.plans.search import AssetSearchFilter, AssetSearchService
+from publishing_workspace.plans.search import AssetSearchFilter, AssetSearchService, NodeSearchService
 
 
 class StaticNodeReader:
@@ -49,7 +50,7 @@ def seed_catalog(root: Path):
     action_root = root / "design" / "动作改2" / "st_foot" / "foot_detail"
     action_root.mkdir(parents=True)
     (action_root / "classify.yaml").write_text(
-        "phase: core\ncast: solo\ndomain: body\nclothing: nude\nflags:\n  - foot_focus\n",
+        "phase: core\ncast: solo\ndomain: body\nsubtype:\n  sex: [kiss]\nclothing: nude\nflags:\n  - foot_focus\n",
         encoding="utf-8",
     )
     first = png(root / "images" / "first.png", "red")
@@ -98,13 +99,14 @@ def test_search_filters_by_import_nodes_and_classify_facets(tmp_path: Path):
         AssetSearchFilter(
             import_id="import-1",
             character="homura",
-            facets={"clothing": {"nude"}},
+            facets={"clothing": {"nude"}, "subtype": {"kiss"}},
         ),
     )
 
     assert len(result) == 2
     assert result[0].values["character"] == ["akemi_homura"]
     assert result[0].facets["phase"] == ["core"]
+    assert result[0].facets["subtype"] == ["kiss"]
     assert result[0].facets["flags"] == ["foot_focus"]
 
 
@@ -115,6 +117,52 @@ def test_search_empty_filters_return_all_assets(tmp_path: Path):
 
     assert len(result) == 2
     assert {item.display_name for item in result} == {"first.png", "second.png"}
+
+
+def test_search_page_returns_stable_adjacent_pages(tmp_path: Path):
+    seed_catalog(tmp_path)
+    service = AssetSearchService()
+
+    first = service.search_page(
+        tmp_path,
+        AssetSearchFilter(import_id="import-1", offset=0, limit=1),
+    )
+    second = service.search_page(
+        tmp_path,
+        AssetSearchFilter(import_id="import-1", offset=1, limit=1),
+    )
+
+    assert first.schema_id == "publishing-workspace.asset-page/v1"
+    assert [item.display_name for item in first.items] == ["first.png"]
+    assert first.next_offset == 1
+    assert first.has_more is True
+    assert [item.display_name for item in second.items] == ["second.png"]
+    assert second.next_offset is None
+    assert second.has_more is False
+    assert not {item.asset_id for item in first.items}.intersection(
+        item.asset_id for item in second.items
+    )
+
+
+def test_legacy_search_ignores_offset_and_includes_image_layout(tmp_path: Path):
+    seed_catalog(tmp_path)
+
+    result = AssetSearchService().search(
+        tmp_path,
+        AssetSearchFilter(import_id="import-1", offset=1, limit=1),
+    )
+
+    assert [item.display_name for item in result] == ["first.png"]
+    assert result[0].width == 8
+    assert result[0].height == 8
+    assert result[0].image_format == "PNG"
+
+
+def test_search_filter_rejects_invalid_page_bounds():
+    with pytest.raises(ValueError):
+        AssetSearchFilter(offset=-1)
+    with pytest.raises(ValueError):
+        AssetSearchFilter(limit=1001)
 
 
 def test_search_reports_plan_usage_by_asset_id(tmp_path: Path):
@@ -156,3 +204,32 @@ def test_facets_are_aggregated_from_matching_assets(tmp_path: Path):
 
     assert facets["clothing"] == ["nude"]
     assert facets["domain"] == ["body"]
+    assert facets["subtype"] == ["kiss"]
+
+
+def test_subtype_facets_flatten_mapping_list(tmp_path: Path):
+    paths, _, assets = seed_catalog(tmp_path)
+    action_path = paths.root / "design" / "动作改2" / "st_foot" / "foot_detail" / "classify.yaml"
+    action_path.write_text(
+        "phase: core\nsubtype:\n  - foot: [sole_focus, barefoot]\n  - sex: [kiss]\n",
+        encoding="utf-8",
+    )
+
+    facets = AssetSearchService().facets(tmp_path, import_id="import-1")
+
+    assert facets["subtype"] == ["barefoot", "kiss", "sole_focus"]
+
+
+def test_node_search_lists_fuzzy_candidates_with_paging(tmp_path: Path):
+    seed_catalog(tmp_path)
+
+    result = NodeSearchService().search(
+        tmp_path,
+        role="character",
+        query="hom",
+        offset=0,
+        limit=20,
+    )
+
+    assert [item.name for item in result.nodes] == ["akemi_homura"]
+    assert result.has_more is False
