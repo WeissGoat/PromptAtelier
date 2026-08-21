@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..action_resolution import ActionNodeValueResolver
 from ..catalog.repository import CatalogRepository
 from ..config import load_workspace
 from ..logging import get_logger
 from ..models import AssetRecord, ImageNodeRef
+from ..identity import DEFAULT_NODE_IDENTITY_NORMALIZER
 from ..tasks.paths import TaskPaths
 from ..tasks.repository import TaskRepository
 from ..tasks.scanner import CurrentSelectionScanner
@@ -45,6 +46,7 @@ class AssetSearchFilter(BaseModel):
     action_group: str | None = None
     action: str | None = None
     facets: dict[str, set[str]] = Field(default_factory=dict)
+    offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=1000)
 
     @field_validator("import_id", "text", "artist", "character", "action_group", "action")
@@ -70,16 +72,63 @@ class AssetSearchResult(BaseModel):
     asset_id: str
     path: str
     display_name: str
+    width: int
+    height: int
+    image_format: str
     values: dict[str, list[str]]
     facets: dict[str, list[str]]
     warnings: list[str] = Field(default_factory=list)
     usage: list[str] = Field(default_factory=list)
 
 
+class AssetPageResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_id: Literal["publishing-workspace.asset-page/v1"] = Field(
+        default="publishing-workspace.asset-page/v1",
+        alias="schema",
+    )
+    items: list[AssetSearchResult]
+    offset: int
+    limit: int
+    has_more: bool
+    next_offset: int | None
+
+
+class NodeOption(BaseModel):
+    role: str
+    name: str
+    ref: str | None = None
+    relative: str | None = None
+
+
+class NodeListResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_id: Literal["publishing-workspace.web.node-list/v1"] = Field(
+        default="publishing-workspace.web.node-list/v1",
+        alias="schema",
+    )
+    role: str
+    nodes: list[NodeOption]
+    offset: int
+    limit: int
+    has_more: bool
+
+
 class ClassifyFacetReader:
     """从 action 节点目录附近的 classify.yaml 读取检索字段。"""
 
+    def __init__(self) -> None:
+        self._path_cache: dict[str, Path | None] = {}
+        self._yaml_cache: dict[Path, tuple[int, dict[str, Any]]] = {}
+        self._asset_cache: dict[str, tuple[dict[str, list[str]], list[str]]] = {}
+
     def read(self, asset: AssetRecord) -> tuple[dict[str, list[str]], list[str]]:
+        cached = self._asset_cache.get(asset.asset_id)
+        if cached is not None:
+            return cached
+
         values: dict[str, list[str]] = {field: [] for field in FACET_FIELDS}
         warnings: list[str] = []
         seen_paths: set[Path] = set()
@@ -90,7 +139,14 @@ class ClassifyFacetReader:
                 continue
             seen_paths.add(classify_path)
             try:
-                data = yaml.safe_load(classify_path.read_text(encoding="utf-8-sig")) or {}
+                stat = classify_path.stat()
+                mtime_ns = stat.st_mtime_ns
+                cached_yaml = self._yaml_cache.get(classify_path)
+                if cached_yaml is not None and cached_yaml[0] == mtime_ns:
+                    data = cached_yaml[1]
+                else:
+                    data = yaml.safe_load(classify_path.read_text(encoding="utf-8-sig")) or {}
+                    self._yaml_cache[classify_path] = (mtime_ns, data)
             except (OSError, UnicodeError, yaml.YAMLError) as exc:
                 warnings.append(f"classify.yaml 读取失败：{classify_path}：{exc}")
                 continue
@@ -98,22 +154,31 @@ class ClassifyFacetReader:
                 warnings.append(f"classify.yaml 顶层不是对象：{classify_path}")
                 continue
             for field in FACET_FIELDS:
-                values[field].extend(_flatten_values(data.get(field)))
-        return {field: _ordered_unique(items) for field, items in values.items()}, warnings
+                values[field].extend(_flatten_facet_values(field, data.get(field)))
 
-    @staticmethod
-    def _find_classify_path(action: ImageNodeRef) -> Path | None:
+        result = ({field: _ordered_unique(items) for field, items in values.items()}, warnings)
+        self._asset_cache[asset.asset_id] = result
+        return result
+
+    def _find_classify_path(self, action: ImageNodeRef) -> Path | None:
         if not action.ref:
             return None
-        start = Path(action.ref).expanduser()
+        ref_key = action.ref.strip()
+        if ref_key in self._path_cache:
+            return self._path_cache[ref_key]
+        start = Path(ref_key).expanduser()
         if not start.is_absolute():
+            self._path_cache[ref_key] = None
             return None
         start = start if start.is_dir() else start.parent
+        found: Path | None = None
         for directory in (start, *start.parents):
             candidate = directory / "classify.yaml"
             if candidate.is_file():
-                return candidate.resolve()
-        return None
+                found = candidate.resolve()
+                break
+        self._path_cache[ref_key] = found
+        return found
 
 
 class AssetSearchService:
@@ -121,6 +186,33 @@ class AssetSearchService:
         self.facet_reader = facet_reader or ClassifyFacetReader()
 
     def search(
+        self,
+        root: str | Path,
+        filters: AssetSearchFilter,
+    ) -> list[AssetSearchResult]:
+        """保留旧数组接口，始终从匹配结果的第一条开始返回。"""
+        return self._search_matches(root, filters)[: filters.limit]
+
+    def search_page(
+        self,
+        root: str | Path,
+        filters: AssetSearchFilter,
+    ) -> AssetPageResult:
+        """先完成全部过滤和稳定排序，再执行 offset/limit 分页。"""
+        matches = self._search_matches(root, filters)
+        start = filters.offset
+        end = start + filters.limit
+        items = matches[start:end]
+        next_offset = end if end < len(matches) else None
+        return AssetPageResult(
+            items=items,
+            offset=filters.offset,
+            limit=filters.limit,
+            has_more=next_offset is not None,
+            next_offset=next_offset,
+        )
+
+    def _search_matches(
         self,
         root: str | Path,
         filters: AssetSearchFilter,
@@ -135,6 +227,14 @@ class AssetSearchService:
             enabled=action_config.enabled,
         )
         usage = self._usage_index(paths, config.image_extensions)
+        sort_keys = {
+            asset.asset_id: (
+                asset.source_order,
+                asset.display_name.casefold(),
+                asset.asset_id,
+            )
+            for asset in assets
+        }
         result: list[AssetSearchResult] = []
         for asset in assets:
             values = self._node_values(asset, action_resolver)
@@ -146,14 +246,16 @@ class AssetSearchService:
                     asset_id=asset.asset_id,
                     path=asset.path,
                     display_name=asset.display_name,
+                    width=asset.image.width,
+                    height=asset.image.height,
+                    image_format=asset.image.format,
                     values=values,
                     facets=facets,
                     warnings=[*asset.warnings, *facet_warnings],
                     usage=usage.get(asset.asset_id, []),
                 )
             )
-            if len(result) >= filters.limit:
-                break
+        result.sort(key=lambda item: sort_keys[item.asset_id])
         return result
 
     def facets(
@@ -182,6 +284,7 @@ class AssetSearchService:
             else asset.node_values(role)
             for role in NODE_FIELDS
         }
+
 
     @staticmethod
     def _matches(
@@ -241,9 +344,62 @@ class AssetSearchService:
                     continue
                 for selection, files in selections.items():
                     for item in files:
-                        asset_id = f"sha256:{_sha256(Path(item.absolute_path))}"
+                        asset_id = f"sha256:{_cached_file_sha256(Path(item.absolute_path))}"
                         _append_usage(usage, asset_id, f"task:{task_root.name}/{selection}")
         return usage
+
+
+class NodeSearchService:
+    """从 Catalog 推导节点候选，不把节点选择状态写回 Catalog。"""
+
+    def search(
+        self,
+        root: str | Path,
+        *,
+        role: str,
+        query: str = "",
+        import_id: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> NodeListResult:
+        normalized_role = str(role or "").strip()
+        if normalized_role not in NODE_FIELDS:
+            raise ValueError(f"不支持的节点 role：{normalized_role}")
+        if offset < 0:
+            raise ValueError("offset 不能小于 0")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit 必须在 1 到 100 之间")
+
+        paths, _ = load_workspace(root)
+        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        expected = str(query or "").strip().casefold()
+        options: dict[str, NodeOption] = {}
+        for node_id, ref in catalog.node_candidates(normalized_role, import_id):
+            raw_value = node_id or _name_from_ref(ref) or ""
+            name = DEFAULT_NODE_IDENTITY_NORMALIZER.normalize(normalized_role, raw_value)
+            if not name or (expected and expected not in name.casefold()):
+                continue
+            key = name.casefold()
+            if key in options:
+                continue
+            options[key] = NodeOption(role=normalized_role, name=name, ref=ref)
+
+        ordered = sorted(options.values(), key=lambda item: (item.name.casefold(), item.name))
+        page = ordered[offset : offset + limit]
+        return NodeListResult(
+            role=normalized_role,
+            nodes=page,
+            offset=offset,
+            limit=limit,
+            has_more=offset + limit < len(ordered),
+        )
+
+
+def _name_from_ref(ref: str | None) -> str | None:
+    if not ref:
+        return None
+    normalized = ref.replace("\\", "/").rstrip("/")
+    return Path(normalized).name or None
 
 
 def _flatten_values(value: Any) -> list[str]:
@@ -258,6 +414,27 @@ def _flatten_values(value: Any) -> list[str]:
         return [str(value).casefold()]
     text = str(value).strip()
     return [text] if text else []
+
+
+def _flatten_facet_values(field: str, value: Any) -> list[str]:
+    """统一读取普通 facet 和 subtype 的分组映射值。"""
+    if field == "subtype":
+        return _flatten_subtype_values(value)
+    return _flatten_values(value)
+
+
+def _flatten_subtype_values(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        result: list[str] = []
+        for items in value.values():
+            result.extend(_flatten_subtype_values(items))
+        return result
+    if isinstance(value, (list, tuple, set)):
+        result: list[str] = []
+        for item in value:
+            result.extend(_flatten_subtype_values(item))
+        return result
+    return _flatten_values(value)
 
 
 def _ordered_unique(values: list[str]) -> list[str]:
@@ -275,6 +452,23 @@ def _append_usage(index: dict[str, list[str]], asset_id: str, source: str) -> No
     values = index.setdefault(asset_id, [])
     if source not in values:
         values.append(source)
+
+
+_FILE_SHA256_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def _cached_file_sha256(path: Path) -> str:
+    try:
+        stat = path.stat()
+        key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+        cached = _FILE_SHA256_CACHE.get(key)
+        if cached is not None:
+            return cached
+        digest = _sha256(path)
+        _FILE_SHA256_CACHE[key] = digest
+        return digest
+    except OSError:
+        return _sha256(path)
 
 
 def _sha256(path: Path) -> str:

@@ -247,10 +247,8 @@ def create_app(root: str | Path, *, export_jobs: ExportJobService | None = None)
     def asset_preview(asset_id: str):
         paths, _ = load_workspace(app.state.publishing_root)
         catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
-        asset = next(
-            (item for item in catalog.assets_for_import() if item.asset_id == asset_id),
-            None,
-        )
+        assets = catalog.assets_by_ids([asset_id])
+        asset = assets.get(asset_id)
         if asset is None or not Path(asset.path).is_file():
             raise KeyError(f"Catalog 中找不到可预览资产：{asset_id}")
         return FileResponse(asset.path)
