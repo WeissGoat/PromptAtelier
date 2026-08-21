@@ -35,12 +35,20 @@ class ExportJobRepository:
         target_path = jobs_dir / f"{job_id}.json"
         if not target_path.is_file():
             return None
-        try:
-            data = json.loads(target_path.read_text(encoding="utf-8"))
-            return ExportJob.model_validate(data)
-        except Exception as exc:
-            logger.warning("读取导出任务失败：%s: %s", target_path, exc)
-            return None
+        import time
+
+        for attempt in range(5):
+            try:
+                data = json.loads(target_path.read_text(encoding="utf-8"))
+                return ExportJob.model_validate(data)
+            except (PermissionError, OSError):
+                if attempt == 4:
+                    return None
+                time.sleep(0.02 * (attempt + 1))
+            except Exception as exc:
+                logger.warning("读取导出任务失败：%s: %s", target_path, exc)
+                return None
+        return None
 
     @classmethod
     def list_all(cls, paths: WorkspacePaths) -> list[ExportJob]:
@@ -70,10 +78,24 @@ class ExportJobRepository:
 
 
 def _write_json_atomic(path: Path, data: dict) -> None:
+    import time
+
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     temporary.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    os.replace(temporary, path)
+    for attempt in range(10):
+        try:
+            os.replace(temporary, path)
+            break
+        except (PermissionError, OSError):
+            if attempt == 9:
+                if temporary.exists():
+                    try:
+                        temporary.unlink()
+                    except OSError:
+                        pass
+                raise
+            time.sleep(0.02 * (attempt + 1))

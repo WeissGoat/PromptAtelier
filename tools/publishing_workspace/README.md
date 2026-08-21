@@ -505,92 +505,83 @@ G:/ai_publish/
 
 它只保存投稿时间、标题、已有 task 引用或有序 `asset_id`。它不会复制公共 Catalog，也不会把绝对图片路径写进计划。
 
-### 8.1 Web 月历
+### 8.1 双页面 Web 交互与启动
 
-启动本地页面：
+启动本地 Web 服务：
 
 ```powershell
 cd F:\my_project\new\tags_machine\refactor\tools\publishing_workspace
-uv run publishing-workspace web G:\ai_publish --host 127.0.0.1 --port 61300 --log-level info
+uv run publishing-workspace web G:\ai_publish --host 127.0.0.1 --port 61302 --log-level info
 ```
 
-浏览器打开 `http://127.0.0.1:61300/`。页面支持：
+Publishing Workspace 拆分为两个独立的页面：
 
-- 创建空月计划，切换月份和查看锁定状态；
-- 按 import、文件名、artist、character、action_group、action 和 `classify.yaml` facet 搜索素材；
-- 新建散图投稿，把搜索结果分别加入 `all`、`post`、`cover`，并独立调整三组顺序；
-- 选择已有 `tasks/<task_id>` 图集作为投稿内容；
-- 同一天增加多个时间槽，拖拽投稿卡片改期，时间保持不变；
-- 点击素材查看大图，查看素材已使用或 Reader warning 角标；
-- 保存、删除、锁定和解锁计划。
+1. **日历排期页 (`/calendar` 或 `/`)**：
+   - 专注文档排期编排与日期管理；
+   - 支持月份切换、月历视图、拖拽投稿卡片改期；
+   - 关联选择已有投稿任务（Task），点击可直达素材库编辑；
+   - 兼容旧 inline 散图排期，支持跳转素材库进行懒转换。
 
-页面没有自动排期和复制投稿功能。锁定前可以编辑，锁定后需要先解锁；发生 revision 冲突时页面会重新读取计划，不会静默覆盖其他编辑器的修改。
+2. **素材库与投稿管理页 (`/library`)**：
+   - 三栏布局：左侧筛选（Import 快照、Node 节点、`classify.yaml` Facets）、中间瀑布流素材（无限滚动、aspect-ratio 预占位防抖）、右侧 Submission 投稿编辑器；
+   - 支持选择素材加入 `all`/`post`/`cover` 集合，集合顺序支持上下移动调整；
+   - 保存投稿时自动补齐（`post` 默认等于 `all`，`cover` 默认等于 `post[0]`），生成对应 `tasks/<task_id>` 及 `submission.yaml`；
+   - 支持单 worker 队列后台导出发布包，实时展示阶段与文件进度，并支持直接打开导出目录。
 
-散图保存时要求 `post` 至少有一张图片。`all` 和 `cover` 可以为空，三组关系不会被强制校验为子集关系。
+兼容旧入口：
+- 旧 `http://127.0.0.1:61302/schedule.html` 继续保留，支持历史页面访问；
+- 旧 `/api/assets/search`（返回数组，上限 1000）、`/api/tasks` 及 inline 计划格式完全向下兼容。
 
-### 8.2 计划 YAML
+### 8.2 计划 YAML 与 Submission 模型
 
-可以用 [月历示例](examples/monthly-plan/2026-09.yaml) 作为 CLI 或人工检查时的参考。核心结构如下：
+月度计划（`plans/<month>/plan.yaml`）保存排期元数据，投稿任务（`tasks/<task_id>/submission.yaml`）保存素材集合元数据：
 
 ```yaml
-schema: publishing-workspace.monthly-plan/v1
-plan_id: 2026-09
-month: 2026-09
-timezone: Asia/Shanghai
-status: draft
-entries:
-  - entry_id: weekday-single
-    scheduled_at: 2026-09-03T20:00:00+08:00
-    title: 工作日散图
-    content:
-      kind: inline_selection
-      source_import_id: import-id
-      sets:
-        all: [sha256:...]
-        post: [sha256:...]
-        cover: []
-    execution:
-      build_on_due: true
-      notify_on_complete: true
-      publish: false
-  - entry_id: weekend-album
-    scheduled_at: 2026-09-06T20:00:00+08:00
-    title: 周末图集
-    content:
-      kind: task
-      task_id: 202609_weekend_album
+schema: publishing-workspace.submission/v1
+submission_id: submission-20260821-220000-a1b2c3
+task_id: submission-20260821-220000-a1b2c3
+title: 示例投稿
+revision: 1
+source_import_id: import-1
+sets:
+  all:
+    - sha256:...
+  post:
+    - sha256:...
+  cover:
+    - sha256:...
+created_at: '2026-08-21T14:00:00+00:00'
+updated_at: '2026-08-21T14:00:00+00:00'
+last_export:
+  build_id: '20260821_140000_123456'
+  output_dir: G:\ai_publish\tasks\submission-20260821-220000-a1b2c3\builds\20260821_140000_123456
+  exported_at: '2026-08-21T14:00:00+00:00'
 ```
-
-`content.kind` 只有两种：
-
-- `task`：运行已有投稿任务，构建结果位于该 task 的 `builds/`；
-- `inline_selection`：从 Catalog 按 `asset_id` 物化一次性临时 task，成功或失败后清理临时目录，正式 build 保存在 `plans/<month>/executions/`。
 
 ### 8.3 CLI 执行
 
 不使用 UI 时可通过 CLI 管理：
 
 ```powershell
-uv run publishing-workspace schedule create G:\ai_publish 2026-09
+# show 在月份不存在时会自动创建默认计划；create 仍作为 CLI 兼容入口保留
 uv run publishing-workspace schedule show G:\ai_publish 2026-09
 uv run publishing-workspace schedule add-entry G:\ai_publish 2026-09 --entry-json entry.json
 uv run publishing-workspace schedule move-date G:\ai_publish 2026-09 weekday-single 2026-09-04
-uv run publishing-workspace schedule lock G:\ai_publish 2026-09
 uv run publishing-workspace schedule run-due G:\ai_publish --now 2026-09-06T20:01:00+08:00
 uv run publishing-workspace schedule status G:\ai_publish 2026-09
 ```
 
-`run-due` 只消费已锁定且到期的计划；每条投稿独立执行，某条失败不会阻塞同计划其他条目。相同计划 revision 的成功 entry 具有幂等保护，重复执行不会重复构建。失败条目可使用：
+`run-due` 消费草稿或已锁定且到期的计划；每条投稿独立执行，某条失败不会阻塞同计划其他条目。相同计划 revision 的成功 entry 具有幂等保护，重复执行不会重复构建。失败条目可使用：
 
 ```powershell
 uv run publishing-workspace schedule retry G:\ai_publish 2026-09 <entry_id>
 ```
 
-执行记录保存在 `plans/<month>/executions/<entry_id>/`，包含运行状态、build ID、失败原因和通知状态。当前 `publish: false`，计划层只负责构建和记录，不直接投稿 Pixiv。
+执行记录保存在 `plans/<month>/executions/<execution_id>.json`，包含运行状态、build ID、失败原因和通知状态。当前 `publish: false`，计划层只负责构建和记录，不直接投稿 Pixiv。
 
 ### 8.4 Web API
 
-页面使用的 API 也可以被其他前端复用：
+API 清单：
 
 ```text
 GET    /api/plans/{month}
@@ -603,13 +594,26 @@ POST   /api/plans/{month}/lock
 POST   /api/plans/{month}/unlock
 GET    /api/imports
 GET    /api/tasks
+GET    /api/nodes?role=character&q=homura&offset=0&limit=20
 GET    /api/assets/search
 GET    /api/assets/facets
 GET    /api/assets/{asset_id}/preview
+
+GET    /api/library/assets
+GET    /api/library/facets
+GET    /api/submissions
+GET    /api/submissions/{task_id}
+POST   /api/submissions
+PUT    /api/submissions/{task_id}
+POST   /api/submissions/{task_id}/exports
+GET    /api/export-jobs/{job_id}
+GET    /api/submissions/{task_id}/exports
+POST   /api/export-jobs/{job_id}/open-output
 ```
 
-所有修改请求的 body 都可以带 `revision`。版本过期时返回 HTTP 409，并由调用方重新读取计划。
+所有修改请求的 body 都可以带 `revision`。版本过期时返回 HTTP 409，并由调用方重新读取。
 
 ## 9. 当前边界与验收
 
-月历功能的业务验收记录见 [acceptance-monthly-publishing-calendar.md](docs/acceptance-monthly-publishing-calendar.md)。验收使用 3 张临时图片、1 个已有 task 和 1 条 inline 散图，不读取公共工作区的大型原始文件集。
+双页面交互与投稿导出业务验收记录见 [acceptance-publishing-workspace-two-pages.md](docs/acceptance-publishing-workspace-two-pages.md)。历史月历验收记录见 [acceptance-monthly-publishing-calendar.md](docs/acceptance-monthly-publishing-calendar.md)。
+
