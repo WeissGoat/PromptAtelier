@@ -7,10 +7,13 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+
 from pydantic import BaseModel, Field
 
 from ..catalog.repository import CatalogRepository
 from ..config import load_workspace
+from ..export_jobs.service import ExportJobService
 from ..plans.models import ScheduleEntry
 from ..plans.repository import PlanRevisionConflictError
 from ..plans.search import AssetSearchFilter, AssetSearchService, NodeSearchService
@@ -39,9 +42,26 @@ class RevisionMutation(BaseModel):
     revision: int | None = Field(default=None, ge=1)
 
 
-def create_app(root: str | Path) -> FastAPI:
-    app = FastAPI(title="Publishing Workspace Schedule API")
-    app.state.publishing_root = Path(root).expanduser().resolve()
+def create_app(root: str | Path, *, export_jobs: ExportJobService | None = None) -> FastAPI:
+    publishing_root = Path(root).expanduser().resolve()
+    jobs_service = export_jobs if export_jobs is not None else ExportJobService()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        recovered = jobs_service.recover_interrupted(publishing_root)
+        if recovered:
+            logger.warning("Web 启动时恢复中断导出：count=%s", recovered)
+        try:
+            yield
+        finally:
+            jobs_service.close(wait=True)
+
+    app = FastAPI(
+        title="Publishing Workspace Schedule API",
+        lifespan=lifespan,
+    )
+    app.state.publishing_root = publishing_root
+    app.state.export_jobs = jobs_service
 
     @app.exception_handler(PlanRevisionConflictError)
     async def revision_conflict(_, exc: PlanRevisionConflictError):

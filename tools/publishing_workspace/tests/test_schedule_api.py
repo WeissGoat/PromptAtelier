@@ -123,7 +123,7 @@ def test_node_search_api_returns_paginated_candidates(tmp_path: Path):
 def test_schedule_api_serves_static_calendar(tmp_path: Path):
     client = client_for(tmp_path)
 
-    response = client.get("/")
+    response = client.get("/schedule.html")
 
     assert response.status_code == 200
     assert "月度投稿计划" in response.text

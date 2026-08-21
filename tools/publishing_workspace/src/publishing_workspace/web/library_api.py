@@ -138,3 +138,59 @@ def register_library_routes(app: FastAPI) -> None:
                 status_code=422,
                 content={"detail": {"code": "asset_unavailable", "message": str(exc)}},
             )
+
+    # 导出作业相关路由
+    @app.post("/api/submissions/{task_id}/exports")
+    def start_task_export(task_id: str):
+        try:
+            job = app.state.export_jobs.start(app.state.publishing_root, task_id)
+            status_code = 202 if job.status == "queued" else 200
+            return JSONResponse(
+                status_code=status_code,
+                content=job.model_dump(mode="json", by_alias=True),
+            )
+        except FileNotFoundError as exc:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": {"code": "task_not_found", "message": str(exc)}},
+            )
+
+    @app.get("/api/export-jobs/{job_id}")
+    def get_export_job(job_id: str):
+        try:
+            job = app.state.export_jobs.get(app.state.publishing_root, job_id)
+            return job.model_dump(mode="json", by_alias=True)
+        except FileNotFoundError as exc:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": {"code": "export_job_not_found", "message": str(exc)}},
+            )
+
+    @app.get("/api/submissions/{task_id}/exports")
+    def list_task_exports(task_id: str):
+        jobs = app.state.export_jobs.list_for_task(app.state.publishing_root, task_id)
+        return [job.model_dump(mode="json", by_alias=True) for job in jobs]
+
+    @app.post("/api/export-jobs/{job_id}/open-output")
+    def open_export_output(job_id: str):
+        from ..export_jobs.models import ExportOutputNotFoundError, ExportOutputOpenError
+
+        try:
+            output_dir = app.state.export_jobs.open_output(app.state.publishing_root, job_id)
+            return {"output_dir": output_dir}
+        except ExportOutputNotFoundError as exc:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": {"code": "export_output_not_found", "message": str(exc)}},
+            )
+        except ExportOutputOpenError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "export_output_open_failed",
+                        "message": str(exc),
+                        "output_dir": exc.output_dir,
+                    }
+                },
+            )
