@@ -28,6 +28,7 @@ class TaskPaths:
 
     def _set_paths(self) -> None:
         self.task_yaml = self.task_root / "task.yaml"
+        self.submission_yaml = self.task_root / "submission.yaml"
         self.selection_root = self.task_root / "selection"
         self.history_dir = self.selection_root / "history"
         self.selection_dirs = {
