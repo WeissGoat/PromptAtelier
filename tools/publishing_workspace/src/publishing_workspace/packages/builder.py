@@ -18,17 +18,27 @@ from ..tasks.models import SelectionSnapshot, SelectionName
 from ..tasks.paths import TaskPaths
 from ..tasks.repository import TaskRepository
 from ..tasks.scanner import CurrentSelectionScanner, SelectionValidator
-from .models import BuildManifest, BuildResult
+from .models import BuildManifest, BuildProgress, BuildResult, ProgressCallback
 
 
 class PackageBuilder:
     def __init__(self, pipeline: ImageProcessingPipeline | None = None):
         self.pipeline = pipeline
 
-    def build(self, root: str | Path, task_id: str) -> BuildResult:
+    def build(
+        self,
+        root: str | Path,
+        task_id: str,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> BuildResult:
         paths, workspace_config = load_workspace(root)
         task_paths = TaskPaths.from_workspace(paths, task_id)
-        return self.build_paths(task_paths, workspace_config=workspace_config)
+        return self.build_paths(
+            task_paths,
+            workspace_config=workspace_config,
+            progress=progress,
+        )
 
     def build_paths(
         self,
@@ -36,6 +46,7 @@ class PackageBuilder:
         *,
         output_root: str | Path | None = None,
         workspace_config=None,
+        progress: ProgressCallback | None = None,
     ) -> BuildResult:
         paths, loaded_config = load_workspace(task_paths.workspace.root)
         workspace_config = workspace_config or loaded_config
@@ -55,6 +66,17 @@ class PackageBuilder:
         )
         if not selections["all"]:
             raise ValueError("all 选择集合为空，无法构建投稿包")
+
+        total_items = sum(len(items) for items in selections.values())
+        if progress is not None:
+            progress(
+                BuildProgress(
+                    phase="validate",
+                    processed=0,
+                    total=total_items,
+                )
+            )
+
         _validate_input_images(selections)
         warnings = SelectionValidator().validate(selections)
         snapshot = SelectionSnapshot(build_id=build_id, selections=selections)
@@ -78,6 +100,7 @@ class PackageBuilder:
                 "processed": 0,
                 "skipped_mosaic": 0,
             }
+            processed_count = 0
             for selection, items in selections.items():
                 for item in items:
                     result = pipeline.process(
@@ -85,6 +108,17 @@ class PackageBuilder:
                         output_paths[selection] / item.filename,
                         config.processing,
                     )
+                    processed_count += 1
+                    if progress is not None:
+                        progress(
+                            BuildProgress(
+                                phase="process",
+                                processed=processed_count,
+                                total=total_items,
+                                current_selection=selection,
+                                current_filename=item.filename,
+                            )
+                        )
                     if result.cache_hit:
                         stats["cache_hit"] += 1
                     else:
@@ -100,6 +134,15 @@ class PackageBuilder:
                     archive = archives_root / f"{selection}.zip"
                     _write_zip(archive, output_paths[selection])
                     archive_paths[selection] = archive
+                    if progress is not None:
+                        progress(
+                            BuildProgress(
+                                phase="archive",
+                                processed=processed_count,
+                                total=total_items,
+                                current_selection=selection,
+                            )
+                        )
 
             selection_counts = {
                 "candidates": _candidate_count(task_paths),
@@ -125,6 +168,16 @@ class PackageBuilder:
                 manifest.model_dump(mode="json", by_alias=True),
             )
             os.replace(temporary, build_root)
+
+            if progress is not None:
+                progress(
+                    BuildProgress(
+                        phase="finalize",
+                        processed=total_items,
+                        total=total_items,
+                    )
+                )
+
             formal_output_paths = {
                 selection: build_root / "output" / selection
                 for selection in output_paths

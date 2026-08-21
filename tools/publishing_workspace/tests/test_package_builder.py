@@ -124,3 +124,33 @@ def test_failed_build_does_not_create_formal_build(tmp_path: Path):
 
     assert list(task_paths.builds_root.iterdir()) == []
     assert (task_paths.selection_dirs["all"] / "broken.png").is_file()
+
+
+def test_builder_reports_real_processing_progress(tmp_path: Path):
+    from publishing_workspace.packages.models import BuildProgress
+
+    root = tmp_path / "publish"
+    paths, _, _ = init_workspace(root)
+    task_paths = TaskPaths.from_workspace(paths, "task-001")
+    TaskRepository.create(task_paths, title="test")
+    img_a = _image(tmp_path / "a.png", "red")
+    img_b = _image(tmp_path / "b.png", "blue")
+    shutil.copy2(img_a, task_paths.selection_dirs["all"] / "0001_a.png")
+    shutil.copy2(img_b, task_paths.selection_dirs["all"] / "0002_b.png")
+    shutil.copy2(img_a, task_paths.selection_dirs["post"] / "0001_a.png")
+    shutil.copy2(img_a, task_paths.selection_dirs["cover"] / "0001_a.png")
+
+    events: list[BuildProgress] = []
+    PackageBuilder().build(
+        root,
+        "task-001",
+        progress=events.append,
+    )
+
+    assert len(events) >= 3
+    assert events[0].phase == "validate"
+    assert events[0].total == 4
+    assert any(event.phase == "process" for event in events)
+    assert events[-1].phase == "finalize"
+    assert events[-1].processed == events[-1].total == 4
+

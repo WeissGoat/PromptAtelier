@@ -1,4 +1,11 @@
-from .models import BuildManifest, BuildResult, WarningRecord
+from .models import BuildManifest, BuildProgress, BuildResult, ProgressCallback, WarningRecord
 from .builder import PackageBuilder
 
-__all__ = ["BuildManifest", "BuildResult", "PackageBuilder", "WarningRecord"]
+__all__ = [
+    "BuildManifest",
+    "BuildProgress",
+    "BuildResult",
+    "PackageBuilder",
+    "ProgressCallback",
+    "WarningRecord",
+]

@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..tasks.models import SelectionName
+
+
+class BuildProgress(BaseModel):
+    phase: Literal["validate", "process", "archive", "finalize"]
+    processed: int
+    total: int
+    current_selection: SelectionName | None = None
+    current_filename: str | None = None
+
+
+ProgressCallback = Callable[[BuildProgress], None]
 
 
 class WarningRecord(BaseModel):
