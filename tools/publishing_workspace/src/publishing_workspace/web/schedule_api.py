@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import asyncio
 import json
 import time
 from datetime import date
@@ -52,16 +51,22 @@ def create_app(root: str | Path, *, export_jobs: ExportJobService | None = None)
         recovered = jobs_service.recover_interrupted(publishing_root)
         if recovered:
             logger.warning("Web 启动时恢复中断导出：count=%s", recovered)
-        try:
-            t0 = time.perf_counter()
-            logger.info("Web 正在预热素材检索索引...")
-            AssetSearchService().preload(publishing_root)
-            logger.info("Web 检索索引预热完成 (耗时: %.2fs)", time.perf_counter() - t0)
-        except Exception as exc:
-            logger.warning("Web 检索索引预热跳过：%s", exc)
+
+        async def _warmup():
+            try:
+                t0 = time.perf_counter()
+                logger.info("Web 正在后台预热素材检索索引与节点缓存...")
+                await asyncio.to_thread(AssetSearchService().preload, publishing_root)
+                logger.info("Web 检索索引后台预热完成 (耗时: %.2fs)", time.perf_counter() - t0)
+            except Exception as exc:
+                logger.warning("Web 检索索引后台预热跳过：%s", exc)
+
+        warmup_task = asyncio.create_task(_warmup())
         try:
             yield
         finally:
+            if not warmup_task.done():
+                warmup_task.cancel()
             jobs_service.close(wait=True)
 
     app = FastAPI(
