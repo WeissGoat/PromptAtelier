@@ -295,8 +295,11 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 .asset-card {
   border: 1px solid var(--line); border-radius: 5px; background: #fff; overflow: hidden;
-  display: flex; flex-direction: column; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  display: flex; flex-direction: column; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, opacity .15s ease;
   position: relative; cursor: pointer;
+}
+.asset-card.filtered-out {
+  display: none !important;
 }
 .asset-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: var(--accent); }
 .asset-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }

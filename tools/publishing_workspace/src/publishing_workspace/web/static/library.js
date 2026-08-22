@@ -18,6 +18,9 @@
     requestToken: 0,
     loadedAssets: new Map(),
     selectedAssetIds: new Set(),
+    datasetAssets: [],
+    datasetImportId: null,
+    cardElements: new Map(),
 
     currentSubmission: {
       task_id: null,
@@ -165,6 +168,95 @@
 
   // ================= 导入快照、Facet 筛选与已生效条件 =================
 
+  function applyInstantFilters() {
+    renderActiveChips();
+    if (state.datasetImportId === state.filters.import_id && state.datasetAssets.length > 0) {
+      applyClientFilter();
+    } else {
+      loadAssetPage({ reset: true });
+    }
+  }
+
+  function applyClientFilter() {
+    const textNeedle = (state.filters.text || "").trim().toLowerCase();
+    const artistNeedle = (state.filters.artist || "").trim().toLowerCase();
+    const charNeedle = (state.filters.character || "").trim().toLowerCase();
+    const groupNeedle = (state.filters.action_group || "").trim().toLowerCase();
+    const actNeedle = (state.filters.action || "").trim().toLowerCase();
+    const facetFilters = state.filters.facets || {};
+    const activeFacetCategories = Object.keys(facetFilters).filter(
+      (k) => facetFilters[k] && facetFilters[k].length > 0
+    );
+
+    let matchedCount = 0;
+    for (const item of state.datasetAssets) {
+      let match = true;
+
+      // 1. Text keyword
+      if (textNeedle) {
+        const nodeVals = Object.values(item.values || {}).flat().join(" ");
+        const combined = `${item.display_name} ${nodeVals}`.toLowerCase();
+        if (!combined.includes(textNeedle)) match = false;
+      }
+
+      // 2. Node filters
+      if (match && artistNeedle) {
+        const list = (item.values?.artist || []).map((x) => x.toLowerCase());
+        if (!list.some((x) => x.includes(artistNeedle))) match = false;
+      }
+      if (match && charNeedle) {
+        const list = (item.values?.character || []).map((x) => x.toLowerCase());
+        if (!list.some((x) => x.includes(charNeedle))) match = false;
+      }
+      if (match && groupNeedle) {
+        const list = (item.values?.action_group || []).map((x) => x.toLowerCase());
+        if (!list.some((x) => x.includes(groupNeedle))) match = false;
+      }
+      if (match && actNeedle) {
+        const list = (item.values?.action || []).map((x) => x.toLowerCase());
+        if (!list.some((x) => x.includes(actNeedle))) match = false;
+      }
+
+      // 3. Classify facets
+      if (match && activeFacetCategories.length) {
+        for (const cat of activeFacetCategories) {
+          const expectedTags = facetFilters[cat].map((t) => t.toLowerCase());
+          const itemTags = (item.facets?.[cat] || []).map((t) => t.toLowerCase());
+          if (!itemTags.some((t) => expectedTags.includes(t))) {
+            match = false;
+            break;
+          }
+        }
+      }
+
+      const card = state.cardElements.get(item.asset_id);
+      if (card) {
+        card.classList.toggle("filtered-out", !match);
+      }
+      if (match) {
+        matchedCount++;
+      }
+    }
+
+    if (elements.assetCountBadge) {
+      elements.assetCountBadge.textContent = `(共 ${matchedCount.toLocaleString()} 张)`;
+    }
+
+    let emptyEl = elements.assetWaterfall.querySelector(".client-empty-hint");
+    if (matchedCount === 0) {
+      if (!emptyEl) {
+        emptyEl = document.createElement("div");
+        emptyEl.className = "client-empty-hint helper-text";
+        emptyEl.style.cssText = "grid-column: 1 / -1; padding: 40px 20px; text-align: center;";
+        emptyEl.textContent = "没有找到符合当前筛选条件的素材";
+        elements.assetWaterfall.appendChild(emptyEl);
+      }
+      emptyEl.hidden = false;
+    } else if (emptyEl) {
+      emptyEl.hidden = true;
+    }
+  }
+
   function renderActiveChips() {
     if (!elements.activeChipsList) return;
     elements.activeChipsList.innerHTML = "";
@@ -178,8 +270,7 @@
         clear: () => {
           state.filters.text = "";
           elements.textFilter.value = "";
-          renderActiveChips();
-          loadAssetPage({ reset: true });
+          applyInstantFilters();
         },
       });
     }
@@ -204,8 +295,7 @@
               const clearBtn = inputEl.closest(".node-picker")?.querySelector(".node-clear");
               if (clearBtn) clearBtn.hidden = true;
             }
-            renderActiveChips();
-            loadAssetPage({ reset: true });
+            applyInstantFilters();
           },
         });
       }
@@ -225,8 +315,7 @@
             }
             renderFacetCategoryTabs();
             renderFacetChips();
-            renderActiveChips();
-            loadAssetPage({ reset: true });
+            applyInstantFilters();
           },
         });
       }
@@ -347,8 +436,7 @@
         }
         renderFacetCategoryTabs();
         renderFacetChips();
-        renderActiveChips();
-        loadAssetPage({ reset: true });
+        applyInstantFilters();
       });
       elements.facetChipsContainer.appendChild(chip);
     }
@@ -364,6 +452,7 @@
       state.hasMore = true;
       state.loadedAssets.clear();
       state.selectedAssetIds.clear();
+      state.cardElements.clear();
       updateSelectionBadge();
       elements.assetWaterfall.classList.add("loading");
     }
@@ -376,27 +465,33 @@
     elements.endOfResults.classList.add("hidden");
 
     try {
+      const isSpecificImport = Boolean(state.filters.import_id);
+      const limit = reset && isSpecificImport ? 2000 : state.limit;
+
       const params = new URLSearchParams();
       params.set("offset", String(state.offset));
-      params.set("limit", String(state.limit));
+      params.set("limit", String(limit));
 
       if (state.filters.import_id) params.set("import_id", state.filters.import_id);
-      if (state.filters.text) params.set("text", state.filters.text);
-      if (state.filters.artist) params.set("artist", state.filters.artist);
-      if (state.filters.character) params.set("character", state.filters.character);
-      if (state.filters.action_group) params.set("action_group", state.filters.action_group);
-      if (state.filters.action) params.set("action", state.filters.action);
 
-      const facetKeys = Object.keys(state.filters.facets);
-      if (facetKeys.length) {
-        const facetsPayload = {};
-        for (const k of facetKeys) {
-          if (state.filters.facets[k].length) {
-            facetsPayload[k] = state.filters.facets[k];
+      if (!isSpecificImport) {
+        if (state.filters.text) params.set("text", state.filters.text);
+        if (state.filters.artist) params.set("artist", state.filters.artist);
+        if (state.filters.character) params.set("character", state.filters.character);
+        if (state.filters.action_group) params.set("action_group", state.filters.action_group);
+        if (state.filters.action) params.set("action", state.filters.action);
+
+        const facetKeys = Object.keys(state.filters.facets);
+        if (facetKeys.length) {
+          const facetsPayload = {};
+          for (const k of facetKeys) {
+            if (state.filters.facets[k].length) {
+              facetsPayload[k] = state.filters.facets[k];
+            }
           }
-        }
-        if (Object.keys(facetsPayload).length) {
-          params.set("facets", JSON.stringify(facetsPayload));
+          if (Object.keys(facetsPayload).length) {
+            params.set("facets", JSON.stringify(facetsPayload));
+          }
         }
       }
 
@@ -407,20 +502,22 @@
 
       const page = await res.json();
       if (currentToken !== state.requestToken) {
-        // 请求过期，丢弃
         return;
       }
 
       state.hasMore = page.has_more;
       state.offset = page.next_offset !== null ? page.next_offset : state.offset + page.items.length;
 
-      if (elements.assetCountBadge) {
-        elements.assetCountBadge.textContent = page.total !== undefined ? `(共 ${page.total.toLocaleString()} 张)` : "";
-      }
-      renderActiveChips();
-
       if (reset) {
         elements.assetWaterfall.innerHTML = "";
+        state.cardElements.clear();
+        if (isSpecificImport) {
+          state.datasetAssets = page.items;
+          state.datasetImportId = state.filters.import_id;
+        } else {
+          state.datasetAssets = [];
+          state.datasetImportId = null;
+        }
       }
 
       for (const item of page.items) {
@@ -430,12 +527,19 @@
         }
       }
 
-      if (!state.loadedAssets.size) {
-        elements.assetWaterfall.innerHTML = '<div class="helper-text" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">没有找到符合当前筛选条件的素材</div>';
-      }
-
-      if (!state.hasMore && state.loadedAssets.size > 0) {
-        elements.endOfResults.classList.remove("hidden");
+      if (isSpecificImport) {
+        applyClientFilter();
+      } else {
+        if (elements.assetCountBadge) {
+          elements.assetCountBadge.textContent = page.total !== undefined ? `(共 ${page.total.toLocaleString()} 张)` : "";
+        }
+        renderActiveChips();
+        if (!state.loadedAssets.size) {
+          elements.assetWaterfall.innerHTML = '<div class="helper-text" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">没有找到符合当前筛选条件的素材</div>';
+        }
+        if (!state.hasMore && state.loadedAssets.size > 0) {
+          elements.endOfResults.classList.remove("hidden");
+        }
       }
     } catch (err) {
       showNotice(err.message, "error");
@@ -450,6 +554,7 @@
     const card = document.createElement("div");
     card.className = "asset-card";
     card.dataset.assetId = item.asset_id;
+    state.cardElements.set(item.asset_id, card);
     if (state.selectedAssetIds.has(item.asset_id)) {
       card.classList.add("selected");
     }
@@ -954,6 +1059,8 @@
 
   elements.importSelect.addEventListener("change", (e) => {
     state.filters.import_id = e.target.value;
+    state.datasetAssets = [];
+    state.datasetImportId = null;
     loadFacets();
     loadAssetPage({ reset: true });
   });
@@ -962,10 +1069,14 @@
     const val = elements.textFilter.value.trim();
     if (state.filters.text !== val) {
       state.filters.text = val;
-      renderActiveChips();
-      loadAssetPage({ reset: true });
+      applyInstantFilters();
     }
   }
+
+  elements.textFilter.addEventListener("input", () => {
+    state.filters.text = elements.textFilter.value.trim();
+    applyInstantFilters();
+  });
 
   elements.textFilter.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -977,7 +1088,7 @@
 
   elements.resetFiltersBtn.addEventListener("click", () => {
     state.filters = {
-      import_id: "",
+      import_id: state.filters.import_id,
       text: "",
       artist: "",
       character: "",
@@ -985,7 +1096,6 @@
       action: "",
       facets: {},
     };
-    elements.importSelect.value = "";
     elements.textFilter.value = "";
     elements.artistFilter.value = "";
     elements.characterFilter.value = "";
@@ -994,8 +1104,7 @@
     document.querySelectorAll(".node-clear").forEach((btn) => (btn.hidden = true));
     renderFacetCategoryTabs();
     renderFacetChips();
-    renderActiveChips();
-    loadAssetPage({ reset: true });
+    applyInstantFilters();
   });
 
   if (elements.clearAllChips) {
@@ -1009,8 +1118,7 @@
       state.filters.facets = {};
       renderFacetCategoryTabs();
       renderFacetChips();
-      renderActiveChips();
-      loadAssetPage({ reset: true });
+      applyInstantFilters();
     });
   }
 
@@ -1021,13 +1129,14 @@
     });
   }
 
-  // 全选 / 清选 / 加入集合
+  // 全选 / 清选 / 加入集合 (仅作用于当前匹配且可见的素材)
   elements.selectAllVisibleBtn.addEventListener("click", () => {
-    for (const [id] of state.loadedAssets) {
-      state.selectedAssetIds.add(id);
-    }
-    const cards = elements.assetWaterfall.querySelectorAll(".asset-card");
-    cards.forEach((c) => {
+    const visibleCards = elements.assetWaterfall.querySelectorAll(".asset-card:not(.filtered-out)");
+    visibleCards.forEach((c) => {
+      const id = c.dataset.assetId;
+      if (id) {
+        state.selectedAssetIds.add(id);
+      }
       c.classList.add("selected");
       const cb = c.querySelector(".asset-checkbox");
       if (cb) cb.checked = true;
@@ -1092,6 +1201,8 @@
   elements.openExportDirBtn.addEventListener("click", handleOpenExportDir);
 
   elements.refreshAllBtn.addEventListener("click", () => {
+    state.datasetAssets = [];
+    state.datasetImportId = null;
     loadImportsList();
     loadFacets();
     loadHistoricalSubmissions();
@@ -1141,8 +1252,7 @@
                 state.filters[role] = val;
                 updateClearButton();
                 optionsEl.classList.remove("open");
-                renderActiveChips();
-                loadAssetPage({ reset: true });
+                applyInstantFilters();
               });
               optionsEl.appendChild(optBtn);
             });
@@ -1170,18 +1280,14 @@
     let timer = null;
     inputEl.addEventListener("input", () => {
       updateClearButton();
+      const query = inputEl.value.trim();
+      state.filters[role] = query;
+      applyInstantFilters();
+
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const query = inputEl.value.trim();
-        if (!query) {
-          if (state.filters[role] !== "") {
-            state.filters[role] = "";
-            renderActiveChips();
-            loadAssetPage({ reset: true });
-          }
-        }
         fetchAndShowOptions(query);
-      }, 100);
+      }, 120);
     });
 
     inputEl.addEventListener("keydown", (e) => {
@@ -1218,8 +1324,7 @@
           if (state.filters[role] !== query) {
             state.filters[role] = query;
             updateClearButton();
-            renderActiveChips();
-            loadAssetPage({ reset: true });
+            applyInstantFilters();
           }
         }
       } else if (e.key === "Escape") {
@@ -1233,8 +1338,7 @@
       optionsEl.classList.remove("open");
       if (state.filters[role] !== "") {
         state.filters[role] = "";
-        renderActiveChips();
-        loadAssetPage({ reset: true });
+        applyInstantFilters();
       }
     });
 
