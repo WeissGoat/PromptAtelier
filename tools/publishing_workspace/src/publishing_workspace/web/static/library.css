@@ -376,6 +376,91 @@ input[type="search"]::-webkit-search-results-decoration {
 .dialog-close { position: absolute; top: 8px; right: 8px; border: 0; background: transparent; font-size: 16px; cursor: pointer; }
 .preview-dialog img { max-width: 80vw; max-height: 80vh; object-fit: contain; display: block; }
 
+/* 快照加载进度条 */
+.import-progress-wrap {
+  margin: 10px 0 14px 0;
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fadeIn 0.2s ease;
+}
+.import-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+.import-progress-status {
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+.import-progress-text {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.import-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.import-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+  border-radius: 3px;
+  transition: width 0.25s ease;
+  position: relative;
+}
+.import-progress-fill.completed {
+  background: linear-gradient(90deg, #10b981, #059669);
+}
+.import-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
+  animation: progressShimmer 1.5s infinite;
+}
+@keyframes progressShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* 空快照引导占位 */
+.empty-snapshot-guide {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+.empty-guide-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.8;
+}
+.empty-snapshot-guide h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.empty-snapshot-guide p {
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
 .hidden { display: none !important; }
 
 @media (max-width: 900px) {

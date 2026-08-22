@@ -93,6 +93,12 @@
     loadingSpinner: document.getElementById("loading-spinner"),
     endOfResults: document.getElementById("end-of-results"),
 
+    importProgressWrap: document.getElementById("import-progress-wrap"),
+    importProgressStatus: document.getElementById("import-progress-status"),
+    importProgressText: document.getElementById("import-progress-text"),
+    importProgressFill: document.getElementById("import-progress-fill"),
+    emptySnapshotGuide: document.getElementById("empty-snapshot-guide"),
+
     submissionEditorTitle: document.getElementById("submission-editor-title"),
     newSubmissionBtn: document.getElementById("new-submission-btn"),
     historySubmissionSelect: document.getElementById("history-submission-select"),
@@ -153,7 +159,7 @@
       const res = await fetch("/api/imports");
       if (res.ok) {
         const data = await res.json();
-        elements.importSelect.innerHTML = '<option value="">全部导入</option>';
+        elements.importSelect.innerHTML = '<option value="">-- 请选择导入快照 --</option>';
         for (const item of data) {
           const opt = document.createElement("option");
           opt.value = item.import_id;
@@ -166,18 +172,198 @@
     }
   }
 
-  // ================= 导入快照、Facet 筛选与已生效条件 =================
+  // ================= 全局快照后台加载池与流式缓存 =================
+
+  const snapshotCache = new Map();
+
+  function getOrCreateSnapshot(importId) {
+    if (!snapshotCache.has(importId)) {
+      snapshotCache.set(importId, {
+        import_id: importId,
+        status: "idle",
+        total: 0,
+        loaded: 0,
+        items: [],
+        cardElements: new Map(),
+        error: null,
+        activeFetchPromise: null,
+      });
+    }
+    return snapshotCache.get(importId);
+  }
+
+  function updateProgressBar(snapshot) {
+    if (!elements.importProgressWrap) return;
+    if (!snapshot || !snapshot.import_id || state.filters.import_id !== snapshot.import_id) {
+      elements.importProgressWrap.classList.add("hidden");
+      return;
+    }
+
+    elements.importProgressWrap.classList.remove("hidden");
+    const loaded = snapshot.loaded || 0;
+    const total = snapshot.total || loaded || 1;
+    const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+
+    if (snapshot.status === "completed") {
+      elements.importProgressStatus.textContent = "✓ 快照素材加载完成";
+      elements.importProgressText.textContent = `${loaded.toLocaleString()} / ${total.toLocaleString()} (100%)`;
+      elements.importProgressFill.style.width = "100%";
+      elements.importProgressFill.classList.add("completed");
+    } else if (snapshot.status === "error") {
+      elements.importProgressStatus.textContent = "✕ 加载出错";
+      elements.importProgressText.textContent = snapshot.error || "网络异常";
+    } else {
+      elements.importProgressStatus.textContent = "正在加载快照素材...";
+      elements.importProgressText.textContent = `${loaded.toLocaleString()} / ${total.toLocaleString()} (${percent}%)`;
+      elements.importProgressFill.style.width = `${percent}%`;
+      elements.importProgressFill.classList.remove("completed");
+    }
+  }
+
+  async function loadSnapshotStream(importId) {
+    if (!importId) return;
+    const snapshot = getOrCreateSnapshot(importId);
+    if (snapshot.status === "completed") {
+      updateProgressBar(snapshot);
+      return;
+    }
+    if (snapshot.activeFetchPromise) {
+      updateProgressBar(snapshot);
+      return snapshot.activeFetchPromise;
+    }
+
+    snapshot.status = "loading";
+    updateProgressBar(snapshot);
+
+    const promise = (async () => {
+      let offset = snapshot.loaded;
+      const batchSize = 100;
+
+      try {
+        while (true) {
+          const params = new URLSearchParams();
+          params.set("offset", String(offset));
+          params.set("limit", String(batchSize));
+          params.set("import_id", importId);
+
+          const res = await fetch(`/api/library/assets?${params.toString()}`);
+          if (!res.ok) {
+            throw new Error(`加载快照失败 (${res.status})`);
+          }
+          const page = await res.json();
+
+          snapshot.total = page.total || snapshot.total || 0;
+
+          // Append new items
+          for (const item of page.items) {
+            snapshot.items.push(item);
+          }
+          snapshot.loaded = snapshot.items.length;
+          offset = page.next_offset;
+
+          // If this snapshot is currently active, render cards progressively and update UI
+          if (state.filters.import_id === importId) {
+            updateProgressBar(snapshot);
+            syncProgressiveAssets(snapshot, page.items);
+          }
+
+          if (offset === null || snapshot.loaded >= snapshot.total || page.items.length === 0) {
+            snapshot.status = "completed";
+            snapshot.total = snapshot.loaded;
+            break;
+          }
+        }
+      } catch (err) {
+        snapshot.status = "error";
+        snapshot.error = err.message;
+        console.error("快照加载异常:", err);
+      } finally {
+        snapshot.activeFetchPromise = null;
+        if (state.filters.import_id === importId) {
+          updateProgressBar(snapshot);
+          applyClientFilter();
+        }
+      }
+    })();
+
+    snapshot.activeFetchPromise = promise;
+    return promise;
+  }
+
+  function switchSnapshot(importId) {
+    state.filters.import_id = importId;
+    state.selectedAssetIds.clear();
+    updateSelectionBadge();
+
+    if (!importId) {
+      if (elements.importProgressWrap) elements.importProgressWrap.classList.add("hidden");
+      if (elements.assetCountBadge) elements.assetCountBadge.textContent = "";
+      elements.assetWaterfall.innerHTML = `
+        <div id="empty-snapshot-guide" class="empty-snapshot-guide">
+          <div class="empty-guide-icon">📂</div>
+          <h3>请选择导入快照</h3>
+          <p>在左侧选择数据源快照即可开始流式加载并浏览、筛选素材</p>
+        </div>
+      `;
+      state.datasetAssets = [];
+      state.datasetImportId = null;
+      state.cardElements.clear();
+      renderActiveChips();
+      return;
+    }
+
+    const snapshot = getOrCreateSnapshot(importId);
+    state.datasetAssets = snapshot.items;
+    state.datasetImportId = importId;
+    state.cardElements = snapshot.cardElements;
+
+    elements.assetWaterfall.innerHTML = "";
+    if (snapshot.items.length > 0) {
+      for (const item of snapshot.items) {
+        let card = snapshot.cardElements.get(item.asset_id);
+        if (!card) {
+          card = renderAssetCard(item);
+          snapshot.cardElements.set(item.asset_id, card);
+        }
+        elements.assetWaterfall.appendChild(card);
+      }
+      applyClientFilter();
+    }
+
+    updateProgressBar(snapshot);
+    loadFacets();
+
+    if (snapshot.status !== "completed") {
+      loadSnapshotStream(importId);
+    }
+  }
+
+  function syncProgressiveAssets(snapshot, newItems) {
+    for (const item of newItems) {
+      if (!snapshot.cardElements.has(item.asset_id)) {
+        const card = renderAssetCard(item);
+        snapshot.cardElements.set(item.asset_id, card);
+        elements.assetWaterfall.appendChild(card);
+      }
+    }
+    state.datasetAssets = snapshot.items;
+    state.cardElements = snapshot.cardElements;
+    applyClientFilter();
+  }
 
   function applyInstantFilters() {
     renderActiveChips();
-    if (state.datasetImportId === state.filters.import_id && state.datasetAssets.length > 0) {
+    if (state.filters.import_id && state.datasetImportId === state.filters.import_id) {
       applyClientFilter();
-    } else {
-      loadAssetPage({ reset: true });
+    } else if (state.filters.import_id) {
+      switchSnapshot(state.filters.import_id);
     }
   }
 
   function applyClientFilter() {
+    if (!state.filters.import_id) {
+      return;
+    }
     const textNeedle = (state.filters.text || "").trim().toLowerCase();
     const artistNeedle = (state.filters.artist || "").trim().toLowerCase();
     const charNeedle = (state.filters.character || "").trim().toLowerCase();
@@ -243,7 +429,7 @@
     }
 
     let emptyEl = elements.assetWaterfall.querySelector(".client-empty-hint");
-    if (matchedCount === 0) {
+    if (matchedCount === 0 && state.datasetAssets.length > 0) {
       if (!emptyEl) {
         emptyEl = document.createElement("div");
         emptyEl.className = "client-empty-hint helper-text";
@@ -442,119 +628,10 @@
     }
   }
 
-  // ================= 瀑布流素材检索与无限滚动 =================
-
-  async function loadAssetPage({ reset = false } = {}) {
-    if (state.loadingPage) return;
-    if (reset) {
-      state.requestToken += 1;
-      state.offset = 0;
-      state.hasMore = true;
-      state.loadedAssets.clear();
-      state.selectedAssetIds.clear();
-      state.cardElements.clear();
-      updateSelectionBadge();
-      elements.assetWaterfall.classList.add("loading");
-    }
-
-    if (!state.hasMore) return;
-
-    const currentToken = state.requestToken;
-    state.loadingPage = true;
-    elements.loadingSpinner.classList.remove("hidden");
-    elements.endOfResults.classList.add("hidden");
-
-    try {
-      const isSpecificImport = Boolean(state.filters.import_id);
-      const limit = reset && isSpecificImport ? 2000 : state.limit;
-
-      const params = new URLSearchParams();
-      params.set("offset", String(state.offset));
-      params.set("limit", String(limit));
-
-      if (state.filters.import_id) params.set("import_id", state.filters.import_id);
-
-      if (!isSpecificImport) {
-        if (state.filters.text) params.set("text", state.filters.text);
-        if (state.filters.artist) params.set("artist", state.filters.artist);
-        if (state.filters.character) params.set("character", state.filters.character);
-        if (state.filters.action_group) params.set("action_group", state.filters.action_group);
-        if (state.filters.action) params.set("action", state.filters.action);
-
-        const facetKeys = Object.keys(state.filters.facets);
-        if (facetKeys.length) {
-          const facetsPayload = {};
-          for (const k of facetKeys) {
-            if (state.filters.facets[k].length) {
-              facetsPayload[k] = state.filters.facets[k];
-            }
-          }
-          if (Object.keys(facetsPayload).length) {
-            params.set("facets", JSON.stringify(facetsPayload));
-          }
-        }
-      }
-
-      const res = await fetch(`/api/library/assets?${params.toString()}`);
-      if (!res.ok) {
-        throw new Error(`加载素材失败 (${res.status})`);
-      }
-
-      const page = await res.json();
-      if (currentToken !== state.requestToken) {
-        return;
-      }
-
-      state.hasMore = page.has_more;
-      state.offset = page.next_offset !== null ? page.next_offset : state.offset + page.items.length;
-
-      if (reset) {
-        elements.assetWaterfall.innerHTML = "";
-        state.cardElements.clear();
-        if (isSpecificImport) {
-          state.datasetAssets = page.items;
-          state.datasetImportId = state.filters.import_id;
-        } else {
-          state.datasetAssets = [];
-          state.datasetImportId = null;
-        }
-      }
-
-      for (const item of page.items) {
-        if (!state.loadedAssets.has(item.asset_id)) {
-          state.loadedAssets.set(item.asset_id, item);
-          renderAssetCard(item);
-        }
-      }
-
-      if (isSpecificImport) {
-        applyClientFilter();
-      } else {
-        if (elements.assetCountBadge) {
-          elements.assetCountBadge.textContent = page.total !== undefined ? `(共 ${page.total.toLocaleString()} 张)` : "";
-        }
-        renderActiveChips();
-        if (!state.loadedAssets.size) {
-          elements.assetWaterfall.innerHTML = '<div class="helper-text" style="grid-column: 1 / -1; padding: 40px 20px; text-align: center;">没有找到符合当前筛选条件的素材</div>';
-        }
-        if (!state.hasMore && state.loadedAssets.size > 0) {
-          elements.endOfResults.classList.remove("hidden");
-        }
-      }
-    } catch (err) {
-      showNotice(err.message, "error");
-    } finally {
-      state.loadingPage = false;
-      elements.loadingSpinner.classList.add("hidden");
-      elements.assetWaterfall.classList.remove("loading");
-    }
-  }
-
   function renderAssetCard(item) {
     const card = document.createElement("div");
     card.className = "asset-card";
     card.dataset.assetId = item.asset_id;
-    state.cardElements.set(item.asset_id, card);
     if (state.selectedAssetIds.has(item.asset_id)) {
       card.classList.add("selected");
     }
@@ -597,7 +674,7 @@
       openPreview(previewUrl, item.display_name);
     });
 
-    elements.assetWaterfall.appendChild(card);
+    return card;
   }
 
   function toggleAssetSelection(assetId, isSelected) {
@@ -1058,11 +1135,7 @@
   // ================= 事件绑定 =================
 
   elements.importSelect.addEventListener("change", (e) => {
-    state.filters.import_id = e.target.value;
-    state.datasetAssets = [];
-    state.datasetImportId = null;
-    loadFacets();
-    loadAssetPage({ reset: true });
+    switchSnapshot(e.target.value);
   });
 
   function applyTextSearch() {
@@ -1201,12 +1274,11 @@
   elements.openExportDirBtn.addEventListener("click", handleOpenExportDir);
 
   elements.refreshAllBtn.addEventListener("click", () => {
-    state.datasetAssets = [];
-    state.datasetImportId = null;
+    snapshotCache.clear();
     loadImportsList();
     loadFacets();
     loadHistoricalSubmissions();
-    loadAssetPage({ reset: true });
+    switchSnapshot(state.filters.import_id);
   });
 
   elements.closePreview.addEventListener("click", () => {
@@ -1356,19 +1428,9 @@
   bindNodePicker("action_group", elements.groupFilter, document.querySelector('[data-node-role="action_group"] .node-clear'));
   bindNodePicker("action", elements.actionFilter, document.querySelector('[data-node-role="action"] .node-clear'));
 
-  // 无限滚动 IntersectionObserver
-  const observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting && state.hasMore && !state.loadingPage) {
-      loadAssetPage();
-    }
-  }, { rootMargin: "200px" });
-
-  observer.observe(elements.scrollSentinel);
-
-  // 初始化加载
+  // 初始化加载 (默认空快照，引导用户选择)
   loadImportsList();
-  loadFacets();
   loadHistoricalSubmissions();
-  loadAssetPage({ reset: true });
+  switchSnapshot("");
   initFromUrl();
 })();

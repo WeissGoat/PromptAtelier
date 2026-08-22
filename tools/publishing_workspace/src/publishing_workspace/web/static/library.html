@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Publishing Workspace 素材库与投稿</title>
-  <link rel="stylesheet" href="/library.css?v=20260821-1">
+  <link rel="stylesheet" href="/library.css?v=20260822-2">
 </head>
 <body>
   <main class="app-shell">
@@ -37,8 +37,19 @@
 
         <label class="field-label" for="import-select">导入快照</label>
         <select id="import-select" class="field-control">
-          <option value="">全部导入</option>
+          <option value="">-- 请选择导入快照 --</option>
         </select>
+
+        <!-- 快照加载进度条 -->
+        <div id="import-progress-wrap" class="import-progress-wrap hidden">
+          <div class="import-progress-header">
+            <span id="import-progress-status" class="import-progress-status">正在加载快照...</span>
+            <span id="import-progress-text" class="import-progress-text">0 / 0 (0%)</span>
+          </div>
+          <div class="import-progress-bar">
+            <div id="import-progress-fill" class="import-progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
 
         <div class="search-row">
           <input id="text-filter" class="field-control" type="search" placeholder="搜索文件名或自由关键词...">
@@ -127,7 +138,13 @@
           </div>
         </div>
 
-        <div id="asset-waterfall" class="asset-waterfall"></div>
+        <div id="asset-waterfall" class="asset-waterfall">
+          <div id="empty-snapshot-guide" class="empty-snapshot-guide">
+            <div class="empty-guide-icon">📂</div>
+            <h3>请选择导入快照</h3>
+            <p>在左侧选择数据源快照即可开始流式加载并浏览、筛选素材</p>
+          </div>
+        </div>
         <div id="scroll-sentinel" class="scroll-sentinel">
           <span id="loading-spinner" class="loading-spinner hidden">加载中...</span>
           <span id="end-of-results" class="end-of-results hidden">已加载全部素材</span>
@@ -218,6 +235,6 @@
     <p id="preview-caption"></p>
   </dialog>
 
-  <script src="/library.js?v=20260821-1" defer></script>
+  <script src="/library.js?v=20260822-2" defer></script>
 </body>
 </html>
