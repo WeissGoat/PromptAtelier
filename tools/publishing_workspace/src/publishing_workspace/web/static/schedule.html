@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Publishing Workspace 月历</title>
-  <link rel="stylesheet" href="/schedule.css">
+  <link rel="stylesheet" href="/schedule.css?v=20260820-2">
 </head>
 <body>
   <main class="app-shell">
@@ -18,8 +18,6 @@
         <input id="month-picker" type="month" aria-label="选择月份">
         <button id="next-month" class="icon-button" type="button" title="下个月" aria-label="下个月">&#8250;</button>
         <span id="plan-status" class="status-badge">未加载</span>
-        <button id="create-plan" class="primary-button" type="button">创建空计划</button>
-        <button id="toggle-lock" class="secondary-button" type="button" disabled>锁定计划</button>
       </div>
     </header>
 
@@ -43,23 +41,52 @@
           <button id="search-assets" class="icon-button search-button" type="button" title="搜索" aria-label="搜索">&#8981;</button>
         </div>
         <div class="node-filters">
-          <input id="artist-filter" class="field-control" type="search" placeholder="artist">
-          <input id="character-filter" class="field-control" type="search" placeholder="character">
-          <input id="group-filter" class="field-control" type="search" placeholder="action_group">
-          <input id="action-filter" class="field-control" type="search" placeholder="action">
+          <div class="node-picker" data-node-role="artist">
+            <div class="node-picker-control">
+              <input id="artist-filter" class="field-control" type="search" placeholder="artist">
+              <button class="node-clear" type="button" title="清除 artist" aria-label="清除 artist">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+          <div class="node-picker" data-node-role="character">
+            <div class="node-picker-control">
+              <input id="character-filter" class="field-control" type="search" placeholder="character">
+              <button class="node-clear" type="button" title="清除 character" aria-label="清除 character">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+          <div class="node-picker" data-node-role="action_group">
+            <div class="node-picker-control">
+              <input id="group-filter" class="field-control" type="search" placeholder="action_group">
+              <button class="node-clear" type="button" title="清除 action_group" aria-label="清除 action_group">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
+          <div class="node-picker" data-node-role="action">
+            <div class="node-picker-control">
+              <input id="action-filter" class="field-control" type="search" placeholder="action">
+              <button class="node-clear" type="button" title="清除 action" aria-label="清除 action">&#10005;</button>
+            </div>
+            <div class="node-options" role="listbox"></div>
+          </div>
         </div>
         <div class="facet-heading">
-          <span class="field-label">classify.yaml 筛选</span>
-          <button id="clear-facets" class="text-button" type="button">清空</button>
+          <div class="facet-heading-main">
+            <strong>classify.yaml 二次过滤</strong>
+            <small>同字段任意命中，不同字段同时满足；不选择则不启用过滤。</small>
+            <small class="facet-supported-fields">Phase · Species · Cast · Domain · Subtype · Pose · Environment · Tone · Flags · Clothing</small>
+          </div>
+          <div class="facet-heading-actions">
+            <div class="facet-add-wrap">
+              <button id="add-facet" class="secondary-button compact-button" type="button" aria-expanded="false">＋ 添加筛选</button>
+              <div id="facet-field-menu" class="facet-field-menu" role="menu" hidden></div>
+            </div>
+            <button id="clear-facets" class="text-button" type="button">清空全部</button>
+          </div>
         </div>
-        <div id="facet-filters" class="facet-filters"></div>
+        <div id="facet-filters" class="facet-filters" aria-live="polite"></div>
         <div class="selection-toolbar">
-          <select id="add-to-set" class="field-control" aria-label="加入选择集合">
-            <option value="post">加入 post</option>
-            <option value="all">加入 all</option>
-            <option value="cover">加入 cover</option>
-          </select>
-          <button id="add-selected-assets" class="secondary-button" type="button">加入已选</button>
+          <button id="add-selected-assets" class="secondary-button" type="button">加入 all</button>
         </div>
         <div id="asset-results" class="asset-results empty-state">请先选择导入或搜索素材</div>
       </aside>
@@ -135,6 +162,6 @@
     <img id="preview-image" alt="素材预览">
     <p id="preview-caption"></p>
   </dialog>
-  <script src="/schedule.js" defer></script>
+  <script src="/schedule.js?v=20260820-2" defer></script>
 </body>
 </html>

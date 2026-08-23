@@ -165,7 +165,7 @@ content:
     cover: []
 ```
 
-散图默认 `all = post`、`cover = []`，用户仍可在右侧编辑器中分别调整三个集合。计划只保存有序 `asset_id`，原始路径由 Catalog 在执行时解析。
+散图保存时，如果 `post` 为空则从 `all` 补齐；如果 `cover` 为空则使用 `post` 第一张。用户仍可在右侧编辑器中分别调整三个集合。计划只保存有序 `asset_id`，原始路径由 Catalog 在执行时解析。
 
 ### 6.3 ExecutionRecord
 
@@ -224,7 +224,7 @@ content:
 ### 7.5 SubmissionExecutor
 
 ```text
-读取已锁定 MonthlyPlan
+读取到期的 MonthlyPlan
   -> 查找到期且尚未成功执行的 ScheduleEntry
   -> 解析 task 或 inline_selection
   -> 调用 TaskService / PackageBuilder
@@ -266,8 +266,8 @@ class Publisher(Protocol):
 ### 8.1 顶部
 
 - 上月、下月、跳转月份。
-- 当前状态：未锁定或已锁定。
-- “锁定计划”按钮。
+- 首次访问月份时自动创建默认计划。
+- 显示当前计划 revision；计划始终可编辑。
 - 不显示自动排期入口。
 
 ### 8.2 左侧素材库
@@ -278,7 +278,8 @@ class Publisher(Protocol):
 - 空筛选表示全部，文本筛选支持模糊匹配。
 - 已用于其他投稿或存在风险标记的图片显示角标提醒。
 - 点击缩略图打开大图预览。
-- 图片可多选后加入当前投稿或创建新的散图投稿。
+- 图片可多选后直接加入当前投稿的 `all` 集合。
+- artist、character、action_group、action 输入支持 Catalog 节点模糊下拉选择，也保留自由文本过滤。
 
 ### 8.3 中间月历
 
@@ -299,9 +300,9 @@ class Publisher(Protocol):
 - 支持拖拽排序、移除图片、从左侧加入图片和查看大图。
 - 显示风险或重复使用提醒，但提醒不阻止保存。
 
-## 9. 锁定语义
+## 9. 计划状态语义
 
-`draft` 状态允许编辑。`locked` 表示该 revision 可以被执行器消费。
+`draft` 和 `locked` 都允许编辑，也都可以被执行器消费。`locked` 只作为旧数据和旧 API 的兼容状态，不再是 UI 或执行门槛。
 
 锁定时校验：
 
@@ -312,7 +313,7 @@ class Publisher(Protocol):
 - 缺少 `all` 或 `cover` 仅 warning。
 - 重复图片、重复时间和图片已用于历史投稿仅 warning。
 
-锁定后如需修改，用户先解锁。再次锁定会生成新的 revision；已经成功执行的旧 entry 不会自动重复执行。
+旧的 lock/unlock API 仍可用于兼容脚本；调用它只改变状态并生成 revision，不改变编辑和执行权限。已经成功执行的旧 entry 不会自动重复执行。
 
 ## 10. 执行方式
 
@@ -324,7 +325,7 @@ uv run publishing-workspace schedule run-due G:\ai_publish
 
 该命令只执行：
 
-- 状态为 `locked` 的计划。
+- 状态为 `draft` 或 `locked` 的计划。
 - `scheduled_at <= now` 的 entry。
 - 当前幂等键尚未成功执行的 entry。
 

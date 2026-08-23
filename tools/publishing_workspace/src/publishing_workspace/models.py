@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .identity import DEFAULT_NODE_IDENTITY_NORMALIZER, NodeIdentityNormalizer
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -60,13 +62,22 @@ class ImageNodeInfo(BaseModel):
     nodes: list[ImageNodeRef] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
-    def values_for(self, role: str) -> list[str]:
+    def values_for(
+        self,
+        role: str,
+        *,
+        normalizer: NodeIdentityNormalizer | None = None,
+    ) -> list[str]:
+        active_normalizer = normalizer or DEFAULT_NODE_IDENTITY_NORMALIZER
         values: list[str] = []
         seen: set[str] = set()
         for node in self.nodes:
             if node.role != role:
                 continue
-            value = (node.id or _name_from_ref(node.ref) or "").strip()
+            value = active_normalizer.normalize(
+                role,
+                (node.id or _name_from_ref(node.ref) or "").strip(),
+            )
             key = value.casefold()
             if value and key not in seen:
                 seen.add(key)
@@ -118,6 +129,7 @@ class AssetRecord(BaseModel):
         hierarchy: list[str],
         *,
         missing_value: str = "unknown",
+        normalizer: NodeIdentityNormalizer | None = None,
     ) -> NodeValueProjection:
         normalized_hierarchy = [
             str(role).strip()
@@ -131,7 +143,7 @@ class AssetRecord(BaseModel):
         values: dict[str, list[str]] = {}
         missing_roles: list[str] = []
         for role in normalized_hierarchy:
-            role_values = self.node_info.values_for(role)
+            role_values = self.node_info.values_for(role, normalizer=normalizer)
             if role_values:
                 values[role] = role_values
             else:
@@ -171,6 +183,7 @@ class ExportPlan(BaseModel):
     import_id: str | None = None
     hierarchy: list[str]
     views: list[ViewEntry] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now_iso)
 
 

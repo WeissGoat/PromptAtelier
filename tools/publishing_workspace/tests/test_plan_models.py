@@ -35,6 +35,16 @@ def test_inline_content_defaults_to_empty_selection_sets():
     assert content.sets == {"all": [], "post": [], "cover": []}
 
 
+def test_inline_content_fills_post_and_cover_from_all():
+    content = InlineContent(sets={"all": ["sha256:a", "sha256:b"], "post": [], "cover": []})
+
+    assert content.sets == {
+        "all": ["sha256:a", "sha256:b"],
+        "post": ["sha256:a", "sha256:b"],
+        "cover": ["sha256:a"],
+    }
+
+
 def test_plan_accepts_task_and_inline_content():
     plan = MonthlyPlan(
         plan_id="2026-09",

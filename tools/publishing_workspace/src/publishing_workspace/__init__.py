@@ -1,6 +1,8 @@
 """投稿素材工作区。"""
 
 from .config import PublishingWorkspaceConfig, WorkspacePaths, init_workspace, load_workspace
+from .action_resolution import ActionNodeValueResolver, ActionResolution
+from .identity import NodeIdentityNormalizer, normalize_node_identity
 from .models import (
     AssetRecord,
     ExportPlan,
@@ -14,9 +16,12 @@ from .models import (
 
 __all__ = [
     "AssetRecord",
+    "ActionNodeValueResolver",
+    "ActionResolution",
     "ExportPlan",
     "ImageNodeInfo",
     "ImageNodeRef",
+    "NodeIdentityNormalizer",
     "ImportedItem",
     "PublishingWorkspaceConfig",
     "SelectionSet",
@@ -25,4 +30,5 @@ __all__ = [
     "WorkspacePaths",
     "init_workspace",
     "load_workspace",
+    "normalize_node_identity",
 ]

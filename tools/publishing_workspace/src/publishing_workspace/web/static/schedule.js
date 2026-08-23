@@ -12,6 +12,9 @@
     tasks: [],
     imports: [],
     facets: {},
+    facetDraftFields: [],
+    facetOpenField: null,
+    facetSearch: "",
     filters: { import_id: "", text: "", artist: "", character: "", action_group: "", action: "", facets: {} },
     draggedEntryId: null,
     draggedAssetId: null,
@@ -22,8 +25,6 @@
     monthPicker: $("month-picker"),
     previousMonth: $("previous-month"),
     nextMonth: $("next-month"),
-    createPlan: $("create-plan"),
-    toggleLock: $("toggle-lock"),
     planStatus: $("plan-status"),
     notice: $("notice"),
     calendarTitle: $("calendar-title"),
@@ -52,9 +53,10 @@
     groupFilter: $("group-filter"),
     actionFilter: $("action-filter"),
     facetFilters: $("facet-filters"),
+    addFacet: $("add-facet"),
+    facetFieldMenu: $("facet-field-menu"),
     clearFacets: $("clear-facets"),
     searchAssets: $("search-assets"),
-    addToSet: $("add-to-set"),
     addSelectedAssets: $("add-selected-assets"),
     assetResults: $("asset-results"),
     assetCount: $("asset-count"),
@@ -62,6 +64,23 @@
     previewImage: $("preview-image"),
     previewCaption: $("preview-caption"),
     closePreview: $("close-preview"),
+  };
+
+  const FACET_FIELD_ORDER = [
+    "phase", "species", "cast", "domain", "subtype",
+    "pose", "environment", "tone", "flags", "clothing",
+  ];
+  const FACET_LABELS = {
+    phase: "Phase",
+    species: "Species",
+    cast: "Cast",
+    domain: "Domain",
+    subtype: "Subtype",
+    pose: "Pose",
+    environment: "Environment",
+    tone: "Tone",
+    flags: "Flags",
+    clothing: "Clothing",
   };
 
   function showNotice(message, kind = "") {
@@ -128,24 +147,20 @@
     return state.plan?.entries?.find((item) => item.entry_id === state.selectedEntryId) || state.draftEntry || null;
   }
 
-  function isLocked() { return state.plan?.status === "locked"; }
-
   function updateControls() {
     const loaded = Boolean(state.plan);
-    elements.newEntry.disabled = !loaded || isLocked();
-    elements.saveEntry.disabled = !loaded || isLocked();
-    elements.deleteEntry.disabled = !loaded || !state.selectedEntryId || isLocked();
-    elements.toggleLock.disabled = !loaded;
-    elements.toggleLock.textContent = isLocked() ? "解锁计划" : "锁定计划";
-    elements.planStatus.textContent = !loaded ? "未创建" : (isLocked() ? "已锁定" : `草稿 · r${state.plan.revision}`);
-    elements.planStatus.classList.toggle("locked", isLocked());
+    elements.newEntry.disabled = !loaded;
+    elements.saveEntry.disabled = !loaded;
+    elements.deleteEntry.disabled = !loaded || !state.selectedEntryId;
+    elements.planStatus.textContent = !loaded ? "加载中" : `计划 · r${state.plan.revision}`;
+    elements.planStatus.classList.remove("locked");
     elements.monthPicker.value = state.month;
-    elements.contentKind.disabled = isLocked();
-    elements.taskSelect.disabled = isLocked();
-    elements.taskIdInput.disabled = isLocked();
-    elements.entryTitle.disabled = isLocked();
-    elements.entryDate.disabled = isLocked();
-    elements.entryTime.disabled = isLocked();
+    elements.contentKind.disabled = !loaded;
+    elements.taskSelect.disabled = !loaded;
+    elements.taskIdInput.disabled = !loaded;
+    elements.entryTitle.disabled = !loaded;
+    elements.entryDate.disabled = !loaded;
+    elements.entryTime.disabled = !loaded;
   }
 
   async function loadPlan() {
@@ -157,26 +172,9 @@
       state.plan = await request(`/api/plans/${state.month}`);
       showNotice("");
     } catch (error) {
-      if (error.status === 404) {
-        showNotice("这个月还没有计划，点击“创建空计划”开始。", "warning");
-      } else {
-        showNotice(error.message, "error");
-      }
+      showNotice(error.message, "error");
     }
     renderAll();
-  }
-
-  async function createPlan() {
-    try {
-      state.plan = await request(`/api/plans/${state.month}`, { method: "POST" });
-      state.selectedEntryId = null;
-      state.draftEntry = null;
-      showNotice(`已创建 ${state.month} 空计划。`);
-      renderAll();
-    } catch (error) {
-      if (error.status === 409) await loadPlan();
-      else showNotice(error.message, "error");
-    }
   }
 
   async function refreshImports() {
@@ -205,6 +203,123 @@
     } catch (error) { showNotice(error.message, "error"); }
   }
 
+  const nodePickerStates = new Map();
+
+  function initializeNodePickers() {
+    document.querySelectorAll(".node-picker[data-node-role]").forEach((picker) => {
+      const role = picker.dataset.nodeRole;
+      const input = picker.querySelector("input");
+      const clear = picker.querySelector(".node-clear");
+      if (!role || !input || !clear) return;
+      const options = picker.querySelector(".node-options");
+      nodePickerStates.set(role, { picker, input, clear, options, timer: null, requestId: 0 });
+      input.addEventListener("focus", () => scheduleNodeSearch(role, true));
+      input.addEventListener("input", () => scheduleNodeSearch(role));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeNodeOptions(role);
+        if (event.key === "Enter") {
+          closeNodeOptions(role);
+          readFilters();
+          searchAssets();
+        }
+      });
+      clear.addEventListener("click", () => {
+        input.value = "";
+        closeNodeOptions(role);
+        readFilters();
+        searchAssets();
+        input.focus();
+      });
+      options.addEventListener("click", (event) => {
+        const button = event.target.closest(".node-option");
+        if (!button || !options.contains(button)) return;
+        input.value = button.dataset.nodeName || "";
+        closeNodeOptions(role);
+        readFilters();
+        searchAssets();
+      });
+    });
+    document.addEventListener("click", (event) => {
+      for (const [role, pickerState] of nodePickerStates) {
+        if (!pickerState.picker.contains(event.target)) closeNodeOptions(role);
+      }
+    });
+  }
+
+  function scheduleNodeSearch(role, immediate = false) {
+    const pickerState = nodePickerStates.get(role);
+    if (!pickerState) return;
+    if (pickerState.timer) window.clearTimeout(pickerState.timer);
+    const delay = immediate ? 0 : 300;
+    pickerState.timer = window.setTimeout(() => searchNodeOptions(role), delay);
+  }
+
+  async function searchNodeOptions(role) {
+    const pickerState = nodePickerStates.get(role);
+    if (!pickerState) return;
+    const requestId = ++pickerState.requestId;
+    const params = new URLSearchParams({
+      role,
+      q: pickerState.input.value.trim(),
+      offset: "0",
+      limit: "20",
+    });
+    const importId = elements.importSelect.value;
+    if (importId) params.set("import_id", importId);
+    try {
+      const result = await request(`/api/nodes?${params}`);
+      if (requestId !== pickerState.requestId) return;
+      renderNodeOptions(role, result.nodes || []);
+    } catch (error) {
+      if (requestId !== pickerState.requestId) return;
+      renderNodeOptions(role, [], error.message);
+    }
+  }
+
+  function renderNodeOptions(role, nodes, errorMessage = "") {
+    const pickerState = nodePickerStates.get(role);
+    if (!pickerState) return;
+    const options = pickerState.options;
+    options.innerHTML = "";
+    options.classList.add("open");
+    if (errorMessage) {
+      options.innerHTML = `<div class="node-options-empty">${escapeHtml(errorMessage)}</div>`;
+      return;
+    }
+    if (!nodes.length) {
+      options.innerHTML = `<div class="node-options-empty">没有匹配的节点</div>`;
+      return;
+    }
+    for (const node of nodes) {
+      const button = document.createElement("button");
+      button.className = "node-option";
+      button.type = "button";
+      button.setAttribute("role", "option");
+      button.dataset.nodeName = node.name;
+      button.innerHTML = `<span>${escapeHtml(node.name)}</span>${node.ref ? `<span class="node-option-ref">${escapeHtml(node.ref)}</span>` : ""}`;
+      button.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectNodeOption(role, node.name);
+      };
+      options.append(button);
+    }
+  }
+
+  function closeNodeOptions(role) {
+    const pickerState = nodePickerStates.get(role);
+    if (pickerState) pickerState.options.classList.remove("open");
+  }
+
+  function selectNodeOption(role, name) {
+    const pickerState = nodePickerStates.get(role);
+    if (!pickerState) return;
+    pickerState.input.value = name;
+    closeNodeOptions(role);
+    readFilters();
+    searchAssets();
+  }
+
   async function refreshFacets() {
     try {
       const query = state.filters.import_id ? `?import_id=${encodeURIComponent(state.filters.import_id)}` : "";
@@ -213,23 +328,107 @@
     } catch (error) { showNotice(error.message, "error"); }
   }
 
+  function facetFields() {
+    const active = new Set([
+      ...Object.keys(state.filters.facets),
+      ...state.facetDraftFields,
+    ]);
+    return [
+      ...FACET_FIELD_ORDER.filter((field) => active.has(field)),
+      ...[...active].filter((field) => !FACET_FIELD_ORDER.includes(field)).sort((a, b) => a.localeCompare(b)),
+    ];
+  }
+
+  function facetOptions(field) {
+    return [...new Set([
+      ...(state.facets[field] || []),
+      ...(state.filters.facets[field] || []),
+    ])].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }
+
+  function closeFacetPopovers() {
+    state.facetOpenField = null;
+    state.facetSearch = "";
+    elements.facetFieldMenu.hidden = true;
+    elements.addFacet.setAttribute("aria-expanded", "false");
+    renderFacets();
+  }
+
+  function renderFacetFieldMenu() {
+    const active = new Set(facetFields());
+    const available = FACET_FIELD_ORDER.filter((field) => !active.has(field) && facetOptions(field).length);
+    elements.facetFieldMenu.innerHTML = "";
+    for (const field of available) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "menuitem";
+      button.dataset.facetAddField = field;
+      button.innerHTML = `<span>${escapeHtml(FACET_LABELS[field] || field)}</span><small>${escapeHtml(field)}</small>`;
+      elements.facetFieldMenu.append(button);
+    }
+    elements.addFacet.disabled = !available.length;
+    if (!available.length && !elements.facetFieldMenu.hidden) closeFacetPopovers();
+  }
+
+  function renderFacetOptions(field, container) {
+    const needle = state.facetSearch.trim().toLowerCase();
+    const selected = new Set(state.filters.facets[field] || []);
+    const options = facetOptions(field).filter((value) => !needle || value.toLowerCase().includes(needle));
+    container.innerHTML = "";
+    for (const value of options) {
+      const label = document.createElement("label");
+      label.className = "facet-option";
+      label.innerHTML = `<input type="checkbox" data-facet-field="${escapeAttr(field)}" data-facet-value="${escapeAttr(value)}"${selected.has(value) ? " checked" : ""}><span>${escapeHtml(value)}</span>${selected.has(value) ? "<span aria-hidden=\"true\">✓</span>" : ""}`;
+      container.append(label);
+    }
+    if (!options.length) container.innerHTML = `<div class="facet-no-options">没有匹配值</div>`;
+  }
+
   function renderFacets() {
     elements.facetFilters.innerHTML = "";
-    for (const [field, values] of Object.entries(state.facets)) {
-      if (!values.length) continue;
+    const fields = facetFields();
+    for (const field of fields) {
       const group = document.createElement("div");
       group.className = "facet-group";
-      group.innerHTML = `<span class="facet-name">${escapeHtml(field)}</span>`;
-      for (const value of values) {
-        const label = document.createElement("label");
-        label.className = "facet-option";
-        const checked = state.filters.facets[field]?.includes(value) ? " checked" : "";
-        label.innerHTML = `<input type="checkbox" data-facet-field="${escapeAttr(field)}" data-facet-value="${escapeAttr(value)}"${checked}> ${escapeHtml(value)}`;
-        group.append(label);
+      const selected = state.filters.facets[field] || [];
+      group.innerHTML = `<div class="facet-group-heading"><div class="facet-name"><strong>${escapeHtml(FACET_LABELS[field] || field)}</strong><small>${escapeHtml(field)}</small></div><button class="text-button" type="button" data-facet-clear-field="${escapeAttr(field)}">清空</button></div><div class="facet-chip-list"></div>`;
+      const chipList = group.querySelector(".facet-chip-list");
+      for (const value of selected) {
+        const chip = document.createElement("span");
+        chip.className = "facet-chip";
+        chip.innerHTML = `${escapeHtml(value)}<button type="button" aria-label="移除 ${escapeAttr(FACET_LABELS[field] || field)} ${escapeAttr(value)}" data-facet-remove-field="${escapeAttr(field)}" data-facet-remove-value="${escapeAttr(value)}">×</button>`;
+        chipList.append(chip);
       }
+      const picker = document.createElement("div");
+      picker.className = "facet-value-picker";
+      const isOpen = state.facetOpenField === field;
+      picker.innerHTML = `<button type="button" class="facet-value-trigger" aria-expanded="${isOpen}" data-facet-open-field="${escapeAttr(field)}">${selected.length ? "继续选择" : "选择值"}<span aria-hidden="true">⌄</span></button>`;
+      picker.querySelector("[data-facet-open-field]").addEventListener("click", (event) => {
+        event.stopPropagation();
+        state.facetOpenField = state.facetOpenField === field ? null : field;
+        state.facetSearch = "";
+        renderFacets();
+        if (state.facetOpenField) focusFacetSearch();
+      });
+      if (isOpen) {
+        picker.insertAdjacentHTML("beforeend", `<div class="facet-option-popover"><label class="facet-option-search"><span aria-hidden="true">⌕</span><input type="search" value="${escapeAttr(state.facetSearch)}" placeholder="搜索值" data-facet-search-field="${escapeAttr(field)}" aria-label="搜索 ${escapeAttr(FACET_LABELS[field] || field)} 值"></label><div class="facet-option-list"></div></div>`);
+        renderFacetOptions(field, picker.querySelector(".facet-option-list"));
+      }
+      chipList.append(picker);
       elements.facetFilters.append(group);
     }
-    if (!elements.facetFilters.children.length) elements.facetFilters.innerHTML = `<div class="empty-state">暂无 facet</div>`;
+    if (!elements.facetFilters.children.length) elements.facetFilters.innerHTML = `<div class="facet-empty">未启用过滤</div>`;
+    renderFacetFieldMenu();
+  }
+
+  function focusFacetSearch() {
+    if (!state.facetOpenField) return;
+    window.requestAnimationFrame(() => {
+      const input = elements.facetFilters.querySelector("[data-facet-search-field]");
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
   }
 
   async function searchAssets() {
@@ -318,6 +517,13 @@
 
   function cloneSets(sets) { return { all: [...(sets?.all || [])], post: [...(sets?.post || [])], cover: [...(sets?.cover || [])] }; }
 
+  function normalizeSets(sets) {
+    const normalized = cloneSets(sets);
+    if (!normalized.post.length && normalized.all.length) normalized.post = [...normalized.all];
+    if (!normalized.cover.length && normalized.post.length) normalized.cover = [normalized.post[0]];
+    return normalized;
+  }
+
   function replaceCurrentInlineSets(sets) {
     const entry = currentEntry();
     if (!entry || entry.content.kind !== "inline_selection") return;
@@ -388,7 +594,7 @@
     elements.calendarSubtitle.textContent = state.plan?.timezone || "Asia/Shanghai";
     elements.calendarGrid.innerHTML = "";
     if (!state.plan) {
-      elements.calendarGrid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1">计划尚未创建</div>`;
+      elements.calendarGrid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1">计划加载中</div>`;
       return;
     }
     const first = monthDate(state.month);
@@ -416,7 +622,7 @@
   function weekdayText(day, first) { return ["一", "二", "三", "四", "五", "六", "日"][(first.getDay() + day - 2 + 7) % 7]; }
 
   function makeEntryCard(entry) {
-    const card = document.createElement("article"); card.className = "entry-card"; card.draggable = !isLocked(); card.dataset.entryId = entry.entry_id;
+    const card = document.createElement("article"); card.className = "entry-card"; card.draggable = true; card.dataset.entryId = entry.entry_id;
     const parts = localParts(entry.scheduled_at, state.plan.timezone);
     let count = "任务";
     if (entry.content.kind === "inline_selection") count = `散图 · post ${(entry.content.sets.post || []).length}`;
@@ -429,7 +635,7 @@
   async function moveEntry(event, dateText, cell) {
     cell.classList.remove("drop-target");
     const entryId = event.dataTransfer.getData("text/plain") || state.draggedEntryId;
-    if (!entryId || isLocked()) return;
+    if (!entryId) return;
     try {
       state.plan = await request(`/api/plans/${state.month}/entries/${encodeURIComponent(entryId)}/date`, { method: "PATCH", body: JSON.stringify({ revision: state.plan.revision, target_date: dateText }) });
       showNotice("投稿日期已更新。"); renderAll();
@@ -438,7 +644,7 @@
 
   async function saveEntry(event) {
     event.preventDefault();
-    if (!state.plan || isLocked()) return;
+    if (!state.plan) return;
     const entryId = elements.entryId.value || `entry-${Date.now().toString(36)}`;
     const kind = elements.contentKind.value;
     let content;
@@ -447,7 +653,7 @@
       if (!taskId) { showNotice("请选择或输入投稿任务。", "warning"); return; }
       content = { kind: "task", task_id: taskId };
     } else {
-      content = { kind: "inline_selection", source_import_id: state.filters.import_id || null, sets: cloneSets(selectedSets()) };
+      content = { kind: "inline_selection", source_import_id: state.filters.import_id || null, sets: normalizeSets(selectedSets()) };
       if (!content.sets.post.length) { showNotice("散图投稿至少需要一张 post 图片。", "warning"); return; }
     }
     const payload = { revision: state.plan.revision, entry: { entry_id: entryId, scheduled_at: fieldsToIso(elements.entryDate.value, elements.entryTime.value), title: elements.entryTitle.value.trim(), content, execution: { build_on_due: true, notify_on_complete: true, publish: false } } };
@@ -462,21 +668,12 @@
   }
 
   async function deleteEntry() {
-    if (!state.selectedEntryId || !state.plan || isLocked()) return;
+    if (!state.selectedEntryId || !state.plan) return;
     if (!window.confirm("确定删除这条投稿吗？")) return;
     try {
       state.plan = await request(`/api/plans/${state.month}/entries/${encodeURIComponent(state.selectedEntryId)}?revision=${state.plan.revision}`, { method: "DELETE" });
       state.selectedEntryId = null; showNotice("投稿已删除。"); renderAll();
     } catch (error) { await recoverAfterMutationError(error); }
-  }
-
-  async function toggleLock() {
-    if (!state.plan) return;
-    const action = isLocked() ? "unlock" : "lock";
-    try {
-      state.plan = await request(`/api/plans/${state.month}/${action}`, { method: "POST", body: JSON.stringify({ revision: state.plan.revision }) });
-      showNotice(isLocked() ? "计划已锁定。" : "计划已解锁。"); renderAll();
-    } catch (error) { showNotice(error.message, "error"); }
   }
 
   async function recoverAfterMutationError(error) {
@@ -506,8 +703,6 @@
     elements.previousMonth.addEventListener("click", () => { const date = monthDate(state.month); date.setMonth(date.getMonth() - 1); state.month = formatMonth(date); loadPlan(); });
     elements.nextMonth.addEventListener("click", () => { const date = monthDate(state.month); date.setMonth(date.getMonth() + 1); state.month = formatMonth(date); loadPlan(); });
     elements.monthPicker.addEventListener("change", () => { state.month = elements.monthPicker.value; loadPlan(); });
-    elements.createPlan.addEventListener("click", createPlan);
-    elements.toggleLock.addEventListener("click", toggleLock);
     elements.newEntry.addEventListener("click", () => prepareNewEntry());
     elements.resetEditor.addEventListener("click", () => prepareNewEntry());
     elements.entryForm.addEventListener("submit", saveEntry);
@@ -530,13 +725,112 @@
     elements.searchAssets.addEventListener("click", () => { readFilters(); searchAssets(); });
     [elements.textFilter, elements.artistFilter, elements.characterFilter, elements.groupFilter, elements.actionFilter].forEach((input) => input.addEventListener("keydown", (event) => { if (event.key === "Enter") { readFilters(); searchAssets(); } }));
     elements.importSelect.addEventListener("change", async () => { readFilters(); await refreshFacets(); await searchAssets(); });
-    elements.clearFacets.addEventListener("click", () => { state.filters.facets = {}; renderFacets(); searchAssets(); });
-    elements.facetFilters.addEventListener("change", (event) => { const input = event.target; if (!input.dataset.facetField) return; const field = input.dataset.facetField; const value = input.dataset.facetValue; const values = new Set(state.filters.facets[field] || []); input.checked ? values.add(value) : values.delete(value); if (values.size) state.filters.facets[field] = [...values]; else delete state.filters.facets[field]; searchAssets(); });
-    elements.addSelectedAssets.addEventListener("click", () => { for (const assetId of state.selectedAssetIds) addAssetToSet(assetId, elements.addToSet.value); showNotice(`已加入 ${state.selectedAssetIds.size} 张素材到 ${elements.addToSet.value}。`); });
+    elements.addFacet.addEventListener("click", () => {
+      const opening = elements.facetFieldMenu.hidden;
+      if (!opening) {
+        closeFacetPopovers();
+        return;
+      }
+      state.facetOpenField = null;
+      state.facetSearch = "";
+      renderFacetFieldMenu();
+      elements.facetFieldMenu.hidden = false;
+      elements.addFacet.setAttribute("aria-expanded", "true");
+    });
+    elements.facetFieldMenu.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const button = event.target.closest("[data-facet-add-field]");
+      if (!button) return;
+      const field = button.dataset.facetAddField;
+      if (!field) return;
+      if (!state.facetDraftFields.includes(field)) state.facetDraftFields.push(field);
+      state.facetOpenField = field;
+      state.facetSearch = "";
+      elements.facetFieldMenu.hidden = true;
+      elements.addFacet.setAttribute("aria-expanded", "false");
+      renderFacets();
+      focusFacetSearch();
+    });
+    elements.clearFacets.addEventListener("click", () => {
+      state.filters.facets = {};
+      state.facetDraftFields = [];
+      state.facetOpenField = null;
+      state.facetSearch = "";
+      renderFacets();
+      searchAssets();
+    });
+    elements.facetFilters.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const clear = event.target.closest("[data-facet-clear-field]");
+      if (clear) {
+        const field = clear.dataset.facetClearField;
+        delete state.filters.facets[field];
+        state.facetDraftFields = state.facetDraftFields.filter((item) => item !== field);
+        if (state.facetOpenField === field) state.facetOpenField = null;
+        state.facetSearch = "";
+        renderFacets();
+        searchAssets();
+        return;
+      }
+      const remove = event.target.closest("[data-facet-remove-field]");
+      if (remove) {
+        const field = remove.dataset.facetRemoveField;
+        const value = remove.dataset.facetRemoveValue;
+        const values = (state.filters.facets[field] || []).filter((item) => item !== value);
+        if (values.length) state.filters.facets[field] = values;
+        else {
+          delete state.filters.facets[field];
+          state.facetDraftFields = state.facetDraftFields.filter((item) => item !== field);
+          state.facetOpenField = null;
+        }
+        renderFacets();
+        searchAssets();
+        return;
+      }
+      const trigger = event.target.closest("[data-facet-open-field]");
+      if (trigger) {
+        const field = trigger.dataset.facetOpenField;
+        state.facetOpenField = state.facetOpenField === field ? null : field;
+        state.facetSearch = "";
+        renderFacets();
+        if (state.facetOpenField) focusFacetSearch();
+      }
+    });
+    elements.facetFilters.addEventListener("input", (event) => {
+      const input = event.target;
+      if (!input.dataset.facetSearchField) return;
+      state.facetSearch = input.value;
+      renderFacets();
+      focusFacetSearch();
+    });
+    elements.facetFilters.addEventListener("change", (event) => {
+      const input = event.target;
+      if (!input.dataset.facetField) return;
+      const field = input.dataset.facetField;
+      const value = input.dataset.facetValue;
+      const values = new Set(state.filters.facets[field] || []);
+      input.checked ? values.add(value) : values.delete(value);
+      if (values.size) state.filters.facets[field] = [...values];
+      else {
+        delete state.filters.facets[field];
+        state.facetDraftFields = state.facetDraftFields.filter((item) => item !== field);
+        state.facetOpenField = null;
+      }
+      state.facetSearch = "";
+      renderFacets();
+      searchAssets();
+    });
+    document.addEventListener("click", (event) => {
+      const path = event.composedPath();
+      if (path.includes(elements.facetFilters) || path.includes(elements.facetFieldMenu) || path.includes(elements.addFacet)) return;
+      if (state.facetOpenField || !elements.facetFieldMenu.hidden) closeFacetPopovers();
+    });
+    elements.addSelectedAssets.addEventListener("click", () => { for (const assetId of state.selectedAssetIds) addAssetToSet(assetId, "all"); showNotice(`已加入 ${state.selectedAssetIds.size} 张素材到 all。`); });
     elements.assetResults.addEventListener("change", (event) => { const input = event.target; if (!input.classList.contains("asset-check")) return; input.checked ? state.selectedAssetIds.add(input.dataset.assetId) : state.selectedAssetIds.delete(input.dataset.assetId); });
     elements.assetResults.addEventListener("click", (event) => { const trigger = event.target.closest(".preview-trigger"); if (trigger) openPreview(trigger.dataset.assetId, trigger.dataset.caption); });
     elements.closePreview.addEventListener("click", () => elements.previewDialog.close());
     elements.previewDialog.addEventListener("click", (event) => { if (event.target === elements.previewDialog) elements.previewDialog.close(); });
+    initializeNodePickers();
   }
 
   async function bootstrap() {

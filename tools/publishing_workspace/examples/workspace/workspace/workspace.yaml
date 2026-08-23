@@ -7,6 +7,10 @@ classification:
   - action
   missing_value: unknown
   skip_missing: false
+  action_resolution:
+    enabled: true
+    design_root: null
+    action_root_name: 动作改2
 exporters:
   neev:
     enabled: true

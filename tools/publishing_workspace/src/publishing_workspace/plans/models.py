@@ -44,6 +44,13 @@ class InlineContent(BaseModel):
                 if value and value not in seen:
                     normalized[selection_name].append(value)
                     seen.add(value)
+
+        # 散图投稿只有一套素材时，保存边界自动补齐投稿集和封面集。
+        if not normalized["post"] and normalized["all"]:
+            normalized["post"] = list(normalized["all"])
+        if not normalized["cover"] and normalized["post"]:
+            normalized["cover"] = [normalized["post"][0]]
+
         self.sets = normalized  # type: ignore[assignment]
         if self.source_import_id is not None:
             self.source_import_id = self.source_import_id.strip() or None

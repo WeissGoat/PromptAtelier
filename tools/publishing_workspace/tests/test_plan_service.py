@@ -10,7 +10,6 @@ from PIL import Image
 from publishing_workspace.config import init_workspace
 from publishing_workspace.plans.models import ScheduleEntry, TaskContent
 from publishing_workspace.plans.service import (
-    PlanLockedError,
     PlanValidationError,
     ScheduleService,
 )
@@ -53,15 +52,17 @@ def test_move_entry_date_preserves_time(tmp_path: Path):
     assert plan.entries[0].scheduled_at.isoformat() == "2026-09-08T20:00:00+08:00"
 
 
-def test_locked_plan_rejects_edit(tmp_path: Path):
+def test_locked_plan_remains_editable_for_compatibility(tmp_path: Path):
     create_task(tmp_path)
     service = ScheduleService()
     service.create_plan(tmp_path, "2026-09")
     service.add_entry(tmp_path, "2026-09", entry_at("2026-09-05T20:00:00+08:00"))
     service.lock(tmp_path, "2026-09")
 
-    with pytest.raises(PlanLockedError):
-        service.delete_entry(tmp_path, "2026-09", "entry-1")
+    plan = service.delete_entry(tmp_path, "2026-09", "entry-1")
+
+    assert plan.status == "locked"
+    assert plan.entries == []
 
 
 def test_lock_requires_post_images(tmp_path: Path):

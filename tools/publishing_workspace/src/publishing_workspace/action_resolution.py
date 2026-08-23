@@ -249,6 +249,14 @@ class ActionResolutionIndex:
                     self._name_sources[_key(text)].add(source)
 
 
+_GLOBAL_WARNED_KEYS: set[str] = set()
+
+
+_GLOBAL_ACTION_INDEXES: dict[tuple[str, str], ActionResolutionIndex] = {}
+_REF_INDEX_LOOKUP_CACHE: dict[tuple[str | None, str, str | None], ActionResolutionIndex | None] = {}
+_MANIFEST_PATH_CACHE: dict[str, Path | None] = {}
+
+
 class ActionNodeValueResolver:
     """为分类投影提供稳定 action 和最新 action_group 值。"""
 
@@ -262,8 +270,7 @@ class ActionNodeValueResolver:
         self.design_root = Path(design_root).expanduser().resolve() if design_root else None
         self.action_root_name = action_root_name
         self.enabled = enabled
-        self._indexes: dict[Path, ActionResolutionIndex] = {}
-        self._unavailable_roots: set[Path] = set()
+        self._unavailable_roots: set[str] = set()
         self._asset_cache: dict[str, ActionResolution] = {}
         self._warnings: list[str] = []
         self._warning_keys: set[str] = set()
@@ -331,10 +338,20 @@ class ActionNodeValueResolver:
             if warning not in self._warning_keys:
                 self._warning_keys.add(warning)
                 self._warnings.append(warning)
-                logger.warning("Publishing action resolution: %s", warning)
+                if warning not in _GLOBAL_WARNED_KEYS:
+                    _GLOBAL_WARNED_KEYS.add(warning)
+                    logger.warning("Publishing action resolution: %s", warning)
         return result
 
     def _index_for(self, ref: str | None) -> ActionResolutionIndex | None:
+        lookup_key = (
+            str(self.design_root) if self.design_root else None,
+            self.action_root_name,
+            ref.strip() if ref else None,
+        )
+        if lookup_key in _REF_INDEX_LOOKUP_CACHE:
+            return _REF_INDEX_LOOKUP_CACHE[lookup_key]
+
         roots: list[tuple[Path, str]] = []
         if self.design_root is not None:
             roots.append((self.design_root, self.action_root_name))
@@ -344,29 +361,32 @@ class ActionNodeValueResolver:
                 manifest = _find_manifest(path)
                 if manifest is not None:
                     roots.append((manifest.parent.parent, manifest.parent.name))
+
+        resolved_index: ActionResolutionIndex | None = None
         for root, action_root_name in roots:
-            key = root.resolve()
-            if key in self._indexes:
-                return self._indexes[key]
-            if key in self._unavailable_roots:
+            root_key = (str(root), action_root_name)
+            if root_key in _GLOBAL_ACTION_INDEXES:
+                resolved_index = _GLOBAL_ACTION_INDEXES[root_key]
+                break
+            if root_key[0] in self._unavailable_roots:
                 continue
             try:
-                index = ActionResolutionIndex(key, action_root_name=action_root_name)
+                index = ActionResolutionIndex(Path(root_key[0]), action_root_name=action_root_name)
             except (FileNotFoundError, OSError, UnicodeError, ValueError) as exc:
-                self._unavailable_roots.add(key)
+                self._unavailable_roots.add(root_key[0])
                 logger.warning("Unable to build action resolution index: %s", exc)
                 continue
-            self._indexes[key] = index
-            return index
-        return None
+            _GLOBAL_ACTION_INDEXES[root_key] = index
+            resolved_index = index
+            break
 
-
-_MANIFEST_PATH_CACHE: dict[str, Path | None] = {}
+        _REF_INDEX_LOOKUP_CACHE[lookup_key] = resolved_index
+        return resolved_index
 
 
 def _find_manifest(path: Path) -> Path | None:
     start = path if path.is_dir() else path.parent
-    key = str(start.resolve())
+    key = str(start).casefold()
     if key in _MANIFEST_PATH_CACHE:
         return _MANIFEST_PATH_CACHE[key]
     found: Path | None = None

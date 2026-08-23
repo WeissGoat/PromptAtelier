@@ -379,7 +379,7 @@ class ImportRunRepository:
                 (import_id,),
             ).fetchone()[0]
             reader_rows = connection.execute(
-                "SELECT a.reader, COUNT(DISTINCT ii.asset_id) AS count "
+                "SELECT a.reader, COUNT(*) AS count "
                 "FROM import_items ii JOIN assets a ON a.asset_id=ii.asset_id "
                 "WHERE ii.import_id=? GROUP BY a.reader",
                 (import_id,),

@@ -47,6 +47,9 @@ class AssetSearchFilter(BaseModel):
     action_group: str | None = None
     action: str | None = None
     facets: dict[str, set[str]] = Field(default_factory=dict)
+    posted: bool | None = None
+    favorite_mode: Literal["all", "favorited", "unfavorited"] = "all"
+    favorite_ids: set[str] = Field(default_factory=set)
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=1000)
 
@@ -118,12 +121,14 @@ class NodeListResult(BaseModel):
     has_more: bool
 
 
+_GLOBAL_DIR_CLASSIFY_CACHE: dict[str, Path | None] = {}
+_GLOBAL_CLASSIFY_YAML_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
+
+
 class ClassifyFacetReader:
     """从 action 节点目录附近的 classify.yaml 读取检索字段。"""
 
     def __init__(self) -> None:
-        self._path_cache: dict[str, Path | None] = {}
-        self._yaml_cache: dict[Path, tuple[int, dict[str, Any]]] = {}
         self._asset_cache: dict[str, tuple[dict[str, list[str]], list[str]]] = {}
 
     def read(self, asset: AssetRecord) -> tuple[dict[str, list[str]], list[str]]:
@@ -143,12 +148,13 @@ class ClassifyFacetReader:
             try:
                 stat = classify_path.stat()
                 mtime_ns = stat.st_mtime_ns
-                cached_yaml = self._yaml_cache.get(classify_path)
+                key = str(classify_path).casefold()
+                cached_yaml = _GLOBAL_CLASSIFY_YAML_CACHE.get(key)
                 if cached_yaml is not None and cached_yaml[0] == mtime_ns:
                     data = cached_yaml[1]
                 else:
                     data = yaml.safe_load(classify_path.read_text(encoding="utf-8-sig")) or {}
-                    self._yaml_cache[classify_path] = (mtime_ns, data)
+                    _GLOBAL_CLASSIFY_YAML_CACHE[key] = (mtime_ns, data)
             except (OSError, UnicodeError, yaml.YAMLError) as exc:
                 warnings.append(f"classify.yaml 读取失败：{classify_path}：{exc}")
                 continue
@@ -166,20 +172,21 @@ class ClassifyFacetReader:
         if not action.ref:
             return None
         ref_key = action.ref.strip()
-        if ref_key in self._path_cache:
-            return self._path_cache[ref_key]
         start = Path(ref_key).expanduser()
         if not start.is_absolute():
-            self._path_cache[ref_key] = None
             return None
-        start = start if start.is_dir() else start.parent
+        dir_key = str(start if start.is_dir() else start.parent).casefold()
+        if dir_key in _GLOBAL_DIR_CLASSIFY_CACHE:
+            return _GLOBAL_DIR_CLASSIFY_CACHE[dir_key]
+
+        start_dir = start if start.is_dir() else start.parent
         found: Path | None = None
-        for directory in (start, *start.parents):
+        for directory in (start_dir, *start_dir.parents):
             candidate = directory / "classify.yaml"
             if candidate.is_file():
-                found = candidate.resolve()
+                found = candidate
                 break
-        self._path_cache[ref_key] = found
+        _GLOBAL_DIR_CLASSIFY_CACHE[dir_key] = found
         return found
 
 
@@ -194,6 +201,8 @@ class _PrecomputedSearchEntry:
 
 
 _SEARCH_ENTRIES_CACHE: dict[tuple[str, int, str | None], list[_PrecomputedSearchEntry]] = {}
+_TASK_USAGE_CACHE: dict[tuple[str, tuple], dict[str, list[str]]] = {}
+_WORKSPACE_USAGE_CACHE: dict[tuple[str, int, tuple, tuple], dict[str, list[str]]] = {}
 
 
 class AssetSearchService:
@@ -229,9 +238,17 @@ class AssetSearchService:
         )
 
     def preload(self, root: str | Path) -> None:
-        """在后端服务启动时预热全局素材检索索引与节点候选。"""
+        """在后端服务启动时预热全局素材检索索引、快照索引、使用索引与节点候选。"""
         paths, config = load_workspace(root)
+        catalog = CatalogRepository(paths.catalog, backups_dir=paths.backups)
+        # 1. 预热使用索引（秒级构建并缓存）
+        self._usage_index(paths, config.image_extensions)
+        # 2. 预热各个快照索引
+        for import_id, _ in catalog.import_sources():
+            self._get_search_entries(paths, config, import_id)
+        # 3. 预热全量快照索引
         self._get_search_entries(paths, config, None)
+        # 4. 预热节点候选
         for role in NODE_FIELDS:
             NodeSearchService().search(root, role=role, limit=1)
 
@@ -343,10 +360,24 @@ class AssetSearchService:
 
             matched_entries.append(entry)
 
+        if filters.favorite_mode == "favorited":
+            if not filters.favorite_ids:
+                return []
+            fav_ids = filters.favorite_ids
+            matched_entries = [e for e in matched_entries if e.asset.asset_id in fav_ids]
+        elif filters.favorite_mode == "unfavorited":
+            fav_ids = filters.favorite_ids or set()
+            matched_entries = [e for e in matched_entries if e.asset.asset_id not in fav_ids]
+
         usage = self._usage_index(paths, config.image_extensions)
         result: list[AssetSearchResult] = []
         for entry in matched_entries:
             asset = entry.asset
+            asset_usage = usage.get(asset.asset_id, [])
+            if filters.posted is True and not asset_usage:
+                continue
+            if filters.posted is False and asset_usage:
+                continue
             result.append(
                 AssetSearchResult(
                     asset_id=asset.asset_id,
@@ -358,7 +389,7 @@ class AssetSearchService:
                     values=entry.values,
                     facets=entry.facets,
                     warnings=[*asset.warnings, *entry.facet_warnings],
-                    usage=usage.get(asset.asset_id, []),
+                    usage=asset_usage,
                 )
             )
         return result
@@ -416,6 +447,37 @@ class AssetSearchService:
 
     @staticmethod
     def _usage_index(paths, image_extensions: list[str]) -> dict[str, list[str]]:
+        catalog_path = paths.catalog
+        try:
+            catalog_mtime = catalog_path.stat().st_mtime_ns
+        except OSError:
+            catalog_mtime = 0
+
+        tasks_signature: list[tuple[str, int]] = []
+        if paths.tasks.is_dir():
+            try:
+                for item in paths.tasks.iterdir():
+                    if item.is_dir():
+                        tasks_signature.append((item.name, item.stat().st_mtime_ns))
+            except OSError:
+                pass
+        tasks_sig = tuple(tasks_signature)
+
+        plans_signature: list[tuple[str, int]] = []
+        if paths.plans.is_dir():
+            try:
+                for item in paths.plans.iterdir():
+                    if item.is_dir():
+                        plans_signature.append((item.name, item.stat().st_mtime_ns))
+            except OSError:
+                pass
+        plans_sig = tuple(plans_signature)
+
+        workspace_key = (str(paths.root.resolve()), catalog_mtime, tasks_sig, plans_sig)
+        cached_usage = _WORKSPACE_USAGE_CACHE.get(workspace_key)
+        if cached_usage is not None:
+            return cached_usage
+
         usage: dict[str, list[str]] = {}
 
         # 1. Catalog 资产独立标记 (如 mark='posted' / 'posted:20260322')
@@ -444,6 +506,7 @@ class AssetSearchService:
                         for asset_id in asset_ids:
                             _append_usage(usage, asset_id, f"plan:{month}/{entry.entry_id}")
 
+        # 3. 投稿任务 (带单个 task 缓存)
         extensions = {extension.casefold() for extension in image_extensions}
         if paths.tasks.is_dir():
             for task_root in sorted(paths.tasks.iterdir(), key=lambda item: item.name.casefold()):
@@ -452,15 +515,32 @@ class AssetSearchService:
                     continue
                 try:
                     task_paths = TaskPaths.from_workspace(paths, task_root.name)
-                    TaskRepository.load(task_paths)
-                    selections = CurrentSelectionScanner().scan(task_paths, extensions)
+                    task_stat = task_root.stat()
+                    task_mtimes = [task_stat.st_mtime_ns]
+                    for sel in ("all", "post", "cover"):
+                        sel_dir = task_paths.selection_dirs[sel]
+                        if sel_dir.is_dir():
+                            task_mtimes.append(sel_dir.stat().st_mtime_ns)
+                    task_cache_key = (str(task_root.resolve()), tuple(task_mtimes))
+                    task_usage = _TASK_USAGE_CACHE.get(task_cache_key)
+                    if task_usage is None:
+                        task_usage = {}
+                        TaskRepository.load(task_paths)
+                        selections = CurrentSelectionScanner().scan(task_paths, extensions)
+                        for selection, files in selections.items():
+                            for item in files:
+                                asset_id = f"sha256:{item.content_sha256}"
+                                _append_usage(task_usage, asset_id, f"task:{task_root.name}/{selection}")
+                        _TASK_USAGE_CACHE[task_cache_key] = task_usage
+
+                    for asset_id, sources in task_usage.items():
+                        for s in sources:
+                            _append_usage(usage, asset_id, s)
                 except (OSError, UnicodeError, ValueError) as exc:
                     logger.warning("投稿任务使用索引跳过：%s：%s", task_root, exc)
                     continue
-                for selection, files in selections.items():
-                    for item in files:
-                        asset_id = f"sha256:{_cached_file_sha256(Path(item.absolute_path))}"
-                        _append_usage(usage, asset_id, f"task:{task_root.name}/{selection}")
+
+        _WORKSPACE_USAGE_CACHE[workspace_key] = usage
         return usage
 
 

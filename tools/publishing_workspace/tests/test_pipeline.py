@@ -27,7 +27,7 @@ from publishing_workspace.models import (
     ViewEntry,
     ViewItem,
 )
-from publishing_workspace.service import PublishingService
+from publishing_workspace.service import PublishingService, _export_scope_name
 from publishing_workspace.views.builder import ClassificationViewBuilder
 from publishing_workspace.views.exporters import (
     WindowsShortcutExporter,
@@ -413,7 +413,7 @@ def test_full_pipeline_deduplicates_and_exports_multi_character_views(tmp_path: 
     assert first_export.results[0].written == 2
     assert second_export.results[0].skipped == 2
     paths, _ = load_workspace(root)
-    homura_playlist = paths.exports / "neev" / "artist_a" / "homura" / "st_sfw" / "standing.nvpls"
+    homura_playlist = paths.exports / "total" / "artist_a" / "homura" / "st_sfw" / "standing.nvpls"
     data = json.loads(homura_playlist.read_text(encoding="utf-8"))
     assert data["Format"] == "NeeView.Playlist/2.0.0"
     assert data["Items"] == [{"Path": plan.views[0].items[0].source_path}]
@@ -442,7 +442,7 @@ def test_full_pipeline_exports_unknown_nodes_and_skips_on_repeat(tmp_path: Path)
     assert second_export.results[0].skipped == 1
 
     paths, _ = load_workspace(root)
-    playlist = paths.exports / "neev" / "unknown" / "unknown" / "unknown" / "unknown.nvpls"
+    playlist = paths.exports / "total" / "unknown" / "unknown" / "unknown" / "unknown.nvpls"
     assert playlist.is_file()
     assert json.loads(playlist.read_text(encoding="utf-8"))["Items"] == [
         {"Path": str((source / "unknown.png").resolve())}
@@ -472,10 +472,33 @@ def test_catalog_export_keeps_assets_from_previous_imports(tmp_path: Path):
     assert [view.key for view in scoped_plan.views] == [
         "artist_a/homura/st_sfw/standing",
     ]
-    assert Path(scoped_export.results[0].output_root).parts[-2:] == (
-        "_imports",
-        first_import.import_id,
-    )
+    assert Path(scoped_export.results[0].output_root).parts[-1] == "first"
+
+
+def test_export_scope_reuses_name_for_duplicate_source_imports():
+    class SourceRepository:
+        def import_sources(self):
+            return [
+                ("first", r"E:\selected\合_20260728.nvpls"),
+                ("second", r"E:\selected\合_20260728.nvpls"),
+            ]
+
+    repository = SourceRepository()
+
+    assert _export_scope_name(repository, "first") == "合_20260728"
+
+
+def test_export_scope_disambiguates_different_sources_with_same_name():
+    class SourceRepository:
+        def import_sources(self):
+            return [
+                ("first", r"E:\one\selected.nvpls"),
+                ("second", r"E:\two\selected.nvpls"),
+            ]
+
+    repository = SourceRepository()
+
+    assert _export_scope_name(repository, "first") == "selected_first"
 
 
 def test_shortcut_export_uses_short_temporary_path(tmp_path: Path, monkeypatch):

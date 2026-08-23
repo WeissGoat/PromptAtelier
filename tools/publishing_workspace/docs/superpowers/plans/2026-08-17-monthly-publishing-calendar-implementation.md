@@ -4,7 +4,7 @@
 
 **Goal:** 在 Publishing Workspace 中增加一个独立的月度投稿编排层，支持手工月历、散图与已有 task 图集、独立 `all/post/cover` 顺序、到期构建和失败重试。
 
-**Architecture:** 新增 `plans/<YYYY-MM>/plan.yaml` 作为日历编排数据，MonthlyPlan 不修改 Catalog 和既有 task。`ScheduleService` 负责编辑和锁定，`AssetSearchService` 负责按 import、节点和 `classify.yaml` 搜索，`SubmissionExecutor` 将 task 或散图选择转换为现有 PackageBuilder 输入，未来通过 Notifier/Publisher 扩展提醒和 Pixiv 发布。
+**Architecture:** 新增 `plans/<YYYY-MM>/plan.yaml` 作为日历编排数据，MonthlyPlan 不修改 Catalog 和既有 task。`ScheduleService` 负责编辑，并保留 `lock/unlock` 作为旧调用方兼容入口；月份首次读取时自动创建唯一默认计划。`AssetSearchService` 负责按 import、节点和 `classify.yaml` 搜索，`SubmissionExecutor` 将 task 或散图选择转换为现有 PackageBuilder 输入，未来通过 Notifier/Publisher 扩展提醒和 Pixiv 发布。
 
 **Tech Stack:** Python 3.11、Pydantic v2、PyYAML、SQLite Catalog、argparse、FastAPI + Uvicorn、原生 HTML/CSS/JavaScript。
 
@@ -14,7 +14,7 @@
 - 月历数据放在 workspace 根目录的 `plans/`，不放入 `tasks/<task_id>/`。
 - 不修改公共 Catalog 中的原图、Reader 结果和节点元数据。
 - 不强制要求 `post` 是 `all` 的子集，也不强制要求 `cover` 属于 `post`；只记录 warning。
-- 散图默认 `all = post`、`cover = []`。
+- 散图保存时，如果 `post` 为空且 `all` 有素材，则复制 `all` 到 `post`；如果 `cover` 为空且 `post` 有素材，则使用 `post[0]` 作为封面。
 - 已有 task 在执行时读取最新 selection，并在 execution 记录实际 build_id。
 - 每条 ScheduleEntry 独立失败和重试，不阻塞同一计划的其他 entry。
 - 月历计划只保存有序 `asset_id`，不保存运行时解析出的绝对图片路径。
@@ -147,12 +147,17 @@ class PlanPaths:
 
 - [ ] **Step 1: Write failing model tests**
 
-测试必须覆盖：默认 `draft`、散图默认集合、task/inline 联合类型、非法月份、重复 entry ID、非本月时间。
+测试必须覆盖：默认 `draft`、散图空集合、散图保存边界自动补齐 `post/cover`、task/inline 联合类型、非法月份、重复 entry ID、非本月时间。
 
 ```python
 def test_inline_content_defaults_to_empty_selection_sets():
     content = InlineContent()
     assert content.sets == {"all": [], "post": [], "cover": []}
+
+def test_inline_content_fills_post_and_cover_from_all():
+    content = InlineContent(sets={"all": ["asset-1", "asset-2"], "post": [], "cover": []})
+    assert content.sets["post"] == ["asset-1", "asset-2"]
+    assert content.sets["cover"] == ["asset-1"]
 
 def test_plan_rejects_entry_outside_month():
     with pytest.raises(ValueError, match="scheduled_at"):
@@ -237,8 +242,8 @@ class ScheduleService:
 - `move_entry_date()` 只替换日期，保留原始小时、分钟和时区。
 - `add_entry()` 和 `update_entry()` 禁止 entry_id 重复。
 - 同一时间多条投稿只写 warning，不抛错。
-- `lock()` 校验 task/asset 引用、月份和 `post` 非空；`all`/`cover` 关系只 warning。
-- `locked` 计划不允许普通编辑，必须先 `unlock()`。
+- `lock()` 作为兼容入口校验 task/asset 引用、月份和 `post` 非空，并把状态写成 `locked`；`all`/`cover` 关系只 warning。
+- `draft` 和 `locked` 都允许新增、修改、删除和执行；`locked` 不再是编辑或执行门槛。
 - 该服务不实现“复制投稿”。
 
 - [ ] **Step 1: Write failing service tests**
@@ -253,11 +258,11 @@ def test_move_entry_date_preserves_time(tmp_path):
     )
     assert plan.entries[0].scheduled_at.isoformat() == "2026-09-08T20:00:00+08:00"
 
-def test_locked_plan_rejects_edit(tmp_path):
+def test_locked_plan_remains_editable(tmp_path):
     service = ready_plan_service(tmp_path)
     service.lock(tmp_path, "2026-09")
-    with pytest.raises(PlanLockedError):
-        service.delete_entry(tmp_path, "2026-09", "entry-1")
+    plan = service.delete_entry(tmp_path, "2026-09", "entry-1")
+    assert plan.entries == []
 ```
 
 - [ ] **Step 2: Run and observe failure**
@@ -461,7 +466,7 @@ class SubmissionExecutor:
 
 实现规则：
 
-- 仅扫描 `locked` 计划和 `scheduled_at <= now` 的 entry。
+- 扫描所有 `draft` 或 `locked` 计划中的 `scheduled_at <= now` entry；`locked` 只保留为旧数据和旧 API 的状态标记。
 - 幂等键为 `sha256(plan_id + entry_id + str(plan.revision) + scheduled_at.isoformat())`。
 - 已有 `completed` execution 不重复 build；失败 execution 只有显式 retry 才再次执行。
 - task entry 使用最新 task selection；inline entry 使用 materializer。
@@ -474,12 +479,12 @@ class SubmissionExecutor:
 
 ```python
 def test_run_due_continues_after_one_entry_fails(tmp_path):
-    plan = locked_plan_with_task_and_broken_task(tmp_path)
+    plan = plan_with_task_and_broken_task(tmp_path)
     records = SubmissionExecutor().run_due(tmp_path, now=plan_time)
     assert [record.status for record in records] == ["failed", "completed"]
 
 def test_run_due_is_idempotent_after_success(tmp_path):
-    create_locked_ready_plan(tmp_path)
+    create_ready_plan(tmp_path)
     first = SubmissionExecutor().run_due(tmp_path, now=plan_time)
     second = SubmissionExecutor().run_due(tmp_path, now=plan_time)
     assert len(first) == 1
@@ -531,7 +536,7 @@ publishing-workspace schedule retry ROOT MONTH ENTRY_ID
 publishing-workspace schedule status ROOT MONTH
 ```
 
-CLI 输出统一 JSON；错误返回非零退出码并输出 `code`、`message`。不增加 `--auto`、`--copy-entry` 或类似参数。
+CLI 输出统一 JSON；错误返回非零退出码并输出 `code`、`message`。不增加 `--auto`、`--copy-entry` 或类似参数。`schedule create` 仅保留为旧 CLI 兼容入口；正常读取不存在月份时由 `schedule show`/Web API 自动创建默认计划。
 
 - [ ] **Step 1: Add failing CLI tests**
 
@@ -633,7 +638,7 @@ git commit -m "feat: add monthly schedule web api"
 
 UI 必须实现：
 
-- 月份切换、跳转月份和当前锁定状态。
+- 月份切换、跳转月份和当前计划状态（`locked` 仅作为兼容状态展示）。
 - 默认空日历、同一天多个时间槽。
 - workspace import 选择。
 - artist、character、action_group、action 模糊搜索。
@@ -671,7 +676,7 @@ const state = {
 
 - [ ] **Step 2: Connect real API and add UI smoke business test**
 
-启动本地 API，使用浏览器验证：创建空计划、加入两张图、建立同日两个时间槽、拖拽改日期、独立调整 post 顺序、重新加载后 revision 和顺序保持。
+启动本地 API，使用浏览器验证：打开不存在月份自动创建默认计划、加入两张图、建立同日两个时间槽、拖拽改日期、独立调整 post 顺序、重新加载后 revision 和顺序保持；页面不提供创建空计划或锁定计划按钮。
 
 - [ ] **Step 3: Commit UI**
 

@@ -83,6 +83,25 @@ def test_run_due_continues_after_one_entry_fails(tmp_path: Path):
     assert (tmp_path / "tasks" / "good-task" / "builds").is_dir()
 
 
+def test_run_due_executes_draft_plan(tmp_path: Path):
+    init_workspace(tmp_path)
+    create_task(tmp_path, "draft-task")
+    service = ScheduleService()
+    service.create_plan(tmp_path, "2026-09")
+    service.add_entry(
+        tmp_path,
+        "2026-09",
+        entry("draft-entry", "draft-task", "2026-09-05T20:00:00+08:00"),
+    )
+
+    records = SubmissionExecutor().run_due(
+        tmp_path,
+        now=datetime.fromisoformat("2026-09-05T22:00:00+08:00"),
+    )
+
+    assert [record.status for record in records] == ["completed"]
+
+
 def test_run_due_is_idempotent_after_success(tmp_path: Path):
     init_workspace(tmp_path)
     create_task(tmp_path, "good-task")

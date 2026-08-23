@@ -109,9 +109,24 @@ class SelectionValidator:
         return warnings
 
 
+_FILE_SHA256_CACHE: dict[tuple[str, int, int], str] = {}
+
+
 def _sha256(path: Path) -> str:
+    try:
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        cached = _FILE_SHA256_CACHE.get(key)
+        if cached is not None:
+            return cached
+    except OSError:
+        key = None
+
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()
+    res = digest.hexdigest()
+    if key is not None:
+        _FILE_SHA256_CACHE[key] = res
+    return res

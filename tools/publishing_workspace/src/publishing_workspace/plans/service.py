@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 
 class PlanLockedError(RuntimeError):
-    """已锁定计划不能直接编辑。"""
+    """保留给旧调用方的兼容异常。"""
 
 
 class PlanValidationError(ValueError):
@@ -44,7 +44,29 @@ class ScheduleService:
 
     def get_plan(self, root: str | Path, month: str) -> MonthlyPlan:
         paths, _ = load_workspace(root)
-        return self.repository.load(PlanPaths.from_workspace(paths, month))
+        return self.get_or_create_plan(root, month)
+
+    def get_or_create_plan(
+        self,
+        root: str | Path,
+        month: str,
+        *,
+        default_import_id: str | None = None,
+    ) -> MonthlyPlan:
+        """读取月份计划；不存在时创建唯一的默认计划。"""
+        paths, _ = load_workspace(root)
+        plan_paths = PlanPaths.from_workspace(paths, month)
+        try:
+            return self.repository.load(plan_paths)
+        except FileNotFoundError:
+            try:
+                return self.repository.create(
+                    plan_paths,
+                    default_import_id=default_import_id,
+                )
+            except FileExistsError:
+                # 多个页面首次打开同一个月份时，允许其中一个请求赢得创建竞争。
+                return self.repository.load(plan_paths)
 
     def add_entry(
         self,
@@ -202,8 +224,8 @@ class ScheduleService:
 
     @staticmethod
     def _ensure_editable(plan: MonthlyPlan) -> None:
-        if plan.status == "locked":
-            raise PlanLockedError(f"月度计划已锁定：{plan.plan_id}")
+        # locked 仅保留为旧数据和旧 API 的状态标记，不再作为编辑门槛。
+        return None
 
     @staticmethod
     def _ensure_revision(plan: MonthlyPlan, expected_revision: int | None) -> None:

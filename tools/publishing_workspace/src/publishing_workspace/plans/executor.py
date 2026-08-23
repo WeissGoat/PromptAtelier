@@ -55,8 +55,6 @@ class SubmissionExecutor:
             except (OSError, UnicodeError, ValueError) as exc:
                 logger.error("到期扫描跳过损坏计划：%s：%s", plan_root, exc)
                 continue
-            if plan.status != "locked":
-                continue
             for entry in sorted(plan.entries, key=lambda item: item.scheduled_at):
                 if not entry.execution.build_on_due or entry.scheduled_at > current_time:
                     continue
@@ -103,8 +101,6 @@ class SubmissionExecutor:
         paths, _ = load_workspace(root)
         plan_paths = PlanPaths.from_workspace(paths, month)
         plan = self.repository.load(plan_paths)
-        if plan.status != "locked":
-            raise ValueError("只有 locked 计划可以重试")
         entry = _find_entry(plan, entry_id)
         previous = self.repository.list_executions(plan_paths, entry_id)
         if not previous or previous[-1].status != "failed":

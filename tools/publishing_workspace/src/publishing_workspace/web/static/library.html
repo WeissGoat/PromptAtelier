@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Publishing Workspace 素材库与投稿</title>
-  <link rel="stylesheet" href="/library.css?v=20260822-2">
+  <link rel="stylesheet" href="/library.css?v=20260823-15">
 </head>
 <body>
   <main class="app-shell">
@@ -56,6 +56,26 @@
           <button id="search-assets-btn" class="icon-button search-button" type="button" title="搜索素材" aria-label="搜索素材">&#8981;</button>
         </div>
 
+        <!-- 收藏与投稿状态筛选（三态分段选择器） -->
+        <div class="quick-filter-section">
+          <div class="quick-filter-row" data-filter-type="favorite">
+            <span class="quick-filter-label">⭐ 收藏</span>
+            <div class="segmented-control">
+              <button class="segment-btn active" type="button" data-val="all">全部</button>
+              <button class="segment-btn" type="button" data-val="favorited">已收藏</button>
+              <button class="segment-btn" type="button" data-val="unfavorited">未收藏</button>
+            </div>
+          </div>
+          <div class="quick-filter-row" data-filter-type="posted">
+            <span class="quick-filter-label">📮 投稿</span>
+            <div class="segmented-control">
+              <button class="segment-btn active" type="button" data-val="all">全部</button>
+              <button class="segment-btn" type="button" data-val="posted">已投稿</button>
+              <button class="segment-btn" type="button" data-val="unposted">未投稿</button>
+            </div>
+          </div>
+        </div>
+
         <!-- 当前已生效的筛选标签 -->
         <div id="active-filter-chips" class="active-filter-chips" hidden>
           <div class="active-chips-header">
@@ -100,26 +120,18 @@
           </div>
         </div>
 
-        <!-- Classify.yaml 属性二次过滤 -->
+        <!-- Classify.yaml 属性二次过滤（垂直手风琴可折叠展开） -->
         <div class="facet-section">
           <div class="facet-heading">
             <div class="facet-heading-main">
               <strong>🏷️ 属性维度二次过滤</strong>
-              <small class="facet-supported-fields">按 classify.yaml 标签精准筛选</small>
+              <small class="facet-supported-fields">点击各维度按 classify.yaml 标签精准筛选</small>
             </div>
             <button id="clear-facets-btn" class="text-button" type="button" hidden>清空属性</button>
           </div>
 
-          <!-- 分类维度选择 Tabs -->
-          <div id="facet-category-tabs" class="facet-category-tabs"></div>
-
-          <!-- 当前分类维度的可选标签面板 -->
-          <div id="facet-tags-panel" class="facet-tags-panel">
-            <div class="facet-search-wrap">
-              <input id="facet-search-input" class="field-control facet-search-input" type="text" placeholder="快速过滤当前维度标签..." autocomplete="off">
-            </div>
-            <div id="facet-chips-container" class="facet-chips-container"></div>
-          </div>
+          <!-- 垂直手风琴折叠面板容器 -->
+          <div id="facet-accordion" class="facet-accordion"></div>
         </div>
       </aside>
 
@@ -135,6 +147,20 @@
             <button id="select-all-visible-btn" class="secondary-button compact-button" type="button">全选当前</button>
             <button id="clear-selection-btn" class="text-button" type="button">清选</button>
             <button id="add-to-set-btn" class="primary-button compact-button" type="button">加入当前集合</button>
+          </div>
+        </div>
+
+        <!-- 顶部醒目全局快照加载进度横幅 -->
+        <div id="gallery-progress-banner" class="gallery-progress-banner hidden">
+          <div class="gallery-progress-info">
+            <div class="gallery-progress-title-wrap">
+              <span class="gallery-progress-spinner"></span>
+              <strong id="gallery-progress-title">正在流式加载快照素材...</strong>
+            </div>
+            <span id="gallery-progress-count" class="gallery-progress-count">0 / 0 (0%)</span>
+          </div>
+          <div class="gallery-progress-track">
+            <div id="gallery-progress-fill" class="gallery-progress-fill" style="width: 0%;"></div>
           </div>
         </div>
 
@@ -177,16 +203,38 @@
           <label class="field-label" for="submission-title">投稿标题</label>
           <input id="submission-title" class="field-control" type="text" required placeholder="例如：Homura 动作系列精选">
 
+          <!-- 📅 排期发布时间设置（日历同步） -->
+          <div class="schedule-input-card">
+            <div class="schedule-card-header">
+              <label class="field-label" for="submission-date">📅 排期发布时间 (同步日历)</label>
+              <button id="clear-schedule-btn" class="text-button" type="button" style="font-size:11px;">清除排期</button>
+            </div>
+            <div class="schedule-controls-row">
+              <input id="submission-date" class="field-control schedule-date-input" type="date">
+              <input id="submission-time" class="field-control schedule-time-input" type="time" value="20:00">
+            </div>
+            <div class="schedule-quick-presets">
+              <span class="preset-label">快捷:</span>
+              <button type="button" class="preset-chip" data-offset-days="0">今天</button>
+              <button type="button" class="preset-chip" data-offset-days="1">明天</button>
+              <button type="button" class="preset-chip" data-offset-days="2">后天</button>
+              <button type="button" class="preset-chip" data-offset-days="7">下周</button>
+            </div>
+          </div>
+
           <div id="submission-meta-row" class="submission-meta-row">
             <span id="submission-task-badge" class="meta-badge">未生成任务</span>
             <span id="submission-rev-badge" class="meta-badge">Rev 1</span>
           </div>
 
           <div class="set-tabs-wrap">
-            <div class="set-tabs" role="tablist" aria-label="选择集合">
-              <button id="tab-all" class="set-tab active" type="button" data-set="all">all <span id="badge-count-all">0</span></button>
-              <button id="tab-post" class="set-tab" type="button" data-set="post">post <span id="badge-count-post">0</span></button>
-              <button id="tab-cover" class="set-tab" type="button" data-set="cover">cover <span id="badge-count-cover">0</span></button>
+            <div class="set-tabs-header-row">
+              <div class="set-tabs" role="tablist" aria-label="选择集合">
+                <button id="tab-all" class="set-tab active" type="button" data-set="all">all <span id="badge-count-all">0</span></button>
+                <button id="tab-post" class="set-tab" type="button" data-set="post">post <span id="badge-count-post">0</span></button>
+                <button id="tab-cover" class="set-tab" type="button" data-set="cover">cover <span id="badge-count-cover">0</span></button>
+              </div>
+              <button id="clear-current-set-btn" class="text-button compact-clear-set" type="button" title="清空当前集合">清空当前集</button>
             </div>
             <small class="helper-text">post 默认自动补齐 all，cover 默认取 post[0]。</small>
           </div>
@@ -229,12 +277,114 @@
     </section>
   </main>
 
+  <!-- 大图与图片详情 Lightbox Modal -->
   <dialog id="preview-dialog" class="preview-dialog">
-    <button id="close-preview" class="dialog-close" type="button" title="关闭预览" aria-label="关闭预览">&#10005;</button>
-    <img id="preview-image" alt="素材预览">
-    <p id="preview-caption"></p>
+    <div class="lightbox-container">
+      <!-- 顶部标题与操作栏 -->
+      <header class="lightbox-header">
+        <div class="lightbox-title-group">
+          <h3 id="lightbox-filename" class="lightbox-filename">素材名称</h3>
+          <p id="lightbox-filepath" class="lightbox-filepath" title="点击复制完整路径"></p>
+        </div>
+        <div class="lightbox-header-actions">
+          <span id="lightbox-counter" class="lightbox-counter">1 / 1</span>
+          <button id="close-preview" class="lightbox-close-btn" type="button" title="关闭 (Esc)">&#10005;</button>
+        </div>
+      </header>
+
+      <!-- 主体分栏 -->
+      <div class="lightbox-body">
+        <!-- 左侧大图展示区 -->
+        <div class="lightbox-image-area">
+          <button id="lightbox-prev-btn" class="lightbox-nav-btn prev" type="button" title="上一张 (←)">&#10094;</button>
+          <div class="lightbox-img-wrapper">
+            <img id="preview-image" alt="素材大图预览">
+          </div>
+          <button id="lightbox-next-btn" class="lightbox-nav-btn next" type="button" title="下一张 (→)">&#10095;</button>
+        </div>
+
+        <!-- 右侧元数据与定制详情侧栏 -->
+        <aside class="lightbox-sidebar">
+          <!-- 快捷操作栏（收藏、投稿状态、打开目录） -->
+          <div class="lightbox-action-card">
+            <button id="lightbox-favorite-btn" class="lightbox-btn" type="button">
+              <span class="btn-icon">⭐</span>
+              <span id="lightbox-fav-label" class="btn-label">收藏</span>
+            </button>
+            <button id="lightbox-posted-btn" class="lightbox-btn" type="button">
+              <span class="btn-icon">📮</span>
+              <span id="lightbox-posted-label" class="btn-label">标记已投稿</span>
+            </button>
+            <button id="lightbox-reveal-btn" class="lightbox-btn" type="button" title="在 Windows 资源管理器中高亮选中文件">
+              <span class="btn-icon">📂</span>
+              <span class="btn-label">打开所在文件夹</span>
+            </button>
+          </div>
+
+          <!-- 详情滚动容器 -->
+          <div class="lightbox-details-scroll">
+            <!-- 基础图像与生成参数 -->
+            <div class="lightbox-meta-section">
+              <h4 class="lightbox-section-title">📊 图像与生成参数</h4>
+              <div class="lightbox-meta-grid">
+                <div class="meta-row"><span class="meta-k">尺寸</span><span id="lb-meta-dimensions" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">文件大小</span><span id="lb-meta-size" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">修改时间</span><span id="lb-meta-mtime" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">Seed</span><span id="lb-meta-seed" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">Model</span><span id="lb-meta-model" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">Sampler</span><span id="lb-meta-sampler" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">Steps</span><span id="lb-meta-steps" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">Scale</span><span id="lb-meta-scale" class="meta-v">-</span></div>
+                <div class="meta-row"><span class="meta-k">Noise schedule</span><span id="lb-meta-noise" class="meta-v">-</span></div>
+              </div>
+            </div>
+
+            <!-- 业务节点与角色 (Publishing 专属) -->
+            <div class="lightbox-meta-section">
+              <h4 class="lightbox-section-title">🏷️ 业务节点</h4>
+              <div class="lightbox-nodes-list">
+                <div class="node-tag-item"><span class="node-tag-role">🎨 画风</span><strong id="lb-node-artist" class="node-tag-val">-</strong></div>
+                <div class="node-tag-item"><span class="node-tag-role">👤 角色</span><strong id="lb-node-character" class="node-tag-val">-</strong></div>
+                <div class="node-tag-item"><span class="node-tag-role">📁 动作组</span><strong id="lb-node-group" class="node-tag-val">-</strong></div>
+                <div class="node-tag-item"><span class="node-tag-role">⚡ 动作</span><strong id="lb-node-action" class="node-tag-val">-</strong></div>
+              </div>
+            </div>
+
+            <!-- Classify 属性标签 -->
+            <div id="lb-facets-section" class="lightbox-meta-section">
+              <h4 class="lightbox-section-title">✨ Classify 属性标签</h4>
+              <div id="lb-facets-list" class="lb-facets-list"></div>
+            </div>
+
+            <!-- Prompt 正向提示词 -->
+            <div class="lightbox-meta-section">
+              <div class="section-title-row">
+                <h4 class="lightbox-section-title">📝 Prompt</h4>
+                <button id="lb-copy-prompt" class="meta-copy-btn" type="button">复制</button>
+              </div>
+              <div id="lb-prompt-box" class="lightbox-textbox"></div>
+            </div>
+
+            <!-- Negative 负向提示词 -->
+            <div class="lightbox-meta-section">
+              <div class="section-title-row">
+                <h4 class="lightbox-section-title">🚫 Negative</h4>
+                <button id="lb-copy-neg" class="meta-copy-btn" type="button">复制</button>
+              </div>
+              <div id="lb-negative-box" class="lightbox-textbox"></div>
+            </div>
+
+            <!-- 完整 PNG Parameters 折叠面板 -->
+            <details class="lightbox-raw-details">
+              <summary class="lightbox-raw-summary">▶ 完整 PNG Parameters / Text</summary>
+              <pre id="lb-raw-parameters" class="lightbox-raw-pre"></pre>
+            </details>
+          </div>
+        </aside>
+      </div>
+    </div>
   </dialog>
 
-  <script src="/library.js?v=20260822-2" defer></script>
+  <script src="/library.js?v=20260823-15" defer></script>
 </body>
 </html>

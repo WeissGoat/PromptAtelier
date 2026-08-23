@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 from itertools import product
+from typing import Protocol
 
-from ..models import AssetRecord, ExportPlan, ViewEntry, ViewItem
+from ..models import AssetRecord, ExportPlan, NodeValueProjection, ViewEntry, ViewItem
+
+
+class NodeValueResolver(Protocol):
+    @property
+    def warnings(self) -> list[str]: ...
+
+    def values_for(self, asset: AssetRecord, role: str) -> list[str]: ...
+
+
+class DefaultNodeValueResolver:
+    @property
+    def warnings(self) -> list[str]:
+        return []
+
+    def values_for(self, asset: AssetRecord, role: str) -> list[str]:
+        return asset.node_info.values_for(role)
 
 
 class ClassificationViewBuilder:
@@ -14,12 +31,16 @@ class ClassificationViewBuilder:
         import_id: str | None = None,
         missing_value: str = "unknown",
         skip_missing: bool = False,
+        node_value_resolver: NodeValueResolver | None = None,
     ) -> ExportPlan:
+        resolver = node_value_resolver or DefaultNodeValueResolver()
         views: dict[tuple[str, ...], list[ViewItem]] = {}
         for asset in assets:
-            projection = asset.node_projection(
+            projection = _project_asset(
+                asset,
                 hierarchy,
                 missing_value=missing_value,
+                resolver=resolver,
             )
             if skip_missing and projection.has_missing:
                 continue
@@ -41,7 +62,46 @@ class ClassificationViewBuilder:
                 key=lambda item: (item.order, _natural_text_key(item.display_name)),
             )
             entries.append(ViewEntry(path=list(path), items=sorted_items))
-        return ExportPlan(import_id=import_id, hierarchy=hierarchy, views=entries)
+        return ExportPlan(
+            import_id=import_id,
+            hierarchy=hierarchy,
+            views=entries,
+            warnings=resolver.warnings,
+        )
+
+
+def _project_asset(
+    asset: AssetRecord,
+    hierarchy: list[str],
+    *,
+    missing_value: str,
+    resolver: NodeValueResolver,
+) -> NodeValueProjection:
+    normalized_hierarchy = [
+        str(role).strip()
+        for role in hierarchy
+        if str(role).strip()
+    ]
+    normalized_missing = str(missing_value or "").strip()
+    if not normalized_missing:
+        raise ValueError("missing_value 不能为空")
+
+    values: dict[str, list[str]] = {}
+    missing_roles: list[str] = []
+    for role in normalized_hierarchy:
+        role_values = resolver.values_for(asset, role)
+        if role_values:
+            values[role] = role_values
+        else:
+            values[role] = [normalized_missing]
+            missing_roles.append(role)
+
+    return NodeValueProjection(
+        hierarchy=normalized_hierarchy,
+        missing_value=normalized_missing,
+        values=values,
+        missing_roles=missing_roles,
+    )
 
 
 def _natural_text_key(value: str) -> tuple[object, ...]:
