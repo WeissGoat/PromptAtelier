@@ -38,18 +38,22 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
 
       const requestBody = {
         render_request: {
-          prompt: {
-            positive: variant.prompt,
-            negative: template.negative,
+          backend: "novelai",
+          prompt: variant.prompt,
+          negative_prompt: template.negative,
+          model: template.model || "nai-diffusion-3",
+          seed,
+          size: {
+            width: template.width,
+            height: template.height,
           },
-          parameters: {
+          params: {
+            seed,
             width: template.width,
             height: template.height,
             steps: template.steps,
             scale: template.scale,
-            seed,
             sampler: template.sampler || "k_euler",
-            model: template.model || "nai-diffusion-3",
           },
           meta: {
             source: "compare_studio",

@@ -65,7 +65,10 @@ describe("useCompareBatchRunner", () => {
       "/generate",
       expect.objectContaining({
         render_request: expect.objectContaining({
-          parameters: expect.objectContaining({ seed: 123456 }),
+          backend: "novelai",
+          prompt: "1girl, solo, smiling",
+          seed: 123456,
+          size: { width: 512, height: 512 },
         }),
       }),
     );
