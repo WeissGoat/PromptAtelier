@@ -16,7 +16,7 @@ from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
-from .routes import batch, compose, generate, health, jobs, node_pools, nodes, results
+from .routes import batch, compose, generate, health, image_meta, jobs, node_pools, nodes, results
 from .services.batch_workspace import BatchWorkspace
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
@@ -98,6 +98,7 @@ def create_app(
     app.include_router(generate.router, prefix="/api", tags=["generate"])
     app.include_router(results.router, prefix="/api", tags=["results"])
     app.include_router(batch.router, prefix="/api", tags=["batch"])
+    app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
     return app
 
 

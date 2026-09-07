@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.115",
     "Pillow>=10.0",
     "pydantic>=2.6",
+    "python-multipart>=0.0.32",
     "PyYAML>=6.0",
     "requests>=2.31",
     "uvicorn[standard]>=0.30",
