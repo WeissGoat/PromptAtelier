@@ -1,7 +1,7 @@
-import { Images, Layers3, PanelLeft, Workflow } from "lucide-react";
+import { GitCompare, Images, Layers3, PanelLeft, Workflow } from "lucide-react";
 import type { ReactNode } from "react";
 
-export type PageKey = "custom" | "batch" | "results";
+export type PageKey = "custom" | "batch" | "results" | "compare";
 
 type LayoutProps = {
   page: PageKey;
@@ -13,6 +13,7 @@ const nav = [
   { key: "custom", label: "Custom", icon: PanelLeft },
   { key: "batch", label: "Batch", icon: Workflow },
   { key: "results", label: "Results", icon: Images },
+  { key: "compare", label: "Compare", icon: GitCompare },
 ] as const;
 
 export function Layout({ page, onPageChange, children }: LayoutProps) {

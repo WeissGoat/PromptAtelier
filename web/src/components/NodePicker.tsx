@@ -9,6 +9,7 @@ type NodePickerProps = {
   label: string;
   role: NodeRole;
   value: string;
+  displayValue?: string;
   placeholder: string;
   onSelect: (node: NodeSummary) => void;
   onClear: () => void;
@@ -16,7 +17,7 @@ type NodePickerProps = {
 
 const PAGE_SIZE = 20;
 
-export function NodePicker({ label, role, value, placeholder, onSelect, onClear }: NodePickerProps) {
+export function NodePicker({ label, role, value, displayValue, placeholder, onSelect, onClear }: NodePickerProps) {
   const pickerId = useId().replace(/:/g, "");
   const resultsId = `${role}-node-results-${pickerId}`;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -32,9 +33,9 @@ export function NodePicker({ label, role, value, placeholder, onSelect, onClear 
   const [nextOffset, setNextOffset] = useState(0);
   const [error, setError] = useState("");
   const [loadMoreError, setLoadMoreError] = useState("");
-  const [text, setText] = useState(value);
+  const [text, setText] = useState(displayValue ?? value);
 
-  useEffect(() => setText(value), [value]);
+  useEffect(() => setText(displayValue ?? value), [displayValue, value]);
 
   useEffect(() => {
     if (!open) return;

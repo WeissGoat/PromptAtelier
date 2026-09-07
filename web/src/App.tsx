@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Layout, type PageKey } from "./components/Layout";
 import { BatchStudio } from "./pages/BatchStudio";
+import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
 import { ResultsGallery } from "./pages/ResultsGallery";
 import { CustomWorkspaceProvider } from "./workspace/CustomWorkspaceProvider";
@@ -13,6 +14,7 @@ export function App() {
     custom: <CustomStudio />,
     batch: <BatchStudio />,
     results: <ResultsGallery />,
+    compare: <CompareStudio />,
   }[page];
 
   return (
