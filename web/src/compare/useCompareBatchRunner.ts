@@ -6,6 +6,30 @@ import type { BaseTemplate, PromptVariant } from "./types";
 
 const terminalJobStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
 
+export function normalizeNovelAIModel(raw?: string): string {
+  if (!raw) return "nai-diffusion-4-5-full";
+  const lower = raw.trim().toLowerCase();
+  if (lower.includes("furry")) return "nai-diffusion-furry-3";
+  if (lower.includes("4.5") || lower.includes("4-5") || lower.includes("v4.5")) {
+    return lower.includes("curated") ? "nai-diffusion-4-5-curated" : "nai-diffusion-4-5-full";
+  }
+  if (
+    lower.includes("v4") ||
+    lower.includes("4-full") ||
+    lower.includes("diffusion 4") ||
+    lower.includes("diffusion-4")
+  ) {
+    return lower.includes("curated") ? "nai-diffusion-4-curated" : "nai-diffusion-4-full";
+  }
+  if (lower.includes("v3") || lower.includes("diffusion 3") || lower.includes("diffusion-3")) {
+    return "nai-diffusion-3";
+  }
+  if (lower.includes("safe")) return "safe-diffusion";
+  if (lower.includes("v2")) return "nai-diffusion-2";
+  if (lower.startsWith("nai-diffusion")) return lower;
+  return "nai-diffusion-4-5-full";
+}
+
 type RunnerOptions = {
   concurrency?: number;
   pollIntervalMs?: number;
@@ -41,7 +65,7 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
           backend: "novelai",
           prompt: variant.prompt,
           negative_prompt: template.negative,
-          model: template.model || "nai-diffusion-3",
+          model: normalizeNovelAIModel(template.model),
           seed,
           size: {
             width: template.width,

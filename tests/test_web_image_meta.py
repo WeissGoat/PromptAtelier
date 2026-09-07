@@ -142,3 +142,15 @@ class WebImageMetaTest(TestCase):
         response = self.client.post("/api/image-meta/inspect", json={})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "missing_image_source")
+
+    def test_inspect_image_meta_normalizes_v45_source_model(self):
+        png_path = self.tmp_path / "v45_source.png"
+        png_info = PngInfo()
+        png_info.add_text("Source", "NovelAI Diffusion V4.5 4BDE2A90")
+        img = Image.new("RGB", (64, 64), "white")
+        img.save(png_path, format="PNG", pnginfo=png_info)
+
+        response = self.client.post("/api/image-meta/inspect", json={"path": str(png_path)})
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["model"], "nai-diffusion-4-5-full")

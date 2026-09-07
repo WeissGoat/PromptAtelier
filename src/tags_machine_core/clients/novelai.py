@@ -99,6 +99,60 @@ class FixedIntervalRetry(Retry):
         return float(self.retry_interval)
 
 
+VALID_NOVELAI_MODELS = {
+    "nai-diffusion-4-5-full",
+    "nai-diffusion-4-5-curated",
+    "nai-diffusion-4-full",
+    "nai-diffusion-4-curated",
+    "nai-diffusion-3",
+    "nai-diffusion-furry-3",
+    "safe-diffusion",
+    "nai-diffusion",
+    "nai-diffusion-2",
+}
+
+DEFAULT_NOVELAI_MODEL = "nai-diffusion-4-5-full"
+
+
+def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELAI_MODEL) -> str:
+    if not raw_model:
+        return default
+
+    cleaned = str(raw_model).strip()
+    if not cleaned:
+        return default
+
+    lower = cleaned.lower()
+
+    if lower in VALID_NOVELAI_MODELS:
+        return lower
+
+    if "furry" in lower:
+        return "nai-diffusion-furry-3"
+
+    if "4.5" in lower or "4-5" in lower or "v4.5" in lower:
+        if "curated" in lower:
+            return "nai-diffusion-4-5-curated"
+        return "nai-diffusion-4-5-full"
+
+    if "v4" in lower or "diffusion 4" in lower or "diffusion-4" in lower or "4-full" in lower or "4-curated" in lower:
+        if "curated" in lower:
+            return "nai-diffusion-4-curated"
+        return "nai-diffusion-4-full"
+
+    if "v3" in lower or "diffusion 3" in lower or "diffusion-3" in lower:
+        return "nai-diffusion-3"
+
+    if "safe" in lower:
+        return "safe-diffusion"
+    if "v2" in lower or "diffusion-2" in lower:
+        return "nai-diffusion-2"
+    if "v1" in lower:
+        return "nai-diffusion"
+
+    return default
+
+
 @dataclass(frozen=True)
 class NovelAIImage:
     filename: str
@@ -117,7 +171,7 @@ class NovelAIClient:
     def build_payload(self, request: RenderRequest) -> dict[str, Any]:
         return {
             "input": request.prompt,
-            "model": request.model,
+            "model": normalize_novelai_model(request.model),
             "action": request.meta.get("action", "generate"),
             "parameters": self._request_parameters(request),
         }

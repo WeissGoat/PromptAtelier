@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from tags_machine_core.clients.novelai import normalize_novelai_model
 from tags_machine_core.verification.image_params import (
     read_image_parameters,
     read_png_dimensions,
@@ -40,7 +41,8 @@ def _parse_meta_dict(
     steps = params_dict.get("steps")
     scale = params_dict.get("scale")
     sampler = params_dict.get("sampler")
-    model = params_dict.get("model") or png_text.get("Source")
+    raw_model = params_dict.get("model") or png_text.get("Source")
+    model = normalize_novelai_model(raw_model) if raw_model else None
 
     if not prompt and "parameters" in png_text and isinstance(png_text["parameters"], str):
         sd_text = png_text["parameters"]

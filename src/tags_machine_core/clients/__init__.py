@@ -5,7 +5,14 @@ from .comfyui import (
     ComfyUIImage,
     ComfyUIPromptResult,
 )
-from .novelai import NovelAIClient, NovelAIClientError, NovelAIImage
+from .novelai import (
+    DEFAULT_NOVELAI_MODEL,
+    VALID_NOVELAI_MODELS,
+    NovelAIClient,
+    NovelAIClientError,
+    NovelAIImage,
+    normalize_novelai_model,
+)
 from .gateway_novelai import GatewayNovelAIRawClient
 from .sd import SDClient, SDClientError, SDImage
 
@@ -22,4 +29,7 @@ __all__ = [
     "SDClient",
     "SDClientError",
     "SDImage",
+    "DEFAULT_NOVELAI_MODEL",
+    "VALID_NOVELAI_MODELS",
+    "normalize_novelai_model",
 ]

@@ -19,7 +19,7 @@ export const defaultBaseTemplate: BaseTemplate = {
   steps: 28,
   scale: 5.0,
   sampler: "k_euler",
-  model: "nai-diffusion-3",
+  model: "nai-diffusion-4-5-full",
 };
 
 function makeId(prefix: string): string {

@@ -127,6 +127,48 @@ class NovelAIClientTest(unittest.TestCase):
         self.assertIn("bad request", ctx.exception.response_text)
         self.assertLess(len(ctx.exception.sanitized_payload["parameters"]["reference_image_multiple"][0]), 200)
 
+    def test_normalize_novelai_model(self):
+        from tags_machine_core.clients.novelai import normalize_novelai_model
+
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V4.5 4BDE2A90"),
+            "nai-diffusion-4-5-full",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V4.5 Curated 4BDE2A90"),
+            "nai-diffusion-4-5-curated",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V4.0"),
+            "nai-diffusion-4-full",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V3"),
+            "nai-diffusion-3",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion Furry V3"),
+            "nai-diffusion-furry-3",
+        )
+        self.assertEqual(
+            normalize_novelai_model("nai-diffusion-4-5-full"),
+            "nai-diffusion-4-5-full",
+        )
+        self.assertEqual(
+            normalize_novelai_model(None),
+            "nai-diffusion-4-5-full",
+        )
+
+    def test_build_payload_normalizes_model_from_png_source(self):
+        client = NovelAIClient(access_token="token")
+        request = RenderRequest(
+            backend="novelai",
+            prompt="test",
+            model="NovelAI Diffusion V4.5 4BDE2A90",
+        )
+        payload = client.build_payload(request)
+        self.assertEqual(payload["model"], "nai-diffusion-4-5-full")
+
 
 if __name__ == "__main__":
     unittest.main()
