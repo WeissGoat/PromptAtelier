@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from tags_machine_core.clients import sanitize_proxy_env
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.execution import execute_render_request
@@ -51,6 +52,7 @@ def create_app(
     generation_executor: GenerationExecutor | None = None,
     config_path: str | Path | None = None,
 ) -> FastAPI:
+    sanitize_proxy_env()
     resolved_config_path = resolve_web_config_path(config_path)
     config = load_config(resolved_config_path)
     app = FastAPI(title="PromptAtelier Web Console", version="0.1.0")

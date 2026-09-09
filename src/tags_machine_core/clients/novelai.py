@@ -243,4 +243,34 @@ class NovelAIClient:
             if key in EMPTY_OPTIONAL_PARAMETER_KEYS and value == []:
                 continue
             parameters[key] = value
+
+        model = normalize_novelai_model(request.model)
+        if "nai-diffusion-4" in model:
+            parameters.setdefault("params_version", 3)
+            if "v4_prompt" not in parameters or not isinstance(parameters.get("v4_prompt"), dict):
+                parameters["v4_prompt"] = {
+                    "caption": {"base_caption": request.prompt, "char_captions": []},
+                    "use_coords": False,
+                    "use_order": True,
+                }
+            else:
+                v4_p = dict(parameters["v4_prompt"])
+                caption = dict(v4_p.get("caption") or {})
+                caption["base_caption"] = request.prompt
+                v4_p["caption"] = caption
+                parameters["v4_prompt"] = v4_p
+
+            if "v4_negative_prompt" not in parameters or not isinstance(parameters.get("v4_negative_prompt"), dict):
+                parameters["v4_negative_prompt"] = {
+                    "caption": {"base_caption": request.negative_prompt or "", "char_captions": []},
+                    "use_coords": False,
+                    "use_order": False,
+                }
+            else:
+                v4_np = dict(parameters["v4_negative_prompt"])
+                caption = dict(v4_np.get("caption") or {})
+                caption["base_caption"] = request.negative_prompt or ""
+                v4_np["caption"] = caption
+                parameters["v4_negative_prompt"] = v4_np
+
         return parameters

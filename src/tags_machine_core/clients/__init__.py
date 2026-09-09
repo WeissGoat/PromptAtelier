@@ -13,7 +13,7 @@ from .novelai import (
     NovelAIImage,
     normalize_novelai_model,
 )
-from .gateway_novelai import GatewayNovelAIRawClient
+from .gateway_novelai import GatewayNovelAIRawClient, sanitize_proxy_env
 from .sd import SDClient, SDClientError, SDImage
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "NovelAIClientError",
     "NovelAIImage",
     "GatewayNovelAIRawClient",
+    "sanitize_proxy_env",
     "SDClient",
     "SDClientError",
     "SDImage",

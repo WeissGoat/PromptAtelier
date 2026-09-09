@@ -19,6 +19,7 @@ from tags_machine_core.clients import (
     NovelAIClient,
     NovelAIImage,
     SDClient,
+    sanitize_proxy_env,
 )
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
@@ -230,6 +231,7 @@ def execute_novelai_generation(
     output_dir: str | Path | None,
     image_format: str,
 ) -> GenerationResult:
+    sanitize_proxy_env()
     access_token = config.novelai.access_token or os.environ.get(config.novelai.access_token_env)
     if not access_token:
         raise RuntimeError(
