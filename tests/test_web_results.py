@@ -234,6 +234,26 @@ class WebResultsTest(TestCase):
             close_fds=True,
         )
 
+    @patch("tags_machine_core.web.routes.results.subprocess.Popen")
+    @patch("tags_machine_core.web.routes.results.sys.platform", "win32")
+    def test_open_image_folder_selects_direct_file_outside_roots(self, popen):
+        root = self.tmp_path / "outputs"
+        outside = self.tmp_path / "custom_dir" / "outside.png"
+        self._write_png(outside, seed=444)
+        client = TestClient(create_app(result_index=ResultIndex(roots=[root])))
+
+        response = client.post(
+            "/api/results/open-image-folder",
+            json={"path": str(outside)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["opened"])
+        popen.assert_called_once_with(
+            ["explorer.exe", "/select,", str(outside.resolve())],
+            close_fds=True,
+        )
+
     def setUp(self):
         import tempfile
         from pathlib import Path

@@ -60,6 +60,13 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
           ? template.seed
           : Math.floor(Math.random() * 0x1_0000_0000);
 
+      const rawParams = template.raw_parameters ? { ...template.raw_parameters } : {};
+      delete rawParams.prompt;
+      delete rawParams.negative_prompt;
+      delete rawParams.uc;
+      delete rawParams.request_type;
+      delete rawParams.signed_hash;
+
       const requestBody = {
         render_request: {
           backend: "novelai",
@@ -72,12 +79,13 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
             height: template.height,
           },
           params: {
+            ...rawParams,
             seed,
             width: template.width,
             height: template.height,
             steps: template.steps,
             scale: template.scale,
-            sampler: template.sampler || "k_euler",
+            sampler: template.sampler || rawParams.sampler || "k_euler",
           },
           meta: {
             source: "compare_studio",

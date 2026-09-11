@@ -2557,9 +2557,13 @@ button {
   position: absolute;
   bottom: 6px;
   right: 6px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
-.compare-select-btn {
+.compare-select-btn,
+.folder-open-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2571,6 +2575,12 @@ button {
   font-size: 11px;
   cursor: pointer;
   backdrop-filter: blur(4px);
+  transition: all 0.15s ease;
+}
+
+.folder-open-btn:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.6);
 }
 
 .compare-select-btn.selected {

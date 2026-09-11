@@ -109,4 +109,50 @@ describe("useCompareBatchRunner", () => {
     expect(lastUpdate.status).toBe("failed");
     expect(lastUpdate.error).toBe("NovelAI rate limit exceeded");
   });
+
+  it("preserves raw_parameters like noise_schedule and vibe transfer in request params", async () => {
+    const mockPost = vi.fn().mockResolvedValue({
+      id: "job-v4",
+      status: "succeeded",
+      result: { images: [{ path: "outputs/v4.png" }] },
+    });
+
+    const templateWithV4: BaseTemplate = {
+      ...sampleTemplate,
+      raw_parameters: {
+        noise_schedule: "karras",
+        cfg_rescale: 0.7,
+        skip_cfg_above_sigma: 19.0,
+        reference_image_multiple: ["base64_vibe_img"],
+        reference_strength_multiple: [0.15],
+      },
+    };
+
+    const { result } = renderHook(() =>
+      useCompareBatchRunner({
+        post: mockPost,
+        get: vi.fn(),
+        pollIntervalMs: 10,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.runVariant(sampleVariant, templateWithV4, vi.fn());
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/generate",
+      expect.objectContaining({
+        render_request: expect.objectContaining({
+          params: expect.objectContaining({
+            noise_schedule: "karras",
+            cfg_rescale: 0.7,
+            skip_cfg_above_sigma: 19.0,
+            reference_image_multiple: ["base64_vibe_img"],
+            reference_strength_multiple: [0.15],
+          }),
+        }),
+      }),
+    );
+  });
 });

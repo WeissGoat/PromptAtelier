@@ -8,6 +8,9 @@ export type BaseTemplate = {
   scale: number;
   sampler?: string;
   model?: string;
+  raw_parameters?: Record<string, any>;
+  is_infilling?: boolean;
+  notice?: string;
   sourceImage?: {
     previewUrl?: string;
     filename?: string;

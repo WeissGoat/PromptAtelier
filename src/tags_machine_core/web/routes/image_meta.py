@@ -24,7 +24,51 @@ def _parse_meta_dict(
     png_text: dict[str, Any],
     dimensions: dict[str, int],
     filename: str,
+    target_path: Path | None = None,
 ) -> dict[str, Any]:
+    notice: str | None = None
+    is_infilling = params_dict.get("request_type") == "NativeInfillingRequest"
+    inferred_original_seed: int | None = None
+    origin_found = False
+
+    if is_infilling:
+        # Check if an origin counterpart exists on disk
+        if target_path and target_path.exists():
+            candidates = [
+                target_path.parent.parent / "origin" / target_path.name,
+                target_path.parent / "origin" / target_path.name,
+            ]
+            for candidate in candidates:
+                if candidate.is_file():
+                    try:
+                        origin_meta = read_image_parameters(candidate)
+                        origin_params = origin_meta.get("parameters", {})
+                        if isinstance(origin_params, dict) and origin_params:
+                            merged = dict(origin_params)
+                            if params_dict.get("prompt"):
+                                merged["prompt"] = params_dict["prompt"]
+                            if params_dict.get("negative_prompt"):
+                                merged["negative_prompt"] = params_dict["negative_prompt"]
+                            params_dict = merged
+                            notice = (
+                                f"检测到局部重绘图 (Infilling)，已自动关联母图 (origin/{candidate.name}) "
+                                f"并恢复原始种子 (Seed={origin_params.get('seed')}) 与风格参考 (Vibe Transfer)。"
+                            )
+                            origin_found = True
+                            break
+                    except Exception:
+                        pass
+
+        if not origin_found:
+            seed_m = re.search(r"comm_seed_\d+_(\d+)_\d+", filename)
+            if seed_m:
+                inferred_original_seed = int(seed_m.group(1))
+                notice = (
+                    f"检测到局部重绘图 (Infilling)，已从文件名自动识别原始母图种子 (Seed={inferred_original_seed})。"
+                )
+            else:
+                notice = "检测到局部重绘图 (Infilling)，若出图与原图有差异，可能是因为母图底图与局部蒙版未包含在元数据中。"
+
     prompt = params_dict.get("prompt") or ""
     if not prompt and isinstance(params_dict.get("v4_prompt"), dict):
         caption = params_dict["v4_prompt"].get("caption")
@@ -38,6 +82,10 @@ def _parse_meta_dict(
             negative_prompt = caption.get("base_caption") or ""
 
     seed = params_dict.get("seed")
+    if is_infilling and inferred_original_seed is not None and not origin_found:
+        seed = inferred_original_seed
+        params_dict["seed"] = inferred_original_seed
+
     steps = params_dict.get("steps")
     scale = params_dict.get("scale")
     sampler = params_dict.get("sampler")
@@ -76,6 +124,8 @@ def _parse_meta_dict(
         "scale": float(scale) if scale is not None else 5.0,
         "sampler": str(sampler) if sampler is not None else None,
         "model": str(model) if model is not None else None,
+        "is_infilling": is_infilling,
+        "notice": notice,
         "raw_parameters": params_dict or {},
     }
 
@@ -179,6 +229,7 @@ async def inspect_image_meta(request: Request) -> dict[str, Any]:
             png_text=png_text,
             dimensions=dimensions,
             filename=filename,
+            target_path=target_path,
         )
 
     finally:

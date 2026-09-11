@@ -154,3 +154,80 @@ class WebImageMetaTest(TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
         self.assertEqual(data["model"], "nai-diffusion-4-5-full")
+
+    def test_inspect_image_meta_infilling_restores_origin_file(self):
+        # Create origin dir and origin png
+        origin_dir = self.tmp_path / "post_1" / "origin"
+        infill_dir = self.tmp_path / "post_1" / "1_to_origin"
+        origin_dir.mkdir(parents=True)
+        infill_dir.mkdir(parents=True)
+
+        filename = "comm_seed_1000_99998888_0.png"
+        origin_path = origin_dir / filename
+        infill_path = infill_dir / filename
+
+        origin_info = PngInfo()
+        origin_info.add_text(
+            "Comment",
+            json.dumps(
+                {
+                    "prompt": "masterpiece, 1girl",
+                    "seed": 99998888,
+                    "noise_schedule": "karras",
+                    "cfg_rescale": 0.7,
+                    "skip_cfg_above_sigma": 19.0,
+                    "reference_image_multiple": ["dummy_base64"],
+                    "reference_strength_multiple": [0.15],
+                    "request_type": "PromptGenerateRequest",
+                }
+            ),
+        )
+        Image.new("RGB", (64, 64), "white").save(origin_path, pnginfo=origin_info)
+
+        infill_info = PngInfo()
+        infill_info.add_text(
+            "Comment",
+            json.dumps(
+                {
+                    "prompt": "masterpiece, 1girl, touched up",
+                    "seed": 11112222,  # inpaint mask seed
+                    "noise_schedule": "karras",
+                    "request_type": "NativeInfillingRequest",
+                }
+            ),
+        )
+        Image.new("RGB", (64, 64), "white").save(infill_path, pnginfo=infill_info)
+
+        response = self.client.post("/api/image-meta/inspect", json={"path": str(infill_path)})
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+
+        self.assertTrue(data["is_infilling"])
+        self.assertEqual(data["seed"], 99998888)  # restored from origin!
+        self.assertIn("origin", data["notice"])
+        self.assertEqual(data["raw_parameters"]["reference_image_multiple"], ["dummy_base64"])
+        self.assertEqual(data["raw_parameters"]["noise_schedule"], "karras")
+        self.assertEqual(data["raw_parameters"]["cfg_rescale"], 0.7)
+
+    def test_inspect_image_meta_infilling_infers_seed_from_filename(self):
+        infill_path = self.tmp_path / "comm_seed_1000_55556666_0.png"
+        infill_info = PngInfo()
+        infill_info.add_text(
+            "Comment",
+            json.dumps(
+                {
+                    "prompt": "solo, homura",
+                    "seed": 1234,  # mask seed
+                    "request_type": "NativeInfillingRequest",
+                }
+            ),
+        )
+        Image.new("RGB", (64, 64), "white").save(infill_path, pnginfo=infill_info)
+
+        response = self.client.post("/api/image-meta/inspect", json={"path": str(infill_path)})
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+
+        self.assertTrue(data["is_infilling"])
+        self.assertEqual(data["seed"], 55556666)  # inferred from filename!
+        self.assertIn("自动识别原始母图种子", data["notice"])

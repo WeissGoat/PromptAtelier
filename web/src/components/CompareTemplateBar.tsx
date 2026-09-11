@@ -41,6 +41,9 @@ export function CompareTemplateBar() {
         scale: number;
         sampler: string | null;
         model: string | null;
+        raw_parameters?: Record<string, any>;
+        is_infilling?: boolean;
+        notice?: string;
       }>("/image-meta/inspect", {
         image_base64: base64Data,
         filename: file.name,
@@ -56,6 +59,9 @@ export function CompareTemplateBar() {
         scale: inspected.scale ?? 5.0,
         sampler: inspected.sampler || "k_euler",
         model: inspected.model || "nai-diffusion-3",
+        raw_parameters: inspected.raw_parameters,
+        is_infilling: inspected.is_infilling,
+        notice: inspected.notice,
         sourceImage: {
           previewUrl: base64Data,
           filename: inspected.filename,
@@ -195,7 +201,25 @@ export function CompareTemplateBar() {
             <span className="param-badge">Scale: {template.scale}</span>
             {template.sampler ? <span className="param-badge">{template.sampler}</span> : null}
             {template.model ? <span className="param-badge">{template.model}</span> : null}
+            {template.raw_parameters?.noise_schedule ? (
+              <span className="param-badge">调度: {template.raw_parameters.noise_schedule}</span>
+            ) : null}
+            {template.raw_parameters?.cfg_rescale ? (
+              <span className="param-badge">Rescale: {template.raw_parameters.cfg_rescale}</span>
+            ) : null}
+            {Array.isArray(template.raw_parameters?.reference_image_multiple) &&
+            template.raw_parameters.reference_image_multiple.length > 0 ? (
+              <span className="param-badge highlight">
+                Vibe风格图: {template.raw_parameters.reference_image_multiple.length}张
+              </span>
+            ) : null}
           </div>
+
+          {template.notice ? (
+            <div className="template-notice-pill" style={{ margin: "8px 0", padding: "6px 10px", background: "rgba(37, 99, 235, 0.08)", border: "1px solid rgba(37, 99, 235, 0.2)", borderRadius: "4px", fontSize: "12px", color: "#1d4ed8" }}>
+              ℹ️ {template.notice}
+            </div>
+          ) : null}
 
           {template.prompt ? (
             <div className="template-prompt-display">

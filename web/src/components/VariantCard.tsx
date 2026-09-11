@@ -1,6 +1,7 @@
 import {
   CheckSquare,
   Copy,
+  FolderOpen,
   GitFork,
   Lock,
   Play,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { apiPost, errorMessage } from "../api/client";
 import type { BaseTemplate, PromptVariant } from "../compare/types";
 import { useCompareWorkspace } from "../compare/useCompareWorkspace";
 
@@ -44,6 +46,24 @@ export function VariantCard({
   } = useCompareWorkspace();
 
   const [isCustomSeed, setIsCustomSeed] = useState(variant.seedOverride !== null);
+
+  const [openingFolder, setOpeningFolder] = useState(false);
+  const [folderNotice, setFolderNotice] = useState<string | null>(null);
+
+  async function handleOpenFolder(imagePath: string) {
+    setOpeningFolder(true);
+    setFolderNotice(null);
+    try {
+      await apiPost("/results/open-image-folder", { path: imagePath });
+      setFolderNotice("已定位");
+      setTimeout(() => setFolderNotice(null), 2000);
+    } catch (err) {
+      setFolderNotice(errorMessage(err));
+      setTimeout(() => setFolderNotice(null), 3000);
+    } finally {
+      setOpeningFolder(false);
+    }
+  }
 
   const effectiveSeed =
     variant.seedOverride !== null && variant.seedOverride !== undefined
@@ -186,6 +206,19 @@ export function VariantCard({
               >
                 {isSelectedForCompare ? <CheckSquare size={14} /> : <Square size={14} />}
                 {isSelectedForCompare ? "已选对比" : "勾选对比"}
+              </button>
+              <button
+                className="folder-open-btn"
+                disabled={openingFolder}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleOpenFolder(variant.resultImage!.path);
+                }}
+                title="打开生成图片所在文件夹"
+                type="button"
+              >
+                <FolderOpen size={14} />
+                {folderNotice ? folderNotice : "打开文件夹"}
               </button>
             </div>
           </div>

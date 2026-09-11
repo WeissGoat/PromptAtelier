@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
 import sys
 
@@ -103,12 +104,16 @@ def open_image_folder(data: dict, request: Request) -> dict:
         )
     try:
         target = _index(request).resolve_image(path)
-    except FileNotFoundError as exc:
-        raise ApiError(
-            code="result_image_not_found",
-            message=f"Result image not found: {path}",
-            status_code=404,
-        ) from exc
+    except FileNotFoundError:
+        direct_path = Path(path)
+        if direct_path.is_file() and direct_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            target = direct_path.resolve()
+        else:
+            raise ApiError(
+                code="result_image_not_found",
+                message=f"Result image not found: {path}",
+                status_code=404,
+            )
     if sys.platform != "win32":
         raise ApiError(
             code="desktop_integration_unsupported",
