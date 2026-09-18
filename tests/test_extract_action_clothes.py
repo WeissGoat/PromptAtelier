@@ -325,3 +325,91 @@ def test_export_clothing_nodes_dedup(tmp_path):
     assert (export_root / "actions" / "sailor_action").exists()
 
 
+def test_clean_and_route_tags_filters_halo_by_default():
+    raw_tags = [
+        "white shirt", "sailor collar", "blue pleated skirt", "brown loafers",
+        "halo", "pink halo", "yellow halo"
+    ]
+    res = clean_and_route_tags(raw_tags)
+    assert "halo" in res["blocked"]
+    assert "pink halo" in res["blocked"]
+    assert "yellow halo" in res["blocked"]
+    assert "halo" in res["dropped"]
+
+    # Headwear should not contain halo
+    headwear_tags = res["sections"].get("headwear", [])
+    assert "halo" not in headwear_tags
+    assert "pink halo" not in headwear_tags
+    assert "yellow halo" not in headwear_tags
+
+    # Legitimate clothing tags are retained
+    assert "white shirt" in res["sections"]["upper_clothes"]
+    assert "blue pleated skirt" in res["sections"]["lower_clothes"]
+    assert "brown loafers" in res["sections"]["shoes"]
+
+
+def test_export_clothing_nodes_filters_halo_and_tracks_frequency(tmp_path: Path):
+    import yaml
+
+    action_root = tmp_path / "action_root"
+    action_root.mkdir()
+
+    # Node with halo and other clothing tags
+    st_dir = action_root / "st_clothes" / "angel_dress"
+    st_dir.mkdir(parents=True)
+    (st_dir / "tags.txt").write_text(
+        "white dress, wings, pink halo, halo, white socks, white shoes, white gloves, white ribbon\n",
+        encoding="utf-8"
+    )
+
+    # Another node with yellow halo
+    act_dir = action_root / "actions" / "act_demon"
+    act_dir.mkdir(parents=True)
+    (act_dir / "tags.txt").write_text("type,dress\n", encoding="utf-8")
+    (act_dir / "meta.yaml").write_text(
+        yaml.safe_dump({
+            "name": "恶魔服装",
+            "tags": {"default": ["black corset", "mini skirt", "yellow halo", "halo", "black boots", "black choker"]},
+        }, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    export_root = tmp_path / "clothing_export"
+    res = export_clothing_nodes(action_root, export_root)
+    sm = res["summary"]
+
+    assert sm["exported_count"] == 2
+    assert "filtered_words_frequency" in sm
+    freq = sm["filtered_words_frequency"]
+    assert freq.get("halo") == 2
+    assert freq.get("pink halo") == 1
+    assert freq.get("yellow halo") == 1
+    assert sm["filtered_words_count"] == 4
+
+    # Verify exported meta.yaml does not have halo
+    angel_meta = yaml.safe_load((export_root / "st_clothes" / "angel_dress" / "meta.yaml").read_text(encoding="utf-8"))
+    all_angel_tags = [t for v in angel_meta["tags"].values() for t in v]
+    assert "halo" not in all_angel_tags
+    assert "pink halo" not in all_angel_tags
+    assert "white dress" in all_angel_tags
+
+
+def test_clean_and_route_tags_custom_blocked_patterns():
+    raw_tags = ["white shirt", "blue pleated skirt", "demon horns", "halo"]
+    # Custom filter only targets horns, not halo
+    res = clean_and_route_tags(raw_tags, blocked_patterns=["horns"])
+    assert "demon horns" in res["blocked"]
+    assert "halo" not in res["blocked"]
+    assert "white shirt" in res["sections"]["upper_clothes"]
+
+
+def test_clean_and_route_tags_disable_filter():
+    raw_tags = ["white shirt", "blue pleated skirt", "halo"]
+    # Explicit empty list disables blocked pattern filtering
+    res = clean_and_route_tags(raw_tags, blocked_patterns=[])
+    assert res["blocked"] == []
+    assert "halo" in res["sections"].get("headwear", [])
+
+
+
+

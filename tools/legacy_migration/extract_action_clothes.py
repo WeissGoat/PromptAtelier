@@ -646,6 +646,32 @@ def is_drop_tag(tag: str) -> bool:
     return any(pattern.match(tag) for pattern in DROP_REGEXES)
 
 
+DEFAULT_BLOCKED_TAG_PATTERNS: list[re.Pattern] = [
+    re.compile(r".*\bhalo\b.*", re.IGNORECASE),
+]
+
+
+def compile_blocked_patterns(
+    patterns: list[str | re.Pattern] | None,
+) -> list[re.Pattern]:
+    """编译屏蔽词列表为正则表达式列表，默认过滤 halo 相关词。"""
+    if patterns is None:
+        return list(DEFAULT_BLOCKED_TAG_PATTERNS)
+    compiled: list[re.Pattern] = []
+    for p in patterns:
+        if isinstance(p, re.Pattern):
+            compiled.append(p)
+        elif isinstance(p, str):
+            p_str = p.strip()
+            if not p_str:
+                continue
+            if re.match(r"^\w+$", p_str):
+                compiled.append(re.compile(rf".*\b{re.escape(p_str)}\b.*", re.IGNORECASE))
+            else:
+                compiled.append(re.compile(p_str, re.IGNORECASE))
+    return compiled
+
+
 def classify_tag_to_section(tag: str) -> str | None:
     """根据关键词与词根将服装标签路由到对应 section。"""
     for section, pattern in _COMPILED_SECTION_RULES:
@@ -765,9 +791,15 @@ ACTION_BASE_GARMENTS: dict[str, str] = {
 }
 
 
-def clean_and_route_tags(raw_tags: list[str]) -> dict[str, Any]:
+def clean_and_route_tags(
+    raw_tags: list[str],
+    *,
+    blocked_patterns: list[str | re.Pattern] | None = None,
+) -> dict[str, Any]:
     """对原始 tags 进行清洗、过滤杂词、路由到 sections。"""
+    compiled_blocked = compile_blocked_patterns(blocked_patterns)
     dropped_tags: list[str] = []
+    blocked_tags: list[str] = []
     section_tags: dict[str, list[str]] = defaultdict(list)
     unclassified_tags: list[str] = []
 
@@ -798,6 +830,12 @@ def clean_and_route_tags(raw_tags: list[str]) -> dict[str, Any]:
         # Stage 0: 明确元标签与情趣玩具先行过滤（防止误匹配到 phone / wand 等道具）
         if is_pre_filter_drop(norm):
             dropped_tags.append(norm)
+            continue
+
+        # Stage 0.5: 明确屏蔽词过滤（如 halo 及其派生词）
+        if any(p.search(norm) for p in compiled_blocked):
+            dropped_tags.append(norm)
+            blocked_tags.append(norm)
             continue
 
         # Stage 1: 服饰动作交互（脱衣/掀衣/扯衣等动作）
@@ -831,6 +869,7 @@ def clean_and_route_tags(raw_tags: list[str]) -> dict[str, Any]:
 
     return {
         "dropped": dropped_tags,
+        "blocked": blocked_tags,
         "sections": dict(section_tags),
         "unclassified": unclassified_tags,
     }
@@ -840,9 +879,16 @@ def clean_and_route_tags(raw_tags: list[str]) -> dict[str, Any]:
 # 5. Dry-Run 运行与全面报表分析 (Analysis & Dry-run Report)
 # ---------------------------------------------------------------------------
 
-def run_dryrun_analysis(action_root: Path, *, min_tags: int = 4, sample_limit: int = 5) -> dict[str, Any]:
+def run_dryrun_analysis(
+    action_root: Path,
+    *,
+    min_tags: int = 4,
+    sample_limit: int = 5,
+    blocked_patterns: list[str | re.Pattern] | None = None,
+) -> dict[str, Any]:
     """执行完整的 Dry-run 扫描并生成统计分析报告。"""
     candidates = discover_clothing_candidate_dirs(action_root)
+    compiled_blocked = compile_blocked_patterns(blocked_patterns)
 
     total_candidates = len(candidates)
     by_category_counts: Counter[str] = Counter()
@@ -853,6 +899,7 @@ def run_dryrun_analysis(action_root: Path, *, min_tags: int = 4, sample_limit: i
     total_unclassified_count = 0
 
     dropped_counter: Counter[str] = Counter()
+    blocked_counter: Counter[str] = Counter()
     routed_counter: Counter[str] = Counter()
     section_counter: Counter[str] = Counter()
     unclassified_counter: Counter[str] = Counter()
@@ -866,10 +913,14 @@ def run_dryrun_analysis(action_root: Path, *, min_tags: int = 4, sample_limit: i
         raw_tags, neg = extract_node_raw_tags(node_dir)
         total_raw_tags_count += len(raw_tags)
 
-        res = clean_and_route_tags(raw_tags)
+        res = clean_and_route_tags(raw_tags, blocked_patterns=compiled_blocked)
         dropped = res["dropped"]
+        blocked = res.get("blocked", [])
         sections = res["sections"]
         unclassified = res["unclassified"]
+
+        if blocked:
+            blocked_counter.update(blocked)
 
         routed_in_node = sum(len(v) for v in sections.values())
         if routed_in_node >= min_tags:
@@ -893,6 +944,7 @@ def run_dryrun_analysis(action_root: Path, *, min_tags: int = 4, sample_limit: i
             "id": node_dir.name,
             "raw_count": len(raw_tags),
             "dropped_count": len(dropped),
+            "blocked_count": len(blocked),
             "routed_count": routed_in_node,
             "unclassified_count": len(unclassified),
             "sections": sections,
@@ -917,10 +969,13 @@ def run_dryrun_analysis(action_root: Path, *, min_tags: int = 4, sample_limit: i
             "total_unclassified_tags": total_unclassified_count,
             "coverage_rate_percent": round(coverage_rate, 2),
             "section_distribution": dict(section_counter),
+            "filtered_words_count": sum(blocked_counter.values()),
+            "filtered_words_frequency": dict(blocked_counter.most_common()),
         },
         "top_dropped_tags": dropped_counter.most_common(40),
         "top_routed_tags": routed_counter.most_common(40),
         "top_unclassified_tags": unclassified_counter.most_common(40),
+        "filtered_words_frequency": dict(blocked_counter.most_common()),
         "samples": processed_items[:sample_limit],
     }
 
@@ -987,9 +1042,11 @@ def export_clothing_nodes(
     force: bool = False,
     min_tags: int = 4,
     dedup: bool = True,
+    blocked_patterns: list[str | re.Pattern] | None = None,
 ) -> dict[str, Any]:
     """将清洗出的有效服装节点导出到指定服装目录 (例如 design/服装/)。"""
     candidates = discover_clothing_candidate_dirs(action_root)
+    compiled_blocked = compile_blocked_patterns(blocked_patterns)
     export_root.mkdir(parents=True, exist_ok=True)
 
     exported_count = 0
@@ -997,12 +1054,15 @@ def export_clothing_nodes(
     skipped_existing_count = 0
     skipped_duplicate_count = 0
     exported_nodes: list[dict[str, Any]] = []
+    filtered_words_counter: Counter[str] = Counter()
 
     # 1. 扫描提取并清洗候选节点
     valid_candidates: list[dict[str, Any]] = []
     for cat, node_dir in candidates:
         raw_tags, neg_list = extract_node_raw_tags(node_dir)
-        res = clean_and_route_tags(raw_tags)
+        res = clean_and_route_tags(raw_tags, blocked_patterns=compiled_blocked)
+        if res.get("blocked"):
+            filtered_words_counter.update(res["blocked"])
         sections = res["sections"]
         routed_in_node = sum(len(v) for v in sections.values())
         if routed_in_node < min_tags:
@@ -1131,6 +1191,8 @@ def export_clothing_nodes(
             "skipped_duplicate_count": skipped_duplicate_count,
             "skipped_existing_count": skipped_existing_count,
             "export_dir": str(export_root),
+            "filtered_words_count": sum(filtered_words_counter.values()),
+            "filtered_words_frequency": dict(filtered_words_counter.most_common()),
         },
         "exported_nodes": exported_nodes,
     }
@@ -1147,12 +1209,21 @@ def main():
     parser.add_argument("--clear", action="store_true", help="Clear existing export dir before exporting")
     parser.add_argument("--min-tags", type=int, default=4, help="Minimum routed clothing tags required to export (default: 4)")
     parser.add_argument("--no-dedup", action="store_true", help="Disable prompt tag content deduplication")
+    parser.add_argument("--filter-words", default="halo", help="Comma-separated list of blocked words/patterns to filter out (default: halo)")
+    parser.add_argument("--no-filter-words", action="store_true", help="Disable blocked words filtering")
     args = parser.parse_args()
 
     action_root = Path(args.root)
     if not action_root.exists():
         print(f"Error: Action root {action_root} does not exist.")
         return 1
+
+    if args.no_filter_words:
+        blocked_patterns = []
+    elif args.filter_words:
+        blocked_patterns = [w.strip() for w in args.filter_words.split(",") if w.strip()]
+    else:
+        blocked_patterns = None
 
     if args.export:
         export_dir = Path(args.export_dir)
@@ -1167,6 +1238,7 @@ def main():
         print(f"Force Overwrite: {args.force}")
         print(f"Min Tags: {args.min_tags}")
         print(f"Deduplication: {not args.no_dedup}")
+        print(f"Filter Words: {blocked_patterns if blocked_patterns is not None else ['halo']}")
         print("-" * 60)
         res = export_clothing_nodes(
             action_root,
@@ -1174,6 +1246,7 @@ def main():
             force=args.force,
             min_tags=args.min_tags,
             dedup=not args.no_dedup,
+            blocked_patterns=blocked_patterns,
         )
         sm = res["summary"]
         print(f"Total Candidates Scanned : {sm['total_candidates']}")
@@ -1181,6 +1254,11 @@ def main():
         print(f"Skipped Below Threshold  : {sm['skipped_empty_count']}")
         print(f"Skipped Duplicate Content: {sm['skipped_duplicate_count']}")
         print(f"Skipped Already Existing : {sm['skipped_existing_count']}")
+        if sm.get("filtered_words_frequency"):
+            print("-" * 60)
+            print(f"本次被过滤的提示词频 (共 {sm['filtered_words_count']} 次):")
+            for word, freq in sm["filtered_words_frequency"].items():
+                print(f"  {word:<25}: {freq} 次")
         print("=" * 60)
         print(f"Export completed successfully to {export_dir}!")
         if args.save_report:
@@ -1188,7 +1266,7 @@ def main():
             print(f"Export report saved to {args.save_report}")
         return 0
 
-    report = run_dryrun_analysis(action_root, min_tags=args.min_tags)
+    report = run_dryrun_analysis(action_root, min_tags=args.min_tags, blocked_patterns=blocked_patterns)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -1209,6 +1287,11 @@ def main():
         print(f"已精准路由到 Section: {summary['total_routed_tags']} ({round(summary['total_routed_tags']/total_p*100, 1)}%)")
         print(f"待确认/未分类词: {summary['total_unclassified_tags']} ({round(summary['total_unclassified_tags']/total_p*100, 1)}%)")
         print(f"清洗与路由总覆盖率: {summary['coverage_rate_percent']}%")
+        if summary.get("filtered_words_frequency"):
+            print("-" * 60)
+            print(f"本次被过滤的提示词频 (共 {summary['filtered_words_count']} 次):")
+            for word, freq in summary["filtered_words_frequency"].items():
+                print(f"  {word:<25}: {freq} 次")
         print("-" * 60)
         print("Section 标签分布:")
         for sec, cnt in summary["section_distribution"].items():
