@@ -7,12 +7,36 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
 from .models import PromptItem, SelectorSpec
 from .spec_reader import resolve_path
+
+
+class CharacterSelection(str):
+    clothing: str | None = None
+
+    def __new__(cls, ref: str, clothing: str | None = None):
+        obj = super().__new__(cls, ref)
+        obj.clothing = clothing
+        return obj
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, CharacterSelection):
+            return super().__eq__(other) and self.clothing == other.clothing
+        if self.clothing is not None:
+            return False
+        return super().__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash((super().__hash__(), self.clothing))
+
+    def __repr__(self) -> str:
+        if self.clothing:
+            return f"CharacterSelection({super().__repr__()}, clothing={self.clothing!r})"
+        return super().__repr__()
 
 
 @dataclass(frozen=True)
@@ -32,17 +56,55 @@ def expand_selector(
     if selector == "explicit":
         if role == "artist":
             return [str(ref) for ref in spec.refs]
+        if role == "character":
+            items: list[Any] = []
+            for ref in spec.refs:
+                if isinstance(ref, (dict, Mapping)):
+                    ref_str = str(resolve_ref(ref["ref"], context.base_dir))
+                    clothing_val = ref.get("clothing") or ref.get("clothing_ref")
+                    clothing_str = str(resolve_ref(clothing_val, context.base_dir)) if clothing_val else None
+                    items.append(CharacterSelection(ref_str, clothing=clothing_str))
+                else:
+                    ref_str = str(resolve_ref(ref, context.base_dir))
+                    if spec.clothing_map:
+                        for clothing_item in spec.clothing_map:
+                            clothing_str = str(resolve_ref(clothing_item, context.base_dir))
+                            items.append(CharacterSelection(ref_str, clothing=clothing_str))
+                    else:
+                        items.append(ref_str)
+            return items
         return [str(resolve_ref(ref, context.base_dir)) for ref in spec.refs]
     if selector == "folder":
         if not spec.root:
             raise ValueError("folder selector requires root")
-        return _discover_nodes(resolve_ref(spec.root, context.base_dir), spec)
+        results = _discover_nodes(resolve_ref(spec.root, context.base_dir), spec)
+        if role == "character" and spec.clothing_map:
+            mapped: list[Any] = []
+            for r in results:
+                for c in spec.clothing_map:
+                    mapped.append(CharacterSelection(r, clothing=str(resolve_ref(c, context.base_dir))))
+            return mapped
+        return results
     if selector == "collection":
-        return _expand_collection(role=role, spec=spec, context=context, collection_stack=collection_stack)
+        results = _expand_collection(role=role, spec=spec, context=context, collection_stack=collection_stack)
+        if role == "character" and spec.clothing_map:
+            mapped: list[Any] = []
+            for r in results:
+                for c in spec.clothing_map:
+                    mapped.append(CharacterSelection(r, clothing=str(resolve_ref(c, context.base_dir))))
+            return mapped
+        return results
     if selector == "glob":
         if not spec.pattern:
             raise ValueError("glob selector requires pattern")
-        return _glob_nodes(spec.pattern, context.base_dir, spec)
+        results = _glob_nodes(spec.pattern, context.base_dir, spec)
+        if role == "character" and spec.clothing_map:
+            mapped: list[Any] = []
+            for r in results:
+                for c in spec.clothing_map:
+                    mapped.append(CharacterSelection(r, clothing=str(resolve_ref(c, context.base_dir))))
+            return mapped
+        return results
     if selector == "prompt_list":
         return [PromptItem.model_validate(item) for item in spec.items]
     if selector == "prompt_file":

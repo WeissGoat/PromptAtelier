@@ -81,4 +81,25 @@ describe("compare matrix", () => {
     expect(selectedSlots(character)).toHaveLength(1);
     expect(buildCompareMatrix({ artist: group("artist", 1), character, action: group("action", 1) }, behaviorGroup())).toHaveLength(1);
   });
+
+  it("expands clothing slots bound to each character", () => {
+    const character = group("character", 1);
+    const cloth1 = slot("clothing", "clothing-1");
+    const cloth2 = slot("clothing", "clothing-2");
+    character.primary.clothingSlots = [cloth1, cloth2];
+
+    const groups = {
+      artist: group("artist", 1),
+      character,
+      action: group("action", 1),
+    };
+
+    const matrix = buildCompareMatrix(groups, behaviorGroup());
+    expect(matrix).toHaveLength(2);
+    expect(compareCount(groups, behaviorGroup())).toBe(2);
+    expect(matrix[0].clothing?.slotId).toBe("clothing-1");
+    expect(matrix[1].clothing?.slotId).toBe("clothing-2");
+    expect(matrix[0].character?.slotId).toBe(character.primary.slotId);
+    expect(matrix[1].character?.slotId).toBe(character.primary.slotId);
+  });
 });

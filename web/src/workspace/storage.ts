@@ -1,4 +1,5 @@
-import type { NodeRole } from "../nodes/types";
+import { errorMessage } from "../api/client";
+import type { GroupRole, NodeRole } from "../nodes/types";
 import type {
   CustomWorkspaceState,
   NodeVariantSlot,
@@ -18,7 +19,7 @@ export const CUSTOM_WORKSPACE_STORAGE_KEY = "promptatelier.custom-workspace/v1";
 export const CUSTOM_WORKSPACE_SCHEMA = "promptatelier.custom-workspace/v2";
 const LEGACY_CUSTOM_WORKSPACE_SCHEMA = "promptatelier.custom-workspace/v1";
 
-const roles: NodeRole[] = ["artist", "character", "action"];
+const roles: GroupRole[] = ["artist", "character", "action"];
 let fallbackCounter = 0;
 
 export type WorkspaceLoadResult =
@@ -32,10 +33,10 @@ export function createSlotId(prefix = "slot"): string {
   return `${prefix}-${Date.now()}-${fallbackCounter}`;
 }
 
-export function createEmptySlot(role: NodeRole, mode: "primary" | "compare"): NodeVariantSlot {
+export function createEmptyClothingSlot(mode: "primary" | "compare" = "primary", parentSlotId = ""): NodeVariantSlot {
   return {
-    slotId: mode === "primary" ? `primary-${role}` : createSlotId(`compare-${role}`),
-    role,
+    slotId: mode === "primary" ? `clothing-primary-${parentSlotId || Date.now()}` : createSlotId(`clothing-compare`),
+    role: "clothing",
     mode,
     sourceKind: "fixed",
     randomSpec: null,
@@ -47,7 +48,26 @@ export function createEmptySlot(role: NodeRole, mode: "primary" | "compare"): No
   };
 }
 
-function createEmptyGroup(role: NodeRole): RoleNodeGroup {
+export function createEmptySlot(role: NodeRole, mode: "primary" | "compare"): NodeVariantSlot {
+  const slot: NodeVariantSlot = {
+    slotId: mode === "primary" ? `primary-${role}` : createSlotId(`compare-${role}`),
+    role,
+    mode,
+    sourceKind: "fixed",
+    randomSpec: null,
+    sourceRef: null,
+    sourceNode: null,
+    draftNode: null,
+    sourceEditor: null,
+    draftEditorValues: null,
+  };
+  if (role === "character") {
+    slot.clothingSlots = [createEmptyClothingSlot("primary", slot.slotId)];
+  }
+  return slot;
+}
+
+function createEmptyGroup(role: GroupRole): RoleNodeGroup {
   return { primary: createEmptySlot(role, "primary"), compares: [] };
 }
 
@@ -83,7 +103,8 @@ function isSlot(value: unknown, role: NodeRole, mode: "primary" | "compare"): va
     && (value.sourceNode === null || isObject(value.sourceNode))
     && (value.draftNode === null || isObject(value.draftNode))
     && (value.sourceEditor === undefined || value.sourceEditor === null || isObject(value.sourceEditor))
-    && (value.draftEditorValues === undefined || value.draftEditorValues === null || isObject(value.draftEditorValues));
+    && (value.draftEditorValues === undefined || value.draftEditorValues === null || isObject(value.draftEditorValues))
+    && (value.clothingSlots === undefined || Array.isArray(value.clothingSlots));
 }
 
 function isWorkspace(value: unknown): value is CustomWorkspaceState {
@@ -134,11 +155,66 @@ function migrateWorkspace(value: unknown): unknown {
     ? Object.fromEntries(roles.map((role) => {
       const rawGroup = isObject(value.groups) ? value.groups[role] : null;
       if (!isObject(rawGroup)) return [role, rawGroup];
-      const normalizeSlot = (slot: unknown) => isObject(slot) ? {
-        ...slot,
-        sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
-        randomSpec: isObject(slot.randomSpec) ? slot.randomSpec : null,
-      } : slot;
+      const healRandomSpec = (rawSpec: unknown, role: NodeRole) => {
+        if (!isObject(rawSpec)) return null;
+        const spec = { ...rawSpec } as any;
+        if (isObject(spec.source)) {
+          spec.source = { ...spec.source };
+          if (spec.source.type === "folder" && typeof spec.source.value === "string" && !spec.source.value.trim()) {
+            spec.source.value = role === "action" ? "new" : ".";
+          }
+        }
+        return spec;
+      };
+
+      const normalizeClothingSlot = (c: unknown, index: number, parentSlotId: string): NodeVariantSlot => {
+        const slot = isObject(c) ? c : {};
+        return {
+          slotId: typeof slot.slotId === "string" ? slot.slotId : (index === 0 ? `clothing-primary-${parentSlotId}` : createSlotId("clothing-compare")),
+          role: "clothing" as const,
+          mode: index === 0 ? "primary" : "compare",
+          sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
+          randomSpec: healRandomSpec(slot.randomSpec, "clothing"),
+          sourceRef: typeof slot.sourceRef === "string" ? slot.sourceRef : null,
+          sourceNode: isObject(slot.sourceNode) ? (slot.sourceNode as any) : null,
+          draftNode: isObject(slot.draftNode) ? (slot.draftNode as any) : null,
+          sourceEditor: isObject(slot.sourceEditor) ? (slot.sourceEditor as any) : null,
+          draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
+        };
+      };
+
+      const normalizeSlot = (slot: unknown) => {
+        if (!isObject(slot)) return slot;
+        const role = (slot.role as NodeRole) || "artist";
+        const normalized = {
+          ...slot,
+          sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
+          randomSpec: healRandomSpec(slot.randomSpec, role),
+        } as NodeVariantSlot;
+        if (normalized.role === "character") {
+          let clothingSlots: NodeVariantSlot[] = [];
+          if (Array.isArray(normalized.clothingSlots) && normalized.clothingSlots.length) {
+            clothingSlots = normalized.clothingSlots.map((c, idx) => normalizeClothingSlot(c, idx, normalized.slotId));
+          } else {
+            clothingSlots = [{
+              slotId: `clothing-primary-${normalized.slotId}`,
+              role: "clothing",
+              mode: "primary",
+              sourceKind: "fixed",
+              randomSpec: null,
+              sourceRef: (normalized as any).clothingRef ?? null,
+              sourceNode: (normalized as any).clothingNode ?? null,
+              draftNode: (normalized as any).clothingNode ?? null,
+              sourceEditor: null,
+              draftEditorValues: null,
+            }];
+          }
+          normalized.clothingSlots = clothingSlots;
+          (normalized as any).clothingRef = clothingSlots[0]?.sourceRef ?? null;
+          (normalized as any).clothingNode = clothingSlots[0]?.draftNode ?? null;
+        }
+        return normalized;
+      };
       return [role, {
         ...rawGroup,
         primary: normalizeSlot(rawGroup.primary),
@@ -174,17 +250,29 @@ export function loadWorkspaceSnapshot(storage: Storage): WorkspaceLoadResult {
     if (state.editor.slotId && editorValues) {
       for (const role of roles) {
         const group = state.groups[role];
-        const slot = [group.primary, ...group.compares]
-          .find((candidate) => candidate.slotId === state.editor.slotId);
-        if (slot) {
-          slot.draftEditorValues = structuredClone(editorValues);
-          break;
+        const allSlots = [group.primary, ...group.compares];
+        let found = false;
+        for (const candidate of allSlots) {
+          if (candidate.slotId === state.editor.slotId) {
+            candidate.draftEditorValues = structuredClone(editorValues);
+            found = true;
+            break;
+          }
+          if (candidate.clothingSlots) {
+            const clothingCandidate = candidate.clothingSlots.find((c) => c.slotId === state.editor.slotId);
+            if (clothingCandidate) {
+              clothingCandidate.draftEditorValues = structuredClone(editorValues);
+              found = true;
+              break;
+            }
+          }
         }
+        if (found) break;
       }
     }
     return { status: "loaded", state };
-  } catch {
-    return { status: "invalid", state: createEmptyWorkspace(), message: "工作台缓存无法解析，请重置工作台。" };
+  } catch (error) {
+    return { status: "invalid", state: createEmptyWorkspace(), message: `读取工作台缓存失败：${errorMessage(error)}` };
   }
 }
 

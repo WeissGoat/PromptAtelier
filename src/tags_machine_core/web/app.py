@@ -112,6 +112,15 @@ def create_app(
     app.include_router(results.router, prefix="/api", tags=["results"])
     app.include_router(batch.router, prefix="/api", tags=["batch"])
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
+
+    @app.get("/", include_in_schema=False)
+    def root():
+        return {
+            "message": "PromptAtelier Backend API is running.",
+            "frontend_ui": "http://127.0.0.1:53173",
+            "api_docs": "/docs",
+        }
+
     return app
 
 

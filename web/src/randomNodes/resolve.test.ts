@@ -64,4 +64,12 @@ describe("random node resolution", () => {
     expect(result.map((item) => item.slots.character?.draftNode?.id)).toEqual(["A", "A", "B"]);
     expect(result.map((item) => item.randomSelections[0].candidate.ref)).toEqual(["a", "a", "b"]);
   });
+
+  it("defaults folder source value to '.' for clothing, character, and artist, and 'new' for action", () => {
+    expect(createDefaultNodePoolSpec("clothing").source.value).toBe(".");
+    expect(createDefaultNodePoolSpec("character").source.value).toBe(".");
+    expect(createDefaultNodePoolSpec("artist").source.value).toBe(".");
+    expect(createDefaultNodePoolSpec("action").source.value).toBe("new");
+    expect(createDefaultNodePoolSpec().source.value).toBe("");
+  });
 });

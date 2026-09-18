@@ -35,6 +35,16 @@ export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot
         } : undefined}
         onRestore={() => workspace.restoreSlot(slot.slotId)}
         onSelect={(response) => workspace.selectNode(slot.slotId, response.ref, response.node, response.editor)}
+        onSelectClothing={(clothingRef, clothingNode) => workspace.setClothingForSlot(slot.slotId, clothingRef, clothingNode)}
+        onAddClothingCompare={role === "character" ? () => workspace.addClothingCompare(slot.slotId) : undefined}
+        onRemoveClothingCompare={role === "character" ? (clothingSlotId) => workspace.removeClothingCompare(slot.slotId, clothingSlotId) : undefined}
+        onSelectClothingSlot={role === "character" ? (clothingSlotId, response) => workspace.selectNode(clothingSlotId, response.ref, response.node, response.editor) : undefined}
+        onCreateBlankClothing={role === "character" ? (clothingSlotId) => workspace.createBlank(clothingSlotId) : undefined}
+        onCreateRandomClothing={role === "character" ? (clothingSlotId) => workspace.createRandom(clothingSlotId) : undefined}
+        onRestoreClothing={role === "character" ? (clothingSlotId) => workspace.restoreSlot(clothingSlotId) : undefined}
+        onClearClothing={role === "character" ? (clothingSlotId) => workspace.clearSlot(clothingSlotId) : undefined}
+        onEditClothing={role === "character" ? (clothingSlotId, response) => onEditSlot ? onEditSlot(clothingSlotId, response) : workspace.openEditor(clothingSlotId, response) : undefined}
+        onEditRandomClothing={role === "character" ? (clothingSlotId) => workspace.openRandomEditor(clothingSlotId) : undefined}
         placeholder={`搜索 ${label} 节点`}
         slot={slot}
       />

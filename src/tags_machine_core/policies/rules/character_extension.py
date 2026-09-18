@@ -182,20 +182,34 @@ class CharacterExtensionPolicyRule:
             return context
 
         options = context.config.options_for(self.id)
+        skip_on_overlay = bool(options.get("skip_on_clothing_overlay", True))
         trigger_mode = _trigger_mode(options.get("trigger_mode"))
         include_materials = bool(options.get("include_declaration_materials", True))
         ignore_disabled = bool(options.get("ignore_disabled_lines", True))
         enabled_slots = _enabled_slots(options.get("enabled_slots"))
-        parsed_by_character = [
-            (character, _parse_character_extensions(character, ignore_disabled=ignore_disabled))
-            for character in characters
-        ]
+
+        active_parsed_by_character = []
+        for character in characters:
+            if skip_on_overlay and _has_clothing_overlay(character):
+                context.add_trace(
+                    rule=f"{self.id}@{self.version}",
+                    action="skip",
+                    reason=f"clothing_overlay:{character.id}",
+                )
+                continue
+            active_parsed_by_character.append(
+                (character, _parse_character_extensions(character, ignore_disabled=ignore_disabled))
+            )
+
+        if not active_parsed_by_character:
+            return context
+
         protected_materials = _declared_material_keys(
-            (parsed for _, parsed in parsed_by_character),
+            (parsed for _, parsed in active_parsed_by_character),
             enabled_slots=enabled_slots,
         )
 
-        for character, parsed in parsed_by_character:
+        for character, parsed in active_parsed_by_character:
             triggered_slots = self._triggered_slots(
                 context.positive_tokens,
                 parsed.rules,
@@ -633,6 +647,12 @@ def _resolved_characters(context: PromptRuleContext) -> list[NodeDocument]:
     if context.resolved_nodes is None:
         return []
     return [item.node for item in context.resolved_nodes.characters()]
+
+
+def _has_clothing_overlay(character: NodeDocument) -> bool:
+    if character and isinstance(character.composition, dict):
+        return bool(character.composition.get("clothing_overlay_sections"))
+    return False
 
 
 def _trigger_mode(value: object) -> TriggerMode:

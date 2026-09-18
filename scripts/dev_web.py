@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     _ensure_frontend_deps(skip=args.no_install)
 
     env = os.environ.copy()
+    src_dir = str((ROOT / "src").resolve())
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else src_dir
     env["VITE_API_ROOT"] = f"http://{args.host}:{args.backend_port}/api"
     if args.config:
         env["TAGS_MACHINE_CONFIG"] = args.config

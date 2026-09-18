@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -118,7 +118,8 @@ class BatchDefaults(BaseModel):
 
 class SelectorSpec(BaseModel):
     selector: str
-    refs: list[str] = Field(default_factory=list)
+    refs: list[Any] = Field(default_factory=list)
+    clothing_map: list[str] = Field(default_factory=list)
     root: str | None = None
     name: str | None = None
     pattern: str | None = None
@@ -134,11 +135,19 @@ class SelectorSpec(BaseModel):
 
     @field_validator("refs", mode="before")
     @classmethod
-    def _refs_as_strings(cls, value: Any) -> list[str]:
+    def _refs_as_strings(cls, value: Any) -> list[Any]:
         if value is None:
             return []
         if isinstance(value, list):
-            return [str(item) for item in value]
+            result: list[Any] = []
+            for item in value:
+                if isinstance(item, (dict, Mapping)):
+                    result.append(dict(item))
+                else:
+                    result.append(str(item))
+            return result
+        if isinstance(value, (dict, Mapping)):
+            return [dict(value)]
         return [str(value)]
 
 
@@ -175,6 +184,7 @@ class NodeRef(BaseModel):
     role: str
     ref: str
     index: int = 0
+    clothing_ref: str | None = None
 
     @field_validator("role", "ref")
     @classmethod

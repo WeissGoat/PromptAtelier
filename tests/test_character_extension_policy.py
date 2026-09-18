@@ -241,6 +241,83 @@ class CharacterExtensionPolicyTest(unittest.TestCase):
         self.assertEqual(bundle.prompt.positive, "weapon")
         self.assertNotIn("policy", bundle.meta.extra)
 
+    def test_clothing_overlay_skips_character_extension_by_default(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            identity_minimal=["character", "copyright"],
+            tags={
+                "character": ["akemi homura"],
+                "copyright": ["mahou shoujo madoka magica"],
+            },
+            composition={"clothing_overlay_sections": ["shoes"]},
+            legacy=LegacyNodeMeta(
+                raw_sections={
+                    "extension": [
+                        "ext_legwear,argyle_legwear,pantyhose",
+                        "leg_wear, pantyhose, add|argyle_legwear",
+                    ]
+                }
+            ),
+        )
+        action = NodeDocument(
+            kind="action",
+            id="leg_action",
+            tags={"action": ["pantyhose, standing"]},
+        )
+
+        bundle = _compose(character, action)
+        self.assertNotIn("argyle_legwear", bundle.prompt.positive)
+        trace = bundle.meta.extra.get("policy_trace", [])
+        ext_trace = [t for t in trace if t["rule"].startswith("character_extension")]
+        self.assertTrue(any(t["action"] == "skip" and "clothing_overlay:homura" in t["reason"] for t in ext_trace))
+
+    def test_clothing_overlay_extension_skip_can_be_disabled_via_options(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            identity_minimal=["character", "copyright"],
+            tags={
+                "character": ["akemi homura"],
+                "copyright": ["mahou shoujo madoka magica"],
+            },
+            composition={"clothing_overlay_sections": ["shoes"]},
+            legacy=LegacyNodeMeta(
+                raw_sections={
+                    "extension": [
+                        "ext_legwear,argyle_legwear,pantyhose",
+                        "leg_wear, pantyhose, add|argyle_legwear",
+                    ]
+                }
+            ),
+        )
+        action = NodeDocument(
+            kind="action",
+            id="leg_action",
+            tags={"action": ["pantyhose, standing"]},
+        )
+        nodes = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=character),
+                ResolvedNode(role="action", ref=action.id, index=0, node=action),
+            ]
+        )
+        bundle = GenerationService().compose_resolved_nodes(
+            nodes,
+            prompt_policy={
+                "enabled": True,
+                "profile": "off",
+                "enabled_rules": ["character_extension"],
+                "rules": {
+                    "character_extension": {
+                        "skip_on_clothing_overlay": False,
+                    }
+                },
+                "apply_to": {"script": True},
+            },
+        )
+        self.assertIn("argyle_legwear", bundle.prompt.positive)
+
 
 if __name__ == "__main__":
     unittest.main()

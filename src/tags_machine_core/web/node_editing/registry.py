@@ -8,6 +8,7 @@ from .action_sources import ActionSourcesAdapter
 from .artist_tags import LegacyArtistTagsAdapter
 from .base import NodeSourceAdapter
 from .character_yaml import CharacterMetaYamlAdapter
+from .clothing_yaml import ClothingMetaYamlAdapter
 
 
 class NodeSourceAdapterRegistry:
@@ -29,5 +30,6 @@ def create_default_registry(design_root: str | Path, reader: NodeReader | None =
             LegacyArtistTagsAdapter(Path(design_root)),
             ActionSourcesAdapter(node_reader),
             CharacterMetaYamlAdapter(node_reader),
+            ClothingMetaYamlAdapter(node_reader),
         ]
     )

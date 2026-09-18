@@ -1,4 +1,4 @@
-import { Dices, FilePlus2, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Dices, FilePlus2, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
@@ -20,6 +20,16 @@ type NodeSlotProps = {
   onEdit: (response?: NodeReadResponse) => void;
   onEditRandom?: () => void;
   onRemove?: () => void;
+  onSelectClothing?: (ref: string | null, node?: NodeDocument | null) => void;
+  onAddClothingCompare?: () => void;
+  onRemoveClothingCompare?: (clothingSlotId: string) => void;
+  onSelectClothingSlot?: (slotId: string, response: NodeReadResponse) => void;
+  onCreateBlankClothing?: (slotId: string) => void;
+  onCreateRandomClothing?: (slotId: string) => void;
+  onRestoreClothing?: (slotId: string) => void;
+  onClearClothing?: (slotId: string) => void;
+  onEditClothing?: (slotId: string, response?: NodeReadResponse) => void;
+  onEditRandomClothing?: (slotId: string) => void;
 };
 
 function statusLabel(slot: NodeVariantSlot): string {
@@ -58,6 +68,16 @@ export function NodeSlot({
   onEdit,
   onEditRandom,
   onRemove,
+  onSelectClothing,
+  onAddClothingCompare,
+  onRemoveClothingCompare,
+  onSelectClothingSlot,
+  onCreateBlankClothing,
+  onCreateRandomClothing,
+  onRestoreClothing,
+  onClearClothing,
+  onEditClothing,
+  onEditRandomClothing,
 }: NodeSlotProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -87,6 +107,15 @@ export function NodeSlot({
       setError(errorMessage(requestError));
     } finally {
       if (requestId === readRequestId.current) setLoading(false);
+    }
+  }
+
+  async function handleSelectClothing(node: NodeSummary) {
+    try {
+      const response = await apiGet<NodeReadResponse>(`/nodes/read?${new URLSearchParams({ ref: node.ref, role: "clothing" })}`);
+      onSelectClothing?.(response.ref, response.node);
+    } catch {
+      onSelectClothing?.(node.ref, null);
     }
   }
 
@@ -156,6 +185,102 @@ export function NodeSlot({
           value={displayName(slot)}
         />
       )}
+      {slot.role === "character" ? (
+        slot.clothingSlots && slot.clothingSlots.length > 0 ? (
+          <div
+            className="clothing-overlay-group"
+            style={{
+              marginTop: "0.5rem",
+              paddingLeft: "0.5rem",
+              borderLeft: "2px solid #cbd6e3",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "0.35rem",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#687182" }}>
+                服装 (Clothing Overlay)
+              </span>
+              {onAddClothingCompare ? (
+                <button
+                  aria-label="新增服装 Compare"
+                  className="icon-button"
+                  onClick={onAddClothingCompare}
+                  style={{ height: "24px", minHeight: "24px", width: "24px" }}
+                  title="新增服装 Compare"
+                  type="button"
+                >
+                  <Plus size={14} />
+                </button>
+              ) : null}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {slot.clothingSlots.map((clothingSlot, index) => (
+                <NodeSlot
+                  key={clothingSlot.slotId}
+                  label={clothingSlot.mode === "compare" ? `服装 (Compare ${index})` : "服装"}
+                  placeholder="可选：选择覆盖服装 (默认使用角色原服装)"
+                  slot={clothingSlot}
+                  onClear={() => {
+                    if (onClearClothing) {
+                      onClearClothing(clothingSlot.slotId);
+                    } else {
+                      onSelectClothing?.(null, null);
+                    }
+                  }}
+                  onCreateBlank={() => onCreateBlankClothing?.(clothingSlot.slotId)}
+                  onCreateRandom={onCreateRandomClothing ? () => onCreateRandomClothing(clothingSlot.slotId) : undefined}
+                  onEdit={(response) => onEditClothing?.(clothingSlot.slotId, response)}
+                  onEditRandom={onEditRandomClothing ? () => onEditRandomClothing(clothingSlot.slotId) : undefined}
+                  onRemove={
+                    clothingSlot.mode === "compare" && onRemoveClothingCompare
+                      ? () => onRemoveClothingCompare(clothingSlot.slotId)
+                      : undefined
+                  }
+                  onRestore={() => onRestoreClothing?.(clothingSlot.slotId)}
+                  onSelect={(response) => {
+                    if (onSelectClothingSlot) {
+                      onSelectClothingSlot(clothingSlot.slotId, response);
+                    } else {
+                      onSelectClothing?.(response.ref, response.node);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="clothing-overlay-picker" style={{ marginTop: "0.5rem", paddingLeft: "0.5rem", borderLeft: "2px solid var(--border-color, #444)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.25rem" }}>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted, #888)" }}>服装 (Clothing Overlay)</span>
+              {slot.clothingRef ? (
+                <button
+                  className="icon-button"
+                  onClick={() => onSelectClothing?.(null, null)}
+                  style={{ fontSize: "0.75rem", padding: "0 0.25rem", height: "auto" }}
+                  title="清除服装覆盖"
+                  type="button"
+                >
+                  清除
+                </button>
+              ) : null}
+            </div>
+            <NodePicker
+              label="服装"
+              onClear={() => onSelectClothing?.(null, null)}
+              onSelect={(node) => void handleSelectClothing(node)}
+              placeholder="可选：选择覆盖服装 (默认使用角色原服装)"
+              role="clothing"
+              value={slot.clothingNode?.name || (slot.clothingRef ? slot.clothingRef.split(/[/\\]/).pop() || slot.clothingRef : "")}
+            />
+          </div>
+        )
+      ) : null}
       {loading ? <small className="field-hint">正在读取节点...</small> : null}
       {error ? <small className="field-error">{error}</small> : null}
     </section>

@@ -1,3 +1,4 @@
+import type { NodeRole } from "../nodes/types";
 import type { ClassifyFilter, NodePoolSpec } from "../workspace/types";
 
 export const CLASSIFY_FIELDS: Array<keyof ClassifyFilter> = [
@@ -41,11 +42,14 @@ export function createEmptyClassifyFilter(): ClassifyFilter {
   };
 }
 
-export function createDefaultNodePoolSpec(): NodePoolSpec {
+export function createDefaultNodePoolSpec(role?: NodeRole): NodePoolSpec {
+  const defaultValue = role === "clothing" || role === "artist" || role === "character"
+    ? "."
+    : (role === "action" ? "new" : "");
   return {
     source: {
       type: "folder",
-      value: "",
+      value: defaultValue,
       recursive: false,
       include_names: [],
       exclude_names: [],
