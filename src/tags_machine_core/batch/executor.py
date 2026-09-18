@@ -17,6 +17,7 @@ from tags_machine_core.nodes import (
     ResolvedNode,
     ResolvedNodeSet,
 )
+from tags_machine_core.nodes.clothing_overlay import apply_clothing_overlay
 from tags_machine_core.services import GenerationService
 from tags_machine_core.policies import PromptPolicyProvider
 
@@ -175,6 +176,9 @@ class BatchExecutor:
                 document = artist_filter.apply(document)
             else:
                 document = self.node_reader.read(node_ref.ref)
+                if node_ref.role == "character" and getattr(node_ref, "clothing_ref", None):
+                    clothing_doc = self.node_reader.read(node_ref.clothing_ref)
+                    document = apply_clothing_overlay(document, clothing_doc)
             items.append(
                 ResolvedNode(
                     role=node_ref.role,

@@ -1,5 +1,5 @@
 import type { ComposePreviewResponse, NodeEditorDocument } from "../api/types";
-import type { NodeDocument, NodeRole } from "../nodes/types";
+import type { GroupRole, NodeDocument, NodeRole } from "../nodes/types";
 
 export type SlotMode = "primary" | "compare";
 
@@ -40,6 +40,9 @@ export type NodeVariantSlot = {
   draftNode: NodeDocument | null;
   sourceEditor?: NodeEditorDocument | null;
   draftEditorValues?: Record<string, unknown> | null;
+  clothingRef?: string | null;
+  clothingNode?: NodeDocument | null;
+  clothingSlots?: NodeVariantSlot[];
 };
 
 export type RoleNodeGroup = {
@@ -96,7 +99,7 @@ export type WorkspaceEditorState = {
 
 export type CustomWorkspaceState = {
   schema: "promptatelier.custom-workspace/v2";
-  groups: Record<NodeRole, RoleNodeGroup>;
+  groups: Record<GroupRole, RoleNodeGroup>;
   params: RenderWorkspaceParams;
   promptBehaviorGroup: PromptBehaviorGroup;
   activePromptBehaviorSlotId: string;

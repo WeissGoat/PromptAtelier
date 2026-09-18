@@ -2,7 +2,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, JobRecord } from "../api/types";
-import type { NodeRole } from "../nodes/types";
+import { cloneNode } from "../nodes/temporaryNodes";
+import type { GroupRole, NodeRole } from "../nodes/types";
 import { resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
 import { promptBehaviorFingerprint } from "../workspace/promptBehavior";
@@ -80,6 +81,7 @@ function initialResult(item: CompareRunItem, randomSelections: RandomSelectionRe
       artist: slotLabel(item.combination.artist),
       character: slotLabel(item.combination.character),
       action: slotLabel(item.combination.action),
+      clothing: slotLabel(item.combination.clothing),
     },
     behavior: {
       slotId: item.combination.promptBehavior.slotId,
@@ -144,7 +146,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
   }, [get, pollIntervalMs]);
 
   const start = useCallback(async (
-    groups: Record<NodeRole, RoleNodeGroup>,
+    groups: Record<GroupRole, RoleNodeGroup>,
     params: RenderWorkspaceParams,
     promptBehaviorGroup: PromptBehaviorGroup,
   ) => {
@@ -161,13 +163,29 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
         artist: item.combination.artist,
         character: item.combination.character,
         action: item.combination.action,
+        clothing: item.combination.clothing ?? null,
       },
     })));
-    const executableItems = resolvedPlan.map(({ value, slots, randomSelections }) => ({
-      ...value,
-      combination: { ...value.combination, ...slots },
-      randomSelections,
-    }));
+    const executableItems = resolvedPlan.map(({ value, slots, randomSelections }) => {
+      const rawCharacter = slots.character;
+      const clothing = slots.clothing;
+      const effectiveCharacter = rawCharacter ? {
+        ...rawCharacter,
+        clothingRef: clothing?.sourceRef ?? null,
+        clothingNode: clothing?.draftNode ? cloneNode(clothing.draftNode) : null,
+      } : null;
+      return {
+        ...value,
+        combination: {
+          ...value.combination,
+          artist: slots.artist,
+          character: effectiveCharacter,
+          action: slots.action,
+          clothing,
+        },
+        randomSelections,
+      };
+    });
     const outputDir = outputDirFactory();
     setResults(executableItems.map((item) => initialResult(item, item.randomSelections)));
     setRunning(true);

@@ -10,6 +10,7 @@ from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.nodes import NodeReader, ResolvedNode, ResolvedNodeSet
+from tags_machine_core.nodes.clothing_overlay import apply_clothing_overlay
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import node_role_order
 from tags_machine_core.services.generation_service import GenerationService
@@ -273,6 +274,12 @@ class GenerationJsonApi:
                 node = self._load_node_for_role(role, item.get("node") or ref)
                 if node is None:
                     raise ValueError("node list item resolved to empty node")
+                if role == "character":
+                    clothing_value = item.get("clothing") or item.get("clothing_ref")
+                    if clothing_value:
+                        clothing_node = self._load_optional_node(clothing_value)
+                        if clothing_node:
+                            node = apply_clothing_overlay(node, clothing_node)
                 items.append((role, ref, node))
         else:
             nodes = _mapping(nodes_value or {}, "compose request nodes")

@@ -18,7 +18,7 @@ from tags_machine_core.node_pools import (
 from .node_workspace import NodeWorkspace
 
 
-VALID_ROLES = {"artist", "character", "action", "background"}
+VALID_ROLES = {"artist", "character", "action", "background", "clothing"}
 
 
 @dataclass

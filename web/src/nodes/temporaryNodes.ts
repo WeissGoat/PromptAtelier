@@ -20,6 +20,7 @@ export function createTemporaryNode(
     schema: NODE_SCHEMA,
     kind: role,
     id,
+    tags: role === "clothing" ? { role: ["{{alternative_clothing}}"] } : {},
     prompt: {
       positive: [],
       negative: [],
@@ -69,13 +70,23 @@ export function serializeNodeSlot(slot: NodeSlotState): ComposeNodeInput | null 
   }
 
   const status = nodeSlotStatus(slot);
-  if (status === "original" && slot.sourceRef) {
-    return { role: slot.role, ref: slot.sourceRef };
+  const result: ComposeNodeInput =
+    status === "original" && slot.sourceRef
+      ? { role: slot.role, ref: slot.sourceRef }
+      : {
+          role: slot.role,
+          ref: slot.sourceRef ?? `web-temporary:${slot.role}:${slot.draftNode.id}`,
+          node: cloneNode(slot.draftNode),
+        };
+
+  if (slot.role === "character") {
+    if (slot.clothingRef) {
+      result.clothing_ref = slot.clothingRef;
+    }
+    if (slot.clothingNode) {
+      result.clothing = cloneNode(slot.clothingNode);
+    }
   }
 
-  return {
-    role: slot.role,
-    ref: slot.sourceRef ?? `web-temporary:${slot.role}:${slot.draftNode.id}`,
-    node: cloneNode(slot.draftNode),
-  };
+  return result;
 }

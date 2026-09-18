@@ -39,12 +39,18 @@ def main() -> int:
         "--report",
         help="Write a JSON report to this path.",
     )
+    parser.add_argument(
+        "--only-existing",
+        action="store_true",
+        help="Only update existing meta.yaml files; do not create new ones.",
+    )
     args = parser.parse_args()
 
     result = fill_action_meta_clothing(
         root=Path(args.root),
         write=args.write,
         backup=args.backup,
+        only_existing=args.only_existing,
     )
     text = json.dumps(result, ensure_ascii=False, indent=2)
     if args.report:
@@ -63,6 +69,7 @@ def fill_action_meta_clothing(
     write: bool = False,
     backup: bool = False,
     ensure_meta: bool = False,
+    only_existing: bool = False,
 ) -> dict[str, Any]:
     root = root.resolve()
     items: list[dict[str, Any]] = []
@@ -70,6 +77,7 @@ def fill_action_meta_clothing(
         "mode": "write" if write else "preview",
         "root": str(root),
         "ensure_meta": ensure_meta,
+        "only_existing": only_existing,
         "scanned": 0,
         "created": 0,
         "updated": 0,
@@ -95,6 +103,7 @@ def fill_action_meta_clothing(
                 write=write,
                 backup=backup,
                 ensure_meta=ensure_meta,
+                only_existing=only_existing,
             )
         except Exception as exc:  # noqa: BLE001 - 脚本需要继续扫描并在报告里标记坏节点。
             summary["errors"] += 1
@@ -148,6 +157,7 @@ def _process_node(
     write: bool,
     backup: bool,
     ensure_meta: bool,
+    only_existing: bool = False,
 ) -> dict[str, Any]:
     classify_path = node_dir / "classify.yaml"
     tags_path = node_dir / "tags.txt"
@@ -157,6 +167,15 @@ def _process_node(
         tags_path: _file_signature(tags_path),
         meta_path: _file_signature(meta_path),
     }
+
+    existed = meta_path.exists()
+    if only_existing and not existed:
+        return {
+            "node_dir": str(node_dir),
+            "relative": _safe_relative(node_dir, root),
+            "status": "skipped",
+            "reason": "meta.yaml does not exist",
+        }
 
     classify = _read_yaml_mapping(classify_path) if classify_path.exists() else {}
     state, state_warning = _read_clothing_state(classify)
@@ -168,7 +187,7 @@ def _process_node(
         conflicts.append(state_warning)
 
     has_clothing_signals = bool(
-        state or type_info["type_dress"] or type_info["type_no_dress"]
+        state or type_info["type_dress"] or type_info["type_no_dress"] or (existed and "clothing" in _read_yaml_mapping(meta_path))
     )
     if not has_clothing_signals and not ensure_meta:
         return {
@@ -178,7 +197,6 @@ def _process_node(
             "reason": "no clothing signals",
         }
 
-    existed = meta_path.exists()
     if ensure_meta and not existed and not tags_path.exists():
         raise FileNotFoundError(f"missing tags.txt for new action node: {node_dir}")
 
@@ -326,7 +344,7 @@ def _empty_type_info() -> dict[str, Any]:
 def _build_clothing(*, state: str | None, type_info: dict[str, Any]) -> dict[str, Any]:
     type_no_dress = bool(type_info["type_no_dress"])
     type_dress = bool(type_info["type_dress"])
-    action_outfit = (state == "specific_outfit" or type_dress) and not type_no_dress
+    action_outfit = type_dress and not type_no_dress
     return {
         "state": state,
         "action_outfit": action_outfit,

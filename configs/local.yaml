@@ -20,8 +20,8 @@ web:
 
 novelai:
   base_url: "https://image.novelai.net"
-  access_token: "pst-NzeqsCCmBsy3mXqaR5W76ee-gQCv3SonlNvR6FdW5RNXXNVi4UPpqY1cImmGzcxF"
-  access_token_env: "pst-NzeqsCCmBsy3mXqaR5W76ee-gQCv3SonlNvR6FdW5RNXXNVi4UPpqY1cImmGzcxF"
+  access_token: "pst-84DFUXraGuZzmYJ0kZ_pqx4xW8iB1Qb9aEbH8tkvTpfyXIS4r1nBmokHqWCun5qc"
+  access_token_env: "NAI_ACCESS_TOKEN"
   timeout: 120
   retry: 3
   retry_interval: 8

@@ -7,6 +7,7 @@ import type { NodeDocument, NodeRole } from "../nodes/types";
 import { createDefaultNodePoolSpec } from "../randomNodes/spec";
 import {
   clearWorkspaceSnapshot,
+  createEmptyClothingSlot,
   createEmptySlot,
   createEmptyWorkspace,
   createSlotId,
@@ -41,6 +42,8 @@ type CustomWorkspaceContextValue = {
   clearSlot(slotId: string): void;
   addCompare(role: NodeRole): string;
   removeCompare(slotId: string): void;
+  addClothingCompare(characterSlotId: string): string;
+  removeClothingCompare(characterSlotId: string, clothingSlotId: string): void;
   openEditor(slotId: string, response?: NodeReadResponse): void;
   openRandomEditor(slotId: string): void;
   closeEditor(): void;
@@ -48,6 +51,7 @@ type CustomWorkspaceContextValue = {
   setEditorDraft(node: NodeDocument): void;
   setEditorValues(values: Record<string, unknown>): void;
   setParams(patch: Partial<RenderWorkspaceParams>): void;
+  setClothingForSlot(slotId: string, clothingRef: string | null, clothingNode?: NodeDocument | null): void;
   findPromptBehavior(slotId: string): PromptBehaviorVariant | null;
   selectPromptBehavior(slotId: string): void;
   addPromptBehaviorCompare(): string;
@@ -60,6 +64,33 @@ type CustomWorkspaceContextValue = {
 
 const CustomWorkspaceContext = createContext<CustomWorkspaceContextValue | null>(null);
 
+function updateSlotOrClothing(
+  slot: NodeVariantSlot,
+  targetSlotId: string,
+  update: (s: NodeVariantSlot) => NodeVariantSlot,
+): { updated: NodeVariantSlot; matched: boolean } {
+  if (slot.slotId === targetSlotId) {
+    return { updated: update(slot), matched: true };
+  }
+  if (slot.clothingSlots && slot.clothingSlots.length > 0) {
+    const cIndex = slot.clothingSlots.findIndex((cs) => cs.slotId === targetSlotId);
+    if (cIndex >= 0) {
+      const newClothingSlots = [...slot.clothingSlots];
+      newClothingSlots[cIndex] = update(newClothingSlots[cIndex]);
+      return {
+        updated: {
+          ...slot,
+          clothingSlots: newClothingSlots,
+          clothingRef: newClothingSlots[0]?.sourceRef ?? null,
+          clothingNode: newClothingSlots[0]?.draftNode ? cloneNode(newClothingSlots[0].draftNode) : null,
+        },
+        matched: true,
+      };
+    }
+  }
+  return { updated: slot, matched: false };
+}
+
 function mapSlot(
   state: CustomWorkspaceState,
   slotId: string,
@@ -68,19 +99,27 @@ function mapSlot(
 ): CustomWorkspaceState {
   let changed = false;
   const groups = { ...state.groups };
-  for (const role of Object.keys(groups) as NodeRole[]) {
+  for (const role of Object.keys(groups) as Array<keyof CustomWorkspaceState["groups"]>) {
     const group = groups[role];
-    if (group.primary.slotId === slotId) {
-      groups[role] = { ...group, primary: update(group.primary) };
+    const primaryResult = updateSlotOrClothing(group.primary, slotId, update);
+    if (primaryResult.matched) {
+      groups[role] = { ...group, primary: primaryResult.updated };
       changed = true;
       break;
     }
-    const index = group.compares.findIndex((slot) => slot.slotId === slotId);
-    if (index >= 0) {
-      const compares = [...group.compares];
-      compares[index] = update(compares[index]);
+    const compares = [...group.compares];
+    let compareMatched = false;
+    for (let i = 0; i < compares.length; i++) {
+      const compareResult = updateSlotOrClothing(compares[i], slotId, update);
+      if (compareResult.matched) {
+        compares[i] = compareResult.updated;
+        compareMatched = true;
+        changed = true;
+        break;
+      }
+    }
+    if (compareMatched) {
       groups[role] = { ...group, compares };
-      changed = true;
       break;
     }
   }
@@ -88,11 +127,20 @@ function mapSlot(
 }
 
 function findSlotInState(state: CustomWorkspaceState, slotId: string): NodeVariantSlot | null {
-  for (const role of Object.keys(state.groups) as NodeRole[]) {
+  for (const role of Object.keys(state.groups) as Array<keyof CustomWorkspaceState["groups"]>) {
     const group = state.groups[role];
     if (group.primary.slotId === slotId) return group.primary;
-    const compare = group.compares.find((slot) => slot.slotId === slotId);
-    if (compare) return compare;
+    if (group.primary.clothingSlots) {
+      const cs = group.primary.clothingSlots.find((c) => c.slotId === slotId);
+      if (cs) return cs;
+    }
+    for (const compare of group.compares) {
+      if (compare.slotId === slotId) return compare;
+      if (compare.clothingSlots) {
+        const cs = compare.clothingSlots.find((c) => c.slotId === slotId);
+        if (cs) return cs;
+      }
+    }
   }
   return null;
 }
@@ -207,16 +255,22 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       draftEditorValues: null,
     }))),
     createRandom: (slotId) => setState((current) => {
-      const next = mapSlot(current, slotId, (slot) => ({
-        ...slot,
-        sourceKind: "random",
-        randomSpec: slot.randomSpec ? structuredClone(slot.randomSpec) : createDefaultNodePoolSpec(),
-        sourceRef: null,
-        sourceNode: null,
-        draftNode: null,
-        sourceEditor: null,
-        draftEditorValues: null,
-      }));
+      const next = mapSlot(current, slotId, (slot) => {
+        const defaultSpec = createDefaultNodePoolSpec(slot.role);
+        const randomSpec = slot.randomSpec?.source?.value?.trim()
+          ? structuredClone(slot.randomSpec)
+          : defaultSpec;
+        return {
+          ...slot,
+          sourceKind: "random",
+          randomSpec,
+          sourceRef: null,
+          sourceNode: null,
+          draftNode: null,
+          sourceEditor: null,
+          draftEditorValues: null,
+        };
+      });
       return {
         ...next,
         editor: {
@@ -253,7 +307,29 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       draftNode: null,
       sourceEditor: null,
       draftEditorValues: null,
+      clothingRef: null,
+      clothingNode: null,
     }))),
+    setClothingForSlot: (slotId, clothingRef, clothingNode = null) => setState((current) => mapSlot(current, slotId, (slot) => {
+      const primaryClothing = slot.clothingSlots?.[0] ?? createEmptyClothingSlot("primary", slot.slotId);
+      const updatedPrimary: NodeVariantSlot = {
+        ...primaryClothing,
+        sourceKind: "fixed",
+        randomSpec: null,
+        sourceRef: clothingRef,
+        sourceNode: clothingNode ? cloneNode(clothingNode) : null,
+        draftNode: clothingNode ? cloneNode(clothingNode) : null,
+        sourceEditor: null,
+        draftEditorValues: null,
+      };
+      const otherClothing = (slot.clothingSlots || []).slice(1);
+      return {
+        ...slot,
+        clothingRef,
+        clothingNode: clothingNode ? cloneNode(clothingNode) : null,
+        clothingSlots: [updatedPrimary, ...otherClothing],
+      };
+    })),
     addCompare: (role) => {
       const slot = createEmptySlot(role, "compare");
       setState((current) => {
@@ -267,6 +343,15 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
           draftNode: primary.draftNode ? cloneNode(primary.draftNode) : null,
           sourceEditor: primary.sourceEditor ? structuredClone(primary.sourceEditor) : null,
           draftEditorValues: primary.draftEditorValues ? structuredClone(primary.draftEditorValues) : null,
+          clothingRef: primary.clothingRef ?? null,
+          clothingNode: primary.clothingNode ? cloneNode(primary.clothingNode) : null,
+          clothingSlots: role === "character"
+            ? (primary.clothingSlots?.map((cs) => ({
+                ...structuredClone(cs),
+                slotId: createSlotId("clothing-compare"),
+                mode: "compare" as const,
+              })) ?? [createEmptyClothingSlot("primary", slot.slotId)])
+            : undefined,
         };
         return {
           ...current,
@@ -280,16 +365,18 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       return slot.slotId;
     },
     removeCompare: (slotId) => setState((current) => {
-      for (const role of Object.keys(current.groups) as NodeRole[]) {
+      for (const role of Object.keys(current.groups) as Array<keyof CustomWorkspaceState["groups"]>) {
         const group = current.groups[role];
-        if (group.compares.some((slot) => slot.slotId === slotId)) {
+        const removed = group.compares.find((slot) => slot.slotId === slotId);
+        if (removed) {
+          const removedIds = new Set([slotId, ...(removed.clothingSlots?.map((cs) => cs.slotId) ?? [])]);
           return {
             ...current,
             groups: { ...current.groups, [role]: {
               ...group,
               compares: group.compares.filter((slot) => slot.slotId !== slotId),
             } },
-            editor: current.editor.slotId === slotId
+            editor: removedIds.has(current.editor.slotId ?? "")
               ? { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null }
               : current.editor,
             revision: current.revision + 1,
@@ -297,6 +384,33 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
         }
       }
       return current;
+    }),
+    addClothingCompare: (characterSlotId) => {
+      const clothingSlot = createEmptyClothingSlot("compare", characterSlotId);
+      setState((current) => mapSlot(current, characterSlotId, (slot) => ({
+        ...slot,
+        clothingSlots: slot.clothingSlots ? [...slot.clothingSlots, clothingSlot] : [clothingSlot],
+      })));
+      return clothingSlot.slotId;
+    },
+    removeClothingCompare: (characterSlotId, clothingSlotId) => setState((current) => {
+      let next = mapSlot(current, characterSlotId, (slot) => {
+        const filtered = (slot.clothingSlots || []).filter((cs) => cs.slotId !== clothingSlotId);
+        const finalClothing = filtered.length ? filtered : [createEmptyClothingSlot("primary", slot.slotId)];
+        return {
+          ...slot,
+          clothingSlots: finalClothing,
+          clothingRef: finalClothing[0]?.sourceRef ?? null,
+          clothingNode: finalClothing[0]?.draftNode ? cloneNode(finalClothing[0].draftNode) : null,
+        };
+      });
+      if (next.editor.slotId === clothingSlotId) {
+        next = {
+          ...next,
+          editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
+        };
+      }
+      return next;
     }),
     openEditor: (slotId, response) => setState((current) => {
       const next = response ? mapSlot(current, slotId, (slot) => {

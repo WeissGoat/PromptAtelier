@@ -96,3 +96,29 @@ def test_invalid_clothing_state_is_reported_without_writing_illegal_state(tmp_pa
     assert report["items"][0]["conflicts"] == ["invalid_clothing_state:armor"]
     assert data["clothing"]["state"] is None
     assert data["clothing"]["action_outfit"] is True
+
+
+
+def test_specific_outfit_without_type_dress_does_not_set_action_outfit(tmp_path: Path):
+    action_dir = tmp_path / "maid_no_type"
+    action_dir.mkdir()
+    (action_dir / "classify.yaml").write_text("clothing: specific_outfit\n", encoding="utf-8")
+    (action_dir / "tags.txt").write_text("standing, maid costume\n", encoding="utf-8")
+
+    report = fill_action_meta_clothing(tmp_path, write=True)
+    data = yaml.safe_load((action_dir / "meta.yaml").read_text(encoding="utf-8"))
+
+    assert data["clothing"]["state"] == "specific_outfit"
+    assert data["clothing"]["action_outfit"] is False
+
+
+def test_only_existing_skips_dirs_without_meta(tmp_path: Path):
+    action_dir = tmp_path / "raw_legacy"
+    action_dir.mkdir()
+    (action_dir / "classify.yaml").write_text("clothing: specific_outfit\n", encoding="utf-8")
+    (action_dir / "tags.txt").write_text("standing\ntype,dress\n", encoding="utf-8")
+
+    report = fill_action_meta_clothing(tmp_path, write=True, only_existing=True)
+
+    assert report["summary"]["skipped"] == 1
+    assert not (action_dir / "meta.yaml").exists()

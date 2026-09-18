@@ -17,7 +17,7 @@ import { PromptPreview } from "./PromptPreview";
 import { ImageDetailDialog } from "./ImageDetailDialog";
 
 const terminalJobStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
-const slotLabels: Record<NodeRole, string> = { artist: "Artist", character: "Character", action: "Action" };
+const slotLabels: Record<NodeRole, string> = { artist: "Artist", character: "Character", action: "Action", clothing: "Clothing" };
 
 function randomSeed(): number {
   if (globalThis.crypto?.getRandomValues) return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
@@ -60,13 +60,20 @@ function seedForImage(image: GenerationImage, result: GenerationResult | undefin
   return null;
 }
 
-function validateSelected(slots: Record<NodeRole, NodeVariantSlot>): string | null {
-  const selected = (slot: NodeVariantSlot) => slot.sourceKind === "random"
+function validateSelected(slots: Partial<Record<NodeRole, NodeVariantSlot | null>>): string | null {
+  const selected = (slot: NodeVariantSlot | null | undefined) => slot?.sourceKind === "random"
     ? Boolean(slot.randomSpec?.source.value.trim())
-    : Boolean(slot.draftNode);
+    : Boolean(slot?.draftNode);
   if (!selected(slots.character) && !selected(slots.action)) return "请至少选择或新建一个 Character 或 Action 节点。";
   for (const role of Object.keys(slots) as NodeRole[]) {
     const slot = slots[role];
+    if (!slot) continue;
+    if (role === "clothing") {
+      if (slot.sourceKind === "random" && !slot.randomSpec?.source.value.trim()) {
+        return "Clothing 随机节点尚未配置来源。";
+      }
+      continue;
+    }
     if (slot.sourceKind === "random") {
       if (!slot.randomSpec?.source.value.trim()) return `${slotLabels[role]} 随机节点尚未配置来源。`;
       continue;
@@ -139,6 +146,7 @@ export function CustomGeneratePanel() {
     artist: groups.artist.primary,
     character: groups.character.primary,
     action: groups.action.primary,
+    clothing: groups.character.primary.clothingSlots?.[0] ?? null,
   }), [groups]);
   const primaryHasRandom = hasRandomSlots(primary);
   const previewRequest = useMemo(() => primaryHasRandom ? null : buildComposeRenderRequest(primary, params, {
@@ -371,6 +379,12 @@ export function CustomGeneratePanel() {
                     <dl>
                       <dt>Artist</dt><dd>{result.labels.artist}</dd>
                       <dt>Character</dt><dd>{result.labels.character}</dd>
+                      {result.labels.clothing && result.labels.clothing !== "未选择" ? (
+                        <>
+                          <dt>Clothing</dt>
+                          <dd>{result.labels.clothing}</dd>
+                        </>
+                      ) : null}
                       <dt>Action</dt><dd>{result.labels.action}</dd>
                       <dt>Behavior</dt><dd>{result.behavior.label}</dd>
                     </dl>

@@ -7,7 +7,7 @@ import type { NodeRole } from "../nodes/types";
 
 type NodePickerProps = {
   label: string;
-  role: NodeRole;
+  role: NodeRole | "clothing";
   value: string;
   displayValue?: string;
   placeholder: string;

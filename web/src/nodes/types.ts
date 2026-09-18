@@ -1,4 +1,5 @@
-export type NodeRole = "artist" | "character" | "action";
+export type NodeRole = "artist" | "character" | "action" | "clothing";
+export type GroupRole = "artist" | "character" | "action";
 
 export type PromptFragment = {
   text: string;
@@ -11,7 +12,7 @@ export type PromptFragment = {
 
 export type NodeDocument = {
   schema: "tags-machine-core.node/v1";
-  kind: NodeRole | "background" | "vibe" | "story" | "unknown";
+  kind: NodeRole | "background" | "clothing" | "vibe" | "story" | "unknown";
   id: string;
   name?: string | null;
   description?: string | null;
@@ -28,6 +29,8 @@ export type NodeSlotState = {
   sourceRef: string | null;
   sourceNode: NodeDocument | null;
   draftNode: NodeDocument | null;
+  clothingRef?: string | null;
+  clothingNode?: NodeDocument | null;
 };
 
 export type NodeSlotStatus = "empty" | "original" | "modified" | "temporary" | "random";
@@ -36,4 +39,6 @@ export type ComposeNodeInput = {
   role: NodeRole;
   ref: string;
   node?: NodeDocument;
+  clothing_ref?: string;
+  clothing?: NodeDocument;
 };

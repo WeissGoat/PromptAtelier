@@ -20,6 +20,7 @@ OUTFIT_SECTION_KEYS = {
     "capelet",
     "legwear",
     "shoes",
+    "feet",
 }
 
 
@@ -34,6 +35,15 @@ class ClothingPolicyRule:
         mode = str(options.get("mode") or _default_mode(context))
         reasons = self._reasons_from_action_clothing(context)
         if not reasons:
+            return context
+        skip_on_overlay = bool(options.get("skip_on_clothing_overlay", True))
+        if skip_on_overlay and self._has_clothing_overlay(context):
+            context.add_trace(
+                rule=f"{self.id}@{self.version}",
+                action="skip",
+                reason="character_has_clothing_overlay",
+                mode=mode,
+            )
             return context
         if mode == "advisory":
             for reason in reasons:
@@ -127,6 +137,15 @@ class ClothingPolicyRule:
                 continue
             result.append(token)
         return result
+
+    def _has_clothing_overlay(self, context: PromptRuleContext) -> bool:
+        if context.resolved_nodes is None:
+            return False
+        for item in context.resolved_nodes.characters():
+            comp = item.node.composition
+            if isinstance(comp, dict) and comp.get("clothing_overlay_sections"):
+                return True
+        return False
 
 
 def _default_mode(context: PromptRuleContext) -> str:
