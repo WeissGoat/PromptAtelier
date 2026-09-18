@@ -2,16 +2,23 @@ import { Image as ImageIcon, Lock, RotateCcw, UploadCloud } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
 import { apiPost, errorMessage } from "../api/client";
-import type { BaseTemplate } from "../compare/types";
+import type { BaseTemplate, CompareRound } from "../compare/types";
 import { useCompareWorkspace } from "../compare/useCompareWorkspace";
 
-export function CompareTemplateBar() {
-  const { state, setBaseTemplate, clearWorkspace } = useCompareWorkspace();
+type CompareTemplateBarProps = {
+  round?: CompareRound;
+  onOpenDetail?: (path: string) => void;
+};
+
+export function CompareTemplateBar({ round, onOpenDetail }: CompareTemplateBarProps = {}) {
+  const { state, setBaseTemplate, setRoundTemplate, syncRoundVariantsToTemplate, clearWorkspace } =
+    useCompareWorkspace();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const template = state.template;
+  const template = round ? round.template : state.template;
   const hasTemplate = Boolean(template.prompt.trim() || template.sourceImage);
 
   async function handleFile(file: File) {
@@ -33,6 +40,7 @@ export function CompareTemplateBar() {
 
       const inspected = await apiPost<{
         filename: string;
+        source_path?: string | null;
         dimensions: { width: number; height: number };
         prompt: string;
         negative_prompt: string;
@@ -58,17 +66,22 @@ export function CompareTemplateBar() {
         steps: inspected.steps ?? 28,
         scale: inspected.scale ?? 5.0,
         sampler: inspected.sampler || "k_euler",
-        model: inspected.model || "nai-diffusion-3",
+        model: inspected.model || "nai-diffusion-4-5-full",
         raw_parameters: inspected.raw_parameters,
         is_infilling: inspected.is_infilling,
         notice: inspected.notice,
         sourceImage: {
           previewUrl: base64Data,
           filename: inspected.filename,
+          sourcePath: inspected.source_path ?? undefined,
         },
       };
 
-      setBaseTemplate(newTemplate);
+      if (round) {
+        setRoundTemplate(round.id, newTemplate);
+      } else {
+        setBaseTemplate(newTemplate);
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -98,6 +111,9 @@ export function CompareTemplateBar() {
 
   useEffect(() => {
     function onPaste(event: ClipboardEvent) {
+      if (round && containerRef.current && !containerRef.current.contains(document.activeElement)) {
+        return;
+      }
       const items = event.clipboardData?.items;
       if (!items) return;
       for (const item of items) {
@@ -113,10 +129,10 @@ export function CompareTemplateBar() {
 
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, []);
+  }, [round]);
 
   return (
-    <section className="panel compare-template-bar">
+    <section className="panel compare-template-bar" ref={containerRef}>
       <input
         accept="image/png,image/jpeg,image/webp"
         onChange={onFileChange}
@@ -127,19 +143,34 @@ export function CompareTemplateBar() {
 
       <div className="template-bar-header">
         <div className="template-title-group">
-          <h2>Base Template (基准底模)</h2>
-          <span className="hint-pill">控制变量锁定</span>
+          <h2>{round ? `${round.name} 基准底模 (Base Template)` : "Base Template (基准底模)"}</h2>
+          <span className="hint-pill">{round ? "本批次独立控制变量" : "控制变量锁定"}</span>
         </div>
-        {hasTemplate ? (
-          <button
-            className="secondary-button compact"
-            onClick={clearWorkspace}
-            title="清空重置工作区"
-            type="button"
-          >
-            <RotateCcw size={14} /> 重置
-          </button>
-        ) : null}
+        <div className="template-bar-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {round && round.variants.length > 0 && hasTemplate ? (
+            <button
+              className="secondary-button compact"
+              onClick={(e) => {
+                e.stopPropagation();
+                syncRoundVariantsToTemplate(round.id);
+              }}
+              title="将当前底模提示词一键同步并覆盖到本批全部变体，清除旧生图与旧差异"
+              type="button"
+            >
+              <RotateCcw size={14} /> 一键同步底模到本批全部变体
+            </button>
+          ) : null}
+          {!round && hasTemplate ? (
+            <button
+              className="secondary-button compact"
+              onClick={clearWorkspace}
+              title="清空重置工作区"
+              type="button"
+            >
+              <RotateCcw size={14} /> 重置
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {error ? <div className="alert error-alert">{error}</div> : null}
@@ -153,7 +184,16 @@ export function CompareTemplateBar() {
         tabIndex={0}
       >
         {template.sourceImage?.previewUrl ? (
-          <div className="template-preview-thumbnail">
+          <div
+            className={`template-preview-thumbnail ${template.sourceImage?.sourcePath && onOpenDetail ? "clickable" : ""}`}
+            onClick={(e) => {
+              if (onOpenDetail && template.sourceImage?.sourcePath) {
+                e.stopPropagation();
+                onOpenDetail(template.sourceImage.sourcePath);
+              }
+            }}
+            title={template.sourceImage?.sourcePath ? "点开缩略图查看大图详情与参数 (对齐 Custom)" : undefined}
+          >
             <img alt="Source preview" src={template.sourceImage.previewUrl} />
           </div>
         ) : (
@@ -167,11 +207,17 @@ export function CompareTemplateBar() {
             {busy
               ? "正在解析图片元数据..."
               : hasTemplate
-              ? `已读入: ${template.sourceImage?.filename || "图片参数模板"}`
+              ? round
+                ? `本批底模: ${template.sourceImage?.filename || "图片参数模板"}`
+                : `已读入: ${template.sourceImage?.filename || "图片参数模板"}`
+              : round
+              ? "拖拽新图片至本批底模，自动保留并重组变体"
               : "拖拽 PNG 图片至此处，或 Ctrl + V 粘贴图片读入参数生成模板"}
           </div>
           <div className="dropzone-text-secondary">
-            支持 NovelAI / WebUI 包含元数据的生成图，自动提取 Prompt、Seed、分辨率与采样参数
+            {round
+              ? "拖入新图片将替换本批底模，并自动将上一批变体差异重新组合至新图提示词"
+              : "支持 NovelAI / WebUI 包含元数据的生成图，自动提取 Prompt、Seed、分辨率与采样参数"}
           </div>
         </div>
 

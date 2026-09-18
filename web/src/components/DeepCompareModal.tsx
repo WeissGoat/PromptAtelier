@@ -9,7 +9,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 
 import type { PromptVariant } from "../compare/types";
 
@@ -33,8 +33,9 @@ export function DeepCompareModal({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
 
   const leftUrl = leftVariant?.resultImage?.url;
   const rightUrl = rightVariant?.resultImage?.url;
@@ -56,10 +57,13 @@ export function DeepCompareModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isOpen, onClose]);
 
-  const handleMouseMove = useCallback(
-    (e: MouseEvent<HTMLDivElement>) => {
-      if (isDragging && containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
+  // Window-level mouse movement for ultra-smooth slider dragging and panning
+  useEffect(() => {
+    if (!isDragging && !isPanning) return;
+
+    function handleWindowMouseMove(e: globalThis.MouseEvent) {
+      if (isDragging && stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
         const offsetX = e.clientX - rect.left;
         const percent = Math.min(100, Math.max(0, (offsetX / rect.width) * 100));
         setSliderPos(percent);
@@ -69,13 +73,48 @@ export function DeepCompareModal({
         setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
         panStartRef.current = { x: e.clientX, y: e.clientY };
       }
-    },
-    [isDragging, isPanning],
-  );
+    }
 
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-    setIsPanning(false);
+    function handleWindowMouseUp() {
+      setIsDragging(false);
+      setIsPanning(false);
+    }
+
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+    };
+  }, [isDragging, isPanning]);
+
+  const handleStageMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    if (e.button === 0 && stageRef.current) {
+      const rect = stageRef.current.getBoundingClientRect();
+      const offsetX = e.clientX - rect.left;
+      const percent = Math.min(100, Math.max(0, (offsetX / rect.width) * 100));
+      setSliderPos(percent);
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleCanvasMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    if (
+      e.button === 1 ||
+      e.button === 2 ||
+      (e.button === 0 && e.altKey) ||
+      (e.button === 0 && e.target === e.currentTarget)
+    ) {
+      e.preventDefault();
+      setIsPanning(true);
+      panStartRef.current = { x: e.clientX, y: e.clientY };
+    }
+  }, []);
+
+  const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.15 : -0.15;
+    setZoom((z) => Math.min(4, Math.max(0.25, Math.round((z + delta) * 100) / 100)));
   }, []);
 
   function handleResetView() {
@@ -89,8 +128,8 @@ export function DeepCompareModal({
   }
 
   return (
-    <div className="deep-compare-backdrop" onMouseUp={handleMouseUp}>
-      <div className="deep-compare-dialog">
+    <div className="deep-compare-backdrop">
+      <div className={`deep-compare-dialog ${isFullscreen ? "fullscreen" : ""}`}>
         <div className="deep-compare-header">
           <div className="dialog-title-group">
             <h3>深度视觉对比 (Deep Compare)</h3>
@@ -120,7 +159,7 @@ export function DeepCompareModal({
             <div className="zoom-controls">
               <button
                 onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}
-                title="缩小"
+                title="缩小 (亦可滚轮缩放)"
                 type="button"
               >
                 <ZoomOut size={14} />
@@ -128,13 +167,20 @@ export function DeepCompareModal({
               <span>{Math.round(zoom * 100)}%</span>
               <button
                 onClick={() => setZoom((z) => Math.min(4, z + 0.25))}
-                title="放大"
+                title="放大 (亦可滚轮缩放)"
                 type="button"
               >
                 <ZoomIn size={14} />
               </button>
               <button onClick={handleResetView} title="重置缩放与平移" type="button">
                 <RotateCcw size={14} />
+              </button>
+              <button
+                onClick={() => setIsFullscreen((prev) => !prev)}
+                title={isFullscreen ? "退出全屏" : "全屏查看"}
+                type="button"
+              >
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
             </div>
 
@@ -146,37 +192,42 @@ export function DeepCompareModal({
 
         <div
           className={`deep-compare-canvas-area ${mode}`}
-          onMouseDown={(e) => {
-            if (e.button === 1 || (e.button === 0 && e.altKey)) {
-              setIsPanning(true);
-              panStartRef.current = { x: e.clientX, y: e.clientY };
-            }
-          }}
-          onMouseMove={handleMouseMove}
-          ref={containerRef}
+          onContextMenu={(e) => e.preventDefault()}
+          onMouseDown={handleCanvasMouseDown}
+          onWheel={handleWheel}
         >
           {mode === "split" ? (
             <div
-              className="split-slider-container"
+              className="split-slider-stage"
+              onMouseDown={handleStageMouseDown}
+              ref={stageRef}
               style={{
                 transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)`,
                 transformOrigin: "center center",
               }}
             >
-              {/* Underlying Left image */}
-              <div className="split-image-layer left-layer">
-                <img alt={leftVariant.name} src={leftUrl} />
-                <span className="image-layer-label left">左: {leftVariant.name}</span>
-              </div>
+              {/* Underlying Left image: sizes the entire stage perfectly */}
+              <img
+                alt={leftVariant.name}
+                className="split-stage-img left-img"
+                draggable={false}
+                src={leftUrl}
+              />
+              <span className="image-layer-label left">左: {leftVariant.name}</span>
 
-              {/* Clipped Right image on top */}
+              {/* Clipped Right image on top: guaranteed identical bounding box */}
               <div
-                className="split-image-layer right-layer"
+                className="split-overlay-container"
                 style={{
-                  clipPath: `polygon(${sliderPos}% 0, 100% 0, 100% 100%, ${sliderPos}% 100%)`,
+                  clipPath: `inset(0 0 0 ${sliderPos}%)`,
                 }}
               >
-                <img alt={rightVariant.name} src={rightUrl} />
+                <img
+                  alt={rightVariant.name}
+                  className="split-stage-img right-img"
+                  draggable={false}
+                  src={rightUrl}
+                />
                 <span className="image-layer-label right">右: {rightVariant.name}</span>
               </div>
 
@@ -207,6 +258,7 @@ export function DeepCompareModal({
               <img
                 alt={activeFlicker === "left" ? leftVariant.name : rightVariant.name}
                 className="flicker-image"
+                draggable={false}
                 src={activeFlicker === "left" ? leftUrl : rightUrl}
               />
               <div className="flicker-indicator-bar">

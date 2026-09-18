@@ -66,9 +66,20 @@ def create_app(
         base_dir=Path.cwd(),
     )
     app.state.node_save_previews = NodeSavePreviewStore()
-    app.state.result_index = result_index or ResultIndex(
-        roots=[config.runtime.output_dir, "outputs", "examples/batches/outputs"],
-    )
+    roots: list[str | Path] = [
+        config.runtime.output_dir,
+        "outputs",
+        "output",
+        Path("output") / ".template_cache",
+        Path("outputs") / ".template_cache",
+        "examples/batches/outputs",
+    ]
+    if hasattr(config, "legacy"):
+        if getattr(config.legacy, "design_root", None):
+            roots.append(config.legacy.design_root)
+        if getattr(config.legacy, "tags_machine_root", None):
+            roots.append(config.legacy.tags_machine_root)
+    app.state.result_index = result_index or ResultIndex(roots=roots)
     app.state.batch_workspace = batch_workspace or BatchWorkspace(base_dir=Path.cwd())
     policy_provider = build_prompt_policy_provider(
         config,

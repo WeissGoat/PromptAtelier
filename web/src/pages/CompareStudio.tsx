@@ -1,20 +1,28 @@
-import { Columns, Plus, Trash2 } from "lucide-react";
+import { Columns, Plus, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
-import type { CompareRound, PromptVariant } from "../compare/types";
 import { useCompareBatchRunner } from "../compare/useCompareBatchRunner";
 import { CompareWorkspaceProvider } from "../compare/CompareWorkspaceProvider";
 import { useCompareWorkspace } from "../compare/useCompareWorkspace";
+import { CompareIndexSidebar } from "../components/CompareIndexSidebar";
 import { CompareRoundSection } from "../components/CompareRoundSection";
 import { CompareTemplateBar } from "../components/CompareTemplateBar";
 import { DeepCompareModal } from "../components/DeepCompareModal";
+import { ImageDetailDialog, type ImageDetailItem } from "../components/ImageDetailDialog";
 
 function CompareStudioContent() {
-  const { state, updateVariant, addNewRound, openDeepCompare, closeDeepCompare, findVariant } =
+  const { state, updateVariant, addNewRound, openDeepCompare, closeDeepCompare, findVariant, clearWorkspace } =
     useCompareWorkspace();
   const { runVariant, runRound, isBusy } = useCompareBatchRunner();
 
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [selectedDetailImage, setSelectedDetailImage] = useState<{
+    paths?: string[];
+    items?: ImageDetailItem[];
+    index: number;
+  } | null>(null);
+  const [activeRoundId, setActiveRoundId] = useState<string>(state.rounds[0]?.id || "");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
 
   function toggleSelectVariant(id: string) {
     setSelectedVariantIds((prev) => {
@@ -22,7 +30,6 @@ function CompareStudioContent() {
         return prev.filter((item) => item !== id);
       }
       if (prev.length >= 2) {
-        // Keep the second one and add the new one
         return [prev[1], id];
       }
       return [...prev, id];
@@ -48,43 +55,90 @@ function CompareStudioContent() {
             {state.rounds.length > 0 ? `${state.rounds.length} 轮批次` : "就绪"}
           </span>
         </div>
+        {state.rounds.length > 0 ? (
+          <button
+            className="secondary-button compact"
+            onClick={clearWorkspace}
+            title="清空重置全部对比批次"
+            type="button"
+          >
+            <RotateCcw size={14} /> 清空工作区
+          </button>
+        ) : null}
       </div>
 
-      <CompareTemplateBar />
-
-      <div className="compare-rounds-container">
-        {state.rounds.map((round) => (
-          <CompareRoundSection
-            canDeleteRound={state.rounds.length > 1}
-            isBusy={isBusy}
-            key={round.id}
-            onRunRound={(r) =>
-              runRound(r.variants, state.template, (vId, patch) => {
-                updateVariant(r.id, vId, patch);
-              })
-            }
-            onRunVariant={(v) =>
-              runVariant(v, state.template, (patch) => {
-                updateVariant(round.id, v.id, patch);
-              })
-            }
-            onToggleSelectVariant={toggleSelectVariant}
-            round={round}
-            selectedVariantIds={selectedVariantIds}
-            template={state.template}
+      {state.rounds.length === 0 ? (
+        <>
+          <CompareTemplateBar />
+          <div className="compare-page-footer-actions">
+            <button
+              className="add-round-downward-btn"
+              onClick={() => {
+                const newId = addNewRound();
+                setActiveRoundId(newId);
+              }}
+              type="button"
+            >
+              <Plus size={18} /> 往下新增新的一批对比 (New Batch Below)
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="compare-layout-body">
+          <CompareIndexSidebar
+            activeRoundId={activeRoundId}
+            isCollapsed={isSidebarCollapsed}
+            onSelectRound={setActiveRoundId}
+            onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
           />
-        ))}
-      </div>
 
-      <div className="compare-page-footer-actions">
-        <button
-          className="add-round-downward-btn"
-          onClick={() => addNewRound()}
-          type="button"
-        >
-          <Plus size={18} /> 往下新增新的一批对比 (New Batch Below)
-        </button>
-      </div>
+          <div className="compare-main-content">
+            <div className="compare-rounds-container">
+              {state.rounds.map((round) => (
+                <CompareRoundSection
+                  canDeleteRound={state.rounds.length > 1}
+                  isBusy={isBusy}
+                  key={round.id}
+                  onOpenImageDetail={setSelectedDetailImage}
+                  onRunRound={(r, runnableVariants) =>
+                    runRound(runnableVariants ?? r.variants, r.template, (vId, patch) => {
+                      updateVariant(r.id, vId, patch);
+                    })
+                  }
+                  onRunVariant={(v) =>
+                    runVariant(v, round.template, (patch) => {
+                      updateVariant(round.id, v.id, patch);
+                    })
+                  }
+                  onToggleSelectVariant={toggleSelectVariant}
+                  round={round}
+                  selectedVariantIds={selectedVariantIds}
+                  template={round.template}
+                />
+              ))}
+            </div>
+
+            <div className="compare-page-footer-actions">
+              <button
+                className="add-round-downward-btn"
+                onClick={() => {
+                  const newId = addNewRound();
+                  setActiveRoundId(newId);
+                  setTimeout(() => {
+                    document.getElementById(`round-section-${newId}`)?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
+                  }, 60);
+                }}
+                type="button"
+              >
+                <Plus size={18} /> 往下新增新的一批对比 (New Batch Below)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating comparison bar when cards are selected */}
       {selectedVariantIds.length > 0 ? (
@@ -124,6 +178,16 @@ function CompareStudioContent() {
         onClose={closeDeepCompare}
         rightVariant={rightVariant}
       />
+
+      {/* Image Detail Dialog (aligned with CustomStudio) */}
+      {selectedDetailImage ? (
+        <ImageDetailDialog
+          initialIndex={selectedDetailImage.index}
+          items={selectedDetailImage.items}
+          onClose={() => setSelectedDetailImage(null)}
+          paths={selectedDetailImage.paths}
+        />
+      ) : null}
     </main>
   );
 }

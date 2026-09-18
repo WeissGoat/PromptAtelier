@@ -4,6 +4,7 @@ import base64
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +117,7 @@ def _parse_meta_dict(
 
     return {
         "filename": filename,
+        "source_path": str(target_path.resolve()) if target_path and target_path.exists() else None,
         "dimensions": dimensions,
         "prompt": str(prompt or ""),
         "negative_prompt": str(negative_prompt or ""),
@@ -154,10 +156,11 @@ async def inspect_image_meta(request: Request) -> dict[str, Any]:
                     status_code=400,
                 )
 
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                tmp.write(data)
-                temp_file_path = Path(tmp.name)
-            target_path = temp_file_path
+            cache_dir = Path("output") / ".template_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            clean_name = re.sub(r'[\\/*?:"<>|]', "_", filename)
+            target_path = cache_dir / f"{int(time.time() * 1000)}_{clean_name}"
+            target_path.write_bytes(data)
         elif "image/" in content_type or "application/octet-stream" in content_type:
             data = await request.body()
             if not data:
@@ -166,11 +169,11 @@ async def inspect_image_meta(request: Request) -> dict[str, Any]:
                     message="Uploaded raw image body is empty",
                     status_code=400,
                 )
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                tmp.write(data)
-                temp_file_path = Path(tmp.name)
-            target_path = temp_file_path
             filename = "uploaded_image.png"
+            cache_dir = Path("output") / ".template_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            target_path = cache_dir / f"{int(time.time() * 1000)}_{filename}"
+            target_path.write_bytes(data)
         else:
             try:
                 body = await request.json()
@@ -186,11 +189,12 @@ async def inspect_image_meta(request: Request) -> dict[str, Any]:
                 if "," in base64_str:
                     base64_str = base64_str.split(",", 1)[1]
                 data = base64.b64decode(base64_str)
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                    tmp.write(data)
-                    temp_file_path = Path(tmp.name)
-                target_path = temp_file_path
                 filename = body.get("filename") or "uploaded_image.png"
+                cache_dir = Path("output") / ".template_cache"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                clean_name = re.sub(r'[\\/*?:"<>|]', "_", filename)
+                target_path = cache_dir / f"{int(time.time() * 1000)}_{clean_name}"
+                target_path.write_bytes(data)
             elif raw_path and isinstance(raw_path, str):
                 target_path = Path(raw_path)
                 if not target_path.is_absolute():

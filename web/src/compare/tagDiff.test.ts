@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeTagDiff, normalizeTag, tokenizePrompt } from "./tagDiff";
+import { applyTagDiff, computeTagDiff, normalizeTag, tokenizePrompt } from "./tagDiff";
 
 describe("tagDiff engine", () => {
   it("tokenizes prompts splitting by commas, full-width commas, and newlines", () => {
@@ -56,5 +56,67 @@ describe("tagDiff engine", () => {
     const diff = computeTagDiff(base, variant);
     expect(diff.added).toEqual(["{photorealistic}"]);
     expect(diff.removed).toEqual([]);
+  });
+
+  it("applies tag diff onto a new base prompt adding and removing tokens", () => {
+    const base = "1girl, solo, black hair, looking at viewer";
+    const diff = {
+      added: ["smiling", "red dress"],
+      removed: ["black hair"],
+    };
+
+    const result = applyTagDiff(base, diff);
+    expect(result).toBe("1girl, solo, looking at viewer, smiling, red dress");
+  });
+
+  it("applies empty diff without changing prompt", () => {
+    const base = "1girl, solo, masterpiece";
+    expect(applyTagDiff(base, { added: [], removed: [] })).toBe("1girl, solo, masterpiece");
+    expect(applyTagDiff(base, undefined)).toBe("1girl, solo, masterpiece");
+  });
+
+  it("detects deleted duplicate tags in computeTagDiff", () => {
+    const base = "1girl, solo, smile, smile";
+    const variant = "1girl, solo, smile";
+
+    const diff = computeTagDiff(base, variant);
+    expect(diff.removed).toEqual(["smile"]);
+    expect(diff.added).toEqual([]);
+    expect(diff.tokens).toEqual([
+      { text: "1girl", type: "unchanged" },
+      { text: "solo", type: "unchanged" },
+      { text: "smile", type: "unchanged" },
+    ]);
+  });
+
+  it("detects multiple deleted duplicate tags in computeTagDiff", () => {
+    const base = "very aesthetic, 1girl, solo, very aesthetic, masterpiece, very aesthetic";
+    const variant = "1girl, solo, very aesthetic, masterpiece";
+
+    const diff = computeTagDiff(base, variant);
+    expect(diff.removed).toEqual(["very aesthetic", "very aesthetic"]);
+    expect(diff.added).toEqual([]);
+  });
+
+  it("detects added duplicate tags in computeTagDiff", () => {
+    const base = "1girl, solo, smile";
+    const variant = "1girl, solo, smile, smile";
+
+    const diff = computeTagDiff(base, variant);
+    expect(diff.added).toEqual(["smile"]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.tokens).toEqual([
+      { text: "1girl", type: "unchanged" },
+      { text: "solo", type: "unchanged" },
+      { text: "smile", type: "unchanged" },
+      { text: "smile", type: "added" },
+    ]);
+  });
+
+  it("applies duplicate removal correctly in applyTagDiff", () => {
+    const base = "1girl, solo, smile, smile";
+    const diff = { removed: ["smile"] };
+    const result = applyTagDiff(base, diff);
+    expect(result).toBe("1girl, solo, smile");
   });
 });

@@ -35,6 +35,7 @@ export type PromptVariant = {
   name: string;
   prompt: string;
   diff: TagDiffResult;
+  inheritedDiff?: { added: string[]; removed: string[] };
   seedOverride: number | null;
   status: "idle" | "queued" | "running" | "succeeded" | "failed";
   jobId: string | null;
@@ -50,6 +51,7 @@ export type PromptVariant = {
 export type CompareRound = {
   id: string;
   name: string;
+  template: BaseTemplate;
   basePrompt: string;
   variants: PromptVariant[];
   status: "idle" | "running" | "completed";

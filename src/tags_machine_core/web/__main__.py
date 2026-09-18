@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 import uvicorn
 
@@ -23,13 +24,14 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if args.config:
         os.environ["TAGS_MACHINE_CONFIG"] = args.config
+    src_dir = str(Path(__file__).resolve().parents[2])
     uvicorn.run(
         "tags_machine_core.web:create_app",
         factory=True,
         host=args.host,
         port=args.port,
         reload=args.reload,
-        reload_dirs=["src"] if args.reload else None,
+        reload_dirs=[src_dir] if args.reload else None,
     )
 
 

@@ -533,8 +533,7 @@ clothing:
 当前迁移约定：
 
 - `state` 优先来自 `classify.yaml.clothing`。
-- `classify.yaml.clothing == specific_outfit` 时，`action_outfit: true`。
-- `tags.txt` 出现 `type,dress` 时，`action_outfit: true`。
+- `tags.txt` 出现 `type,dress` 时，`action_outfit: true`。不再依据 `classify.yaml.clothing == specific_outfit` 自动设置（避免旧分类器假阳性）。
 - `tags.txt` 出现 `type,no dress` / `type,no_dress` 时，`action_outfit: false`，优先级最高。
 - 如果 `state: nude` 同时出现 `type,dress`，迁移报告会标记 `nude_with_type_dress`，但仍保留事实来源，交给人工复核。
 

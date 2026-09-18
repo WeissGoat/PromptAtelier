@@ -3,6 +3,7 @@ import {
   Copy,
   FolderOpen,
   GitFork,
+  GripVertical,
   Lock,
   Play,
   RotateCcw,
@@ -25,6 +26,16 @@ type VariantCardProps = {
   canDelete: boolean;
   isSelectedForCompare: boolean;
   onToggleCompare: () => void;
+  onOpenDetail?: () => void;
+  index?: number;
+  isDragging?: boolean;
+  dragOverSide?: "left" | "right" | null;
+  onDragStart?: (index: number) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (e: React.DragEvent, index: number) => void;
+  isControlGroup?: boolean;
+  isDuplicate?: boolean;
+  onDrop?: (e: React.DragEvent, index: number) => void;
 };
 
 export function VariantCard({
@@ -36,6 +47,16 @@ export function VariantCard({
   canDelete,
   isSelectedForCompare,
   onToggleCompare,
+  onOpenDetail,
+  index,
+  isDragging,
+  dragOverSide,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  isControlGroup,
+  isDuplicate,
 }: VariantCardProps) {
   const {
     duplicateVariant,
@@ -70,9 +91,60 @@ export function VariantCard({
       ? variant.seedOverride
       : template.seed;
 
+  const [isHandleHovered, setIsHandleHovered] = useState(false);
+  const [isDraggingSelf, setIsDraggingSelf] = useState(false);
+
   return (
-    <article className={`variant-card ${variant.status}`}>
+    <article
+      aria-grabbed={isDragging || isDraggingSelf}
+      className={`variant-card ${variant.status} ${
+        isDragging || isDraggingSelf ? "dragging" : ""
+      } ${
+        dragOverSide === "left"
+          ? "drag-over-left"
+          : dragOverSide === "right"
+          ? "drag-over-right"
+          : ""
+      }`}
+      draggable={isHandleHovered}
+      onDragEnd={() => {
+        setIsDraggingSelf(false);
+        setIsHandleHovered(false);
+        onDragEnd?.();
+      }}
+      onDragOver={(e) => {
+        if (index !== undefined) {
+          onDragOver?.(e, index);
+        }
+      }}
+      onDragStart={(e) => {
+        setIsDraggingSelf(true);
+        if (index !== undefined) {
+          e.dataTransfer.setData("text/plain", String(index));
+          e.dataTransfer.effectAllowed = "move";
+          onDragStart?.(index);
+        }
+      }}
+      onDrop={(e) => {
+        if (index !== undefined) {
+          onDrop?.(e, index);
+        }
+      }}
+    >
       <div className="variant-card-header">
+        <div
+          aria-label="拖拽调整变体顺序"
+          className="variant-drag-handle"
+          onMouseEnter={() => setIsHandleHovered(true)}
+          onMouseLeave={() => {
+            if (!isDraggingSelf) {
+              setIsHandleHovered(false);
+            }
+          }}
+          title="按住左右拖拽调整顺序"
+        >
+          <GripVertical size={16} />
+        </div>
         <input
           aria-label="变体名称"
           className="variant-name-input"
@@ -132,7 +204,35 @@ export function VariantCard({
 
       <div className="variant-diff-pills-row">
         {variant.diff.added.length === 0 && variant.diff.removed.length === 0 ? (
-          <span className="diff-pill unchanged">与本轮基准一致</span>
+          isControlGroup ? (
+            <span
+              className="diff-pill unchanged control-group"
+              title="对照组：与本批基准底模提示词一致，批量运行时将作为对比基准正常生成"
+            >
+              对照组 (与基准一致)
+            </span>
+          ) : isDuplicate ? (
+            <span
+              className="diff-pill duplicate"
+              title="与本批对照组提示词完全一致，批量运行将自动跳过"
+            >
+              与对照组重复 (跳过)
+            </span>
+          ) : (
+            <span
+              className="diff-pill unchanged"
+              title="与本批基准底模提示词一致"
+            >
+              与本轮基准一致
+            </span>
+          )
+        ) : isDuplicate ? (
+          <span
+            className="diff-pill duplicate"
+            title="与同批前面的变体提示词与Seed完全一致，批量运行将自动跳过"
+          >
+            与同批变体重复 (跳过)
+          </span>
         ) : null}
         {variant.diff.added.map((tag, i) => (
           <span className="diff-pill added" key={`add-${i}`}>
@@ -194,10 +294,16 @@ export function VariantCard({
 
       {variant.error ? <div className="variant-error-msg">{variant.error}</div> : null}
 
-      <div className="variant-result-container">
+      <div className={`variant-result-container ${variant.resultImage ? "has-image" : "empty"}`}>
         {variant.resultImage ? (
           <div className="variant-image-preview">
-            <img alt={variant.name} src={variant.resultImage.url} />
+            <img
+              alt={variant.name}
+              className="clickable-result-image"
+              onClick={onOpenDetail}
+              src={variant.resultImage.url}
+              title="点开缩略图查看大图详情与参数 (对齐 Custom)"
+            />
             <div className="image-overlay-actions">
               <button
                 className={`compare-select-btn ${isSelectedForCompare ? "selected" : ""}`}

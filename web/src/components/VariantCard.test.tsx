@@ -81,4 +81,40 @@ describe("VariantCard", () => {
       });
     });
   });
+
+  it("renders drag handle and activates draggable on handle hover", () => {
+    const onDragStart = vi.fn();
+    const { container } = render(
+      <CompareWorkspaceProvider>
+        <VariantCard
+          canDelete={true}
+          index={1}
+          isBusy={false}
+          isSelectedForCompare={false}
+          onDragStart={onDragStart}
+          onRun={vi.fn()}
+          onToggleCompare={vi.fn()}
+          roundId="round-1"
+          template={template}
+          variant={variantWithImage}
+        />
+      </CompareWorkspaceProvider>,
+    );
+
+    const handle = screen.getByLabelText("拖拽调整变体顺序");
+    expect(handle).toBeTruthy();
+
+    const article = container.querySelector("article.variant-card") as HTMLElement;
+    expect(article).toBeTruthy();
+    expect(article.getAttribute("draggable")).toBe("false");
+
+    fireEvent.mouseEnter(handle);
+    expect(article.getAttribute("draggable")).toBe("true");
+
+    fireEvent.mouseLeave(handle);
+    expect(article.getAttribute("draggable")).toBe("false");
+
+    const resultContainer = container.querySelector(".variant-result-container");
+    expect(resultContainer?.classList.contains("has-image")).toBe(true);
+  });
 });
