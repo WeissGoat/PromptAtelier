@@ -224,6 +224,75 @@ def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", checksum)
 
 
+def _hydrate_reference_images(request: RenderRequest) -> RenderRequest:
+    params = dict(request.params)
+    has_ref_images = bool(params.get("reference_image_multiple"))
+    has_director_images = bool(params.get("director_reference_images"))
+
+    if has_ref_images and (has_director_images or not params.get("director_references")):
+        return request
+
+    source_path_val = (
+        request.meta.get("source_image_path")
+        or params.get("source_image_path")
+        or request.meta.get("template_image_path")
+        or params.get("template_image_path")
+        or request.meta.get("source_path")
+        or params.get("source_path")
+    )
+    if not source_path_val:
+        return request
+
+    source_path = Path(source_path_val)
+    if not source_path.is_absolute():
+        source_path = (Path.cwd() / source_path).resolve()
+    if not source_path.is_file():
+        logger.warning("source_image_path specified but file does not exist: %s", source_path)
+        return request
+
+    try:
+        source_meta = read_image_parameters(source_path)
+        source_params = source_meta.get("parameters") or {}
+    except Exception as exc:
+        logger.warning("Failed to read image parameters from %s: %s", source_path, exc)
+        return request
+
+    updated = False
+    if not has_ref_images and source_params.get("reference_image_multiple"):
+        params["reference_image_multiple"] = list(source_params["reference_image_multiple"])
+        if not params.get("reference_strength_multiple") and source_params.get("reference_strength_multiple"):
+            params["reference_strength_multiple"] = list(source_params["reference_strength_multiple"])
+        if not params.get("reference_information_extracted_multiple") and source_params.get("reference_information_extracted_multiple"):
+            params["reference_information_extracted_multiple"] = list(source_params["reference_information_extracted_multiple"])
+        updated = True
+        logger.info(
+            "Hydrated %d reference_image_multiple from source image: %s",
+            len(params["reference_image_multiple"]),
+            source_path,
+        )
+
+    if not has_director_images and source_params.get("director_reference_images"):
+        params["director_reference_images"] = list(source_params["director_reference_images"])
+        for key in [
+            "director_references",
+            "director_reference_strengths",
+            "director_reference_descriptions",
+            "director_reference_information_extracted",
+            "director_reference_secondary_strengths",
+        ]:
+            if key not in params and key in source_params:
+                params[key] = source_params[key]
+        updated = True
+        logger.info(
+            "Hydrated director_reference_images from source image: %s",
+            source_path,
+        )
+
+    if updated:
+        return request.model_copy(update={"params": params})
+    return request
+
+
 def execute_novelai_generation(
     config: AppConfig,
     request: RenderRequest,
@@ -242,6 +311,7 @@ def execute_novelai_generation(
         )
     client = _novelai_executor_client(config, access_token)
     output_path = Path(output_dir or config.runtime.output_dir)
+    request = _hydrate_reference_images(request)
     requests = split_novelai_samples(request)
     logger.info(
         "execute_novelai_generation start model=%s split_requests=%s output_dir=%s",

@@ -354,6 +354,57 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                 retry_interval=None,
             )
 
+    def test_execute_novelai_generation_hydrates_reference_images_from_source_image_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_png = root / "source_template.png"
+            source_png.write_bytes(
+                _png_bytes_with_text(
+                    {
+                        "Comment": json.dumps(
+                            {
+                                "prompt": "source base prompt",
+                                "reference_image_multiple": ["vibe_b64_1", "vibe_b64_2"],
+                                "reference_strength_multiple": [0.15, 0.15],
+                                "reference_information_extracted_multiple": [1.0, 1.0],
+                            }
+                        )
+                    }
+                )
+            )
+            config = _app_config(root).model_copy(
+                update={"novelai": _app_config(root).novelai.model_copy(update={"access_token": "token"})}
+            )
+            request = RenderRequest(
+                backend="novelai",
+                prompt="variant prompt",
+                params={"seed": 456},
+                meta={"source_image_path": str(source_png)},
+            )
+
+            with patch("tags_machine_core.execution.NovelAIClient") as client_cls:
+                client = client_cls.return_value
+                client.generate_images.return_value = [
+                    SimpleNamespace(filename="out.png", content=b"fake-bytes")
+                ]
+                client.build_payload.return_value = {"input": "variant prompt", "parameters": {}}
+
+                execute_novelai_generation(config, request, output_dir=root / "out", image_format="png")
+
+                called_request = client.generate_images.call_args[0][0]
+                self.assertEqual(
+                    called_request.params.get("reference_image_multiple"),
+                    ["vibe_b64_1", "vibe_b64_2"],
+                )
+                self.assertEqual(
+                    called_request.params.get("reference_strength_multiple"),
+                    [0.15, 0.15],
+                )
+                self.assertEqual(
+                    called_request.params.get("reference_information_extracted_multiple"),
+                    [1.0, 1.0],
+                )
+
     def test_execute_novelai_generation_can_use_gateway_raw_executor(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
