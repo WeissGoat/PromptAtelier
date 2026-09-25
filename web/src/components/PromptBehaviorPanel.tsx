@@ -2,6 +2,7 @@ import { Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import type { PolicyRuleState, PromptBehaviorParams } from "../workspace/types";
+import { ArtistRefPicker } from "./ArtistRefPicker";
 
 const POLICY_RULES = [
   "tag_normalize",
@@ -13,6 +14,7 @@ const POLICY_RULES = [
   "visibility_policy",
   "character_extension",
   "character_weight",
+  "novelai_vibe",
 ] as const;
 
 const ruleLabels: Record<string, string> = {
@@ -25,6 +27,7 @@ const ruleLabels: Record<string, string> = {
   visibility_policy: "Visibility Policy",
   character_extension: "Character Extension",
   character_weight: "Character Weight",
+  novelai_vibe: "NovelAI Vibe",
 };
 
 const ruleOptions: Record<string, string[]> = {
@@ -33,6 +36,7 @@ const ruleOptions: Record<string, string[]> = {
   visibility_policy: ["mode"],
   character_extension: ["trigger_mode", "enabled_slots"],
   character_weight: ["style", "level", "numeric_weight", "existing_weight", "missing_identity"],
+  novelai_vibe: ["artist_ref", "mode", "strength", "information_extracted"],
 };
 
 type PromptBehaviorPanelProps = {
@@ -185,6 +189,67 @@ export function PromptBehaviorPanel({ value, characterSections, onChange }: Prom
                     {ruleId === "clothing_policy" || ruleId === "visibility_policy" ? <label className="field"><span>{ruleId === "clothing_policy" ? "Clothing mode" : "Visibility mode"}</span><select aria-label={ruleId === "clothing_policy" ? "Clothing mode" : "Visibility mode"} onChange={(event) => setRuleOption(ruleId, "mode", event.target.value)} value={String(options.mode ?? "enforce")}><option value="enforce">Enforce</option><option value="advisory">Advisory</option></select></label> : null}
                     {ruleId === "character_extension" ? <><label className="field"><span>Trigger mode</span><select aria-label="Trigger mode" onChange={(event) => setRuleOption(ruleId, "trigger_mode", event.target.value)} value={String(options.trigger_mode ?? "fixed")}><option value="fixed">Fixed</option><option value="fixed_plus_legacy">Fixed + legacy</option><option value="legacy">Legacy</option></select></label><label className="field"><span>Enabled slots</span><input aria-label="Enabled slots" onChange={(event) => setRuleOption(ruleId, "enabled_slots", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} value={Array.isArray(options.enabled_slots) ? options.enabled_slots.join(", ") : ""} placeholder="legwear, shoes, weapon" /></label><label className="toggle-row compact-toggle"><input aria-label="Include declaration materials" checked={Boolean(options.include_declaration_materials ?? true)} onChange={(event) => setRuleOption(ruleId, "include_declaration_materials", event.target.checked)} type="checkbox" /> Include declaration materials</label><label className="toggle-row compact-toggle"><input aria-label="Ignore disabled lines" checked={Boolean(options.ignore_disabled_lines ?? true)} onChange={(event) => setRuleOption(ruleId, "ignore_disabled_lines", event.target.checked)} type="checkbox" /> Ignore disabled lines</label></> : null}
                     {ruleId === "character_weight" ? <><label className="field"><span>Weight style</span><select aria-label="Weight style" onChange={(event) => setRuleOption(ruleId, "style", event.target.value)} value={String(options.style ?? "numeric")}><option value="numeric">Numeric</option><option value="braces">Braces</option></select></label><label className="field"><span>Weight level</span><input aria-label="Weight level" min={1} max={6} onChange={(event) => setRuleOption(ruleId, "level", Number(event.target.value))} type="number" value={String(options.level ?? 2)} /></label><label className="field"><span>Numeric weight</span><input aria-label="Numeric weight" min={0.1} max={10} onChange={(event) => setRuleOption(ruleId, "numeric_weight", Number(event.target.value))} step={0.1} type="number" value={String(options.numeric_weight ?? 2)} /></label><label className="field"><span>Existing weight</span><select aria-label="Existing weight" onChange={(event) => setRuleOption(ruleId, "existing_weight", event.target.value)} value={String(options.existing_weight ?? "replace")}><option value="replace">Replace</option><option value="keep">Keep</option><option value="increase">Increase</option></select></label><label className="field"><span>Missing identity</span><select aria-label="Missing identity" onChange={(event) => setRuleOption(ruleId, "missing_identity", event.target.value)} value={String(options.missing_identity ?? "ignore")}><option value="ignore">Ignore</option><option value="error">Error</option></select></label></> : null}
+                    {ruleId === "novelai_vibe" ? (
+                      <>
+                        <ArtistRefPicker
+                          label="Vibe Artist"
+                          onChange={(ref) => {
+                            setRuleOption(ruleId, "source", { type: "artist", ref });
+                            setRuleOption(ruleId, "artist_ref", ref);
+                          }}
+                          value={String((options.source as Record<string, unknown> | undefined)?.ref || options.artist_ref || "")}
+                        />
+                        <label className="field">
+                          <span>Vibe mode</span>
+                          <select
+                            aria-label="Vibe mode"
+                            onChange={(event) => setRuleOption(ruleId, "mode", event.target.value)}
+                            value={String(options.mode ?? "replace")}
+                          >
+                            <option value="replace">Replace</option>
+                            <option value="merge">Merge</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Strength</span>
+                          <input
+                            aria-label="Vibe strength"
+                            onChange={(event) => {
+                              const val = event.target.value.trim();
+                              if (!val) {
+                                setRuleOption(ruleId, "strength", undefined);
+                              } else if (val.includes(",")) {
+                                setRuleOption(ruleId, "strength", val.split(",").map((v) => Number(v.trim())).filter((n) => Number.isFinite(n)));
+                              } else {
+                                const num = Number(val);
+                                setRuleOption(ruleId, "strength", Number.isFinite(num) ? num : val);
+                              }
+                            }}
+                            placeholder="留空沿用来源；多个逗号分隔如 0.35, 0.4"
+                            value={Array.isArray(options.strength) ? options.strength.join(", ") : (options.strength !== undefined ? String(options.strength) : "")}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Information Extracted</span>
+                          <input
+                            aria-label="Vibe information extracted"
+                            onChange={(event) => {
+                              const val = event.target.value.trim();
+                              if (!val) {
+                                setRuleOption(ruleId, "information_extracted", undefined);
+                              } else if (val.includes(",")) {
+                                setRuleOption(ruleId, "information_extracted", val.split(",").map((v) => Number(v.trim())).filter((n) => Number.isFinite(n)));
+                              } else {
+                                const num = Number(val);
+                                setRuleOption(ruleId, "information_extracted", Number.isFinite(num) ? num : val);
+                              }
+                            }}
+                            placeholder="留空沿用来源；多个逗号分隔如 0.85, 0.9"
+                            value={Array.isArray(options.information_extracted) ? options.information_extracted.join(", ") : (options.information_extracted !== undefined ? String(options.information_extracted) : "")}
+                          />
+                        </label>
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
               </details>

@@ -289,7 +289,7 @@ export function CustomGeneratePanel() {
     const resolved = await resolveRandomItems(Array.from({ length: count }, (_, index) => ({ value: index, slots: primary })));
     const parsedSeed = Number(params.seed);
     const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
-    const outputDir = createCompareOutputDir().replace("compare_", "random_");
+    const outputDir = createCompareOutputDir("random");
     const token = ++pollToken.current;
     setJob(null);
     setRandomJobs([]);

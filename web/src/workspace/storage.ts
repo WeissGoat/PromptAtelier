@@ -1,8 +1,9 @@
 import { errorMessage } from "../api/client";
-import type { GroupRole, NodeRole } from "../nodes/types";
+import type { GroupRole, NodeDocument, NodeRole } from "../nodes/types";
 import type {
   CustomWorkspaceState,
   NodeVariantSlot,
+  RenderWorkspaceParams,
   RoleNodeGroup,
 } from "./types";
 import {
@@ -134,105 +135,148 @@ function isWorkspace(value: unknown): value is CustomWorkspaceState {
 
 function migrateWorkspace(value: unknown): unknown {
   if (!isObject(value)) return value;
-  if (value.schema !== LEGACY_CUSTOM_WORKSPACE_SCHEMA && value.schema !== CUSTOM_WORKSPACE_SCHEMA) return value;
+  if (value.schema && value.schema !== LEGACY_CUSTOM_WORKSPACE_SCHEMA && value.schema !== CUSTOM_WORKSPACE_SCHEMA && !isObject(value.groups) && !isObject(value.params)) {
+    return value;
+  }
 
-  const promptBehaviorGroup = value.schema === LEGACY_CUSTOM_WORKSPACE_SCHEMA
-    ? {
-      ...createDefaultPromptBehaviorGroup(),
-      primary: {
-        ...createDefaultPromptBehaviorGroup().primary,
-        value: normalizePromptBehavior(value.promptBehavior),
-      },
-    }
-    : normalizePromptBehaviorGroup(value.promptBehaviorGroup);
+  const promptBehaviorGroup = value.promptBehaviorGroup
+    ? normalizePromptBehaviorGroup(value.promptBehaviorGroup)
+    : (value.promptBehavior ? {
+        ...createDefaultPromptBehaviorGroup(),
+        primary: {
+          ...createDefaultPromptBehaviorGroup().primary,
+          value: normalizePromptBehavior(value.promptBehavior),
+        },
+      } : createDefaultPromptBehaviorGroup());
+
   const requestedActive = typeof value.activePromptBehaviorSlotId === "string"
     ? value.activePromptBehaviorSlotId
     : PRIMARY_PROMPT_BEHAVIOR_SLOT_ID;
   const activePromptBehaviorSlotId = findPromptBehaviorVariant(promptBehaviorGroup, requestedActive)
     ? requestedActive
     : promptBehaviorGroup.primary.slotId;
-  const groups = isObject(value.groups)
-    ? Object.fromEntries(roles.map((role) => {
-      const rawGroup = isObject(value.groups) ? value.groups[role] : null;
-      if (!isObject(rawGroup)) return [role, rawGroup];
-      const healRandomSpec = (rawSpec: unknown, role: NodeRole) => {
-        if (!isObject(rawSpec)) return null;
-        const spec = { ...rawSpec } as any;
-        if (isObject(spec.source)) {
-          spec.source = { ...spec.source };
-          if (spec.source.type === "folder" && typeof spec.source.value === "string" && !spec.source.value.trim()) {
-            spec.source.value = role === "action" ? "new" : ".";
-          }
-        }
-        return spec;
-      };
 
-      const normalizeClothingSlot = (c: unknown, index: number, parentSlotId: string): NodeVariantSlot => {
-        const slot = isObject(c) ? c : {};
-        return {
-          slotId: typeof slot.slotId === "string" ? slot.slotId : (index === 0 ? `clothing-primary-${parentSlotId}` : createSlotId("clothing-compare")),
-          role: "clothing" as const,
-          mode: index === 0 ? "primary" : "compare",
-          sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
-          randomSpec: healRandomSpec(slot.randomSpec, "clothing"),
-          sourceRef: typeof slot.sourceRef === "string" ? slot.sourceRef : null,
-          sourceNode: isObject(slot.sourceNode) ? (slot.sourceNode as any) : null,
-          draftNode: isObject(slot.draftNode) ? (slot.draftNode as any) : null,
-          sourceEditor: isObject(slot.sourceEditor) ? (slot.sourceEditor as any) : null,
-          draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
-        };
-      };
+  const healRandomSpec = (rawSpec: unknown, role: NodeRole) => {
+    if (!isObject(rawSpec)) return null;
+    const spec = { ...rawSpec } as any;
+    if (isObject(spec.source)) {
+      spec.source = { ...spec.source };
+      if (spec.source.type === "folder" && typeof spec.source.value === "string" && !spec.source.value.trim()) {
+        spec.source.value = role === "action" ? "new" : ".";
+      }
+    }
+    return spec;
+  };
 
-      const normalizeSlot = (slot: unknown) => {
-        if (!isObject(slot)) return slot;
-        const role = (slot.role as NodeRole) || "artist";
-        const normalized = {
-          ...slot,
-          sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
-          randomSpec: healRandomSpec(slot.randomSpec, role),
-        } as NodeVariantSlot;
-        if (normalized.role === "character") {
-          let clothingSlots: NodeVariantSlot[] = [];
-          if (Array.isArray(normalized.clothingSlots) && normalized.clothingSlots.length) {
-            clothingSlots = normalized.clothingSlots.map((c, idx) => normalizeClothingSlot(c, idx, normalized.slotId));
-          } else {
-            clothingSlots = [{
-              slotId: `clothing-primary-${normalized.slotId}`,
-              role: "clothing",
-              mode: "primary",
-              sourceKind: "fixed",
-              randomSpec: null,
-              sourceRef: (normalized as any).clothingRef ?? null,
-              sourceNode: (normalized as any).clothingNode ?? null,
-              draftNode: (normalized as any).clothingNode ?? null,
-              sourceEditor: null,
-              draftEditorValues: null,
-            }];
-          }
-          normalized.clothingSlots = clothingSlots;
-          (normalized as any).clothingRef = clothingSlots[0]?.sourceRef ?? null;
-          (normalized as any).clothingNode = clothingSlots[0]?.draftNode ?? null;
-        }
-        return normalized;
-      };
-      return [role, {
-        ...rawGroup,
-        primary: normalizeSlot(rawGroup.primary),
-        compares: Array.isArray(rawGroup.compares) ? rawGroup.compares.map(normalizeSlot) : rawGroup.compares,
-      }];
-    }))
-    : value.groups;
-  const editor = isObject(value.editor) ? {
-    ...value.editor,
-    kind: value.editor.kind === "random" ? "random" : value.editor.slotId ? "node" : null,
-  } : value.editor;
+  const normalizeClothingSlot = (c: unknown, index: number, parentSlotId: string): NodeVariantSlot => {
+    const slot = isObject(c) ? c : {};
+    return {
+      slotId: typeof slot.slotId === "string" && slot.slotId ? slot.slotId : (index === 0 ? `clothing-primary-${parentSlotId}` : createSlotId("clothing-compare")),
+      role: "clothing",
+      mode: index === 0 ? "primary" : "compare",
+      sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
+      randomSpec: healRandomSpec(slot.randomSpec, "clothing"),
+      sourceRef: typeof slot.sourceRef === "string" ? slot.sourceRef : null,
+      sourceNode: isObject(slot.sourceNode) ? (slot.sourceNode as NodeDocument) : null,
+      draftNode: isObject(slot.draftNode) ? (slot.draftNode as NodeDocument) : null,
+      sourceEditor: isObject(slot.sourceEditor) ? (slot.sourceEditor as any) : null,
+      draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
+    };
+  };
+
+  const normalizeSlot = (rawSlot: unknown, role: GroupRole, mode: "primary" | "compare"): NodeVariantSlot => {
+    const slot = isObject(rawSlot) ? rawSlot : {};
+    const slotId = typeof slot.slotId === "string" && slot.slotId
+      ? slot.slotId
+      : (mode === "primary" ? `primary-${role}` : createSlotId(`compare-${role}`));
+
+    const normalized: NodeVariantSlot = {
+      slotId,
+      role,
+      mode,
+      sourceKind: slot.sourceKind === "random" ? "random" : "fixed",
+      randomSpec: healRandomSpec(slot.randomSpec, role),
+      sourceRef: typeof slot.sourceRef === "string" ? slot.sourceRef : null,
+      sourceNode: isObject(slot.sourceNode) ? (slot.sourceNode as NodeDocument) : null,
+      draftNode: isObject(slot.draftNode) ? (slot.draftNode as NodeDocument) : null,
+      sourceEditor: isObject(slot.sourceEditor) ? (slot.sourceEditor as any) : null,
+      draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
+    };
+
+    if (role === "character") {
+      let clothingSlots: NodeVariantSlot[] = [];
+      if (Array.isArray(slot.clothingSlots) && slot.clothingSlots.length) {
+        clothingSlots = slot.clothingSlots.map((c, idx) => normalizeClothingSlot(c, idx, slotId));
+      } else {
+        const fallbackClothingRef = typeof slot.clothingRef === "string" ? slot.clothingRef : null;
+        const fallbackClothingNode = isObject(slot.clothingNode) ? (slot.clothingNode as NodeDocument) : null;
+        clothingSlots = [{
+          slotId: `clothing-primary-${slotId}`,
+          role: "clothing",
+          mode: "primary",
+          sourceKind: "fixed",
+          randomSpec: null,
+          sourceRef: fallbackClothingRef,
+          sourceNode: fallbackClothingNode,
+          draftNode: fallbackClothingNode,
+          sourceEditor: null,
+          draftEditorValues: null,
+        }];
+      }
+      normalized.clothingSlots = clothingSlots;
+      normalized.clothingRef = clothingSlots[0]?.sourceRef ?? null;
+      normalized.clothingNode = clothingSlots[0]?.draftNode ?? null;
+    }
+
+    return normalized;
+  };
+
+  const rawGroups = isObject(value.groups) ? value.groups : {};
+  const groups = Object.fromEntries(roles.map((role) => {
+    const rawGroup = isObject(rawGroups[role]) ? rawGroups[role] : {};
+    const rawPrimary = isObject(rawGroup.primary) ? rawGroup.primary : {};
+    const rawCompares = Array.isArray(rawGroup.compares) ? rawGroup.compares : [];
+
+    const primarySlot = normalizeSlot(rawPrimary, role, "primary");
+    const compareSlots = rawCompares.map((c) => normalizeSlot(c, role, "compare"));
+
+    return [role, { primary: primarySlot, compares: compareSlots }];
+  })) as Record<GroupRole, RoleNodeGroup>;
+
+  const rawParams = isObject(value.params) ? value.params : {};
+  const params: RenderWorkspaceParams = {
+    negative: typeof rawParams.negative === "string" ? rawParams.negative : "",
+    width: typeof rawParams.width === "number" && rawParams.width > 0 ? rawParams.width : 1024,
+    height: typeof rawParams.height === "number" && rawParams.height > 0 ? rawParams.height : 1024,
+    nt: typeof rawParams.nt === "number" && rawParams.nt > 0 ? rawParams.nt : 1,
+    seed: rawParams.seed !== undefined && rawParams.seed !== null ? String(rawParams.seed) : "-1",
+  };
+
+  const rawEditor = isObject(value.editor) ? value.editor : {};
+  const editorSlotId = typeof rawEditor.slotId === "string" ? rawEditor.slotId : null;
+  const editorKind = rawEditor.kind === "random" || rawEditor.kind === "node"
+    ? rawEditor.kind
+    : (editorSlotId ? "node" : null);
+  const editorTab = rawEditor.tab === "json" ? "json" : "form";
+  const editor = {
+    slotId: editorSlotId,
+    kind: editorKind,
+    tab: editorTab,
+    draftNode: isObject(rawEditor.draftNode) ? (rawEditor.draftNode as NodeDocument) : null,
+    baselineNode: isObject(rawEditor.baselineNode) ? (rawEditor.baselineNode as NodeDocument) : null,
+    editValues: isObject(rawEditor.editValues) ? (rawEditor.editValues as Record<string, unknown>) : null,
+    baselineValues: isObject(rawEditor.baselineValues) ? (rawEditor.baselineValues as Record<string, unknown>) : null,
+  };
+
   return {
-    ...value,
     schema: CUSTOM_WORKSPACE_SCHEMA,
     groups,
+    params,
     editor,
     promptBehaviorGroup,
     activePromptBehaviorSlotId,
+    preview: isObject(value.preview) ? value.preview : null,
+    revision: typeof value.revision === "number" ? value.revision : 0,
   };
 }
 

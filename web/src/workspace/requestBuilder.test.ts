@@ -89,4 +89,94 @@ describe("request builder", () => {
       },
     )).toThrow("identity_minimal_sections");
   });
+
+  it("serializes novelai_vibe policy rule with valid artist source", () => {
+    const request = buildComposeRenderRequest(
+      { artist: artistSlot(), character: null, action: null },
+      params,
+      {
+        compare: false,
+        promptBehavior: {
+          ...promptBehavior,
+          policyRules: {
+            novelai_vibe: {
+              state: "enabled",
+              options: {
+                artist_ref: "F:/artists/vibe_ref",
+                mode: "merge",
+                strength: [0.2, 0.3],
+                information_extracted: 0.85,
+              },
+            },
+          },
+        },
+      },
+    );
+
+    expect(request.compose.prompt_policy?.rules.novelai_vibe).toEqual({
+      enabled: true,
+      options: {
+        source: { type: "artist", ref: "F:/artists/vibe_ref" },
+        mode: "merge",
+        strength: [0.2, 0.3],
+        information_extracted: 0.85,
+      },
+    });
+  });
+
+  it("bridges legacy novelai_vibe_artist into novelai_vibe without leaking novelai_vibe_artist to backend", () => {
+    const request = buildComposeRenderRequest(
+      { artist: artistSlot(), character: null, action: null },
+      params,
+      {
+        compare: false,
+        promptBehavior: {
+          ...promptBehavior,
+          policyRules: {
+            novelai_vibe_artist: {
+              state: "enabled",
+              options: {
+                artist_ref: "F:/artists/vibe_ref",
+                mode: "merge",
+                strength: [0.2, 0.3],
+                information_extracted: 0.85,
+              },
+            },
+          },
+        },
+      },
+    );
+
+    expect(request.compose.prompt_policy?.rules.novelai_vibe_artist).toBeUndefined();
+    expect(request.compose.prompt_policy?.rules.novelai_vibe).toEqual({
+      enabled: true,
+      options: {
+        source: { type: "artist", ref: "F:/artists/vibe_ref" },
+        mode: "merge",
+        strength: [0.2, 0.3],
+        information_extracted: 0.85,
+      },
+    });
+  });
+
+  it("omits novelai_vibe when novelai_vibe is disabled or has empty ref", () => {
+    const request = buildComposeRenderRequest(
+      { artist: artistSlot(), character: null, action: null },
+      params,
+      {
+        compare: false,
+        promptBehavior: {
+          ...promptBehavior,
+          policyRules: {
+            novelai_vibe: {
+              state: "disabled",
+              options: { artist_ref: "F:/artists/vibe_ref" },
+            },
+          },
+        },
+      },
+    );
+
+    expect(request.compose.prompt_policy?.rules.novelai_vibe).toBeUndefined();
+  });
 });

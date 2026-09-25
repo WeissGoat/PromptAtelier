@@ -30,8 +30,8 @@ describe("random node resolution", () => {
     });
 
     const result = await resolveRandomItems([
-      { value: 1, slots: { artist: null, character: slot, action: null } },
-      { value: 2, slots: { artist: null, character: slot, action: null } },
+      { value: 1, slots: { artist: null, character: slot, action: null, clothing: null } },
+      { value: 2, slots: { artist: null, character: slot, action: null, clothing: null } },
     ]);
 
     expect(sampleNodePool).toHaveBeenCalledOnce();
@@ -54,9 +54,9 @@ describe("random node resolution", () => {
     });
 
     const result = await resolveRandomItems([
-      { value: 1, randomScope: "group-1", slots: { artist: null, character: slot, action: null } },
-      { value: 2, randomScope: "group-1", slots: { artist: null, character: slot, action: null } },
-      { value: 3, randomScope: "group-2", slots: { artist: null, character: slot, action: null } },
+      { value: 1, randomScope: "group-1", slots: { artist: null, character: slot, action: null, clothing: null } },
+      { value: 2, randomScope: "group-1", slots: { artist: null, character: slot, action: null, clothing: null } },
+      { value: 3, randomScope: "group-2", slots: { artist: null, character: slot, action: null, clothing: null } },
     ]);
 
     expect(sampleNodePool).toHaveBeenCalledOnce();

@@ -2,19 +2,19 @@ import { Plus } from "lucide-react";
 
 import type { NodeReadResponse } from "../api/types";
 import { nodeSlotStatus } from "../nodes/temporaryNodes";
-import type { NodeRole } from "../nodes/types";
+import type { GroupRole } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import type { NodeVariantSlot } from "../workspace/types";
 import { NodeSlot } from "./NodeSlot";
 
-const labels: Record<NodeRole, string> = { artist: "Artist", character: "Character", action: "Action" };
+const labels: Record<GroupRole, string> = { artist: "Artist", character: "Character", action: "Action" };
 
 function isDirty(slot: NodeVariantSlot): boolean {
   const status = nodeSlotStatus(slot);
   return status === "modified" || status === "temporary";
 }
 
-export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot?: (slotId: string, response?: NodeReadResponse) => void }) {
+export function NodeRoleGroup({ role, onEditSlot }: { role: GroupRole; onEditSlot?: (slotId: string, response?: NodeReadResponse) => void }) {
   const workspace = useCustomWorkspace();
   const group = workspace.state.groups[role];
   const label = labels[role];

@@ -3,7 +3,7 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, 
 import type { ComposePreviewResponse, NodeEditorDocument, NodeReadResponse } from "../api/types";
 import { useCompareRunController, type CompareRunController } from "../compare/useCompareRunController";
 import { cloneNode, createTemporaryNode } from "../nodes/temporaryNodes";
-import type { NodeDocument, NodeRole } from "../nodes/types";
+import type { GroupRole, NodeDocument, NodeRole } from "../nodes/types";
 import { createDefaultNodePoolSpec } from "../randomNodes/spec";
 import {
   clearWorkspaceSnapshot,
@@ -40,7 +40,7 @@ type CustomWorkspaceContextValue = {
   updateDraft(slotId: string, node: NodeDocument): void;
   restoreSlot(slotId: string): void;
   clearSlot(slotId: string): void;
-  addCompare(role: NodeRole): string;
+  addCompare(role: GroupRole): string;
   removeCompare(slotId: string): void;
   addClothingCompare(characterSlotId: string): string;
   removeClothingCompare(characterSlotId: string, clothingSlotId: string): void;
@@ -330,7 +330,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
         clothingSlots: [updatedPrimary, ...otherClothing],
       };
     })),
-    addCompare: (role) => {
+    addCompare: (role: GroupRole) => {
       const slot = createEmptySlot(role, "compare");
       setState((current) => {
         const primary = current.groups[role].primary;
@@ -346,7 +346,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
           clothingRef: primary.clothingRef ?? null,
           clothingNode: primary.clothingNode ? cloneNode(primary.clothingNode) : null,
           clothingSlots: role === "character"
-            ? (primary.clothingSlots?.map((cs) => ({
+            ? (primary.clothingSlots?.map((cs: NodeVariantSlot) => ({
                 ...structuredClone(cs),
                 slotId: createSlotId("clothing-compare"),
                 mode: "compare" as const,
