@@ -6,7 +6,7 @@ import type { NodeDocument, NodeRole } from "../nodes/types";
 import { createDefaultNodePoolSpec } from "../randomNodes/spec";
 import { createDefaultPromptBehaviorGroup } from "../workspace/promptBehavior";
 import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
-import { useCompareRunController } from "./useCompareRunController";
+import { createCompareOutputDir, useCompareRunController } from "./useCompareRunController";
 
 const sampleNodePool = vi.fn();
 
@@ -300,5 +300,12 @@ describe("useCompareRunController", () => {
     const charNode2 = ((req2.compose as Record<string, unknown>).nodes as Array<Record<string, unknown>>).find((n) => n.role === "character");
     expect(charNode1?.clothing_ref).toBe("clothing/maid");
     expect(charNode2?.clothing_ref).toBe("clothing/swimsuit");
+  });
+
+  it("creates compare output directories under outputs/compares/", () => {
+    const defaultDir = createCompareOutputDir();
+    expect(defaultDir).toMatch(/^outputs\/compares\/compare_\d{14}_[a-f0-9]+$/);
+    const randomDir = createCompareOutputDir("random");
+    expect(randomDir).toMatch(/^outputs\/compares\/random_\d{14}_[a-f0-9]+$/);
   });
 });

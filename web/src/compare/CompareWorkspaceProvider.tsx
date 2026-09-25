@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
+  clearCompareWorkspaceFromBackend,
   clearCompareWorkspaceSnapshot,
   createDefaultCompareWorkspace,
   defaultCompareTemplate,
+  fetchCompareWorkspaceFromBackend,
   loadCompareWorkspaceSnapshot,
   saveCompareWorkspaceSnapshot,
+  saveCompareWorkspaceToBackend,
 } from "./storage";
 import { applyTagDiff, computeTagDiff } from "./tagDiff";
 import type {
@@ -46,14 +49,59 @@ export function CompareWorkspaceProvider({ children }: { children: ReactNode }) 
   }, []);
 
   const [state, setState] = useState<CompareWorkspaceState>(initial);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const isBackendSyncedRef = useRef(false);
 
+  // Sync with backend on mount (adopt backend if backend has more rounds than local or local is empty)
   useEffect(() => {
-    if (typeof window === "undefined" || !window.localStorage) return;
+    let active = true;
+    void fetchCompareWorkspaceFromBackend().then((result) => {
+      if (!active) return;
+      isBackendSyncedRef.current = true;
+      if (result.status === "loaded" && result.state.rounds.length > 0) {
+        setState((current) => {
+          if (result.state.rounds.length > current.rounds.length || current.rounds.length === 0) {
+            if (typeof window !== "undefined" && window.localStorage) {
+              saveCompareWorkspaceSnapshot(window.localStorage, result.state);
+            }
+            return result.state;
+          }
+          return current;
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Debounced auto-save to localStorage and backend
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const timer = window.setTimeout(() => {
-      saveCompareWorkspaceSnapshot(window.localStorage, state);
+      if (window.localStorage) {
+        saveCompareWorkspaceSnapshot(window.localStorage, state);
+      }
+      if (isBackendSyncedRef.current) {
+        void saveCompareWorkspaceToBackend(state);
+      }
     }, 250);
     return () => window.clearTimeout(timer);
   }, [state]);
+
+  // Immediate save on beforeunload so reload/refresh never loses un-flushed debounce state
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onBeforeUnload() {
+      if (window.localStorage) {
+        saveCompareWorkspaceSnapshot(window.localStorage, stateRef.current);
+      }
+      void saveCompareWorkspaceToBackend(stateRef.current);
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   const setBaseTemplate = useCallback((template: BaseTemplate) => {
     setState((prev) => {
@@ -377,6 +425,69 @@ export function CompareWorkspaceProvider({ children }: { children: ReactNode }) 
     return newRoundId;
   }, []);
 
+  const batchDeriveRounds = useCallback(
+    (
+      sourceRoundId: string,
+      items: Array<{ template: BaseTemplate; filename: string }>,
+    ): CompareRound[] => {
+      if (!items || items.length === 0) return [];
+      const sourceRound = state.rounds.find((r) => r.id === sourceRoundId);
+      if (!sourceRound) return [];
+
+      const newRounds: CompareRound[] = items.map((item) => {
+        const newRoundId = makeId("round");
+        const cleanFilename = item.filename.replace(/\.[^/.]+$/, "");
+        const roundName = `${sourceRound.name} - ${cleanFilename}`;
+        const clonedTemplate: BaseTemplate = { ...item.template };
+
+        const variants: PromptVariant[] = sourceRound.variants.map((v) => {
+          const diffToInherit =
+            v.diff.added.length > 0 || v.diff.removed.length > 0
+              ? { added: [...v.diff.added], removed: [...v.diff.removed] }
+              : v.inheritedDiff ?? { added: [], removed: [] };
+          const prompt = applyTagDiff(clonedTemplate.prompt, diffToInherit);
+          const diff = computeTagDiff(clonedTemplate.prompt, prompt);
+          return {
+            id: makeId("var"),
+            name: v.name,
+            prompt,
+            diff,
+            inheritedDiff: diffToInherit,
+            seedOverride: v.seedOverride,
+            status: "idle" as const,
+            jobId: null,
+          };
+        });
+
+        return {
+          id: newRoundId,
+          name: roundName,
+          template: clonedTemplate,
+          basePrompt: clonedTemplate.prompt,
+          variants:
+            variants.length > 0
+              ? variants
+              : [createVariant(clonedTemplate.prompt, "变体 A")],
+          status: "idle",
+        };
+      });
+
+      setState((prev) => {
+        const sourceIndex = prev.rounds.findIndex((r) => r.id === sourceRoundId);
+        if (sourceIndex < 0) return prev;
+        const nextRounds = [...prev.rounds];
+        nextRounds.splice(sourceIndex + 1, 0, ...newRounds);
+        return {
+          ...prev,
+          rounds: nextRounds,
+        };
+      });
+
+      return newRounds;
+    },
+    [state.rounds],
+  );
+
   const removeRound = useCallback((roundId: string) => {
     setState((prev) => {
       if (prev.rounds.length <= 1) return prev;
@@ -493,7 +604,20 @@ export function CompareWorkspaceProvider({ children }: { children: ReactNode }) 
     if (typeof window !== "undefined" && window.localStorage) {
       clearCompareWorkspaceSnapshot(window.localStorage);
     }
+    void clearCompareWorkspaceFromBackend();
     setState(createDefaultCompareWorkspace());
+  }, []);
+
+  const restoreBackendWorkspace = useCallback(async (): Promise<boolean> => {
+    const result = await fetchCompareWorkspaceFromBackend();
+    if (result.status === "loaded" && result.state.rounds.length > 0) {
+      setState(result.state);
+      if (typeof window !== "undefined" && window.localStorage) {
+        saveCompareWorkspaceSnapshot(window.localStorage, result.state);
+      }
+      return true;
+    }
+    return false;
   }, []);
 
   const value: CompareWorkspaceContextValue = {
@@ -508,6 +632,7 @@ export function CompareWorkspaceProvider({ children }: { children: ReactNode }) 
     resetVariantToTemplate,
     syncRoundVariantsToTemplate,
     addNewRound,
+    batchDeriveRounds,
     removeRound,
     reorderRounds,
     forkVariantToNewRound,
@@ -515,6 +640,7 @@ export function CompareWorkspaceProvider({ children }: { children: ReactNode }) 
     closeDeepCompare,
     findVariant,
     clearWorkspace,
+    restoreBackendWorkspace,
   };
 
   return <CompareWorkspaceContext.Provider value={value}>{children}</CompareWorkspaceContext.Provider>;

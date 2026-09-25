@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { BaseTemplate } from "./types";
+import type { BaseTemplate, CompareRound } from "./types";
 import { useCompareWorkspace } from "./useCompareWorkspace";
 import { CompareWorkspaceProvider } from "./CompareWorkspaceProvider";
 
@@ -142,6 +142,67 @@ describe("useCompareWorkspace", () => {
     expect(result.current.state.rounds[0].id).toBe(round1Id);
     expect(result.current.state.rounds[1].id).toBe(round1DerivedId);
     expect(result.current.state.rounds[2].id).toBe(round2Id);
+  });
+
+  it("batchDeriveRounds derives multiple rounds with sourceRound.name - filename and inherits diffs", () => {
+    const { result } = renderHook(() => useCompareWorkspace(), {
+      wrapper: CompareWorkspaceProvider,
+    });
+
+    act(() => {
+      result.current.setBaseTemplate({
+        ...sampleTemplate,
+        prompt: "1girl, solo, smile",
+      });
+    });
+
+    const round1Id = result.current.state.rounds[0].id;
+    // Add a variant with a diff to round 1
+    act(() => {
+      result.current.addVariant(round1Id, "加帽子", "1girl, solo, smile, hat");
+    });
+
+    let newRounds: CompareRound[] = [];
+    act(() => {
+      newRounds = result.current.batchDeriveRounds(round1Id, [
+        {
+          template: {
+            ...sampleTemplate,
+            prompt: "1boy, warrior, standing",
+            seed: 12345,
+          },
+          filename: "hero_portrait.png",
+        },
+        {
+          template: {
+            ...sampleTemplate,
+            prompt: "cat, playing",
+            seed: 67890,
+          },
+          filename: "cute_cat.webp",
+        },
+      ]);
+    });
+
+    expect(newRounds.length).toBe(2);
+    expect(result.current.state.rounds.length).toBe(3);
+    const round2 = result.current.state.rounds[1];
+    const round3 = result.current.state.rounds[2];
+
+    expect(round2.id).toBe(newRounds[0].id);
+    expect(round2.name).toBe("第 1 批对比 - hero_portrait");
+    expect(round2.template.prompt).toBe("1boy, warrior, standing");
+    expect(round2.template.seed).toBe(12345);
+    // Round 2 should have inherited the variants with diffs applied to new base prompt
+    expect(round2.variants.length).toBe(2);
+    // Variant 2 should have "+hat" applied to "1boy, warrior, standing"
+    expect(round2.variants[1].prompt).toContain("hat");
+    expect(round2.variants[1].diff.added).toEqual(["hat"]);
+
+    expect(round3.id).toBe(newRounds[1].id);
+    expect(round3.name).toBe("第 1 批对比 - cute_cat");
+    expect(round3.template.prompt).toBe("cat, playing");
+    expect(round3.variants[1].prompt).toContain("hat");
   });
 
   it("removeRound removes a specific round and updates remaining rounds", () => {

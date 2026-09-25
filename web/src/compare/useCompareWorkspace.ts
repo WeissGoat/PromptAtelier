@@ -19,6 +19,10 @@ export type CompareWorkspaceContextValue = {
   resetVariantToTemplate: (roundId: string, variantId: string) => void;
   syncRoundVariantsToTemplate: (roundId: string) => void;
   addNewRound: (sourceRoundId?: string, name?: string) => string;
+  batchDeriveRounds: (
+    sourceRoundId: string,
+    items: Array<{ template: BaseTemplate; filename: string }>,
+  ) => CompareRound[];
   removeRound: (roundId: string) => void;
   reorderRounds: (sourceIndex: number, targetIndex: number) => void;
   forkVariantToNewRound: (roundId: string, variantId: string) => string;
@@ -26,6 +30,7 @@ export type CompareWorkspaceContextValue = {
   closeDeepCompare: () => void;
   findVariant: (variantId: string) => { round: CompareRound; variant: PromptVariant } | null;
   clearWorkspace: () => void;
+  restoreBackendWorkspace: () => Promise<boolean>;
 };
 
 export const CompareWorkspaceContext = createContext<CompareWorkspaceContextValue | null>(null);

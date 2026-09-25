@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { BaseTemplate, PromptVariant } from "./types";
 import {
+  getPendingRunnableVariants,
   getRunnableVariants,
   getVariantIdentityMap,
+  isVariantCompleted,
   isVariantIdenticalToBase,
   normalizePromptTags,
 } from "./runnableVariants";
@@ -212,5 +214,62 @@ describe("runnableVariants", () => {
       isRunnable: false,
       duplicateOfVariantId: "v2",
     });
+  });
+
+  it("isVariantCompleted checks status and presence of resultImage", () => {
+    const vIdle = createMockVariant("v1", "V1", "1girl");
+    expect(isVariantCompleted(vIdle)).toBe(false);
+
+    const vFailed: PromptVariant = {
+      ...vIdle,
+      status: "failed",
+      error: "Timeout",
+    };
+    expect(isVariantCompleted(vFailed)).toBe(false);
+
+    const vSucceededNoImg: PromptVariant = {
+      ...vIdle,
+      status: "succeeded",
+    };
+    expect(isVariantCompleted(vSucceededNoImg)).toBe(false);
+
+    const vSucceededWithImg: PromptVariant = {
+      ...vIdle,
+      status: "succeeded",
+      resultImage: {
+        path: "outputs/sample.png",
+        url: "/api/results/image?path=outputs/sample.png",
+        seed: 12345,
+      },
+    };
+    expect(isVariantCompleted(vSucceededWithImg)).toBe(true);
+  });
+
+  it("getPendingRunnableVariants filters out already completed variants from runnable list", () => {
+    const v1 = createMockVariant("v1", "V1", "1girl, solo, black hair"); // Control group
+    const v2 = createMockVariant("v2", "V2", "1girl, solo, smile", ["smile"]); // Runnable
+    const v3 = createMockVariant("v3", "V3", "1girl, solo, smile", ["smile"]); // Duplicate, not runnable
+
+    // Mark v1 as completed
+    const v1Completed: PromptVariant = {
+      ...v1,
+      status: "succeeded",
+      resultImage: {
+        path: "outputs/v1.png",
+        url: "/api/results/image?path=outputs/v1.png",
+        seed: 12345,
+      },
+    };
+
+    // Mark v2 as failed
+    const v2Failed: PromptVariant = {
+      ...v2,
+      status: "failed",
+      error: "504 Gateway Timeout",
+    };
+
+    const pending = getPendingRunnableVariants([v1Completed, v2Failed, v3], mockTemplate);
+    // Only v2 should be returned (v1 is already completed, v3 is not runnable because duplicate)
+    expect(pending.map((v) => v.id)).toEqual(["v2"]);
   });
 });

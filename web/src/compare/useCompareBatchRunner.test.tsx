@@ -155,4 +155,97 @@ describe("useCompareBatchRunner", () => {
       }),
     );
   });
+
+  it("passes source_image_path in params and meta when template has sourceImage.sourcePath", async () => {
+    const mockPost = vi.fn().mockResolvedValue({
+      id: "job-source-path",
+      status: "succeeded",
+      result: { images: [{ path: "outputs/source_path.png" }] },
+    });
+
+    const templateWithSourcePath: BaseTemplate = {
+      ...sampleTemplate,
+      sourceImage: {
+        sourcePath: "F:/cached/template.png",
+      },
+      raw_parameters: {
+        reference_strength_multiple: [0.15, 0.15],
+      },
+    };
+
+    const { result } = renderHook(() =>
+      useCompareBatchRunner({
+        post: mockPost,
+        get: vi.fn(),
+        pollIntervalMs: 10,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.runVariant(sampleVariant, templateWithSourcePath, vi.fn());
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/generate",
+      expect.objectContaining({
+        render_request: expect.objectContaining({
+          params: expect.objectContaining({
+            source_image_path: "F:/cached/template.png",
+            reference_strength_multiple: [0.15, 0.15],
+          }),
+          meta: expect.objectContaining({
+            source_image_path: "F:/cached/template.png",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("runRoundsSequence runs tasks across rounds and tracks queueProgress", async () => {
+    const mockPost = vi.fn().mockImplementation(async (_path, body) => ({
+      id: `job-${body.render_request.meta.variant_id}`,
+      status: "succeeded",
+      result: { images: [{ path: `outputs/${body.render_request.meta.variant_id}.png` }] },
+    }));
+
+    const { result } = renderHook(() =>
+      useCompareBatchRunner({
+        post: mockPost,
+        get: vi.fn(),
+        pollIntervalMs: 5,
+      }),
+    );
+
+    const variantA: PromptVariant = { ...sampleVariant, id: "var-a", name: "Var A" };
+    const variantB: PromptVariant = { ...sampleVariant, id: "var-b", name: "Var B" };
+    const updates: Array<{ roundId: string; variantId: string; patch: Partial<PromptVariant> }> = [];
+
+    await act(async () => {
+      await result.current.runRoundsSequence(
+        [
+          {
+            roundId: "round-1",
+            roundName: "批次 1",
+            template: sampleTemplate,
+            variants: [variantA],
+          },
+          {
+            roundId: "round-2",
+            roundName: "批次 2",
+            template: sampleTemplate,
+            variants: [variantB],
+          },
+        ],
+        (roundId, variantId, patch) => {
+          updates.push({ roundId, variantId, patch });
+        },
+      );
+    });
+
+    expect(mockPost).toHaveBeenCalledTimes(2);
+    expect(updates.some((u) => u.roundId === "round-1" && u.variantId === "var-a")).toBe(true);
+    expect(updates.some((u) => u.roundId === "round-2" && u.variantId === "var-b")).toBe(true);
+    expect(result.current.queueProgress).toBeNull();
+    expect(result.current.isBusy).toBe(false);
+  });
 });

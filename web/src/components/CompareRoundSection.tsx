@@ -1,9 +1,10 @@
-import { GitFork, Play, Plus, Trash2 } from "lucide-react";
+import { GitFork, Layers, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { getVariantIdentityMap } from "../compare/runnableVariants";
+import { getVariantIdentityMap, isVariantCompleted } from "../compare/runnableVariants";
 import type { BaseTemplate, CompareRound, PromptVariant } from "../compare/types";
 import { useCompareWorkspace } from "../compare/useCompareWorkspace";
+import { BatchDeriveDialog } from "./BatchDeriveDialog";
 import { CompareTemplateBar } from "./CompareTemplateBar";
 import type { ImageDetailItem } from "./ImageDetailDialog";
 import { VariantCard } from "./VariantCard";
@@ -17,6 +18,11 @@ type CompareRoundSectionProps = {
   onToggleSelectVariant: (variantId: string) => void;
   onRunVariant: (variant: PromptVariant) => Promise<void>;
   onRunRound: (round: CompareRound, runnableVariants?: PromptVariant[]) => Promise<void>;
+  onBatchDerive?: (
+    sourceRound: CompareRound,
+    items: Array<{ template: BaseTemplate; filename: string }>,
+    autoRun: boolean,
+  ) => void;
   onOpenImageDetail: (selection: {
     paths?: string[];
     items?: ImageDetailItem[];
@@ -33,9 +39,11 @@ export function CompareRoundSection({
   onToggleSelectVariant,
   onRunVariant,
   onRunRound,
+  onBatchDerive,
   onOpenImageDetail,
 }: CompareRoundSectionProps) {
   const { addVariant, addNewRound, removeRound, reorderVariants } = useCompareWorkspace();
+  const [isBatchDeriveOpen, setIsBatchDeriveOpen] = useState(false);
   const effectiveTemplate = round.template || template;
 
   const identityMap = useMemo(
@@ -52,6 +60,13 @@ export function CompareRoundSection({
   );
   const runnableCount = runnableVariants.length;
   const skippedCount = round.variants.length - runnableCount;
+
+  const pendingVariants = useMemo(
+    () => runnableVariants.filter((v) => !isVariantCompleted(v)),
+    [runnableVariants],
+  );
+  const pendingCount = pendingVariants.length;
+  const completedCount = runnableCount - pendingCount;
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -170,19 +185,52 @@ export function CompareRoundSection({
         </div>
 
         <div className="round-actions">
-          <button
-            className="primary-button compact"
-            disabled={isBusy || runnableCount === 0}
-            onClick={() => void onRunRound(round, runnableVariants)}
-            title={
-              skippedCount > 0
-                ? `本批共 ${round.variants.length} 个变体，将运行 ${runnableCount} 个有效变体（含 1 个基准对照组，已跳过 ${skippedCount} 个重复变体）`
-                : `运行本批全部 ${round.variants.length} 个变体`
-            }
-            type="button"
-          >
-            <Play size={13} /> 运行本批全部变体 ({runnableCount})
-          </button>
+          {completedCount === 0 ? (
+            <button
+              className="primary-button compact"
+              disabled={isBusy || runnableCount === 0}
+              onClick={() => void onRunRound(round, runnableVariants)}
+              title={
+                skippedCount > 0
+                  ? `本批共 ${round.variants.length} 个变体，将运行 ${runnableCount} 个有效变体（含 1 个基准对照组，已跳过 ${skippedCount} 个重复变体）`
+                  : `运行本批全部 ${round.variants.length} 个变体`
+              }
+              type="button"
+            >
+              <Play size={13} /> 运行本批全部变体 ({runnableCount})
+            </button>
+          ) : completedCount < runnableCount ? (
+            <>
+              <button
+                className="primary-button compact"
+                disabled={isBusy || pendingCount === 0}
+                onClick={() => void onRunRound(round, pendingVariants)}
+                title={`本批共 ${runnableCount} 个有效变体，已完成 ${completedCount} 个，本次将仅运行 ${pendingCount} 个未完成/失败变体（自动跳过已成功生成的卡片）`}
+                type="button"
+              >
+                <Play size={13} /> 运行未完成变体 ({pendingCount})
+              </button>
+              <button
+                className="secondary-button compact"
+                disabled={isBusy || runnableCount === 0}
+                onClick={() => void onRunRound(round, runnableVariants)}
+                title={`重新运行本批全部 ${runnableCount} 个变体并覆盖已有生成图片`}
+                type="button"
+              >
+                <RotateCcw size={13} /> 重跑全部 ({runnableCount})
+              </button>
+            </>
+          ) : (
+            <button
+              className="secondary-button compact"
+              disabled={isBusy || runnableCount === 0}
+              onClick={() => void onRunRound(round, runnableVariants)}
+              title={`本批所有 ${runnableCount} 个变体已生成完毕。点击将重新运行整批全部变体并覆盖已有图片`}
+              type="button"
+            >
+              <RotateCcw size={13} /> 重新运行全部变体 ({runnableCount})
+            </button>
+          )}
 
           <button
             className="secondary-button compact"
@@ -191,6 +239,15 @@ export function CompareRoundSection({
             type="button"
           >
             <GitFork size={13} /> 往下派生新批次
+          </button>
+
+          <button
+            className="secondary-button compact batch-derive-trigger-btn"
+            onClick={() => setIsBatchDeriveOpen(true)}
+            title="选择或拖入多张图片，自动为每张图片派生新批次并继承本批diff"
+            type="button"
+          >
+            <Layers size={13} /> 多图批量派生...
           </button>
 
           {canDeleteRound ? (
@@ -205,6 +262,15 @@ export function CompareRoundSection({
           ) : null}
         </div>
       </div>
+
+      <BatchDeriveDialog
+        isOpen={isBatchDeriveOpen}
+        onClose={() => setIsBatchDeriveOpen(false)}
+        onConfirm={(items, autoRun) => {
+          onBatchDerive?.(round, items, autoRun);
+        }}
+        sourceRound={round}
+      />
 
       <CompareTemplateBar
         onOpenDetail={(templatePath) => {

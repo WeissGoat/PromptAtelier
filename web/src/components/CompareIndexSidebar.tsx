@@ -36,6 +36,14 @@ function getRoundStatusTag(round: CompareRound) {
   return <span className="sidebar-status-tag idle">就绪</span>;
 }
 
+function formatSidebarRoundName(name: string): string {
+  const commMatch = name.match(/^(.*?) - comm_seed_\d+_(\d+_\d+)/);
+  if (commMatch) {
+    return `${commMatch[1]} · ${commMatch[2]}`;
+  }
+  return name;
+}
+
 export function CompareIndexSidebar({
   activeRoundId,
   onSelectRound,
@@ -163,7 +171,7 @@ export function CompareIndexSidebar({
               <div className="sidebar-item-header">
                 <span className="sidebar-item-order">#{index + 1}</span>
                 <span className="sidebar-round-name" title={round.name}>
-                  {round.name}
+                  {formatSidebarRoundName(round.name)}
                 </span>
                 <span className="sidebar-variants-count">
                   {round.variants.length} 变体
@@ -172,6 +180,24 @@ export function CompareIndexSidebar({
 
               <div className="sidebar-item-meta">
                 {getRoundStatusTag(round)}
+                {round.template?.seed && round.template.seed > 0 ? (
+                  <span
+                    className="sidebar-seed-pill"
+                    style={{
+                      fontSize: 10,
+                      padding: "1px 5px",
+                      background: "#e2e8f0",
+                      color: "#475569",
+                      borderRadius: 3,
+                      fontFamily: "monospace",
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}
+                    title={`底模种子: ${round.template.seed}`}
+                  >
+                    #{round.template.seed}
+                  </span>
+                ) : null}
                 <span
                   className="sidebar-prompt-preview"
                   title={round.basePrompt || round.template?.prompt}

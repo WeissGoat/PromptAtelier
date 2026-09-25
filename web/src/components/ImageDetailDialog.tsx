@@ -54,8 +54,20 @@ function diffCategory(item: ImageParameterDiffItem): DiffCategory {
 }
 
 function diffLabel(path: string): string {
-  if (path === "$.input" || path === "$.parameters.prompt") return "Prompt";
-  if (path === "$.parameters.uc" || path === "$.parameters.negative_prompt") return "Negative";
+  if (
+    path === "$.input" ||
+    path === "$.parameters.prompt" ||
+    path.startsWith("$.parameters.v4_prompt.caption.base_caption")
+  ) {
+    return "Prompt";
+  }
+  if (
+    path === "$.parameters.uc" ||
+    path === "$.parameters.negative_prompt" ||
+    path.startsWith("$.parameters.v4_negative_prompt.caption.base_caption")
+  ) {
+    return "Negative";
+  }
   if (path === "$.model" || path === "$.parameters.model") return "Model";
   return path
     .replace(/^\$\.parameters\./, "")

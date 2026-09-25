@@ -1,7 +1,7 @@
 import { Image as ImageIcon, Lock, RotateCcw, UploadCloud } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
-import { apiPost, errorMessage } from "../api/client";
+import { apiPost, apiUrl, errorMessage } from "../api/client";
 import type { BaseTemplate, CompareRound } from "../compare/types";
 import { useCompareWorkspace } from "../compare/useCompareWorkspace";
 
@@ -71,7 +71,9 @@ export function CompareTemplateBar({ round, onOpenDetail }: CompareTemplateBarPr
         is_infilling: inspected.is_infilling,
         notice: inspected.notice,
         sourceImage: {
-          previewUrl: base64Data,
+          previewUrl: inspected.source_path
+            ? apiUrl(`/results/image?path=${encodeURIComponent(inspected.source_path)}`)
+            : base64Data,
           filename: inspected.filename,
           sourcePath: inspected.source_path ?? undefined,
         },
@@ -253,10 +255,17 @@ export function CompareTemplateBar({ round, onOpenDetail }: CompareTemplateBarPr
             {template.raw_parameters?.cfg_rescale ? (
               <span className="param-badge">Rescale: {template.raw_parameters.cfg_rescale}</span>
             ) : null}
-            {Array.isArray(template.raw_parameters?.reference_image_multiple) &&
-            template.raw_parameters.reference_image_multiple.length > 0 ? (
+            {((Array.isArray(template.raw_parameters?.reference_image_multiple) &&
+              template.raw_parameters.reference_image_multiple.length > 0) ||
+              (Array.isArray(template.raw_parameters?.reference_strength_multiple) &&
+                template.raw_parameters.reference_strength_multiple.length > 0)) ? (
               <span className="param-badge highlight">
-                Vibe风格图: {template.raw_parameters.reference_image_multiple.length}张
+                Vibe风格图: {
+                  (template.raw_parameters.reference_image_multiple &&
+                   template.raw_parameters.reference_image_multiple.length > 0)
+                    ? template.raw_parameters.reference_image_multiple.length
+                    : template.raw_parameters.reference_strength_multiple?.length
+                }张
               </span>
             ) : null}
           </div>

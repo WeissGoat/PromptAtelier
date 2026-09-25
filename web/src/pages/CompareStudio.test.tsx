@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { CompareStudio } from "./CompareStudio";
@@ -179,6 +179,69 @@ describe("CompareStudio", () => {
     // Now Variant 1-B is a duplicate of Variant 1-A (both non-base identical), runnable count drops back to 1!
     expect(screen.getByRole("button", { name: /运行本批全部变体 \(1\)/ })).toBeTruthy();
     expect(screen.getByText("与同批变体重复 (跳过)")).toBeTruthy();
+  });
+
+  it("opens BatchDeriveDialog from round action and derives multiple rounds", async () => {
+    const mockInspectResponse = {
+      filename: "summer_beach.png",
+      dimensions: { width: 1024, height: 1024 },
+      prompt: "beach, ocean, sunny day",
+      negative_prompt: "worst quality",
+      seed: 999111,
+      steps: 28,
+      scale: 5.0,
+      sampler: "k_euler",
+      model: "nai-diffusion-4-5-full",
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/image-meta/inspect")) {
+        return new Response(JSON.stringify(mockInspectResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    render(<CompareStudio />);
+    clickAddRound(); // Creates Round 1
+
+    expect(screen.getAllByText("第 1 批对比").length).toBeGreaterThanOrEqual(1);
+
+    // Click "多图批量派生..." button
+    const batchDeriveBtn = screen.getByRole("button", { name: /多图批量派生/ });
+    fireEvent.click(batchDeriveBtn);
+
+    // Dialog opens
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText(/多图批量派生新批次/)).toBeTruthy();
+
+    // Upload an image
+    const file = new File(["test data"], "summer_beach.png", { type: "image/png" });
+    const fileInput = screen.getByRole("dialog").querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    // Wait for card to be ready
+    await waitFor(() => {
+      expect(screen.getByText("1024×1024")).toBeTruthy();
+    });
+
+    // Uncheck autoRun for test simplicity
+    const autoRunCheckbox = screen.getByRole("checkbox");
+    fireEvent.click(autoRunCheckbox);
+
+    // Confirm batch derive
+    const confirmBtn = screen.getByRole("button", { name: /确定派生 1 个新批次/ });
+    fireEvent.click(confirmBtn);
+
+    // Dialog should close and new round should appear
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    expect(screen.getAllByText("第 1 批对比 - summer_beach").length).toBeGreaterThanOrEqual(1);
   });
 });
 

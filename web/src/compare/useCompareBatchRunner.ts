@@ -30,6 +30,22 @@ export function normalizeNovelAIModel(raw?: string): string {
   return "nai-diffusion-4-5-full";
 }
 
+export type QueueProgress = {
+  currentRoundIndex: number;
+  totalRounds: number;
+  roundName?: string;
+  currentVariantIndex: number;
+  totalVariants: number;
+  variantName?: string;
+};
+
+export type RoundRunTask = {
+  roundId: string;
+  roundName?: string;
+  template: BaseTemplate;
+  variants: PromptVariant[];
+};
+
 type RunnerOptions = {
   concurrency?: number;
   pollIntervalMs?: number;
@@ -39,6 +55,7 @@ type RunnerOptions = {
 
 export function useCompareBatchRunner(options: RunnerOptions = {}) {
   const [isBusy, setIsBusy] = useState(false);
+  const [queueProgress, setQueueProgress] = useState<QueueProgress | null>(null);
   const abortRef = useRef(false);
 
   const post = options.post ?? apiPost;
@@ -66,6 +83,16 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
       delete rawParams.uc;
       delete rawParams.request_type;
       delete rawParams.signed_hash;
+      delete (rawParams as Record<string, unknown>).extra_passthrough_testing;
+
+      if (rawParams.v4_negative_prompt && typeof rawParams.v4_negative_prompt === "object") {
+        const v4np = { ...(rawParams.v4_negative_prompt as Record<string, unknown>) };
+        const caption =
+          typeof v4np.caption === "object" && v4np.caption !== null
+            ? { ...(v4np.caption as Record<string, unknown>), base_caption: template.negative }
+            : { base_caption: template.negative, char_captions: [] };
+        rawParams.v4_negative_prompt = { ...v4np, caption };
+      }
 
       const requestBody = {
         render_request: {
@@ -86,11 +113,19 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
             steps: template.steps,
             scale: template.scale,
             sampler: template.sampler || rawParams.sampler || "k_euler",
+            uc: template.negative,
+            negative_prompt: template.negative,
+            ...(template.sourceImage?.sourcePath
+              ? { source_image_path: template.sourceImage.sourcePath }
+              : {}),
           },
           meta: {
             source: "compare_studio",
             variant_id: variant.id,
             variant_name: variant.name,
+            ...(template.sourceImage?.sourcePath
+              ? { source_image_path: template.sourceImage.sourcePath }
+              : {}),
           },
         },
       };
@@ -166,14 +201,53 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
     [runVariant],
   );
 
+  const runRoundsSequence = useCallback(
+    async (
+      tasks: RoundRunTask[],
+      onUpdateVariant: (roundId: string, variantId: string, patch: Partial<PromptVariant>) => void,
+    ) => {
+      setIsBusy(true);
+      abortRef.current = false;
+
+      try {
+        for (let rIdx = 0; rIdx < tasks.length; rIdx++) {
+          if (abortRef.current) break;
+          const task = tasks[rIdx];
+          for (let vIdx = 0; vIdx < task.variants.length; vIdx++) {
+            if (abortRef.current) break;
+            const variant = task.variants[vIdx];
+            setQueueProgress({
+              currentRoundIndex: rIdx + 1,
+              totalRounds: tasks.length,
+              roundName: task.roundName,
+              currentVariantIndex: vIdx + 1,
+              totalVariants: task.variants.length,
+              variantName: variant.name,
+            });
+            await runVariant(variant, task.template, (patch) => {
+              onUpdateVariant(task.roundId, variant.id, patch);
+            });
+          }
+        }
+      } finally {
+        setIsBusy(false);
+        setQueueProgress(null);
+      }
+    },
+    [runVariant],
+  );
+
   const stop = useCallback(() => {
     abortRef.current = true;
     setIsBusy(false);
+    setQueueProgress(null);
   }, []);
 
   return {
     runVariant,
     runRound,
+    runRoundsSequence,
+    queueProgress,
     isBusy,
     stop,
   };

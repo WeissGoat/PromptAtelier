@@ -150,6 +150,75 @@ describe("compare workspace storage", () => {
     expect(result.state.rounds).toEqual([]);
   });
 
+  it("strips heavy vibe transfer arrays from raw_parameters during sanitization", () => {
+    const templateWithHeavyParams: BaseTemplate = {
+      ...sampleTemplate,
+      raw_parameters: {
+        sampler: "k_euler",
+        steps: 28,
+        reference_image_multiple: ["huge_base64_data_1", "huge_base64_data_2"],
+        extra_passthrough_testing: { prompt: null },
+      },
+    };
+
+    const state = createDefaultCompareWorkspace();
+    state.template = templateWithHeavyParams;
+    state.rounds = [
+      {
+        id: "round-1",
+        name: "第 1 批对比",
+        template: templateWithHeavyParams,
+        basePrompt: templateWithHeavyParams.prompt,
+        status: "idle",
+        variants: [],
+      },
+    ];
+
+    saveCompareWorkspaceSnapshot(localStorage, state);
+    const raw = localStorage.getItem(COMPARE_WORKSPACE_STORAGE_KEY)!;
+    expect(raw).not.toContain("huge_base64_data_1");
+    expect(raw).not.toContain("reference_image_multiple");
+    expect(raw).toContain('"sampler":"k_euler"');
+  });
+
+  it("recovers via aggressive pruning if localStorage throws quota exceeded error on first attempt", () => {
+    const state = createDefaultCompareWorkspace();
+    state.rounds = [
+      {
+        id: "round-1",
+        name: "第 1 批对比",
+        template: {
+          ...sampleTemplate,
+          raw_parameters: { heavy: "something" },
+        },
+        basePrompt: sampleTemplate.prompt,
+        status: "idle",
+        variants: [],
+      },
+    ];
+
+    let callCount = 0;
+    const mockStorage = {
+      getItem: () => null,
+      setItem: (_key: string, value: string) => {
+        callCount++;
+        if (callCount === 1) {
+          throw new DOMException("QuotaExceededError", "QuotaExceededError");
+        }
+        localStorage.setItem(_key, value);
+      },
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as unknown as Storage;
+
+    saveCompareWorkspaceSnapshot(mockStorage, state);
+    expect(callCount).toBe(2);
+    const raw = localStorage.getItem(COMPARE_WORKSPACE_STORAGE_KEY)!;
+    expect(raw).not.toContain("heavy");
+  });
+
   it("clearCompareWorkspaceSnapshot clears the key from storage", () => {
     saveCompareWorkspaceSnapshot(localStorage, createDefaultCompareWorkspace());
     expect(localStorage.getItem(COMPARE_WORKSPACE_STORAGE_KEY)).not.toBeNull();

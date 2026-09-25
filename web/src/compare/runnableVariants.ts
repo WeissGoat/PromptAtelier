@@ -148,3 +148,22 @@ export function getRunnableVariants(
   const identityMap = getVariantIdentityMap(variants, template);
   return variants.filter((v) => identityMap.get(v.id)?.isRunnable ?? false);
 }
+
+/**
+ * Checks if a variant has already completed generation with a valid result image.
+ */
+export function isVariantCompleted(variant: PromptVariant): boolean {
+  return variant.status === "succeeded" && !!variant.resultImage?.url;
+}
+
+/**
+ * Returns only runnable variants that have not yet completed successfully
+ * (i.e. idle, failed, or missing result image).
+ */
+export function getPendingRunnableVariants(
+  variants: PromptVariant[],
+  template: BaseTemplate,
+): PromptVariant[] {
+  const runnable = getRunnableVariants(variants, template);
+  return runnable.filter((v) => !isVariantCompleted(v));
+}
