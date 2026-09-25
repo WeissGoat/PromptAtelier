@@ -340,6 +340,7 @@ class NovelAIRenderAdapter:
             "legacy_v3_extend": params.get("legacy_v3_extend", False),
             "uncond_scale": uncond_scale,
             "negative_prompt": negative,
+            "uc": negative,
             "prompt": positive,
             "reference_image_multiple": params.get("reference_image_multiple", []),
             "reference_information_extracted_multiple": params.get(

@@ -39,6 +39,33 @@ class PromptPolicyRegistry:
             self._by_id[rule.id] = rule
 
     def validate_config(self, config: PromptPolicyConfig) -> PromptPolicyConfig:
+        if (
+            "novelai_vibe_artist" in config.rules
+            or "novelai_vibe_artist" in config.enabled_rules
+            or "novelai_vibe_artist" in config.disabled_rules
+        ):
+            config = config.model_copy(deep=True)
+            if "novelai_vibe_artist" in config.rules:
+                vibe_artist_rule = config.rules.pop("novelai_vibe_artist")
+                if "novelai_vibe" not in config.rules:
+                    opts = dict(vibe_artist_rule.options)
+                    artist_ref = opts.pop("artist_ref", None)
+                    if artist_ref and "source" not in opts:
+                        opts["source"] = {"type": "artist", "ref": artist_ref}
+                    if "source" in opts and isinstance(opts["source"], dict) and opts["source"].get("ref"):
+                        vibe_artist_rule.options = opts
+                        config.rules["novelai_vibe"] = vibe_artist_rule
+            if "novelai_vibe_artist" in config.enabled_rules:
+                config.enabled_rules = [
+                    "novelai_vibe" if r == "novelai_vibe_artist" else r
+                    for r in config.enabled_rules
+                ]
+            if "novelai_vibe_artist" in config.disabled_rules:
+                config.disabled_rules = [
+                    "novelai_vibe" if r == "novelai_vibe_artist" else r
+                    for r in config.disabled_rules
+                ]
+
         known_ids = set(self._by_id)
         configured_ids = set(config.rules) | set(config.enabled_rules) | set(config.disabled_rules)
         unknown = sorted(configured_ids - known_ids)

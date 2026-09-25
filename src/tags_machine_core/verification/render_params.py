@@ -22,6 +22,7 @@ IGNORED_PARAMETER_KEYS = {
     "signed_hash",
     "request_type",
     "stream",
+    "extra_passthrough_testing",
 }
 
 

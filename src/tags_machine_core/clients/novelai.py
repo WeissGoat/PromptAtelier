@@ -12,6 +12,7 @@ from tags_machine_core.contracts import RenderRequest
 from tags_machine_core.json_tools import sanitize_json_for_display
 
 
+
 IMAGE_BASE_URL = "https://image.novelai.net"
 NOVELAI_WEB_HEADERS = {
     "Content-Type": "application/json",
@@ -66,6 +67,7 @@ REQUEST_PARAMETER_KEYS = {
     "sm_dyn",
     "steps",
     "strength",
+    "uc",
     "ucPreset",
     "uncond_scale",
     "use_coords",
@@ -245,6 +247,14 @@ class NovelAIClient:
             parameters[key] = value
 
         model = normalize_novelai_model(request.model)
+        negative = request.negative_prompt
+        if not negative:
+            negative = str(request.params.get("negative_prompt") or request.params.get("uc") or "")
+            if not negative and isinstance(request.params.get("v4_negative_prompt"), dict):
+                v4_cap = request.params["v4_negative_prompt"].get("caption")
+                if isinstance(v4_cap, dict):
+                    negative = str(v4_cap.get("base_caption") or "")
+
         if "nai-diffusion-4" in model:
             parameters.setdefault("params_version", 3)
             if "v4_prompt" not in parameters or not isinstance(parameters.get("v4_prompt"), dict):
@@ -262,15 +272,18 @@ class NovelAIClient:
 
             if "v4_negative_prompt" not in parameters or not isinstance(parameters.get("v4_negative_prompt"), dict):
                 parameters["v4_negative_prompt"] = {
-                    "caption": {"base_caption": request.negative_prompt or "", "char_captions": []},
+                    "caption": {"base_caption": negative, "char_captions": []},
                     "use_coords": False,
                     "use_order": False,
                 }
             else:
                 v4_np = dict(parameters["v4_negative_prompt"])
                 caption = dict(v4_np.get("caption") or {})
-                caption["base_caption"] = request.negative_prompt or ""
+                caption["base_caption"] = negative
                 v4_np["caption"] = caption
                 parameters["v4_negative_prompt"] = v4_np
+
+        parameters["uc"] = negative
+        parameters["negative_prompt"] = negative
 
         return parameters

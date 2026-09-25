@@ -176,6 +176,34 @@ class NovelAIRenderPolicyTest(unittest.TestCase):
                     target="script",
                 )
 
+    def test_novelai_vibe_artist_alias_maps_to_novelai_vibe(self):
+        policy = PromptPolicyProvider().resolve(
+            {
+                "enabled": True,
+                "apply_to": {"script": True},
+                "rules": {
+                    "novelai_vibe_artist": {
+                        "enabled": True,
+                        "options": {
+                            "artist_ref": "artists/test_artist",
+                            "strength": 0.4,
+                        },
+                    }
+                },
+            }
+        )
+        self.assertNotIn("novelai_vibe_artist", policy.rules)
+        self.assertIn("novelai_vibe", policy.rules)
+        self.assertEqual(
+            policy.rules["novelai_vibe"].options["source"]["ref"],
+            "artists/test_artist",
+        )
+        self.assertEqual(
+            policy.rules["novelai_vibe"].options["source"]["type"],
+            "artist",
+        )
+        self.assertEqual(policy.rules["novelai_vibe"].options["strength"], 0.4)
+
 
 if __name__ == "__main__":
     unittest.main()

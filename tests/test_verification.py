@@ -348,6 +348,18 @@ class VerificationTest(unittest.TestCase):
         self.assertEqual(len(diffs), 1)
         self.assertEqual(diffs[0].path, "$.parameters.director_reference_images[0].sha256")
 
+    def test_compare_render_parameters_ignores_extra_passthrough_testing(self):
+        left = {"parameters": {**_sample_parameters(), "extra_passthrough_testing": {"crash_hydra": False}}}
+        right = {"parameters": _sample_parameters()}
+        self.assertEqual(compare_render_parameters(left, right), [])
+
+    def test_compare_render_parameters_reports_negative_prompt_diff(self):
+        left = {"parameters": {**_sample_parameters(), "uc": "lowres, bad quality"}}
+        right = {"parameters": {**_sample_parameters(), "uc": ""}}
+        diffs = compare_render_parameters(left, right)
+        self.assertEqual(len(diffs), 1)
+        self.assertEqual(diffs[0].path, "$.parameters.uc")
+
     def test_cli_compare_render_params(self):
         with tempfile.TemporaryDirectory() as tmp:
             left = Path(tmp) / "left.json"
