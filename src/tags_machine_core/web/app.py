@@ -17,7 +17,7 @@ from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
-from .routes import batch, compose, generate, health, image_meta, jobs, node_pools, nodes, results
+from .routes import batch, compare, compose, generate, health, image_meta, jobs, node_pools, nodes, results
 from .services.batch_workspace import BatchWorkspace
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
@@ -69,6 +69,8 @@ def create_app(
     roots: list[str | Path] = [
         config.runtime.output_dir,
         "outputs",
+        Path(config.runtime.output_dir) / "compares",
+        Path("outputs") / "compares",
         "output",
         Path("output") / ".template_cache",
         Path("outputs") / ".template_cache",
@@ -112,6 +114,7 @@ def create_app(
     app.include_router(results.router, prefix="/api", tags=["results"])
     app.include_router(batch.router, prefix="/api", tags=["batch"])
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
+    app.include_router(compare.router, prefix="/api", tags=["compare"])
 
     @app.get("/", include_in_schema=False)
     def root():

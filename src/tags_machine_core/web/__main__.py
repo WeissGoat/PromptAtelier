@@ -3,6 +3,11 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import sys
+
+if sys.platform == "win32":
+    import asyncio
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import uvicorn
 
@@ -25,6 +30,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.config:
         os.environ["TAGS_MACHINE_CONFIG"] = args.config
     src_dir = str(Path(__file__).resolve().parents[2])
+    loop_opt = "asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto"
     uvicorn.run(
         "tags_machine_core.web:create_app",
         factory=True,
@@ -32,6 +38,7 @@ def main(argv: list[str] | None = None) -> None:
         port=args.port,
         reload=args.reload,
         reload_dirs=[src_dir] if args.reload else None,
+        loop=loop_opt,
     )
 
 
