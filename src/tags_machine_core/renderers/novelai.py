@@ -76,6 +76,46 @@ def _legacy_prompt_tags(text: str) -> list[str]:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
+def _extract_character_blocks(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """提取 ::character X: ... :: 语法块，并返回分离后的 base prompt 和 blocks。"""
+    pattern = r"::character\s*([A-Za-z0-9_]+)\s*:\s*(.*?)\s*::"
+    matches = list(re.finditer(pattern, text))
+    if not matches:
+        return text, []
+
+    base_text = text
+    blocks: list[dict[str, Any]] = []
+    for m in matches:
+        block_id = m.group(1).strip()
+        content = m.group(2).strip()
+        tags = [t.strip() for t in content.split(",") if t.strip()]
+        is_male = any(
+            t in ("boy", "man", "male", "1boy", "fat man", "faceless male", "males")
+            or "boy" in t.split()
+            or "man" in t.split()
+            for t in tags
+        )
+        is_female = any(
+            t in ("girl", "woman", "female", "1girl", "girls")
+            or "girl" in t.split()
+            or "woman" in t.split()
+            for t in tags
+        )
+        gender = "male" if (is_male and not is_female) else "female"
+        blocks.append({
+            "id": block_id,
+            "raw_content": content,
+            "tags": tags,
+            "gender": gender,
+        })
+
+    for m in reversed(matches):
+        start, end = m.span()
+        base_text = base_text[:start] + base_text[end:]
+
+    return base_text, blocks
+
+
 def _dedupe_prompt_tags(values: Any) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -392,7 +432,8 @@ class NovelAIRenderAdapter:
                 {"mode": "auto", "status": "no_characters"},
             )
 
-        base_tags = _legacy_prompt_tags(positive)
+        cleaned_positive, prompt_character_blocks = _extract_character_blocks(positive)
+        base_tags = _legacy_prompt_tags(cleaned_positive)
         negative_tags = _legacy_prompt_tags(negative)
         char_captions: list[dict[str, Any]] = []
         negative_char_captions: list[dict[str, Any]] = []
@@ -404,62 +445,134 @@ class NovelAIRenderAdapter:
         max_characters = _bounded_int(config.get("max_characters"), default=6, minimum=1, maximum=6)
         male_caption_added = False
 
-        for material in materials[:max_characters]:
-            candidate_positive_tags = _dedupe_prompt_tags(material.get("positive_tags", []))
-            candidate_negative_tags = _dedupe_prompt_tags(material.get("negative_tags", []))
-            matched_positive_tags: list[str] = []
-            matched_negative_tags: list[str] = []
-            for tag in candidate_positive_tags:
-                matched_tag = _find_prompt_tag(tag, base_tags)
-                if matched_tag is not None:
-                    matched_positive_tags.append(matched_tag)
-                    removed_positive_tags.append(matched_tag)
-                    matched_positive_tag_set.add(matched_tag)
-            for tag in candidate_negative_tags:
-                matched_tag = _find_prompt_tag(tag, negative_tags)
-                if matched_tag is not None:
-                    matched_negative_tags.append(matched_tag)
-                    removed_negative_tags.append(matched_tag)
-                    matched_negative_tag_set.add(matched_tag)
+        if prompt_character_blocks:
+            # 模式 A：检测到提示词中包含分角色块（::character A: ... ::）
+            # 分离男角色块与女角色块
+            male_blocks = [b for b in prompt_character_blocks if b["gender"] == "male"]
+            female_blocks = [b for b in prompt_character_blocks if b["gender"] != "male"]
 
-            if matched_positive_tags:
-                caption_parts = (
-                    [default_caption_prefix, *matched_positive_tags]
-                    if default_caption_prefix
-                    else matched_positive_tags
+            char_idx = 0
+            # 1. 对女角色块：依次挂载对应的 --character 节点特征
+            for f_block in female_blocks:
+                if len(char_captions) >= max_characters:
+                    break
+                block_content = f_block["raw_content"]
+                matched_neg: list[str] = []
+
+                if char_idx < len(materials):
+                    material = materials[char_idx]
+                    char_idx += 1
+                    cand_pos = _dedupe_prompt_tags(material.get("positive_tags", []))
+                    cand_neg = _dedupe_prompt_tags(material.get("negative_tags", []))
+
+                    # 角色特征优先取角色节点的正向标签，若 base tags 中包含则进行迁移并从 base 中移除
+                    matched_pos: list[str] = []
+                    for tag in cand_pos:
+                        mt = _find_prompt_tag(tag, base_tags)
+                        if mt is not None:
+                            matched_pos.append(mt)
+                            removed_positive_tags.append(mt)
+                            matched_positive_tag_set.add(mt)
+                        elif tag not in f_block["tags"]:
+                            matched_pos.append(tag)
+
+                    for tag in cand_neg:
+                        mt = _find_prompt_tag(tag, negative_tags)
+                        if mt is not None:
+                            matched_neg.append(mt)
+                            removed_negative_tags.append(mt)
+                            matched_negative_tag_set.add(mt)
+
+                    # 角色特征与分块动作合成
+                    merged_parts = [block_content]
+                    if matched_pos:
+                        merged_parts.extend(matched_pos)
+                    char_caption_str = _join_prompt_parts(merged_parts)
+                else:
+                    # 超出角色数量保底：保持原女角色块动作作为通用角色，不追加专属角色词
+                    char_caption_str = block_content
+
+                char_captions.append({
+                    "char_caption": char_caption_str,
+                    "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                })
+                negative_char_captions.append({
+                    "char_caption": _join_prompt_parts(matched_neg) if matched_neg else "",
+                    "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                })
+
+            # 2. 对男角色块：每个男角色块独立成为一个 char_caption（不追加女角色词）
+            for m_block in male_blocks:
+                if len(char_captions) >= max_characters:
+                    break
+                char_captions.append({
+                    "char_caption": m_block["raw_content"],
+                    "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                })
+                negative_char_captions.append({
+                    "char_caption": "",
+                    "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                })
+                male_caption_added = True
+
+        else:
+            # 模式 B：常规扁平提示词处理逻辑
+            for material in materials[:max_characters]:
+                candidate_positive_tags = _dedupe_prompt_tags(material.get("positive_tags", []))
+                candidate_negative_tags = _dedupe_prompt_tags(material.get("negative_tags", []))
+                matched_positive_tags: list[str] = []
+                matched_negative_tags: list[str] = []
+                for tag in candidate_positive_tags:
+                    matched_tag = _find_prompt_tag(tag, base_tags)
+                    if matched_tag is not None:
+                        matched_positive_tags.append(matched_tag)
+                        removed_positive_tags.append(matched_tag)
+                        matched_positive_tag_set.add(matched_tag)
+                for tag in candidate_negative_tags:
+                    matched_tag = _find_prompt_tag(tag, negative_tags)
+                    if matched_tag is not None:
+                        matched_negative_tags.append(matched_tag)
+                        removed_negative_tags.append(matched_tag)
+                        matched_negative_tag_set.add(matched_tag)
+
+                if matched_positive_tags:
+                    caption_parts = (
+                        [default_caption_prefix, *matched_positive_tags]
+                        if default_caption_prefix
+                        else matched_positive_tags
+                    )
+                    char_captions.append(
+                        {
+                            "char_caption": _join_prompt_parts(caption_parts),
+                            "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                        }
+                    )
+                    negative_char_captions.append(
+                        {
+                            "char_caption": (
+                                _join_prompt_parts(matched_negative_tags)
+                                if matched_negative_tags
+                                else ""
+                            ),
+                            "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                        }
+                    )
+
+            if (
+                char_captions
+                and _enabled_config(config.get("add_male_caption"), default=True)
+                and _contains_male_character(base_tags)
+                and not _contains_male_character(
+                    [caption.get("char_caption") for caption in char_captions]
                 )
+            ):
                 char_captions.append(
                     {
-                        "char_caption": _join_prompt_parts(caption_parts),
+                        "char_caption": MALE_CHARACTER_CAPTION,
                         "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
                     }
                 )
-                negative_char_captions.append(
-                    {
-                        "char_caption": (
-                            _join_prompt_parts(matched_negative_tags)
-                            if matched_negative_tags
-                            else ""
-                        ),
-                        "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
-                    }
-                )
-
-        if (
-            char_captions
-            and _enabled_config(config.get("add_male_caption"), default=True)
-            and _contains_male_character(base_tags)
-            and not _contains_male_character(
-                [caption.get("char_caption") for caption in char_captions]
-            )
-        ):
-            char_captions.append(
-                {
-                    "char_caption": MALE_CHARACTER_CAPTION,
-                    "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
-                }
-            )
-            male_caption_added = True
+                male_caption_added = True
 
         negative_char_captions = _pad_negative_character_captions(
             negative_char_captions,

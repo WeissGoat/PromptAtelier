@@ -470,6 +470,68 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         self.assertIn("artist style", caption["base_caption"])
         self.assertIn("very aesthetic", caption["base_caption"])
 
+    def test_novelai_character_blocks_matching_and_fallback(self):
+        """测试底层识别 ::character A/B:: 分块并追加至对应的 char_captions。"""
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"], "hair": ["black hair"]},
+        )
+        madoka = NodeDocument(
+            kind="character",
+            id="madoka",
+            tags={"character": ["kaname madoka"], "hair": ["pink hair"]},
+        )
+        resolved = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="character", ref="madoka", index=1, node=madoka),
+            ]
+        )
+
+        # 包含 1个男角色块 + 3个女角色块（女角色块数量为 3，大于传入的 2 个 character 节点）
+        prompt = (
+            "akemi homura, kaname madoka, outdoors, autumn, "
+            "::character A: boy, faceless male, grabbing ::, "
+            "::character B: girl, smile, blush ::, "
+            "::character C: girl, arched back, tears ::, "
+            "::character D: girl, lying down, skirt lift ::"
+        )
+        bundle = ScriptComposer().compose_full_prompt(prompt=prompt)
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        # base_caption 中应剥离所有的 ::character ... :: 定界符
+        self.assertNotIn("::character", caption["base_caption"])
+        self.assertIn("outdoors", caption["base_caption"])
+        self.assertIn("autumn", caption["base_caption"])
+
+        char_captions = caption["char_captions"]
+        # 3 个女角色块 + 1 个男角色块 = 4 个 char_captions
+        self.assertEqual(len(char_captions), 4)
+
+        # 女角色块 1：匹配到 homura
+        self.assertIn("girl, smile, blush", char_captions[0]["char_caption"])
+        self.assertIn("akemi homura", char_captions[0]["char_caption"])
+        self.assertIn("black hair", char_captions[0]["char_caption"])
+
+        # 女角色块 2：匹配到 madoka
+        self.assertIn("girl, arched back, tears", char_captions[1]["char_caption"])
+        self.assertIn("kaname madoka", char_captions[1]["char_caption"])
+        self.assertIn("pink hair", char_captions[1]["char_caption"])
+
+        # 女角色块 3：超出角色数量保底，保留匿名动作，不注入前两个角色的特征
+        self.assertEqual(char_captions[2]["char_caption"], "girl, lying down, skirt lift")
+
+        # 男角色块：独立存在，不追加女角色特征
+        self.assertEqual(char_captions[3]["char_caption"], "boy, faceless male, grabbing")
+
 
 if __name__ == "__main__":
     unittest.main()
