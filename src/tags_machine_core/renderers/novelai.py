@@ -78,8 +78,9 @@ def _legacy_prompt_tags(text: str) -> list[str]:
 
 def _extract_character_blocks(text: str) -> tuple[str, list[dict[str, Any]]]:
     """提取 ::character X: ... :: 语法块，并返回分离后的 base prompt 和 blocks。"""
-    pattern = r"::character\s*([A-Za-z0-9_]+)\s*:\s*(.*?)\s*::"
-    matches = list(re.finditer(pattern, text))
+    # 宽松匹配 ::character X: ... ::，允许内容包含嵌套 :: 或无闭合直到下一块/末尾
+    pattern = r"::character\s*([A-Za-z0-9_]+)\s*:\s*(.*?)(?=\s*::character|\s*::$|$)"
+    matches = list(re.finditer(pattern, text, flags=re.DOTALL))
     if not matches:
         return text, []
 
@@ -87,7 +88,11 @@ def _extract_character_blocks(text: str) -> tuple[str, list[dict[str, Any]]]:
     blocks: list[dict[str, Any]] = []
     for m in matches:
         block_id = m.group(1).strip()
-        content = m.group(2).strip()
+        raw_val = m.group(2).strip()
+        # 清理可能残留的末尾定界符
+        content = re.sub(r"::+$", "", raw_val).strip()
+        content = re.sub(r"::+$", "", content).strip().rstrip(",")
+        content = re.sub(r"\s*::$", "", content).strip().rstrip(",")
         tags = [t.strip() for t in content.split(",") if t.strip()]
         is_male = any(
             t in ("boy", "man", "male", "1boy", "fat man", "faceless male", "males")
@@ -109,9 +114,14 @@ def _extract_character_blocks(text: str) -> tuple[str, list[dict[str, Any]]]:
             "gender": gender,
         })
 
-    for m in reversed(matches):
-        start, end = m.span()
-        base_text = base_text[:start] + base_text[end:]
+    # 从 base_text 中移除整个 ::character 区域
+    first_start = matches[0].start()
+    last_end = matches[-1].end()
+    # 同时吃掉结尾可能存在的闭合 ::
+    tail_match = re.match(r"\s*::", base_text[last_end:])
+    if tail_match:
+        last_end += tail_match.end()
+    base_text = (base_text[:first_start] + base_text[last_end:]).strip().rstrip(",")
 
     return base_text, blocks
 
