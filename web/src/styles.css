@@ -4330,3 +4330,14 @@ button {
   border-color: #f3bcb7;
   color: #a3261f;
 }
+
+.job-progress {
+  color: #2b6cb0;
+  font-size: 12px;
+}
+
+.policy-rule summary .rule-hint {
+  color: #687182;
+  font-size: 11px;
+  margin-left: 6px;
+}

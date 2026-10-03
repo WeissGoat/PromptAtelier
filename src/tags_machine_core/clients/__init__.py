@@ -7,6 +7,7 @@ from .comfyui import (
     ComfyUIPromptResult,
     ComfyUITransport,
     PreparedComfyUIWorkflow,
+    ProgressCallback,
     prepare_comfyui_workflow,
 )
 from .novelai import (
@@ -29,6 +30,7 @@ __all__ = [
     "ComfyUIPromptResult",
     "ComfyUITransport",
     "PreparedComfyUIWorkflow",
+    "ProgressCallback",
     "prepare_comfyui_workflow",
     "NovelAIClient",
     "NovelAIClientError",

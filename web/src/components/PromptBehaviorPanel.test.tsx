@@ -15,6 +15,15 @@ describe("PromptBehaviorPanel", () => {
     expect((screen.getByLabelText("Visibility Policy state") as HTMLSelectElement).value).toBe("inherit");
   });
 
+  it("marks the NovelAI-only options when ComfyUI artists are in the workspace", () => {
+    const view = render(<PromptBehaviorPanel characterSections={[]} onChange={vi.fn()} value={createDefaultPromptBehavior()} />);
+    expect(screen.queryByText("ComfyUI 画风不使用此项")).toBeNull();
+
+    view.rerender(<PromptBehaviorPanel characterSections={[]} comfyuiArtists onChange={vi.fn()} value={createDefaultPromptBehavior()} />);
+
+    expect(screen.getAllByText("ComfyUI 画风不使用此项")).toHaveLength(2);
+  });
+
   it("does not allow removing the last identity section", () => {
     const value: PromptBehaviorParams = {
       ...createDefaultPromptBehavior(),

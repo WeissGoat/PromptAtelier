@@ -6,7 +6,7 @@ import json
 import mimetypes
 from pathlib import Path
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlencode
 
 import requests
@@ -24,6 +24,8 @@ from tags_machine_core.renderers.comfyui_workflow import (
 
 
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
+# 进度回调：(事件名, 数据)。Web 任务用它显示「启动中 / 生成中 / 下载图片」。
+ProgressCallback = Callable[[str, dict[str, Any]], None]
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 logger = get_logger(__name__)
 
@@ -175,6 +177,7 @@ class ComfyUITransport(Protocol):
         prepared: PreparedComfyUIWorkflow,
         *,
         client_id: str | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> ComfyUIPromptResult: ...
 
     def run(
@@ -184,6 +187,7 @@ class ComfyUITransport(Protocol):
         client_id: str | None = None,
         poll_interval: float = 1.0,
         max_wait_seconds: float | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> ComfyUIGenerationResult: ...
 
 
@@ -227,8 +231,9 @@ class ComfyUIClient:
         prepared: PreparedComfyUIWorkflow,
         *,
         client_id: str | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> ComfyUIPromptResult:
-        self.ensure_ready()
+        self.ensure_ready(on_progress)
         self.upload_input_files(prepared)
         payload = self.payload(prepared, client_id=client_id)
         response = self._request("post", self._url("/prompt"), json=payload, timeout=self.timeout)
@@ -243,6 +248,12 @@ class ComfyUIClient:
         if not isinstance(data, dict):
             data = {"raw": data}
         prompt_id = data.get("prompt_id")
+        _report(
+            on_progress,
+            "comfyui_queued",
+            prompt_id=str(prompt_id) if prompt_id is not None else None,
+            queue_number=data.get("number"),
+        )
         return ComfyUIPromptResult(
             prompt_id=str(prompt_id) if prompt_id is not None else None,
             raw=data,
@@ -255,8 +266,9 @@ class ComfyUIClient:
         client_id: str | None = None,
         poll_interval: float = 1.0,
         max_wait_seconds: float | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> ComfyUIGenerationResult:
-        queued = self.queue(prepared, client_id=client_id)
+        queued = self.queue(prepared, client_id=client_id, on_progress=on_progress)
         if not queued.prompt_id:
             raise ComfyUIClientError(
                 status_code=200,
@@ -268,6 +280,7 @@ class ComfyUIClient:
             poll_interval=poll_interval,
             max_wait_seconds=max_wait_seconds,
         )
+        _report(on_progress, "comfyui_downloading", prompt_id=queued.prompt_id)
         return ComfyUIGenerationResult(
             prompt_id=queued.prompt_id,
             queue_raw=queued.raw,
@@ -308,11 +321,14 @@ class ComfyUIClient:
             max_wait_seconds=max_wait_seconds,
         )
 
-    def ensure_ready(self) -> None:
+    def ensure_ready(self, on_progress: ProgressCallback | None = None) -> None:
         if self._ready or self.ready_timeout <= 0:
             return
+        _report(on_progress, "comfyui_starting", base_url=self.base_url)
+        started_at = time.monotonic()
         self.wait_until_ready(self.ready_timeout)
         self._ready = True
+        _report(on_progress, "comfyui_ready", waited_seconds=round(time.monotonic() - started_at, 1))
 
     def wait_until_ready(self, max_wait_seconds: float) -> dict[str, Any]:
         """轮询 /system_stats，等 serverless 冷启动的 ComfyUI 能接请求。"""
@@ -625,6 +641,11 @@ class ComfyUIClient:
 
     def _status_text(self, status: dict[str, Any]) -> str:
         return str(status.get("status_str") or status.get("status") or "").lower()
+
+
+def _report(on_progress: ProgressCallback | None, event: str, **payload: Any) -> None:
+    if on_progress is not None:
+        on_progress(event, {"at": time.time(), **payload})
 
 
 def _json_or_none(response: Any) -> Any:

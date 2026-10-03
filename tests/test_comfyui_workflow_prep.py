@@ -227,6 +227,33 @@ class NativeClientTargetFeaturesTest(unittest.TestCase):
             ["system_stats", "system_stats", "system_stats", "prompt", "prompt"],
         )
 
+    def test_run_reports_progress_phases(self):
+        session = RecordingSession(
+            [
+                FakeResponse(200, data={"system": {}}),
+                FakeResponse(200, data={"prompt_id": "p1", "number": 3}),
+                FakeResponse(200, data={"p1": {"outputs": {}, "status": {"completed": True}}}),
+            ]
+        )
+        client = ComfyUIClient(http_client=session, ready_timeout=60)
+        events: list[tuple[str, dict]] = []
+        request = RenderRequest(backend="comfyui", prompt="x", params={"workflow_json": {}})
+
+        client.run(
+            client.prepare(request),
+            poll_interval=0,
+            max_wait_seconds=1,
+            on_progress=lambda event, payload: events.append((event, payload)),
+        )
+
+        self.assertEqual(
+            [event for event, _ in events],
+            ["comfyui_starting", "comfyui_ready", "comfyui_queued", "comfyui_downloading"],
+        )
+        queued = dict(events)["comfyui_queued"]
+        self.assertEqual((queued["prompt_id"], queued["queue_number"]), ("p1", 3))
+        self.assertTrue(all(isinstance(payload["at"], float) for _, payload in events))
+
     def test_readiness_fails_fast_on_rejected_credentials(self):
         session = RecordingSession([FakeResponse(401, text="missing credentials")])
         client = ComfyUIClient(http_client=session, ready_timeout=60)

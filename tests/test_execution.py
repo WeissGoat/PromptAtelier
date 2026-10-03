@@ -581,8 +581,9 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                 path_style="native",
                 ready_timeout=0,
             )
-            client.prepare.assert_called_once_with(request)
-            client.queue.assert_called_once_with(prepared, client_id="client-1")
+            client.prepare.assert_called_once()
+            self.assertEqual(client.prepare.call_args.args[0].meta["comfyui_target"], "default")
+            client.queue.assert_called_once_with(prepared, client_id="client-1", on_progress=None)
             client.run.assert_not_called()
             client.payload.assert_called_once_with(prepared, client_id="client-1")
             self.assertEqual(result.backend, "comfyui")
@@ -647,6 +648,7 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                 client_id="client-1",
                 poll_interval=0,
                 max_wait_seconds=1,
+                on_progress=None,
             )
             self.assertEqual(
                 result.png_info["comfyui"]["workflow_preparation"]["output_nodes"],

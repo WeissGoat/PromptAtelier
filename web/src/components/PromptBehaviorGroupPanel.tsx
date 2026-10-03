@@ -5,7 +5,13 @@ import { findPromptBehaviorVariant, promptBehaviorVariants } from "../workspace/
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { PromptBehaviorPanel } from "./PromptBehaviorPanel";
 
-export function PromptBehaviorGroupPanel({ characterSections }: { characterSections: string[] }) {
+export function PromptBehaviorGroupPanel({
+  characterSections,
+  comfyuiArtists = false,
+}: {
+  characterSections: string[];
+  comfyuiArtists?: boolean;
+}) {
   const workspace = useCustomWorkspace();
   const group = workspace.state.promptBehaviorGroup;
   const active = findPromptBehaviorVariant(group, workspace.state.activePromptBehaviorSlotId) ?? group.primary;
@@ -91,6 +97,7 @@ export function PromptBehaviorGroupPanel({ characterSections }: { characterSecti
 
       <PromptBehaviorPanel
         characterSections={characterSections}
+        comfyuiArtists={comfyuiArtists}
         onChange={workspace.setPromptBehavior}
         value={active.value}
       />

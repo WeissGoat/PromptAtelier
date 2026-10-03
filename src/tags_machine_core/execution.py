@@ -16,6 +16,7 @@ from tags_machine_core.backends import ensure_backend_can_execute
 from tags_machine_core.clients import (
     ComfyUIClient,
     ComfyUITransport,
+    ProgressCallback,
     GatewayNovelAIRawClient,
     NovelAIClient,
     NovelAIImage,
@@ -87,6 +88,7 @@ def build_core_png_text(request: RenderRequest) -> dict[str, str]:
             request.meta.get("novelai_render_policy")
         ),
         "random_nodes": request.meta.get("random_nodes") or [],
+        "render": _comfyui_render_info(request) if request.backend == "comfyui" else None,
     }
     result = {
         CORE_PNG_INFO_KEY: json.dumps(_drop_none(core_info), ensure_ascii=False),
@@ -168,6 +170,28 @@ def _node_refs(request: RenderRequest, role: str) -> list[str]:
 def _first_node_ref(request: RenderRequest, role: str) -> str | None:
     refs = _node_refs(request, role)
     return refs[0] if refs else None
+
+
+def _comfyui_render_info(request: RenderRequest) -> dict[str, Any]:
+    """ComfyUI 出的图没有 NovelAI 那样的参数块，这里记下提示词、种子、尺寸和 workflow。"""
+    params = request.params
+    info: dict[str, Any] = {
+        "prompt": request.prompt,
+        "negative_prompt": request.negative_prompt,
+        "comfyui_prompt": params.get("positive_prompt"),
+        "comfyui_negative_prompt": params.get("negative_prompt"),
+        "prompt_format": params.get("prompt_format"),
+        "seed": request.seed,
+        "width": request.size.width,
+        "height": request.size.height,
+        "workflow": params.get("workflow"),
+        "workflow_hash": params.get("workflow_hash"),
+        "target": request.meta.get("comfyui_target"),
+    }
+    for key in ("steps", "cfg", "sampler", "scheduler"):
+        if key in params:
+            info[key] = params[key]
+    return {key: value for key, value in info.items() if value not in (None, "")}
 
 
 def _drop_none(value: Any) -> Any:
@@ -666,6 +690,7 @@ def execute_render_request(
     comfyui_poll_interval: float | None = None,
     comfyui_max_wait_seconds: float | None = None,
     comfyui_target: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> GenerationResult:
     ensure_backend_can_execute(
         request.backend,
@@ -693,6 +718,7 @@ def execute_render_request(
             poll_interval=comfyui_poll_interval,
             max_wait_seconds=comfyui_max_wait_seconds,
             target=comfyui_target,
+            on_progress=on_progress,
         )
     if request.backend == "sd":
         return execute_sd_generation(
@@ -758,6 +784,7 @@ def execute_comfyui_generation(
     poll_interval: float | None = None,
     max_wait_seconds: float | None = None,
     target: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> GenerationResult:
     resolved = config.comfyui.resolve_target(target)
     if no_wait and not resolved.allow_no_wait:
@@ -768,7 +795,11 @@ def execute_comfyui_generation(
         )
     transport = build_comfyui_transport(resolved)
     output_path = Path(output_dir or config.runtime.output_dir)
-    requests = split_comfyui_samples(request)
+    # 运行位置写进每张图的请求，PNG 元数据和归档里能看到在哪出的图。
+    requests = [
+        item.model_copy(update={"meta": {**item.meta, "comfyui_target": resolved.name}})
+        for item in split_comfyui_samples(request)
+    ]
     effective_poll_interval = resolved.poll_interval if poll_interval is None else poll_interval
     effective_max_wait = (
         resolved.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
@@ -794,12 +825,13 @@ def execute_comfyui_generation(
             poll_interval=effective_poll_interval,
             max_wait_seconds=effective_max_wait,
             target_meta=target_meta,
+            on_progress=on_progress,
         )
 
     effective_request = requests[0]
     prepared = transport.prepare(effective_request)
     if no_wait:
-        queued = transport.queue(prepared, client_id=client_id)
+        queued = transport.queue(prepared, client_id=client_id, on_progress=on_progress)
         images: list[GeneratedImage] = []
         comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
     else:
@@ -808,6 +840,7 @@ def execute_comfyui_generation(
             client_id=client_id,
             poll_interval=effective_poll_interval,
             max_wait_seconds=effective_max_wait,
+            on_progress=on_progress,
         )
         images = save_generated_images(
             generated.images,
@@ -844,6 +877,7 @@ def _execute_split_comfyui_generation(
     poll_interval: float,
     max_wait_seconds: float | None,
     target_meta: dict[str, Any],
+    on_progress: ProgressCallback | None = None,
 ) -> GenerationResult:
     images: list[GeneratedImage] = []
     png_records: list[dict[str, Any]] = []
@@ -852,11 +886,12 @@ def _execute_split_comfyui_generation(
     preparation_summary: dict[str, Any] | None = None
 
     for index, split_request in enumerate(requests):
+        sample_progress = _sample_progress(on_progress, index, len(requests))
         prepared = transport.prepare(split_request)
         if preparation_summary is None:
             preparation_summary = prepared.summary()
         if no_wait:
-            queued = transport.queue(prepared, client_id=client_id)
+            queued = transport.queue(prepared, client_id=client_id, on_progress=sample_progress)
             request_bodies.append(transport.payload(prepared, client_id=client_id))
             prompt_records.append({"split_request_index": index, "prompt_id": queued.prompt_id})
             continue
@@ -866,6 +901,7 @@ def _execute_split_comfyui_generation(
             client_id=client_id,
             poll_interval=poll_interval,
             max_wait_seconds=max_wait_seconds,
+            on_progress=sample_progress,
         )
         generated_images = save_generated_images(
             generated.images,
@@ -920,6 +956,20 @@ def _execute_split_comfyui_generation(
         },
         cache_hit=False,
     )
+
+
+def _sample_progress(
+    on_progress: ProgressCallback | None,
+    index: int,
+    count: int,
+) -> ProgressCallback | None:
+    if on_progress is None:
+        return None
+
+    def report(event: str, payload: dict[str, Any]) -> None:
+        on_progress(event, {**payload, "sample_index": index, "sample_count": count})
+
+    return report
 
 
 def split_comfyui_samples(request: RenderRequest) -> list[RenderRequest]:

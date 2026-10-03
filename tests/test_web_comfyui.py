@@ -184,3 +184,72 @@ class WebGenerationExecutorTest(TestCase):
         self.assertIsNone(execute.call_args_list[1].kwargs["comfyui_target"])
         modal = next(item for item in service.describe()["targets"] if item["name"] == "modal")
         self.assertIsNotNone(modal["last_used_at"])
+
+
+class WebComfyUIProgressTest(TestCase):
+    def test_generate_job_records_comfyui_progress_events(self):
+        def executor(request, options):
+            options["on_progress"]("comfyui_queued", {"at": 1.0, "prompt_id": "p1"})
+            return {"backend": "comfyui", "images": []}
+
+        client = TestClient(create_app(generation_executor=executor))
+        job = client.post(
+            "/api/generate",
+            json={"render_request": {"backend": "comfyui", "prompt": "x"}},
+        ).json()
+        app_jobs = client.app.state.job_manager
+        app_jobs.wait(job["id"], timeout=5)
+        record = client.get(f"/api/jobs/{job['id']}").json()
+
+        self.assertEqual(record["status"], "succeeded")
+        self.assertIn(
+            {"type": "comfyui_queued", "at": 1.0, "prompt_id": "p1"},
+            record["events"],
+        )
+        self.assertNotIn("on_progress", json.dumps(record["result"]))
+
+
+class WebBatchComfyUITargetTest(TestCase):
+    def test_batch_run_uses_requested_comfyui_target(self):
+        from tags_machine_core.web.services.batch_workspace import BatchWorkspace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for kind, name, prompt in (("character", "homura", "akemi_homura"), ("action", "standing", "standing")):
+                node = root / f"{kind}s" / name
+                node.mkdir(parents=True)
+                (node / "meta.yaml").write_text(
+                    yaml.safe_dump({"kind": kind, "id": name, "name": name, "prompt": {"positive": [prompt]}}),
+                    encoding="utf-8",
+                )
+            config = root / "local.yaml"
+            config.write_text(
+                yaml.safe_dump(
+                    {
+                        "legacy": {"tags_machine_root": str(root), "design_root": str(root / "design")},
+                        "comfyui": _targets_config().model_dump(exclude_defaults=True),
+                    },
+                    allow_unicode=True,
+                ),
+                encoding="utf-8",
+            )
+            spec = {
+                "name": "demo",
+                "defaults": {"composer": "script"},
+                "select": {
+                    "characters": [{"selector": "explicit", "refs": [str(root / "characters" / "homura")]}],
+                    "actions": [{"selector": "explicit", "refs": [str(root / "actions" / "standing")]}],
+                },
+                "expand": {"mode": "product"},
+            }
+            ctx = SimpleNamespace(emit=lambda *args, **kwargs: None, cancel_requested=lambda: False)
+
+            with patch("tags_machine_core.web.services.batch_workspace.BatchRunner") as runner:
+                runner.return_value.run_tasks.return_value = {"counts": {}}
+                BatchWorkspace(base_dir=root).run(
+                    {"spec": spec, "config": str(config), "comfyui_target": "modal", "fresh": True},
+                    ctx,
+                )
+
+        used_config = runner.return_value.run_tasks.call_args.kwargs["config"]
+        self.assertEqual(used_config.comfyui.resolve_target().name, "modal")

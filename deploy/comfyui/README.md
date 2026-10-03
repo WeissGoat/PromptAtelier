@@ -101,6 +101,11 @@
 - 选了 ComfyUI 画风后，参数区会出现「ComfyUI 运行位置」（整个工作区一个）：本机 aki 或 Modal 云端。
 - 状态说明：本机探测端口；云端通过 Modal API 读容器数，不会因为查看状态启动 GPU。
   云端开着时显示自动关机倒计时（按 Web 最后一次生成 + 3 分钟估算）。
+- 生成时任务下方显示当前阶段：正在启动 ComfyUI → 生成中 → 正在下载图片，带已等待秒数；
+  冷启动后的第一张会提示「首张要先加载模型」。
+- 预览里列出 Backend / Workflow / 尺寸 / Seed，以及换算权重后 ComfyUI 实际收到的提示词；
+  图片详情里能看到这张图的运行位置、workflow 和换算后的提示词（从 PNG 里的 core 元数据读）。
+- Batch 页也有「ComfyUI 运行位置」，只对用 ComfyUI 画风的任务生效，选择会记在浏览器里。
 - Web 后端从环境变量 `TM_COMFYUI_MODAL_TOKEN` 读 proxy token；设置后要重启 Web 控制台。
 
 ## 新增 workflow / 插件 / 模型

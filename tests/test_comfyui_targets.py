@@ -249,3 +249,85 @@ class ComfyUIInputFilesRenderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComfyUIProgressAndMetadataTest(unittest.TestCase):
+    def test_split_samples_tag_progress_with_their_index(self):
+        events: list[dict] = []
+
+        def fake_queue(prepared, *, client_id=None, on_progress=None):
+            on_progress("comfyui_queued", {"at": 1.0})
+            return SimpleNamespace(prompt_id="p", raw={})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _app_config(Path(tmp), {"base_url": "http://comfy.local"})
+            request = RenderRequest(
+                backend="comfyui", prompt="x", seed=10, params={"workflow_json": {}, "n_samples": 2}
+            )
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.prepare.return_value = PreparedComfyUIWorkflow(prompt={})
+                client.queue.side_effect = fake_queue
+                client.payload.return_value = {"prompt": {}}
+
+                execute_comfyui_generation(
+                    config,
+                    request,
+                    output_dir=None,
+                    image_format="png",
+                    no_wait=True,
+                    on_progress=lambda event, payload: events.append({"type": event, **payload}),
+                )
+
+        self.assertEqual(
+            [(item["sample_index"], item["sample_count"]) for item in events],
+            [(0, 2), (1, 2)],
+        )
+
+    def test_comfyui_images_carry_render_parameters(self):
+        from tags_machine_core.execution import save_generated_images
+        from tags_machine_core.verification import read_image_parameters
+
+        png = (
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", (1).to_bytes(4, "big") * 2 + bytes([8, 6, 0, 0, 0]))
+            + _chunk(b"IEND", b"")
+        )
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="{{x}}, a",
+            negative_prompt="[lowres]",
+            seed=123,
+            size={"width": 832, "height": 1216},
+            params={
+                "workflow": "cunyfunky",
+                "workflow_hash": "sha256:abc",
+                "positive_prompt": "(x:1.1), a",
+                "negative_prompt": "(lowres:0.95)",
+                "prompt_format": "comfyui",
+                "cfg": 6.5,
+            },
+            meta={"comfyui_target": "modal"},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = save_generated_images(
+                [SimpleNamespace(filename="ComfyUI_00001_.png", content=png)],
+                output_dir=Path(tmp),
+                request=request,
+                default_format="png",
+            )
+            parameters = read_image_parameters(saved[0].path)["parameters"]
+
+        self.assertEqual(parameters["backend"], "comfyui")
+        self.assertEqual(parameters["prompt"], "{{x}}, a")
+        self.assertEqual(parameters["comfyui_prompt"], "(x:1.1), a")
+        self.assertEqual((parameters["seed"], parameters["width"], parameters["height"]), (123, 832, 1216))
+        self.assertEqual(parameters["target"], "modal")
+        self.assertEqual(parameters["workflow"], "cunyfunky")
+        self.assertEqual(parameters["scale"], 6.5)
+
+
+def _chunk(kind: bytes, data: bytes) -> bytes:
+    import zlib
+
+    return len(data).to_bytes(4, "big") + kind + data + (zlib.crc32(kind + data) & 0xFFFFFFFF).to_bytes(4, "big")

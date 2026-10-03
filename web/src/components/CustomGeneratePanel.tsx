@@ -13,6 +13,7 @@ import { hasRandomSlots, hasSequentialSlot, isSequentialSlot, resolveRandomItems
 import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest, buildGeneratePayload } from "../workspace/requestBuilder";
+import { describeJobProgress } from "../comfyui/jobProgress";
 import { notifyComfyTargetsChanged } from "../comfyui/targetStatus";
 import type { NodeVariantSlot } from "../workspace/types";
 import { PromptPreview } from "./PromptPreview";
@@ -102,6 +103,12 @@ function validateSelected(slots: Partial<Record<NodeRole, NodeVariantSlot | null
 }
 
 type ImageSelection = { paths: string[]; index: number };
+
+/** ComfyUI 任务的当前阶段（启动 / 生成 / 下载）；任务轮询时整块重新渲染，已等待的秒数跟着走。 */
+function JobProgress({ job }: { job: JobRecord | null | undefined }) {
+  const text = job ? describeJobProgress(job, Date.now() / 1000) : null;
+  return text ? <small className="job-progress">{text}</small> : null;
+}
 
 function ImageGrid({
   job,
@@ -479,9 +486,9 @@ export function CustomGeneratePanel() {
         <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> {primaryHasSequential ? "Generate Next" : "Generate Primary"}</button>
         {primaryHasSequential ? <button disabled={busy} onClick={() => void generateAllSequential()} type="button"><ListOrdered size={16} /> Run All</button> : null}
       </div>
-      {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
-      {randomJobs.length ? <section className="job-result"><strong>Random Primary</strong><span>{randomJobs.filter((item) => item.job.status === "succeeded").length} / {randomJobs.length}</span>{randomJobs.map((item) => <ImageGrid job={item.job} key={item.job.id} onOpenImage={setSelectedImage} prefix="Random" sequencePaths={randomImagePaths} />)}</section> : null}
-      {sequentialJobs.length ? <section className="job-result"><strong>Sequential Actions</strong><span>{sequentialJobs.filter((item) => item.job.status === "succeeded").length} / {sequentialJobs.length}</span>{sequentialJobs.map((item) => <div key={item.job.id}><small>#{item.actionIndex + 1} {item.actionName} · {item.job.status}</small><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Sequential" sequencePaths={sequentialImagePaths} /></div>)}</section> : null}
+      {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><JobProgress job={job} /><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
+      {randomJobs.length ? <section className="job-result"><strong>Random Primary</strong><span>{randomJobs.filter((item) => item.job.status === "succeeded").length} / {randomJobs.length}</span>{randomJobs.map((item) => <div key={item.job.id}><JobProgress job={item.job} /><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Random" sequencePaths={randomImagePaths} /></div>)}</section> : null}
+      {sequentialJobs.length ? <section className="job-result"><strong>Sequential Actions</strong><span>{sequentialJobs.filter((item) => item.job.status === "succeeded").length} / {sequentialJobs.length}</span>{sequentialJobs.map((item) => <div key={item.job.id}><small>#{item.actionIndex + 1} {item.actionName} · {item.job.status}</small><JobProgress job={item.job} /><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Sequential" sequencePaths={sequentialImagePaths} /></div>)}</section> : null}
 
       <section className="compare-generate-section">
         <div className="section-title-row">
@@ -510,6 +517,7 @@ export function CustomGeneratePanel() {
                 {compare.results.filter((result) => result.groupIndex === group.groupIndex).map((result) => (
                   <article className={`compare-result-card ${result.status}`} key={result.runId}>
                     <div className="compare-result-header"><strong>{result.status}</strong>{result.job ? <span>{result.job.id}</span> : null}</div>
+                    {result.status === "running" ? <JobProgress job={result.job} /> : null}
                     <dl>
                       <dt>Artist</dt><dd>{result.labels.artist}</dd>
                       <dt>Character</dt><dd>{result.labels.character}</dd>

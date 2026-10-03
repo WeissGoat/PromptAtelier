@@ -161,6 +161,7 @@ def _default_generation_executor(
                 output_dir=options.get("output_dir"),
                 image_format=str(options.get("image_format") or config.defaults.image_format),
                 comfyui_target=target,
+                on_progress=options.get("on_progress"),
             )
 
     return executor

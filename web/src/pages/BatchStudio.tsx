@@ -3,6 +3,25 @@ import { useMemo, useState } from "react";
 
 import { apiPost, errorMessage } from "../api/client";
 import type { BatchPreviewResponse, JobRecord } from "../api/types";
+import { ComfyTargetPanel } from "../components/ComfyTargetPanel";
+
+const COMFYUI_TARGET_STORAGE_KEY = "promptatelier.batch-comfyui-target/v1";
+
+function loadComfyuiTarget(): string {
+  try {
+    return window.localStorage.getItem(COMFYUI_TARGET_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveComfyuiTarget(value: string): void {
+  try {
+    window.localStorage.setItem(COMFYUI_TARGET_STORAGE_KEY, value);
+  } catch {
+    // 浏览器禁用存储时只在当前页面生效。
+  }
+}
 
 export function BatchStudio() {
   const [batchSpec, setBatchSpec] = useState("examples/batches/blackboard_action_new_manga_monochrome.yaml");
@@ -12,6 +31,7 @@ export function BatchStudio() {
   const [maxTasks, setMaxTasks] = useState(1);
   const [nt, setNt] = useState(1);
   const [useInlineSpec, setUseInlineSpec] = useState(true);
+  const [comfyuiTarget, setComfyuiTarget] = useState(loadComfyuiTarget);
   const [preview, setPreview] = useState<BatchPreviewResponse | null>(null);
   const [job, setJob] = useState<JobRecord | null>(null);
   const [status, setStatus] = useState("Ready");
@@ -24,6 +44,7 @@ export function BatchStudio() {
         batch_spec: batchSpec,
         fresh: true,
         limit: maxTasks,
+        comfyui_target: comfyuiTarget || undefined,
       };
     }
     return {
@@ -49,8 +70,9 @@ export function BatchStudio() {
       },
       fresh: true,
       limit: maxTasks,
+      comfyui_target: comfyuiTarget || undefined,
     };
-  }, [actionGroups, artist, batchSpec, characters, maxTasks, nt, useInlineSpec]);
+  }, [actionGroups, artist, batchSpec, characters, comfyuiTarget, maxTasks, nt, useInlineSpec]);
 
   async function planPreview() {
     setBusy(true);
@@ -121,6 +143,14 @@ export function BatchStudio() {
             <input aria-label="Batch NT" min={1} onChange={(event) => setNt(Number(event.target.value))} type="number" value={nt} />
           </label>
         </div>
+        <ComfyTargetPanel
+          onChange={(value) => {
+            setComfyuiTarget(value);
+            saveComfyuiTarget(value);
+          }}
+          value={comfyuiTarget || undefined}
+        />
+        <small className="field-hint">运行位置只对用 ComfyUI 画风的任务生效。</small>
         <div className="button-row">
           <button disabled={busy} onClick={planPreview} type="button">
             <ListChecks size={16} />

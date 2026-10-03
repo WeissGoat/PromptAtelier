@@ -39,10 +39,15 @@ const ruleOptions: Record<string, string[]> = {
   novelai_vibe: ["artist_ref", "mode", "strength", "information_extracted"],
 };
 
+// 这两项是 NovelAI 专有功能，ComfyUI 画风收到的是合并后的一段提示词，也不带 vibe 参考图。
+const NOVELAI_ONLY_HINT = "ComfyUI 画风不使用此项";
+
 type PromptBehaviorPanelProps = {
   value: PromptBehaviorParams;
   characterSections: string[];
   onChange: (value: PromptBehaviorParams) => void;
+  /** 工作区里有（或可能抽到）ComfyUI 画风时，在 NovelAI 专有的选项旁边提示。 */
+  comfyuiArtists?: boolean;
 };
 
 function uniqueSections(values: string[]): string[] {
@@ -57,7 +62,7 @@ function optionsFor(value: PromptBehaviorParams, ruleId: string): Record<string,
   return value.policyRules[ruleId]?.options ?? {};
 }
 
-export function PromptBehaviorPanel({ value, characterSections, onChange }: PromptBehaviorPanelProps) {
+export function PromptBehaviorPanel({ value, characterSections, onChange, comfyuiArtists = false }: PromptBehaviorPanelProps) {
   const [customSection, setCustomSection] = useState("");
   const availableSections = uniqueSections(["character", "role", ...characterSections]);
   const selectedSections = value.identityMinimal.sections;
@@ -163,7 +168,7 @@ export function PromptBehaviorPanel({ value, characterSections, onChange }: Prom
       </section>
 
       <section className="behavior-section">
-        <div className="behavior-section-title"><strong>Character Prompts</strong></div>
+        <div className="behavior-section-title"><strong>Character Prompts</strong>{comfyuiArtists ? <small>{NOVELAI_ONLY_HINT}</small> : null}</div>
         <div className="segmented-control" role="radiogroup" aria-label="Character Prompts mode">
           <label><input aria-label="Character Prompts Auto" checked={value.characterPrompts.mode === "auto"} onChange={() => update({ characterPrompts: { ...value.characterPrompts, mode: "auto" } })} type="radio" /> Auto</label>
           <label><input aria-label="Character Prompts Off" checked={value.characterPrompts.mode === "off"} onChange={() => update({ characterPrompts: { ...value.characterPrompts, mode: "off" } })} type="radio" /> Off</label>
@@ -182,7 +187,7 @@ export function PromptBehaviorPanel({ value, characterSections, onChange }: Prom
             const supportsOptions = Boolean(ruleOptions[ruleId]?.length);
             return (
               <details className="policy-rule" key={ruleId} open={state === "enabled" && supportsOptions}>
-                <summary><span>{ruleLabels[ruleId]}</span><select aria-label={`${ruleLabels[ruleId]} state`} onClick={(event) => event.stopPropagation()} onChange={(event) => setRuleState(ruleId, event.target.value as PolicyRuleState)} value={state}><option value="inherit">Inherit</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></summary>
+                <summary><span>{ruleLabels[ruleId]}{ruleId === "novelai_vibe" && comfyuiArtists ? <small className="rule-hint">{NOVELAI_ONLY_HINT}</small> : null}</span><select aria-label={`${ruleLabels[ruleId]} state`} onClick={(event) => event.stopPropagation()} onChange={(event) => setRuleState(ruleId, event.target.value as PolicyRuleState)} value={state}><option value="inherit">Inherit</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></summary>
                 {state === "enabled" && supportsOptions ? (
                   <div className="policy-options">
                     {ruleId === "character_section_filter" ? <label className="field"><span>Blocked sections</span><input aria-label="Blocked sections" onChange={(event) => setRuleOption(ruleId, "blocked_sections", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} value={Array.isArray(options.blocked_sections) ? options.blocked_sections.join(", ") : "copyright"} /></label> : null}

@@ -136,15 +136,17 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
     setResults((current) => current.map((item) => item.runId === runId ? { ...item, ...patch } : item));
   }, []);
 
-  const pollJob = useCallback(async (token: number, job: JobRecord): Promise<JobRecord> => {
+  const pollJob = useCallback(async (token: number, runId: string, job: JobRecord): Promise<JobRecord> => {
     let current = job;
     while (!terminalStatuses.has(current.status)) {
       await new Promise((resolve) => window.setTimeout(resolve, pollIntervalMs));
       if (runToken.current !== token) throw new Error("Compare run cancelled");
       current = await get(`/jobs/${encodeURIComponent(job.id)}`) as JobRecord;
+      // 运行中的任务也同步到卡片上，ComfyUI 的启动 / 生成阶段才看得到。
+      if (!terminalStatuses.has(current.status)) updateResult(token, runId, { job: current });
     }
     return current;
-  }, [get, pollIntervalMs]);
+  }, [get, pollIntervalMs, updateResult]);
 
   const start = useCallback(async (
     groups: Record<GroupRole, RoleNodeGroup>,
@@ -208,7 +210,7 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
         })) as JobRecord;
         updateResult(token, item.runId, { job: queued });
         notifyComfyTargetsChanged(preview.render_request);
-        const completed = await pollJob(token, queued);
+        const completed = await pollJob(token, item.runId, queued);
         notifyComfyTargetsChanged(preview.render_request);
         if (completed.status !== "succeeded") throw new Error(completed.error || `Job ${completed.status}`);
         updateResult(token, item.runId, { status: "succeeded", job: completed });
