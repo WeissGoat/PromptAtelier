@@ -1,3 +1,4 @@
+import { ComfyTargetPanel } from "../components/ComfyTargetPanel";
 import { CustomGeneratePanel } from "../components/CustomGeneratePanel";
 import { NodeRoleGroup } from "../components/NodeRoleGroup";
 import { NodeWorkspaceEditor } from "../components/NodeWorkspaceEditor";
@@ -5,6 +6,7 @@ import { PromptBehaviorGroupPanel } from "../components/PromptBehaviorGroupPanel
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
 import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
+import { workspaceMayUseComfyUI } from "../workspace/requestBuilder";
 
 function nodeSections(node: NodeDocument | null): string[] {
   if (!node) return [];
@@ -48,6 +50,12 @@ export function CustomStudio() {
           seed={params.seed}
           width={params.width}
         />
+        {workspaceMayUseComfyUI([groups.artist.primary, ...groups.artist.compares]) ? (
+          <ComfyTargetPanel
+            onChange={(comfyuiTarget) => workspace.setParams({ comfyuiTarget })}
+            value={params.comfyuiTarget}
+          />
+        ) : null}
         <PromptBehaviorGroupPanel characterSections={characterSections} />
       </section>
       <NodeWorkspaceEditor />

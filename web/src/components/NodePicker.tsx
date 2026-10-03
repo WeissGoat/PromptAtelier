@@ -218,6 +218,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
               type="button"
             >
               <span>{node.name}</span>
+              {node.backends?.includes("comfyui") ? <small className="node-badge">ComfyUI</small> : null}
             </button>
           )) : null}
           {!loading && !error && hasMore ? <div aria-hidden="true" className="node-picker-sentinel" ref={sentinelRef} /> : null}

@@ -219,7 +219,7 @@ class ComfyUIInputFilesRenderTest(unittest.TestCase):
                 "id: pose_artist\n"
                 "renderers:\n"
                 "  comfyui:\n"
-                "    workflow_json: {'1': {class_type: LoadImage, inputs: {}}}\n"
+                "    workflow_json: {'1': {class_type: LoadImage, inputs: {a: '', b: '', c: 0, d: 0, e: 0}}}\n"
                 "    inputs:\n"
                 "      positive_prompt: 1.inputs.a\n"
                 "      negative_prompt: 1.inputs.b\n"

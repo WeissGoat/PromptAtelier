@@ -133,9 +133,52 @@ def workflow_class_types(workflow: dict[str, Any]) -> set[str]:
     return class_types
 
 
-def apply_node_overrides(workflow: dict[str, Any], overrides: dict[str, Any]) -> None:
+def apply_node_overrides(
+    workflow: dict[str, Any],
+    overrides: dict[str, Any],
+    *,
+    strict: bool = True,
+    source: str = "workflow",
+) -> None:
+    if strict:
+        check_override_paths(workflow, overrides, source=source)
     for path, value in overrides.items():
         set_workflow_value(workflow, str(path), value)
+
+
+def check_override_paths(workflow: dict[str, Any], overrides: dict[str, Any], *, source: str) -> None:
+    """绑定必须指向 workflow 里已有的节点和输入。
+
+    ComfyUI 会忽略未知输入：写错一个字母或重新导出后节点改号时，提示词会被悄悄丢掉，
+    workflow 用自带的默认文本出图。这里改成直接报错。
+    """
+    problems = [
+        problem
+        for path in overrides
+        if (problem := _override_path_problem(workflow, str(path))) is not None
+    ]
+    if problems:
+        raise ValueError(
+            f"ComfyUI bindings do not match {source}: " + "; ".join(problems)
+        )
+
+
+def _override_path_problem(workflow: dict[str, Any], path: str) -> str | None:
+    parts = [part for part in path.split(".") if part]
+    if not parts:
+        return "empty binding path"
+    node = workflow.get(parts[0])
+    if not isinstance(node, dict):
+        return f"{path}: node {parts[0]} not found"
+    if len(parts) >= 3 and parts[1] == "inputs":
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or parts[2] not in inputs:
+            available = ", ".join(sorted(inputs)) if isinstance(inputs, dict) else "none"
+            return (
+                f"{path}: node {parts[0]} ({node.get('class_type')}) has no input "
+                f"'{parts[2]}' (inputs: {available})"
+            )
+    return None
 
 
 def set_workflow_value(workflow: dict[str, Any], path: str, value: Any) -> None:

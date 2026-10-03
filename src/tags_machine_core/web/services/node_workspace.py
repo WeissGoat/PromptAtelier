@@ -66,28 +66,60 @@ class NodeWorkspace:
                     continue
                 if len(result) >= limit:
                     return result, True
-                result.append(
-                    {
-                        "role": role,
-                        "name": item.name,
-                        "ref": str(item),
-                        "relative": relative,
-                    }
-                )
+                entry = {
+                    "role": role,
+                    "name": item.name,
+                    "ref": str(item),
+                    "relative": relative,
+                }
+                if role == "artist":
+                    entry["backends"] = self._artist_backends(item)
+                result.append(entry)
         return result, False
+
+    def read_artist_node(self, ref: str | Path) -> NodeDocument:
+        """生图用的 artist 读取：有 node.yaml/meta.yaml 的结构化节点（含 ComfyUI 画风）优先，
+        只有 tags.txt 的旧画风走 NovelAI 兼容读取；相对路径按画风根目录解析。"""
+        path = Path(ref)
+        if not path.is_absolute():
+            candidate = self.artist_repository.artist_root / path
+            if candidate.exists():
+                path = candidate
+        return self.read_runtime_node(path, role="artist")
+
+    def _artist_backends(self, path: Path) -> list[str]:
+        for name in ("node.yaml", "meta.yaml"):
+            candidate = path / name
+            if not candidate.exists():
+                continue
+            try:
+                data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                return []
+            renderers = data.get("renderers") if isinstance(data, dict) else None
+            if isinstance(renderers, dict) and renderers:
+                return sorted(str(key) for key in renderers)
+            return ["novelai"]
+        return ["novelai"] if (path / "tags.txt").exists() else []
 
     def read_node(self, ref: str | Path, *, role: str | None = None) -> dict[str, Any]:
         path = Path(ref).resolve()
         node = self.read_runtime_node(path, role=role)
         effective_role = role or node.kind
-        editor = self.adapter_registry.resolve(path, effective_role).read_editor(path)
+        try:
+            adapter = self.adapter_registry.resolve(path, effective_role)
+        except ValueError:
+            # 没有表单编辑适配器的节点（例如 ComfyUI 画风的 node.yaml）照常可选可用，只是不提供表单编辑。
+            editor = None
+        else:
+            editor = adapter.read_editor(path).model_dump(mode="json")
         return {
             "schema": "tags-machine-core.web.node/v2",
             "ref": str(path),
             "node": node.model_dump(mode="json"),
             "form": self.to_form(node),
             "raw": self._raw_file(path),
-            "editor": editor.model_dump(mode="json"),
+            "editor": editor,
         }
 
     def read_runtime_node(self, ref: str | Path, *, role: str | None = None) -> NodeDocument:

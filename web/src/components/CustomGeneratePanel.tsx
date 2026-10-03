@@ -12,7 +12,8 @@ import { listAllPoolNodes } from "../randomNodes/api";
 import { hasRandomSlots, hasSequentialSlot, isSequentialSlot, resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
 import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
-import { buildComposeRenderRequest } from "../workspace/requestBuilder";
+import { buildComposeRenderRequest, buildGeneratePayload } from "../workspace/requestBuilder";
+import { notifyComfyTargetsChanged } from "../comfyui/targetStatus";
 import type { NodeVariantSlot } from "../workspace/types";
 import { PromptPreview } from "./PromptPreview";
 import { ImageDetailDialog } from "./ImageDetailDialog";
@@ -284,8 +285,10 @@ export function CustomGeneratePanel() {
           activeBehavior.slotId === primaryBehavior.slotId,
         );
       if (!ready.render_request) throw new Error("该节点组合需要外部 Agent 先完成提示词拼接。");
-      const queued = await apiPost<JobRecord>("/generate", { render_request: ready.render_request });
+      const queued = await apiPost<JobRecord>("/generate", buildGeneratePayload(ready.render_request, params));
+      notifyComfyTargetsChanged(ready.render_request);
       await pollJob(queued);
+      notifyComfyTargetsChanged(ready.render_request);
     } catch (requestError) {
       setStatus("Generate failed");
       setError(errorMessage(requestError));
@@ -343,16 +346,17 @@ export function CustomGeneratePanel() {
       });
       const ready = await apiPost<ComposePreviewResponse>("/compose-preview", request);
       if (!ready.render_request) throw new Error(`Action ${actionName}: 需要外部 Agent 先完成提示词拼接。`);
-      let current = await apiPost<JobRecord>("/generate", {
-        render_request: ready.render_request,
+      let current = await apiPost<JobRecord>("/generate", buildGeneratePayload(ready.render_request, runParams, {
         output_dir: createCompareGroupOutputDir(outputDir, cursor + 1, seed),
-      });
+      }));
       setSequentialJobs((jobs) => [...jobs, { job: current, actionName, actionIndex: cursor }]);
+      notifyComfyTargetsChanged(ready.render_request);
       while (!terminalJobStatuses.has(current.status) && pollToken.current === token) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));
         current = await apiGet<JobRecord>(`/jobs/${encodeURIComponent(current.id)}`);
         setSequentialJobs((jobs) => jobs.map((item) => item.job.id === current.id ? { ...item, job: current } : item));
       }
+      notifyComfyTargetsChanged(ready.render_request);
       if (current.status !== "succeeded") throw new Error(current.error || `Generation ${current.status}`);
     }
     return true;
@@ -431,17 +435,18 @@ export function CustomGeneratePanel() {
       });
       const ready = await apiPost<ComposePreviewResponse>("/compose-preview", request);
       if (!ready.render_request) throw new Error("该随机节点组合需要外部 Agent 先完成提示词拼接。");
-      let current = await apiPost<JobRecord>("/generate", {
-        render_request: ready.render_request,
+      let current = await apiPost<JobRecord>("/generate", buildGeneratePayload(ready.render_request, runParams, {
         output_dir: createCompareGroupOutputDir(outputDir, index + 1, seed),
         random_selections: resolved[index].randomSelections,
-      });
+      }));
       setRandomJobs((jobs) => [...jobs, { job: current, selections: resolved[index].randomSelections }]);
+      notifyComfyTargetsChanged(ready.render_request);
       while (!terminalJobStatuses.has(current.status) && pollToken.current === token) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));
         current = await apiGet<JobRecord>(`/jobs/${encodeURIComponent(current.id)}`);
         setRandomJobs((jobs) => jobs.map((item) => item.job.id === current.id ? { ...item, job: current } : item));
       }
+      notifyComfyTargetsChanged(ready.render_request);
       if (current.status !== "succeeded") throw new Error(current.error || `Generation ${current.status}`);
     }
     setStatus(`Random Primary complete · ${resolved.length}`);

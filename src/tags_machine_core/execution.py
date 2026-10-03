@@ -665,6 +665,7 @@ def execute_render_request(
     comfyui_no_wait: bool = False,
     comfyui_poll_interval: float | None = None,
     comfyui_max_wait_seconds: float | None = None,
+    comfyui_target: str | None = None,
 ) -> GenerationResult:
     ensure_backend_can_execute(
         request.backend,
@@ -691,6 +692,7 @@ def execute_render_request(
             no_wait=comfyui_no_wait,
             poll_interval=comfyui_poll_interval,
             max_wait_seconds=comfyui_max_wait_seconds,
+            target=comfyui_target,
         )
     if request.backend == "sd":
         return execute_sd_generation(

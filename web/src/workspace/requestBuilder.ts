@@ -8,6 +8,8 @@ export type SelectedNodes = {
   clothing?: NodeVariantSlot | null;
 };
 
+export type RenderBackend = "novelai" | "comfyui";
+
 export type ComposeRenderRequest = {
   compose: {
     nodes: NonNullable<ReturnType<typeof serializeNodeSlot>>[];
@@ -18,7 +20,7 @@ export type ComposeRenderRequest = {
     };
   };
   render: {
-    backend: "novelai";
+    backend: RenderBackend;
     artist?: string;
     width: number;
     height: number;
@@ -26,6 +28,32 @@ export type ComposeRenderRequest = {
     params: Record<string, unknown>;
   };
 };
+
+/** 画风节点只声明了 ComfyUI 渲染器时走 ComfyUI，其余（含旧 tags.txt 画风）走 NovelAI。 */
+export function artistBackend(slot: NodeVariantSlot | null | undefined): RenderBackend {
+  const renderers = slot?.draftNode?.renderers;
+  if (!renderers || typeof renderers !== "object" || Array.isArray(renderers)) return "novelai";
+  const names = Object.keys(renderers);
+  return names.includes("comfyui") && !names.includes("novelai") ? "comfyui" : "novelai";
+}
+
+/** 工作区里是否可能用到 ComfyUI：有 ComfyUI 画风，或画风来自随机池（抽到哪个事先不知道）。 */
+export function workspaceMayUseComfyUI(slots: Array<NodeVariantSlot | null | undefined>): boolean {
+  return slots.some((slot) => slot?.sourceKind === "random" || artistBackend(slot) === "comfyui");
+}
+
+/** /generate 的请求体；ComfyUI 请求带上工作区选的运行位置。 */
+export function buildGeneratePayload(
+  renderRequest: Record<string, unknown>,
+  params: RenderWorkspaceParams,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { render_request: renderRequest, ...extra };
+  if (renderRequest.backend === "comfyui" && params.comfyuiTarget) {
+    payload.comfyui_target = params.comfyuiTarget;
+  }
+  return payload;
+}
 
 export function buildComposeRenderRequest(
   selected: SelectedNodes,
@@ -45,6 +73,7 @@ export function buildComposeRenderRequest(
     .map((slot) => slot ? serializeNodeSlot(slot) : null)
     .filter((node): node is NonNullable<typeof node> => Boolean(node));
   const artistIsInline = Boolean(selected.artist?.draftNode) && nodeSlotStatus(selected.artist!) !== "original";
+  const backend = artistBackend(selected.artist);
   const parsedSeed = Number(params.seed);
   const promptBehavior = options.promptBehavior;
   const compose: ComposeRenderRequest["compose"] = {
@@ -62,7 +91,8 @@ export function buildComposeRenderRequest(
     for (const [ruleId, rule] of Object.entries(promptBehavior.policyRules)) {
       if (rule.state === "inherit") continue;
       if (ruleId === "novelai_vibe" || ruleId === "novelai_vibe_artist") {
-        if (rule.state === "enabled") {
+        // vibe 是 NovelAI 的参考图功能，ComfyUI 画风不带。
+        if (rule.state === "enabled" && backend === "novelai") {
           const sourceOptions = (rule.options ?? {}) as Record<string, unknown>;
           const rawSource = sourceOptions.source && typeof sourceOptions.source === "object" && !Array.isArray(sourceOptions.source)
             ? (sourceOptions.source as Record<string, unknown>)
@@ -100,7 +130,8 @@ export function buildComposeRenderRequest(
   const renderParams: Record<string, unknown> = {
     n_samples: options.compare ? 1 : params.nt,
   };
-  if (promptBehavior?.characterPrompts.mode === "auto") {
+  // 多角色分区提示词是 NovelAI V4 的功能，ComfyUI 收到的是合并后的一段提示词。
+  if (backend === "novelai" && promptBehavior?.characterPrompts.mode === "auto") {
     renderParams.character_prompts = {
       mode: "auto",
       add_male_caption: promptBehavior.characterPrompts.addMaleCaption,
@@ -109,7 +140,7 @@ export function buildComposeRenderRequest(
   return {
     compose,
     render: {
-      backend: "novelai",
+      backend,
       artist: !artistIsInline ? selected.artist?.sourceRef ?? undefined : undefined,
       width: params.width,
       height: params.height,

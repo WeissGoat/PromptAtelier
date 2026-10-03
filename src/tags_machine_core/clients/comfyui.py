@@ -105,7 +105,13 @@ def prepare_comfyui_workflow(
             "ComfyUIClient requires params.workflow_json or params.workflow to be a workflow mapping"
         )
     workflow = copy.deepcopy(workflow)
-    apply_node_overrides(workflow, params.get("node_overrides") or {})
+    label = params.get("workflow") if isinstance(params.get("workflow"), str) else "inline"
+    apply_node_overrides(
+        workflow,
+        params.get("node_overrides") or {},
+        strict=params.get("strict_bindings") is not False,
+        source=f"workflow {label}",
+    )
     output_nodes = tuple(output_node_ids({"output_nodes": params.get("output_nodes")}))
     pruned: list[str] = []
     if prune_to_output_nodes and output_nodes:

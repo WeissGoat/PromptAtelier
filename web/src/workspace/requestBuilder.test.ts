@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { NodeDocument } from "../nodes/types";
 import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams } from "./types";
-import { buildComposeRenderRequest } from "./requestBuilder";
+import { artistBackend, buildComposeRenderRequest, buildGeneratePayload, workspaceMayUseComfyUI } from "./requestBuilder";
 
 const params: RenderWorkspaceParams = { negative: "", width: 832, height: 1216, nt: 3, seed: "-1" };
 const artistNode: NodeDocument = { schema: "tags-machine-core.node/v1", kind: "artist", id: "artist-a", prompt: { positive: [], negative: [] } };
@@ -178,5 +178,57 @@ describe("request builder", () => {
     );
 
     expect(request.compose.prompt_policy?.rules.novelai_vibe).toBeUndefined();
+  });
+
+  describe("ComfyUI artists", () => {
+    const comfyNode: NodeDocument = {
+      ...artistNode,
+      id: "cunyfunky",
+      renderers: { comfyui: { workflow: "cunyfunky" } },
+    };
+    const comfySlot: NodeVariantSlot = { ...artistSlot(), sourceRef: "F:/design/画风/comfyui/cunyfunky", sourceNode: comfyNode, draftNode: comfyNode };
+    const vibeBehavior: PromptBehaviorParams = {
+      ...promptBehavior,
+      policyRules: { novelai_vibe: { state: "enabled", options: { artist_ref: "vibe-artist" } } },
+    };
+
+    it("picks the backend from the artist renderers", () => {
+      expect(artistBackend(comfySlot)).toBe("comfyui");
+      expect(artistBackend(artistSlot())).toBe("novelai");
+      expect(artistBackend({ ...comfySlot, draftNode: { ...comfyNode, renderers: { comfyui: {}, novelai: {} } } })).toBe("novelai");
+      expect(artistBackend(null)).toBe("novelai");
+    });
+
+    it("builds a comfyui render without NovelAI-only extras", () => {
+      const request = buildComposeRenderRequest(
+        { artist: comfySlot, character: null, action: null },
+        params,
+        { compare: false, promptBehavior: vibeBehavior },
+      );
+
+      expect(request.render.backend).toBe("comfyui");
+      expect(request.render.artist).toBe("F:/design/画风/comfyui/cunyfunky");
+      expect(request.render.params.character_prompts).toBeUndefined();
+      expect(request.compose.prompt_policy?.rules.novelai_vibe).toBeUndefined();
+      expect(request.render.params.n_samples).toBe(3);
+    });
+
+    it("adds the workspace run location only to comfyui generate payloads", () => {
+      const withTarget = { ...params, comfyuiTarget: "modal" };
+
+      expect(buildGeneratePayload({ backend: "comfyui" }, withTarget, { output_dir: "x" })).toEqual({
+        render_request: { backend: "comfyui" },
+        output_dir: "x",
+        comfyui_target: "modal",
+      });
+      expect(buildGeneratePayload({ backend: "novelai" }, withTarget)).toEqual({ render_request: { backend: "novelai" } });
+      expect(buildGeneratePayload({ backend: "comfyui" }, params)).toEqual({ render_request: { backend: "comfyui" } });
+    });
+
+    it("shows the run location for comfyui or random artists", () => {
+      expect(workspaceMayUseComfyUI([artistSlot()])).toBe(false);
+      expect(workspaceMayUseComfyUI([artistSlot(), comfySlot])).toBe(true);
+      expect(workspaceMayUseComfyUI([{ ...artistSlot(), sourceKind: "random" }])).toBe(true);
+    });
   });
 });

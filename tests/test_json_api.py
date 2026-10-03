@@ -13,6 +13,7 @@ from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.cli import main
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
+from tags_machine_core.renderers.comfyui_prompt import novelai_to_comfyui_prompt
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.services.json_api_models import BatchItemRequest
 from tags_machine_core.verification import build_acceptance_record
@@ -500,7 +501,12 @@ tags:
             self.assertEqual(request["seed"], 456)
             self.assertEqual(request["params"]["workflow"], "portrait_workflow")
             self.assertEqual(request["params"]["scheduler"], "karras")
-            self.assertEqual(request["params"]["positive_prompt"], bundle["prompt"]["positive"])
+            self.assertEqual(request["prompt"], bundle["prompt"]["positive"])
+            self.assertEqual(
+                request["params"]["positive_prompt"],
+                novelai_to_comfyui_prompt(bundle["prompt"]["positive"]),
+            )
+            self.assertEqual(request["params"]["prompt_format"], "comfyui")
 
     def test_render_plan_json_api_rejects_unknown_backend_with_support_matrix_error(self):
         bundle = {

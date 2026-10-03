@@ -47,8 +47,10 @@ comfyui:
   default_target: local
   targets:
     local:
+      label: "本机 aki"
       base_url: "http://127.0.0.1:8188"
     modal:
+      label: "Modal 云端"
       # modal deploy deploy/comfyui/providers/modal_app.py 输出的地址
       base_url: "https://<workspace>--tm-comfyui-api.modal.run"
       path_style: posix            # 把 Windows 导出的 "风格\\x.safetensors" 改成 "/"
@@ -57,6 +59,12 @@ comfyui:
       auth:
         type: bearer
         token_env: TM_COMFYUI_MODAL_TOKEN  # 值为 Modal proxy token：wk-xxx.ws-yyy
+      # Web 显示云端是否还开着：用 Modal API 读容器数，不会把容器拉起来
+      status_probe:
+        type: modal
+        app: tm-comfyui
+        function: api
+        idle_shutdown_seconds: 180  # 与 modal_app.py 的 scaledown_window 一致
 
 sd:
   base_url: "http://127.0.0.1:7860"

@@ -25,12 +25,14 @@ artist node 只声明三件事：
 | `renderers.comfyui.output_nodes` | 否 | 只下载指定输出节点的图片。为空时下载所有图片输出。声明后提交时默认只保留这些节点的上游子图（见下文）。 |
 | `renderers.comfyui.node_overrides` | 否 | 高级固定覆盖，用于 workflow 特殊节点。 |
 | `renderers.comfyui.input_files` | 否 | LoadImage 等节点要读的输入图，提交前上传到目标 ComfyUI 的 input 目录。每项是路径字符串，或 `{path, name, subfolder}`；相对路径基于 artist node 目录。 |
+| `renderers.comfyui.prompt_format` | 否 | workflow 期望的提示词写法。`comfyui`（默认）：渲染层把节点里的 NovelAI 写法转成 ComfyUI 写法（`{x}`→`(x:1.05)`、`[x]`→`(x:0.95)`、`1.2::x::`→`(x:1.2)`、字面圆括号转义），正向和负向都转；`novelai`：原样传入，由 workflow 自己的转换节点处理。 |
+| `renderers.comfyui.strict_bindings` | 否 | 默认 `true`：`inputs`、`optional_inputs`、`node_overrides` 指向的节点和输入必须在 workflow 里存在，否则直接报错。只有确实要给节点新增输入时才设成 `false`。 |
 
 路径使用 ComfyUI API workflow 的点路径，例如：
 
 ```yaml
 inputs:
-  positive_prompt: "218.inputs.wildcard_text"
+  positive_prompt: "165.inputs.text"
   negative_prompt: "153.inputs.text"
   width: "23.inputs.width"
   height: "23.inputs.height"
@@ -68,13 +70,18 @@ optional_inputs:
 
 UI workflow 顶层通常包含 `nodes` 和 `links`，不能直接提交给 `/prompt`。
 
+## 种子与提示词
+
+- 没给 seed 或给了负数（Web 的 `-1`）表示随机：渲染层抽一个 0–4294967295 的种子写进请求，归档和文件名里是实际用的值。
+- 提示词正文来自组合后的 PromptBundle。注意：目前 ComfyUI 渲染层不会像 NovelAI 那样把 artist node 自己的 `tags` 加进提示词，画风完全由 workflow 决定。
+
 ## 提交前的处理
 
 套用参数后、提交给 ComfyUI 之前，core 会按目标（`comfyui.targets`）做两件事：
 
 - **裁剪到 output_nodes**（`prune_to_output_nodes`，默认开）：只保留 `output_nodes` 及其上游节点。
   ComfyUI 会执行 prompt 里所有输出节点，并要求每个 `class_type` 都已安装；裁剪后预览、备用保存等分支不再执行，
-  云端也不必安装它们用到的插件。cunyfunky 从 64 个节点裁到 24 个。
+  云端也不必安装它们用到的插件。cunyfunky 从 64 个节点裁到 22 个。
 - **路径归一化**（`path_style`）：`posix` 会把相对文件路径里的 `\` 改成 `/`。Windows 上导出的
   `画风调整\\add_contrast_XL.safetensors` 在 Linux 的 ComfyUI 上会因下拉值精确匹配失败而报 `value_not_in_list`。
 
@@ -83,10 +90,8 @@ UI workflow 顶层通常包含 `nodes` 和 `links`，不能直接提交给 `/pro
 
 ## Cunyfunky 基准
 
-`comfyui_cunyfunky` 使用 `218.inputs.wildcard_text` 注入正向提示词，保留 workflow 自带链路：
-
-```text
-ImpactWildcardProcessor -> OldNAIToComfyUI -> CLIPTextEncode
-```
+`comfyui_cunyfunky` 把正向提示词直接写入 `165.inputs.text`（CLIPTextEncode），NovelAI 写法由渲染层转换。
+workflow 里原来的链路 `ImpactWildcardProcessor(#218) -> OldNAIToComfyUI(#219) -> CLIPTextEncode(#165)` 不再使用：
+#218 会把 `{tag}` 当成随机选项展开，加权在进入 #219 之前就丢了。改绑后 #218/#219 会被裁剪掉。
 
 checkpoint、VAE、LoRA、FaceDetailer、UltimateSDUpscale 等都继续由 workflow 自己控制。

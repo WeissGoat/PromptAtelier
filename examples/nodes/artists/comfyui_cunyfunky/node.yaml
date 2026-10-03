@@ -12,9 +12,12 @@ renderers:
     workflow: cunyfunky
     workflow_path: workflows/cunyfunky_api.json
     workflow_ui_path: workflows/cunyfunky.json
+    prompt_format: comfyui
 
     inputs:
-      positive_prompt: "218.inputs.wildcard_text"
+      # 直接写入正向 CLIPTextEncode；NovelAI 加权由 core 的 ComfyUI 渲染层转换，
+      # 原来的 #218 通配符和 #219 转换节点不再参与（会把 {tag} 的加权吃掉）。
+      positive_prompt: "165.inputs.text"
       negative_prompt: "153.inputs.text"
       width: "23.inputs.width"
       height: "23.inputs.height"

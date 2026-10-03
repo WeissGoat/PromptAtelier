@@ -126,6 +126,40 @@ class WorkflowPreparationTest(unittest.TestCase):
         self.assertEqual(prepared.extra_data, {"extra_pnginfo": {"workflow": {"nodes": []}}})
         self.assertEqual(request.params["workflow_json"]["6"]["inputs"]["text"], "escaped \\{brace\\}")
 
+    def test_prepare_rejects_bindings_that_miss_the_workflow(self):
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="x",
+            params={
+                "workflow": "cunyfunky",
+                "workflow_json": _workflow(),
+                "node_overrides": {"6.inputs.txt": "akemi homura", "99.inputs.seed": 1},
+            },
+        )
+
+        with self.assertRaises(ValueError) as raised:
+            prepare_comfyui_workflow(request)
+
+        message = str(raised.exception)
+        self.assertIn("workflow cunyfunky", message)
+        self.assertIn("node 6 (CLIPTextEncode) has no input 'txt' (inputs: clip, text)", message)
+        self.assertIn("99.inputs.seed: node 99 not found", message)
+
+    def test_prepare_can_opt_out_of_strict_bindings(self):
+        request = RenderRequest(
+            backend="comfyui",
+            prompt="x",
+            params={
+                "workflow_json": _workflow(),
+                "node_overrides": {"6.inputs.new_input": 1},
+                "strict_bindings": False,
+            },
+        )
+
+        prepared = prepare_comfyui_workflow(request)
+
+        self.assertEqual(prepared.prompt["6"]["inputs"]["new_input"], 1)
+
     def test_prepare_without_output_nodes_keeps_full_workflow(self):
         request = RenderRequest(backend="comfyui", prompt="x", params={"workflow_json": _workflow()})
 

@@ -68,11 +68,27 @@ class ComfyUIAuthConfig(BaseModel):
     header_envs: dict[str, str] = Field(default_factory=dict)
 
 
+class ComfyUIStatusProbeConfig(BaseModel):
+    """Web 显示目标是否在线的方式，查询状态不能把 serverless 容器拉起来。
+
+    auto：本机地址探测 /system_stats，其它地址不探测；http：总是探测 /system_stats；
+    modal：用 Modal API 读取函数当前的容器数（需要安装 modal SDK）；none：不显示。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["auto", "none", "http", "modal"] = "auto"
+    app: str | None = None
+    function: str | None = None
+    idle_shutdown_seconds: float | None = None
+
+
 class ComfyUIConnectionConfig(BaseModel):
     """一个 ComfyUI 目标的连接设置；顶层 comfyui 字段也是同一套。"""
 
     model_config = ConfigDict(extra="forbid")
 
+    label: str | None = None
     transport: Literal["native"] = "native"
     base_url: str = "http://127.0.0.1:8188"
     timeout: int = 300
@@ -89,6 +105,7 @@ class ComfyUIConnectionConfig(BaseModel):
     # serverless 目标缩容后结果会丢，应关闭只排队不轮询的模式。
     allow_no_wait: bool = True
     auth: ComfyUIAuthConfig = Field(default_factory=ComfyUIAuthConfig)
+    status_probe: ComfyUIStatusProbeConfig = Field(default_factory=ComfyUIStatusProbeConfig)
 
 
 class ResolvedComfyUITarget(ComfyUIConnectionConfig):
@@ -130,6 +147,9 @@ class ComfyUIConfig(ComfyUIConnectionConfig):
             raise ValueError(f"Unknown ComfyUI target {selected!r}; expected one of: {allowed}")
         overrides = target.model_dump(include=target.model_fields_set)
         return ResolvedComfyUITarget(name=selected, **{**base, **overrides})
+
+    def target_names(self) -> list[str]:
+        return list(self.targets) or [DEFAULT_COMFYUI_TARGET]
 
     def with_default_target(self, name: str) -> ComfyUIConfig:
         return self.model_copy(update={"default_target": name})

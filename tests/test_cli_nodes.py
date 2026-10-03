@@ -141,12 +141,6 @@ renderers:
       height: "1.inputs.height"
       seed: "1.inputs.seed"
     checkpoint: anime_comfy.safetensors
-    inputs:
-      positive_prompt: "17.inputs.text"
-      negative_prompt: "17.inputs.negative"
-      width: "12.inputs.width"
-      height: "12.inputs.height"
-      seed: "12.inputs.seed"
     loras:
       - name: lineart
         weight: 0.65
@@ -421,8 +415,12 @@ sd:
             (workflow_dir / "portrait.json").write_text(
                 json.dumps(
                     {
-                        "12": {"class_type": "KSampler", "inputs": {"cfg": 5.0}},
-                        "17": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}},
+                        "12": {
+                            "class_type": "KSampler",
+                            "inputs": {"cfg": 5.0, "width": 512, "height": 512, "seed": 0},
+                        },
+                        "17": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "negative": ""}},
+                        "18": {"class_type": "KSampler", "inputs": {"seed": 0, "width": 512}},
                     }
                 ),
                 encoding="utf-8",
@@ -483,7 +481,7 @@ renderers:
             self.assertEqual(data["params"]["workflow_json"]["17"]["inputs"]["text"], "")
             self.assertEqual(
                 data["params"]["node_overrides"]["17.inputs.text"],
-                "1girl, 2.0::akemi_homura::, bare_soles, foot_focus",
+                "1girl, (akemi_homura:2), bare_soles, foot_focus",
             )
             self.assertEqual(data["params"]["node_overrides"]["18.inputs.seed"], 123)
             self.assertEqual(data["params"]["node_overrides"]["18.inputs.width"], 1024)

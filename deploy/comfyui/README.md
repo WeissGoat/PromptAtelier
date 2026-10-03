@@ -95,6 +95,14 @@
 - UI 页面开着时 ComfyUI 前端一直连着 websocket，容器不会缩容；用完关标签并结束 `modal run`。
 - serverless 目标配置了 `allow_no_wait: false`：`--comfyui-no-wait` 只排队不轮询，容器缩容后结果会丢。
 
+## 在 Web 控制台里用
+
+- ComfyUI 画风节点放在 design 根目录的 `画风/comfyui/<名字>/`（`node.yaml` + `workflows/`），Artist 选择器里带 `ComfyUI` 标记。
+- 选了 ComfyUI 画风后，参数区会出现「ComfyUI 运行位置」（整个工作区一个）：本机 aki 或 Modal 云端。
+- 状态说明：本机探测端口；云端通过 Modal API 读容器数，不会因为查看状态启动 GPU。
+  云端开着时显示自动关机倒计时（按 Web 最后一次生成 + 3 分钟估算）。
+- Web 后端从环境变量 `TM_COMFYUI_MODAL_TOKEN` 读 proxy token；设置后要重启 Web 控制台。
+
 ## 新增 workflow / 插件 / 模型
 
 1. 在本地 aki 里做好 workflow，`File -> Export (API)`，放进 artist node。

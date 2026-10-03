@@ -5,7 +5,8 @@ import type { ComposePreviewResponse, JobRecord } from "../api/types";
 import { cloneNode } from "../nodes/temporaryNodes";
 import type { GroupRole, NodeRole } from "../nodes/types";
 import { resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
-import { buildComposeRenderRequest } from "../workspace/requestBuilder";
+import { buildComposeRenderRequest, buildGeneratePayload } from "../workspace/requestBuilder";
+import { notifyComfyTargetsChanged } from "../comfyui/targetStatus";
 import { promptBehaviorFingerprint } from "../workspace/promptBehavior";
 import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
 import { buildCompareMatrix, selectedSlots, type CompareCombination } from "./matrix";
@@ -201,13 +202,14 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
         });
         const preview = await post("/compose-preview", request) as ComposePreviewResponse;
         if (!preview.render_request) throw new Error("该组合需要外部 Agent 先完成提示词拼接。");
-        const queued = await post("/generate", {
-          render_request: preview.render_request,
+        const queued = await post("/generate", buildGeneratePayload(preview.render_request, runParams, {
           output_dir: createCompareGroupOutputDir(outputDir, item.groupIndex, item.groupSeed),
           random_selections: item.randomSelections,
-        }) as JobRecord;
+        })) as JobRecord;
         updateResult(token, item.runId, { job: queued });
+        notifyComfyTargetsChanged(preview.render_request);
         const completed = await pollJob(token, queued);
+        notifyComfyTargetsChanged(preview.render_request);
         if (completed.status !== "succeeded") throw new Error(completed.error || `Job ${completed.status}`);
         updateResult(token, item.runId, { status: "succeeded", job: completed });
       } catch (runError) {

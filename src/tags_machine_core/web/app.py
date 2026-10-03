@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -11,14 +12,26 @@ from tags_machine_core.clients import sanitize_proxy_env
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.execution import execute_render_request
-from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
-from .routes import batch, compare, compose, generate, health, image_meta, jobs, node_pools, nodes, results
+from .routes import (
+    batch,
+    comfyui,
+    compare,
+    compose,
+    generate,
+    health,
+    image_meta,
+    jobs,
+    node_pools,
+    nodes,
+    results,
+)
 from .services.batch_workspace import BatchWorkspace
+from .services.comfyui_targets import ComfyUITargetService
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
 from .services.node_pool_service import NodePoolService
@@ -83,6 +96,7 @@ def create_app(
             roots.append(config.legacy.tags_machine_root)
     app.state.result_index = result_index or ResultIndex(roots=roots)
     app.state.batch_workspace = batch_workspace or BatchWorkspace(base_dir=Path.cwd())
+    app.state.comfyui_targets = ComfyUITargetService(config.comfyui)
     policy_provider = build_prompt_policy_provider(
         config,
         config_path=resolved_config_path,
@@ -93,8 +107,9 @@ def create_app(
             design_root=config.legacy.design_root,
             policy_relative_to=resolved_config_path.resolve().parent,
         ),
-        artist_loader=NovelAIArtistRepository(config.legacy.design_root).load_node,
-        generation_executor=generation_executor or _default_generation_executor(config),
+        artist_loader=app.state.node_workspace.read_artist_node,
+        generation_executor=generation_executor
+        or _default_generation_executor(config, app.state.comfyui_targets),
     )
     app.add_middleware(
         CORSMiddleware,
@@ -115,6 +130,7 @@ def create_app(
     app.include_router(batch.router, prefix="/api", tags=["batch"])
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
     app.include_router(compare.router, prefix="/api", tags=["compare"])
+    app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
 
     @app.get("/", include_in_schema=False)
     def root():
@@ -127,16 +143,24 @@ def create_app(
     return app
 
 
-def _default_generation_executor(config) -> GenerationExecutor:
+def _default_generation_executor(
+    config,
+    comfyui_targets: ComfyUITargetService | None = None,
+) -> GenerationExecutor:
     def executor(
         request: RenderRequest,
         options: Mapping[str, Any],
     ) -> GenerationResult:
-        return execute_render_request(
-            config,
-            request,
-            output_dir=options.get("output_dir"),
-            image_format=str(options.get("image_format") or config.defaults.image_format),
-        )
+        is_comfyui = request.backend == "comfyui"
+        target = (options.get("comfyui_target") or None) if is_comfyui else None
+        tracking = comfyui_targets.track(target) if is_comfyui and comfyui_targets else nullcontext()
+        with tracking:
+            return execute_render_request(
+                config,
+                request,
+                output_dir=options.get("output_dir"),
+                image_format=str(options.get("image_format") or config.defaults.image_format),
+                comfyui_target=target,
+            )
 
     return executor

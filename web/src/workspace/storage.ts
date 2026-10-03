@@ -253,6 +253,9 @@ function migrateWorkspace(value: unknown): unknown {
     nt: typeof rawParams.nt === "number" && rawParams.nt > 0 ? rawParams.nt : 1,
     seed: rawParams.seed !== undefined && rawParams.seed !== null ? String(rawParams.seed) : "-1",
   };
+  if (typeof rawParams.comfyuiTarget === "string" && rawParams.comfyuiTarget) {
+    params.comfyuiTarget = rawParams.comfyuiTarget;
+  }
 
   const rawEditor = isObject(value.editor) ? value.editor : {};
   const editorSlotId = typeof rawEditor.slotId === "string" ? rawEditor.slotId : null;

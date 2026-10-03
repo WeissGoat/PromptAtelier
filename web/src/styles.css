@@ -4289,3 +4289,44 @@ button {
   border-color: #ef4444;
 }
 
+.node-badge {
+  background: #eef2ff;
+  border-radius: 999px;
+  color: #3949ab;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  margin-left: 6px;
+  padding: 0 6px;
+}
+
+.comfy-target-panel {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.comfy-target-panel select {
+  min-width: 160px;
+}
+
+.target-status.ok {
+  background: #e7f5ec;
+  border-color: #b5dec3;
+  color: #1f6b3a;
+}
+
+.target-status.busy {
+  background: #fff4e3;
+  border-color: #f2cd8d;
+  color: #8a5400;
+}
+
+.target-status.warn {
+  background: #fdeceb;
+  border-color: #f3bcb7;
+  color: #a3261f;
+}
