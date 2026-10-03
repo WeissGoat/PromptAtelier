@@ -12,6 +12,7 @@ const roleLabels: Record<NodeVariantSlot["role"], string> = {
   artist: "Artist",
   character: "Character",
   action: "Action",
+  clothing: "Clothing",
 };
 
 function splitPatterns(value: string): string[] {
@@ -106,7 +107,15 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
       <div className="random-source-grid">
         <label className="field compact">
           <span>来源</span>
-          <select aria-label="随机节点来源" onChange={(event) => updateSource({ type: event.target.value as NodePoolSpec["source"]["type"], value: "" })} value={spec.source.type}>
+          <select
+            aria-label="随机节点来源"
+            onChange={(event) => {
+              const nextType = event.target.value as NodePoolSpec["source"]["type"];
+              const defaultValue = nextType === "folder" ? (slot.role === "action" ? "new" : ".") : "";
+              updateSource({ type: nextType, value: defaultValue });
+            }}
+            value={spec.source.type}
+          >
             <option value="folder">Folder</option>
             <option value="collection">Collection</option>
             <option value="glob">Glob</option>

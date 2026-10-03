@@ -10,9 +10,12 @@ web/dist/
 build/
 *.egg-info/
 outputs/
+output/
 runtime/
 cache/
 acceptance_compare/
+web-batch-draft/
+.superpowers/
 local.yaml
 configs/local.yaml
 .env

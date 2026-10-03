@@ -6,7 +6,7 @@ import type { NodeDocument, NodeRole } from "../nodes/types";
 import { createDefaultNodePoolSpec } from "../randomNodes/spec";
 import { createDefaultPromptBehaviorGroup } from "../workspace/promptBehavior";
 import type { PromptBehaviorGroup, RenderWorkspaceParams, RoleNodeGroup } from "../workspace/types";
-import { useCompareRunController } from "./useCompareRunController";
+import { createCompareOutputDir, useCompareRunController } from "./useCompareRunController";
 
 const sampleNodePool = vi.fn();
 
@@ -263,5 +263,49 @@ describe("useCompareRunController", () => {
       "action-b",
     ]);
     expect(result.current.results.map((item) => item.groupSeed)).toEqual([101, 101, 202, 202]);
+  });
+
+  it("expands character clothing slots into separate compare runs with clothing labels", async () => {
+    const composeRequests: Array<Record<string, unknown>> = [];
+    const post = vi.fn(async (path: string, body: unknown): Promise<unknown> => {
+      if (path === "/compose-preview") {
+        composeRequests.push(body as Record<string, unknown>);
+        return { status: "ready", render_request: {} };
+      }
+      return { id: "job", name: "generate", status: "succeeded" };
+    });
+    const character = group("character", 1);
+    const maidNode = { schema: "tags-machine-core.node/v1" as const, kind: "clothing" as const, id: "maid", name: "Maid Dress", prompt: { positive: [{ text: "maid outfit" }], negative: [] } };
+    const swimNode = { schema: "tags-machine-core.node/v1" as const, kind: "clothing" as const, id: "swimsuit", name: "Swimsuit", prompt: { positive: [{ text: "swimsuit" }], negative: [] } };
+    character.primary.clothingSlots = [
+      { slotId: "clothing-1", role: "clothing", mode: "primary", sourceRef: "clothing/maid", sourceNode: maidNode, draftNode: maidNode },
+      { slotId: "clothing-2", role: "clothing", mode: "compare", sourceRef: "clothing/swimsuit", sourceNode: swimNode, draftNode: swimNode },
+    ];
+    const { result } = renderHook(() => useCompareRunController({ post }));
+
+    await act(async () => {
+      await result.current.start(
+        { artist: group("artist", 1), character, action: group("action", 1) },
+        params,
+        behaviorGroup(),
+      );
+    });
+
+    expect(composeRequests).toHaveLength(2);
+    expect(result.current.results).toHaveLength(2);
+    expect(result.current.results[0].labels.clothing).toBe("Maid Dress");
+    expect(result.current.results[1].labels.clothing).toBe("Swimsuit");
+    const [req1, req2] = composeRequests;
+    const charNode1 = ((req1.compose as Record<string, unknown>).nodes as Array<Record<string, unknown>>).find((n) => n.role === "character");
+    const charNode2 = ((req2.compose as Record<string, unknown>).nodes as Array<Record<string, unknown>>).find((n) => n.role === "character");
+    expect(charNode1?.clothing_ref).toBe("clothing/maid");
+    expect(charNode2?.clothing_ref).toBe("clothing/swimsuit");
+  });
+
+  it("creates compare output directories under outputs/compares/", () => {
+    const defaultDir = createCompareOutputDir();
+    expect(defaultDir).toMatch(/^outputs\/compares\/compare_\d{14}_[a-f0-9]+$/);
+    const randomDir = createCompareOutputDir("random");
+    expect(randomDir).toMatch(/^outputs\/compares\/random_\d{14}_[a-f0-9]+$/);
   });
 });

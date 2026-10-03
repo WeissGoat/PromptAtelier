@@ -163,4 +163,68 @@ describe("workspace storage", () => {
     saveWorkspaceSnapshot(localStorage, state);
     expect(JSON.parse(localStorage.getItem(CUSTOM_WORKSPACE_STORAGE_KEY) ?? "{}").jobs).toBeUndefined();
   });
+
+  it("migrates legacy snapshots with numeric seed and missing clothing slots without resetting", () => {
+    const legacyData = {
+      schema: "promptatelier.custom-workspace/v1",
+      groups: {
+        artist: {
+          primary: { slotId: "primary-artist", role: "artist", mode: "primary", sourceRef: "artists/test", sourceNode: null, draftNode: null },
+          compares: [],
+        },
+        character: {
+          primary: { slotId: "primary-character", role: "character", mode: "primary", sourceRef: "characters/hero", sourceNode: null, draftNode: null },
+          compares: [],
+        },
+        action: {
+          primary: { slotId: "primary-action", role: "action", mode: "primary", sourceRef: null, sourceNode: null, draftNode: null },
+          compares: [],
+        },
+      },
+      params: { negative: "lowres", width: 1024, height: 1024, nt: 2, seed: 123456 },
+      editor: { slotId: null, tab: "form", draftNode: null, baselineNode: null },
+      revision: 3,
+    };
+    localStorage.setItem(CUSTOM_WORKSPACE_STORAGE_KEY, JSON.stringify(legacyData));
+
+    const loaded = loadWorkspaceSnapshot(localStorage);
+    expect(loaded.status).toBe("loaded");
+    expect(loaded.state.params.seed).toBe("123456");
+    expect(loaded.state.params.negative).toBe("lowres");
+    expect(loaded.state.groups.artist.primary.sourceRef).toBe("artists/test");
+    expect(loaded.state.groups.character.primary.sourceRef).toBe("characters/hero");
+    expect(loaded.state.groups.character.primary.clothingSlots).toBeDefined();
+    expect(loaded.state.groups.character.primary.clothingSlots?.length).toBe(1);
+    expect(loaded.state.groups.character.primary.clothingSlots?.[0].mode).toBe("primary");
+  });
+
+  it("preserves legacy clothingRef and clothingNode in character slot into clothingSlots", () => {
+    const legacyNode = createTemporaryNode("clothing", "school_uniform");
+    const legacyData = {
+      schema: "promptatelier.custom-workspace/v1",
+      groups: {
+        character: {
+          primary: {
+            slotId: "primary-character",
+            role: "character",
+            mode: "primary",
+            sourceRef: "characters/hero",
+            sourceNode: null,
+            draftNode: null,
+            clothingRef: "clothing/school_uniform",
+            clothingNode: legacyNode,
+          },
+          compares: [],
+        },
+      },
+      params: { seed: "-1" },
+    };
+    localStorage.setItem(CUSTOM_WORKSPACE_STORAGE_KEY, JSON.stringify(legacyData));
+
+    const loaded = loadWorkspaceSnapshot(localStorage);
+    expect(loaded.status).toBe("loaded");
+    expect(loaded.state.groups.character.primary.clothingRef).toBe("clothing/school_uniform");
+    expect(loaded.state.groups.character.primary.clothingSlots?.[0].sourceRef).toBe("clothing/school_uniform");
+    expect(loaded.state.groups.character.primary.clothingSlots?.[0].draftNode?.id).toBe("school_uniform");
+  });
 });

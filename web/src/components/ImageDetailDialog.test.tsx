@@ -148,4 +148,90 @@ describe("ImageDetailDialog", () => {
     fireEvent.keyDown(document, { key: "ArrowLeft" });
     expect(await screen.findByText("1 / 2")).toBeTruthy();
   });
+
+  it("supports batch filmstrip navigation, reference selection, and split/flicker comparison modes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/results/image-parameter-diff")) {
+        return response({
+          schema: "tags-machine-core.web.image-parameter-diff/v1",
+          previous: { path: "F:/outputs/v1.png", filename: "v1.png" },
+          current: { path: "F:/outputs/v2.png", filename: "v2.png" },
+          match: false,
+          diff_count: 1,
+          diffs: [
+            { path: "$.input", kind: "value", left: "1girl, smile", right: "1girl, smile, glasses" },
+          ],
+          previous_normalized: {},
+          current_normalized: {},
+        });
+      }
+      if (url.includes("/results/image-metadata")) {
+        const path = new URL(url).searchParams.get("path");
+        return response({
+          ...metadata(),
+          path: `F:/${path}`,
+          filename: path?.split("/").pop() ?? "image.png",
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const items = [
+      { path: "outputs/base.png", label: "本批底模", name: "底模原图", badge: "底模" },
+      { path: "outputs/v1.png", label: "变体 12-A", name: "变体 12-A", badge: "对照组", isControlGroup: true },
+      { path: "outputs/v2.png", label: "变体 12-F", name: "变体 12-F", badge: "-3" },
+    ];
+
+    render(
+      <ImageDetailDialog
+        initialIndex={2}
+        items={items}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Initial load at index 2 (变体 12-F)
+    expect(await screen.findByText("3 / 3")).toBeTruthy();
+    expect(screen.getAllByText("变体 12-F").length).toBeGreaterThanOrEqual(1);
+
+    // Filmstrip rendered with all 3 items
+    const filmstrip = screen.getByRole("region", { name: "同批图片缩略图列表" });
+    expect(filmstrip).toBeTruthy();
+    expect(filmstrip.textContent).toContain("本批底模");
+    expect(filmstrip.textContent).toContain("变体 12-A");
+    expect(filmstrip.textContent).toContain("变体 12-F");
+
+    // Default reference automatically set to control group (变体 12-A)
+    const refSelect = screen.getByLabelText("选择对比基准") as HTMLSelectElement;
+    expect(refSelect.value).toBe("1"); // index 1 is 变体 12-A
+
+    // Parameter diff indicates comparison with 变体 12-A
+    expect(screen.getByText(/与【变体 12-A】比较/)).toBeTruthy();
+
+    // Switch to Split Slider mode
+    const splitBtn = screen.getByRole("button", { name: /卷帘对比/ });
+    fireEvent.click(splitBtn);
+    expect(document.querySelector(".split-slider-stage")).toBeTruthy();
+    expect(screen.getByText("基准: 变体 12-A")).toBeTruthy();
+    expect(screen.getByText("当前: 变体 12-F")).toBeTruthy();
+
+    // Switch to Flicker mode
+    const flickerBtn = screen.getByRole("button", { name: /瞬切闪烁/ });
+    fireEvent.click(flickerBtn);
+    expect(document.querySelector(".flicker-stage")).toBeTruthy();
+    expect(screen.getByText(/正在显示：/)).toBeTruthy();
+
+    // Toggle flicker with button or space key
+    const toggleFlickerBtn = screen.getByRole("button", { name: "切换 (空格键)" });
+    fireEvent.click(toggleFlickerBtn);
+    expect(screen.getByText(/基准图 · 变体 12-A/)).toBeTruthy();
+    fireEvent.keyDown(document, { key: " " });
+    expect(screen.getByText(/当前图 · 变体 12-F/)).toBeTruthy();
+
+    // Filmstrip click switches current image
+    const v1Card = filmstrip.querySelector(".filmstrip-card:nth-child(2)") as HTMLElement;
+    fireEvent.click(v1Card);
+    expect(await screen.findByText("2 / 3")).toBeTruthy();
+  });
 });

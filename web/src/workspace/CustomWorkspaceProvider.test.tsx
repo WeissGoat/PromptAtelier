@@ -29,6 +29,40 @@ function Probe() {
       <span data-testid="compare-behavior-mode">{workspace.state.promptBehaviorGroup.compares[0]?.value.characterPrompts.mode ?? "empty"}</span>
       <span data-testid="compare-behavior-label">{workspace.state.promptBehaviorGroup.compares[0]?.label ?? "empty"}</span>
       <span data-testid="warning">{workspace.storageWarning}</span>
+      <span data-testid="clothing-count">{workspace.state.groups.character.primary.clothingSlots?.length ?? 0}</span>
+      <span data-testid="primary-clothing-ref">{workspace.state.groups.character.primary.clothingRef ?? "none"}</span>
+      <span data-testid="compare-clothing-ref">{workspace.state.groups.character.primary.clothingSlots?.[1]?.sourceRef ?? "none"}</span>
+      <span data-testid="clothing-source-kind">{workspace.state.groups.character.primary.clothingSlots?.[0]?.sourceKind ?? "none"}</span>
+      <span data-testid="clothing-random-source">{workspace.state.groups.character.primary.clothingSlots?.[0]?.randomSpec?.source.value ?? "none"}</span>
+      <button onClick={() => {
+        const slotId = workspace.state.groups.character.primary.clothingSlots?.[0]?.slotId;
+        if (slotId) workspace.createRandom(slotId);
+      }}>random primary clothing</button>
+      <button onClick={() => workspace.addClothingCompare("primary-character")}>add clothing</button>
+      <button onClick={() => {
+        const slotId = workspace.state.groups.character.primary.clothingSlots?.[0]?.slotId;
+        if (slotId) workspace.selectNode(slotId, "clothing/maid", {
+          schema: "tags-machine-core.node/v1",
+          kind: "clothing",
+          id: "maid",
+          name: "Maid Dress",
+          prompt: { positive: [], negative: [] },
+        });
+      }}>select primary clothing</button>
+      <button onClick={() => {
+        const slotId = workspace.state.groups.character.primary.clothingSlots?.[1]?.slotId;
+        if (slotId) workspace.selectNode(slotId, "clothing/swimsuit", {
+          schema: "tags-machine-core.node/v1",
+          kind: "clothing",
+          id: "swimsuit",
+          name: "Swimsuit",
+          prompt: { positive: [], negative: [] },
+        });
+      }}>select compare clothing</button>
+      <button onClick={() => {
+        const slotId = workspace.state.groups.character.primary.clothingSlots?.[1]?.slotId;
+        if (slotId) workspace.removeClothingCompare("primary-character", slotId);
+      }}>remove clothing compare</button>
       <button onClick={() => workspace.addCompare("artist")}>add</button>
       <button onClick={() => workspace.selectNode("primary-artist", "artists/a", artistNode)}>select artist</button>
       <button onClick={() => {
@@ -144,5 +178,32 @@ describe("CustomWorkspaceProvider", () => {
     expect(screen.getByTestId("warning").textContent).not.toBe("");
     fireEvent.click(screen.getByText("reset"));
     expect(localStorage.getItem(CUSTOM_WORKSPACE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("supports adding, selecting, and removing clothing compares on character", () => {
+    render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
+    expect(screen.getByTestId("clothing-count").textContent).toBe("1");
+    expect(screen.getByTestId("primary-clothing-ref").textContent).toBe("none");
+
+    fireEvent.click(screen.getByText("select primary clothing"));
+    expect(screen.getByTestId("primary-clothing-ref").textContent).toBe("clothing/maid");
+
+    fireEvent.click(screen.getByText("add clothing"));
+    expect(screen.getByTestId("clothing-count").textContent).toBe("2");
+
+    fireEvent.click(screen.getByText("select compare clothing"));
+    expect(screen.getByTestId("compare-clothing-ref").textContent).toBe("clothing/swimsuit");
+    expect(screen.getByTestId("primary-clothing-ref").textContent).toBe("clothing/maid");
+
+    fireEvent.click(screen.getByText("remove clothing compare"));
+    expect(screen.getByTestId("clothing-count").textContent).toBe("1");
+    expect(screen.getByTestId("primary-clothing-ref").textContent).toBe("clothing/maid");
+  });
+
+  it("initializes random clothing slot with default source value '.'", () => {
+    render(<CustomWorkspaceProvider><Probe /></CustomWorkspaceProvider>);
+    fireEvent.click(screen.getByText("random primary clothing"));
+    expect(screen.getByTestId("clothing-source-kind").textContent).toBe("random");
+    expect(screen.getByTestId("clothing-random-source").textContent).toBe(".");
   });
 });

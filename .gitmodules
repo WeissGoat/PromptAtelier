@@ -1,3 +1,6 @@
 [submodule "vendor/ai-image-gateway"]
 	path = vendor/ai-image-gateway
 	url = git@github.com:WeissGoat/ai-image-gateway.git
+[submodule "tools/publishing_workspace"]
+	path = tools/publishing_workspace
+	url = git@github.com:WeissGoat/publishing-workspace.git

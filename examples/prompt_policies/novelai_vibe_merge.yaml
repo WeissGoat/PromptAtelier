@@ -1,0 +1,20 @@
+schema: tags-machine-core.prompt-policy-template/v1
+name: novelai_vibe_merge
+require: default
+
+# 保留当前 artist 的 Vibe，并把这里的 source 追加到末尾。
+enabled: true
+apply_to:
+  script: true
+  full_prompt: true
+  agent: false
+rules:
+  novelai_vibe:
+    enabled: true
+    options:
+      mode: merge
+      source:
+        type: artist
+        ref: 20260412_2
+      strength: 0.35
+      information_extracted: 0.85

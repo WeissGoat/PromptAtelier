@@ -8,6 +8,7 @@ import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { ActionNodeForm } from "./nodeForms/ActionNodeForm";
 import { ArtistNodeForm } from "./nodeForms/ArtistNodeForm";
 import { CharacterNodeForm } from "./nodeForms/CharacterNodeForm";
+import { ClothingNodeForm } from "./nodeForms/ClothingNodeForm";
 import { NodeSaveDiffDialog } from "./NodeSaveDiffDialog";
 import { RandomNodeEditor } from "./RandomNodeEditor";
 
@@ -36,6 +37,7 @@ function SourceForm({ role, values, onChange }: { role: string; values: Record<s
   if (role === "artist") return <ArtistNodeForm onChange={onChange} values={values} />;
   if (role === "action") return <ActionNodeForm onChange={onChange} values={values} />;
   if (role === "character") return <CharacterNodeForm onChange={onChange} values={values} />;
+  if (role === "clothing") return <ClothingNodeForm onChange={onChange} values={values} />;
   return <div className="empty-workspace">当前节点类型没有可用的 Form，请使用 JSON 查看运行时节点。</div>;
 }
 

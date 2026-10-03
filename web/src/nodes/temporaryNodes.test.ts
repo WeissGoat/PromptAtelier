@@ -56,4 +56,23 @@ describe("temporary node slots", () => {
     expect(serialized?.node).not.toBe(node);
     expect(serialized?.node).toEqual(node);
   });
+
+  it("serializes character clothing overlay reference and node", () => {
+    const node = createTemporaryNode("character", "homura");
+    const clothing = createTemporaryNode("clothing", "uniform");
+    const slot = {
+      role: "character" as const,
+      sourceRef: "F:/design/homura",
+      sourceNode: node,
+      draftNode: node,
+      clothingRef: "F:/design/uniform",
+      clothingNode: clothing,
+    };
+    expect(serializeNodeSlot(slot)).toEqual({
+      role: "character",
+      ref: "F:/design/homura",
+      clothing_ref: "F:/design/uniform",
+      clothing,
+    });
+  });
 });

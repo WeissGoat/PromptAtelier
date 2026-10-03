@@ -30,8 +30,8 @@ describe("random node resolution", () => {
     });
 
     const result = await resolveRandomItems([
-      { value: 1, slots: { artist: null, character: slot, action: null } },
-      { value: 2, slots: { artist: null, character: slot, action: null } },
+      { value: 1, slots: { artist: null, character: slot, action: null, clothing: null } },
+      { value: 2, slots: { artist: null, character: slot, action: null, clothing: null } },
     ]);
 
     expect(sampleNodePool).toHaveBeenCalledOnce();
@@ -54,14 +54,22 @@ describe("random node resolution", () => {
     });
 
     const result = await resolveRandomItems([
-      { value: 1, randomScope: "group-1", slots: { artist: null, character: slot, action: null } },
-      { value: 2, randomScope: "group-1", slots: { artist: null, character: slot, action: null } },
-      { value: 3, randomScope: "group-2", slots: { artist: null, character: slot, action: null } },
+      { value: 1, randomScope: "group-1", slots: { artist: null, character: slot, action: null, clothing: null } },
+      { value: 2, randomScope: "group-1", slots: { artist: null, character: slot, action: null, clothing: null } },
+      { value: 3, randomScope: "group-2", slots: { artist: null, character: slot, action: null, clothing: null } },
     ]);
 
     expect(sampleNodePool).toHaveBeenCalledOnce();
     expect(sampleNodePool).toHaveBeenCalledWith("character", slot.randomSpec, 2);
     expect(result.map((item) => item.slots.character?.draftNode?.id)).toEqual(["A", "A", "B"]);
     expect(result.map((item) => item.randomSelections[0].candidate.ref)).toEqual(["a", "a", "b"]);
+  });
+
+  it("defaults folder source value to '.' for clothing, character, and artist, and 'new' for action", () => {
+    expect(createDefaultNodePoolSpec("clothing").source.value).toBe(".");
+    expect(createDefaultNodePoolSpec("character").source.value).toBe(".");
+    expect(createDefaultNodePoolSpec("artist").source.value).toBe(".");
+    expect(createDefaultNodePoolSpec("action").source.value).toBe("new");
+    expect(createDefaultNodePoolSpec().source.value).toBe("");
   });
 });

@@ -194,7 +194,7 @@ class BatchPlanner:
         context = context or SelectorContext(base_dir=self.base_dir, collections={})
         refs: list[str] = []
         for selector in selectors:
-            refs.extend(str(item) for item in expand_selector(role=role, spec=selector, context=context))
+            refs.extend(expand_selector(role=role, spec=selector, context=context))
         return list(dict.fromkeys(refs))
 
     def _plan_prompt_list(
@@ -266,7 +266,8 @@ class BatchPlanner:
                 artist=artist,
                 background=background,
             )
-            task_id = _task_id(run_id, len(tasks), character, action, artist, background, spec.defaults.composer)
+            clothing = getattr(character, "clothing", None)
+            task_id = _task_id(run_id, len(tasks), character, clothing, action, artist, background, spec.defaults.composer)
             tasks.append(
                 self._task(
                     spec,
@@ -276,7 +277,8 @@ class BatchPlanner:
                     nodes=nodes,
                     artist=artist,
                     source={
-                        "character": character,
+                        "character": str(character) if character else None,
+                        "clothing": clothing,
                         "action": action,
                         "artist": artist,
                         "background": background,
@@ -314,15 +316,16 @@ class BatchPlanner:
                 artist=artist,
                 background=background,
             )
+            clothing = getattr(character, "clothing", None)
             tasks.append(
                 self._task(
                     spec,
-                    task_id=_task_id(run_id, index, character, action, artist, background),
+                    task_id=_task_id(run_id, index, character, clothing, action, artist, background),
                     index=index,
                     composer=spec.defaults.composer,
                     nodes=nodes,
                     artist=artist,
-                    source={"zip_index": index, "run_id": run_id},
+                    source={"zip_index": index, "clothing": clothing, "run_id": run_id},
                     run_dir=run_dir,
                     output_dir=output_dir,
                     run_id=run_id,
@@ -734,7 +737,8 @@ class BatchPlanner:
             for role in ("character", "action", "artist", "background"):
                 value = raw.get(role)
                 if value:
-                    nodes.append(NodeRef(role=role, ref=str(value), index=_role_index(nodes, role)))
+                    clothing_ref = str(raw.get("clothing") or raw.get("clothing_ref")) if role == "character" and (raw.get("clothing") or raw.get("clothing_ref")) else None
+                    nodes.append(NodeRef(role=role, ref=str(value), index=_role_index(nodes, role), clothing_ref=clothing_ref))
             artist = raw.get("artist") or spec.defaults.artist
             task_id = str(raw.get("id") or _task_id(run_id, index, artist, raw.get("prompt"), raw.get("action")))
             tasks.append(
@@ -879,7 +883,15 @@ def _node_refs(
     nodes: list[NodeRef] = []
     for value in characters or ([character] if character else []):
         if value:
-            nodes.append(NodeRef(role="character", ref=value, index=_role_index(nodes, "character")))
+            clothing_ref = getattr(value, "clothing", None)
+            nodes.append(
+                NodeRef(
+                    role="character",
+                    ref=str(value),
+                    index=_role_index(nodes, "character"),
+                    clothing_ref=clothing_ref,
+                )
+            )
     for role, value in (
         ("action", action),
         ("artist", artist),

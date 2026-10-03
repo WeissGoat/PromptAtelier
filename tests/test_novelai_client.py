@@ -66,6 +66,7 @@ class NovelAIClientTest(unittest.TestCase):
         self.assertEqual(payload["model"], "nai-diffusion-4-5-full")
         self.assertEqual(payload["action"], "generate")
         self.assertEqual(payload["parameters"]["director_reference_images"], ["director-x"])
+        self.assertEqual(payload["parameters"]["uc"], "bad anatomy")
 
         images = client.generate_images(request)
         self.assertEqual([image.filename for image in images], ["image_1.png", "image_2.png"])
@@ -126,6 +127,99 @@ class NovelAIClientTest(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("bad request", ctx.exception.response_text)
         self.assertLess(len(ctx.exception.sanitized_payload["parameters"]["reference_image_multiple"][0]), 200)
+
+    def test_normalize_novelai_model(self):
+        from tags_machine_core.clients.novelai import normalize_novelai_model
+
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V4.5 4BDE2A90"),
+            "nai-diffusion-4-5-full",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V4.5 Curated 4BDE2A90"),
+            "nai-diffusion-4-5-curated",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V4.0"),
+            "nai-diffusion-4-full",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion V3"),
+            "nai-diffusion-3",
+        )
+        self.assertEqual(
+            normalize_novelai_model("NovelAI Diffusion Furry V3"),
+            "nai-diffusion-furry-3",
+        )
+        self.assertEqual(
+            normalize_novelai_model("nai-diffusion-4-5-full"),
+            "nai-diffusion-4-5-full",
+        )
+        self.assertEqual(
+            normalize_novelai_model(None),
+            "nai-diffusion-4-5-full",
+        )
+
+    def test_build_payload_normalizes_model_from_png_source(self):
+        client = NovelAIClient(access_token="token")
+        request = RenderRequest(
+            backend="novelai",
+            prompt="test",
+            model="NovelAI Diffusion V4.5 4BDE2A90",
+        )
+        payload = client.build_payload(request)
+        self.assertEqual(payload["model"], "nai-diffusion-4-5-full")
+
+    def test_build_payload_always_includes_negative_prompt_in_uc_and_v4(self):
+        client = NovelAIClient(access_token="token")
+
+        # 1. From request.negative_prompt
+        req1 = RenderRequest(
+            backend="novelai",
+            prompt="1girl",
+            negative_prompt="lowres, bad hands",
+            model="nai-diffusion-4-5-full",
+        )
+        p1 = client.build_payload(req1)
+        self.assertEqual(p1["parameters"]["uc"], "lowres, bad hands")
+        self.assertEqual(
+            p1["parameters"]["v4_negative_prompt"]["caption"]["base_caption"],
+            "lowres, bad hands",
+        )
+
+        # 2. From params uc
+        req2 = RenderRequest(
+            backend="novelai",
+            prompt="1girl",
+            negative_prompt="",
+            model="nai-diffusion-4-5-full",
+            params={"uc": "blurry, error"},
+        )
+        p2 = client.build_payload(req2)
+        self.assertEqual(p2["parameters"]["uc"], "blurry, error")
+        self.assertEqual(
+            p2["parameters"]["v4_negative_prompt"]["caption"]["base_caption"],
+            "blurry, error",
+        )
+
+        # 3. From params v4_negative_prompt
+        req3 = RenderRequest(
+            backend="novelai",
+            prompt="1girl",
+            negative_prompt="",
+            model="nai-diffusion-4-5-full",
+            params={
+                "v4_negative_prompt": {
+                    "caption": {"base_caption": "jpeg artifacts"},
+                }
+            },
+        )
+        p3 = client.build_payload(req3)
+        self.assertEqual(p3["parameters"]["uc"], "jpeg artifacts")
+        self.assertEqual(
+            p3["parameters"]["v4_negative_prompt"]["caption"]["base_caption"],
+            "jpeg artifacts",
+        )
 
 
 if __name__ == "__main__":

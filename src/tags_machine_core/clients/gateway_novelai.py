@@ -21,6 +21,20 @@ from ai_image_gateway.providers.novelai import NovelAIRawClient
 from tags_machine_core.clients.novelai import NovelAIClient, NovelAIImage
 from tags_machine_core.contracts import RenderRequest
 
+import os
+
+
+def sanitize_proxy_env() -> None:
+    """Removes IPv6 entries (such as ::1) from NO_PROXY/no_proxy to avoid httpx InvalidURL crashes."""
+    for key in ("NO_PROXY", "no_proxy"):
+        val = os.environ.get(key)
+        if val and "::" in val:
+            cleaned = [p.strip() for p in val.split(",") if "::" not in p]
+            os.environ[key] = ",".join(cleaned)
+
+
+sanitize_proxy_env()
+
 
 @dataclass
 class GatewayNovelAIRawClient:

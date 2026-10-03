@@ -138,3 +138,20 @@ class WebNodePoolTest(TestCase):
 
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["items"], [{"name": "foot", "item_count": 1}])
+
+    def test_scan_clothing_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clothings = root / "design" / "服装"
+            self._node(clothings, "school_uniform")
+            self._node(clothings, "swimsuit")
+            collections = root / "collections.yaml"
+            collections.write_text("{}", encoding="utf-8")
+            client = self._client(root, collections)
+
+            response = client.post(
+                "/api/node-pools/scan",
+                json={"role": "clothing", "spec": {"source": {"type": "folder", "value": "."}}},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["total"], 2)

@@ -62,8 +62,19 @@ export function normalizePromptBehavior(value: unknown): PromptBehaviorParams {
     for (const [ruleId, rawRule] of Object.entries(value.policyRules)) {
       if (!isObject(rawRule)) continue;
       if (rawRule.state !== "inherit" && rawRule.state !== "enabled" && rawRule.state !== "disabled") continue;
+      const targetRuleId = ruleId === "novelai_vibe_artist" ? "novelai_vibe" : ruleId;
       const options = isObject(rawRule.options) ? structuredClone(rawRule.options) : undefined;
-      policyRules[ruleId] = options ? { state: rawRule.state, options } : { state: rawRule.state };
+      if (targetRuleId === "novelai_vibe" && options) {
+        const rawSource = isObject(options.source) ? (options.source as Record<string, unknown>) : null;
+        const artistRef = typeof options.artist_ref === "string" && options.artist_ref.trim()
+          ? options.artist_ref.trim()
+          : (rawSource && typeof rawSource.ref === "string" ? String(rawSource.ref).trim() : "");
+        if (artistRef) {
+          options.artist_ref = artistRef;
+          options.source = { type: "artist", ref: artistRef };
+        }
+      }
+      policyRules[targetRuleId] = options ? { state: rawRule.state, options } : { state: rawRule.state };
     }
   }
 

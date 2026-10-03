@@ -11,6 +11,7 @@ NodeKind = Literal[
     "action",
     "artist",
     "background",
+    "clothing",
     "vibe",
     "story",
     "unknown",

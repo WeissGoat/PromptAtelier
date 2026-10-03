@@ -2,19 +2,19 @@ import { Plus } from "lucide-react";
 
 import type { NodeReadResponse } from "../api/types";
 import { nodeSlotStatus } from "../nodes/temporaryNodes";
-import type { NodeRole } from "../nodes/types";
+import type { GroupRole } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import type { NodeVariantSlot } from "../workspace/types";
 import { NodeSlot } from "./NodeSlot";
 
-const labels: Record<NodeRole, string> = { artist: "Artist", character: "Character", action: "Action" };
+const labels: Record<GroupRole, string> = { artist: "Artist", character: "Character", action: "Action" };
 
 function isDirty(slot: NodeVariantSlot): boolean {
   const status = nodeSlotStatus(slot);
   return status === "modified" || status === "temporary";
 }
 
-export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot?: (slotId: string, response?: NodeReadResponse) => void }) {
+export function NodeRoleGroup({ role, onEditSlot }: { role: GroupRole; onEditSlot?: (slotId: string, response?: NodeReadResponse) => void }) {
   const workspace = useCustomWorkspace();
   const group = workspace.state.groups[role];
   const label = labels[role];
@@ -35,6 +35,16 @@ export function NodeRoleGroup({ role, onEditSlot }: { role: NodeRole; onEditSlot
         } : undefined}
         onRestore={() => workspace.restoreSlot(slot.slotId)}
         onSelect={(response) => workspace.selectNode(slot.slotId, response.ref, response.node, response.editor)}
+        onSelectClothing={(clothingRef, clothingNode) => workspace.setClothingForSlot(slot.slotId, clothingRef, clothingNode)}
+        onAddClothingCompare={role === "character" ? () => workspace.addClothingCompare(slot.slotId) : undefined}
+        onRemoveClothingCompare={role === "character" ? (clothingSlotId) => workspace.removeClothingCompare(slot.slotId, clothingSlotId) : undefined}
+        onSelectClothingSlot={role === "character" ? (clothingSlotId, response) => workspace.selectNode(clothingSlotId, response.ref, response.node, response.editor) : undefined}
+        onCreateBlankClothing={role === "character" ? (clothingSlotId) => workspace.createBlank(clothingSlotId) : undefined}
+        onCreateRandomClothing={role === "character" ? (clothingSlotId) => workspace.createRandom(clothingSlotId) : undefined}
+        onRestoreClothing={role === "character" ? (clothingSlotId) => workspace.restoreSlot(clothingSlotId) : undefined}
+        onClearClothing={role === "character" ? (clothingSlotId) => workspace.clearSlot(clothingSlotId) : undefined}
+        onEditClothing={role === "character" ? (clothingSlotId, response) => onEditSlot ? onEditSlot(clothingSlotId, response) : workspace.openEditor(clothingSlotId, response) : undefined}
+        onEditRandomClothing={role === "character" ? (clothingSlotId) => workspace.openRandomEditor(clothingSlotId) : undefined}
         placeholder={`搜索 ${label} 节点`}
         slot={slot}
       />

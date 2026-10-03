@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from tags_machine_core.clients import sanitize_proxy_env
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.execution import execute_render_request
@@ -16,7 +17,7 @@ from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
-from .routes import batch, compose, generate, health, jobs, node_pools, nodes, results
+from .routes import batch, compare, compose, generate, health, image_meta, jobs, node_pools, nodes, results
 from .services.batch_workspace import BatchWorkspace
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
@@ -51,6 +52,7 @@ def create_app(
     generation_executor: GenerationExecutor | None = None,
     config_path: str | Path | None = None,
 ) -> FastAPI:
+    sanitize_proxy_env()
     resolved_config_path = resolve_web_config_path(config_path)
     config = load_config(resolved_config_path)
     app = FastAPI(title="PromptAtelier Web Console", version="0.1.0")
@@ -64,16 +66,33 @@ def create_app(
         base_dir=Path.cwd(),
     )
     app.state.node_save_previews = NodeSavePreviewStore()
-    app.state.result_index = result_index or ResultIndex(
-        roots=[config.runtime.output_dir, "outputs", "examples/batches/outputs"],
-    )
+    roots: list[str | Path] = [
+        config.runtime.output_dir,
+        "outputs",
+        Path(config.runtime.output_dir) / "compares",
+        Path("outputs") / "compares",
+        "output",
+        Path("output") / ".template_cache",
+        Path("outputs") / ".template_cache",
+        "examples/batches/outputs",
+    ]
+    if hasattr(config, "legacy"):
+        if getattr(config.legacy, "design_root", None):
+            roots.append(config.legacy.design_root)
+        if getattr(config.legacy, "tags_machine_root", None):
+            roots.append(config.legacy.tags_machine_root)
+    app.state.result_index = result_index or ResultIndex(roots=roots)
     app.state.batch_workspace = batch_workspace or BatchWorkspace(base_dir=Path.cwd())
     policy_provider = build_prompt_policy_provider(
         config,
         config_path=resolved_config_path,
     )
     app.state.generation_api = GenerationJsonApi(
-        service=GenerationService(policy_provider=policy_provider),
+        service=GenerationService(
+            policy_provider=policy_provider,
+            design_root=config.legacy.design_root,
+            policy_relative_to=resolved_config_path.resolve().parent,
+        ),
         artist_loader=NovelAIArtistRepository(config.legacy.design_root).load_node,
         generation_executor=generation_executor or _default_generation_executor(config),
     )
@@ -94,6 +113,17 @@ def create_app(
     app.include_router(generate.router, prefix="/api", tags=["generate"])
     app.include_router(results.router, prefix="/api", tags=["results"])
     app.include_router(batch.router, prefix="/api", tags=["batch"])
+    app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
+    app.include_router(compare.router, prefix="/api", tags=["compare"])
+
+    @app.get("/", include_in_schema=False)
+    def root():
+        return {
+            "message": "PromptAtelier Backend API is running.",
+            "frontend_ui": "http://127.0.0.1:53173",
+            "api_docs": "/docs",
+        }
+
     return app
 
 

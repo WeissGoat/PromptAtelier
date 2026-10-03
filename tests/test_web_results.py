@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -233,6 +234,42 @@ class WebResultsTest(TestCase):
             ["explorer.exe", "/select,", str(image.resolve())],
             close_fds=True,
         )
+
+    @patch("tags_machine_core.web.routes.results.subprocess.Popen")
+    @patch("tags_machine_core.web.routes.results.sys.platform", "win32")
+    def test_open_image_folder_selects_direct_file_outside_roots(self, popen):
+        root = self.tmp_path / "outputs"
+        outside = self.tmp_path / "custom_dir" / "outside.png"
+        self._write_png(outside, seed=444)
+        client = TestClient(create_app(result_index=ResultIndex(roots=[root])))
+
+        response = client.post(
+            "/api/results/open-image-folder",
+            json={"path": str(outside)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["opened"])
+        popen.assert_called_once_with(
+            ["explorer.exe", "/select,", str(outside.resolve())],
+            close_fds=True,
+        )
+
+    def test_default_app_serves_image_from_template_cache(self):
+        output_cache = Path("output") / ".template_cache"
+        output_cache.mkdir(parents=True, exist_ok=True)
+        cached_img = output_cache / "test_cache_img.png"
+        self._write_png(cached_img, seed=777)
+        try:
+            client = TestClient(create_app())
+            response = client.get("/api/results/image", params={"path": str(cached_img.resolve())})
+            self.assertEqual(response.status_code, 200)
+            meta_res = client.get("/api/results/image-metadata", params={"path": str(cached_img.resolve())})
+            self.assertEqual(meta_res.status_code, 200)
+            self.assertEqual(meta_res.json()["filename"], "test_cache_img.png")
+        finally:
+            if cached_img.exists():
+                cached_img.unlink()
 
     def setUp(self):
         import tempfile

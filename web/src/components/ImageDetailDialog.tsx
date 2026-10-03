@@ -1,5 +1,15 @@
-import { ChevronLeft, ChevronRight, FolderOpen, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeftRight,
+  ChevronLeft,
+  ChevronRight,
+  Columns,
+  Eye,
+  FolderOpen,
+  MoveHorizontal,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type {
@@ -8,8 +18,17 @@ import type {
   ImageParameterDiffResponse,
 } from "../api/types";
 
+export type ImageDetailItem = {
+  path: string;
+  label?: string;
+  name?: string;
+  badge?: string;
+  isControlGroup?: boolean;
+};
+
 type ImageDetailDialogProps = {
-  paths: string[];
+  paths?: string[];
+  items?: ImageDetailItem[];
   initialIndex: number;
   onClose(): void;
 };
@@ -35,8 +54,20 @@ function diffCategory(item: ImageParameterDiffItem): DiffCategory {
 }
 
 function diffLabel(path: string): string {
-  if (path === "$.input" || path === "$.parameters.prompt") return "Prompt";
-  if (path === "$.parameters.uc" || path === "$.parameters.negative_prompt") return "Negative";
+  if (
+    path === "$.input" ||
+    path === "$.parameters.prompt" ||
+    path.startsWith("$.parameters.v4_prompt.caption.base_caption")
+  ) {
+    return "Prompt";
+  }
+  if (
+    path === "$.parameters.uc" ||
+    path === "$.parameters.negative_prompt" ||
+    path.startsWith("$.parameters.v4_negative_prompt.caption.base_caption")
+  ) {
+    return "Negative";
+  }
   if (path === "$.model" || path === "$.parameters.model") return "Model";
   return path
     .replace(/^\$\.parameters\./, "")
@@ -139,7 +170,17 @@ function PromptSummary({ summary }: { summary: PromptDiffSummary }) {
   );
 }
 
-function DiffGroup({ category, items }: { category: DiffCategory; items: ImageParameterDiffItem[] }) {
+function DiffGroup({
+  category,
+  items,
+  referenceLabel,
+  currentLabel,
+}: {
+  category: DiffCategory;
+  items: ImageParameterDiffItem[];
+  referenceLabel?: string;
+  currentLabel?: string;
+}) {
   if (!items.length) return null;
   const labels: Record<DiffCategory, string> = { changed: "变更", added: "新增", removed: "移除" };
   return (
@@ -153,8 +194,18 @@ function DiffGroup({ category, items }: { category: DiffCategory; items: ImagePa
               <strong>{diffLabel(item.path)}</strong>
               {promptSummary ? <PromptSummary summary={promptSummary} /> : (
                 <div className="parameter-diff-values">
-                  {category !== "added" ? <div className="diff-before"><span>上一张</span><pre>{summarizeValue(item.left)}</pre></div> : null}
-                  {category !== "removed" ? <div className="diff-after"><span>当前</span><pre>{summarizeValue(item.right)}</pre></div> : null}
+                  {category !== "added" ? (
+                    <div className="diff-before">
+                      <span>{referenceLabel ? `基准 (${referenceLabel})` : "上一张"}</span>
+                      <pre>{summarizeValue(item.left)}</pre>
+                    </div>
+                  ) : null}
+                  {category !== "removed" ? (
+                    <div className="diff-after">
+                      <span>{currentLabel ? `当前 (${currentLabel})` : "当前"}</span>
+                      <pre>{summarizeValue(item.right)}</pre>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </article>
@@ -165,9 +216,39 @@ function DiffGroup({ category, items }: { category: DiffCategory; items: ImagePa
   );
 }
 
-export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailDialogProps) {
-  const safeInitialIndex = Math.min(Math.max(initialIndex, 0), Math.max(paths.length - 1, 0));
+export function ImageDetailDialog({ paths, items, initialIndex, onClose }: ImageDetailDialogProps) {
+  const resolvedItems: ImageDetailItem[] = useMemo(() => {
+    if (items && items.length > 0) return items;
+    if (paths && paths.length > 0) {
+      return paths.map((p, idx) => ({
+        path: p,
+        label: `第 ${idx + 1} 张`,
+        name: `第 ${idx + 1} 张`,
+      }));
+    }
+    return [];
+  }, [items, paths]);
+
+  const safeInitialIndex = Math.min(Math.max(initialIndex, 0), Math.max(resolvedItems.length - 1, 0));
   const [currentIndex, setCurrentIndex] = useState(safeInitialIndex);
+
+  // Initialize reference index: if safeInitialIndex > 0, default to control group or 0; if at 0, default to null
+  const [referenceIndex, setReferenceIndex] = useState<number | null>(() => {
+    if (resolvedItems.length <= 1) return null;
+    if (safeInitialIndex > 0) {
+      const ctrlIdx = resolvedItems.findIndex((item) => item.isControlGroup);
+      if (ctrlIdx >= 0 && ctrlIdx !== safeInitialIndex) return ctrlIdx;
+      return 0;
+    }
+    return null;
+  });
+
+  const [compareMode, setCompareMode] = useState<"single" | "split" | "flicker">("single");
+  const [sliderPos, setSliderPos] = useState(50);
+  const [isDraggingSlider, setIsDraggingSlider] = useState(false);
+  const [flickerTarget, setFlickerTarget] = useState<"current" | "reference">("current");
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
   const [metadata, setMetadata] = useState<ImageMetadataResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -177,18 +258,45 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
   const [diffExpanded, setDiffExpanded] = useState(false);
   const [folderStatus, setFolderStatus] = useState("");
   const [openingFolder, setOpeningFolder] = useState(false);
-  const path = paths[currentIndex] ?? "";
-  const previousPath = currentIndex > 0 ? paths[currentIndex - 1] : null;
-  const hasPrevious = currentIndex > 0;
-  const hasNext = currentIndex < paths.length - 1;
 
+  const currentItem = resolvedItems[currentIndex];
+  const currentPath = currentItem?.path ?? "";
+
+  const referenceItem =
+    referenceIndex !== null &&
+    referenceIndex >= 0 &&
+    referenceIndex < resolvedItems.length &&
+    referenceIndex !== currentIndex
+      ? resolvedItems[referenceIndex]
+      : null;
+  const referencePath = referenceItem?.path ?? null;
+
+  const hasPrevious = currentIndex > 0;
+  const hasNext = currentIndex < resolvedItems.length - 1;
+
+  function handleSelectCurrent(newIndex: number) {
+    setCurrentIndex(newIndex);
+    if (referenceIndex === null && newIndex > 0) {
+      const ctrlIdx = resolvedItems.findIndex((item) => item.isControlGroup);
+      setReferenceIndex(ctrlIdx >= 0 && ctrlIdx !== newIndex ? ctrlIdx : 0);
+    } else if (referenceIndex === newIndex) {
+      // If user chooses current to be the same as reference, pick an alternative reference
+      setReferenceIndex(newIndex === 0 ? (resolvedItems.length > 1 ? 1 : null) : 0);
+    }
+  }
+
+  // Fetch metadata for currently viewed image
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError("");
     setMetadata(null);
     setFolderStatus("");
-    void apiGet<ImageMetadataResponse>(`/results/image-metadata?${new URLSearchParams({ path })}`)
+    if (!currentPath) {
+      setLoading(false);
+      return () => { active = false; };
+    }
+    void apiGet<ImageMetadataResponse>(`/results/image-metadata?${new URLSearchParams({ path: currentPath })}`)
       .then((result) => {
         if (active) setMetadata(result);
       })
@@ -199,19 +307,20 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [path]);
+  }, [currentPath]);
 
+  // Fetch parameter diff against reference
   useEffect(() => {
     let active = true;
     setDiffExpanded(false);
     setDiff(null);
     setDiffError("");
-    if (!previousPath) {
+    if (!referencePath || !currentPath) {
       setDiffLoading(false);
       return () => { active = false; };
     }
     setDiffLoading(true);
-    const search = new URLSearchParams({ previous_path: previousPath, current_path: path });
+    const search = new URLSearchParams({ previous_path: referencePath, current_path: currentPath });
     void apiGet<ImageParameterDiffResponse>(`/results/image-parameter-diff?${search}`)
       .then((result) => {
         if (active) setDiff(result);
@@ -223,8 +332,33 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
         if (active) setDiffLoading(false);
       });
     return () => { active = false; };
-  }, [path, previousPath]);
+  }, [currentPath, referencePath]);
 
+  // Split slider mouse tracking
+  useEffect(() => {
+    if (!isDraggingSlider) return;
+
+    function handleMouseMove(e: globalThis.MouseEvent) {
+      if (!stageRef.current) return;
+      const rect = stageRef.current.getBoundingClientRect();
+      const rawX = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(100, (rawX / rect.width) * 100));
+      setSliderPos(pct);
+    }
+
+    function handleMouseUp() {
+      setIsDraggingSlider(false);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingSlider]);
+
+  // Keyboard navigation
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -233,12 +367,21 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
       }
       const target = event.target;
       if (target instanceof Element && target.matches("input, textarea, select")) return;
-      if (event.key === "ArrowLeft") setCurrentIndex((index) => Math.max(0, index - 1));
-      if (event.key === "ArrowRight") setCurrentIndex((index) => Math.min(paths.length - 1, index + 1));
+
+      if (compareMode === "flicker") {
+        if (event.key === " " || event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          setFlickerTarget((prev) => (prev === "current" ? "reference" : "current"));
+          return;
+        }
+      }
+
+      if (event.key === "ArrowLeft") handleSelectCurrent(Math.max(0, currentIndex - 1));
+      if (event.key === "ArrowRight") handleSelectCurrent(Math.min(resolvedItems.length - 1, currentIndex + 1));
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, paths.length]);
+  }, [compareMode, currentIndex, onClose, resolvedItems.length, referenceIndex]);
 
   const commonParameters = useMemo(() => {
     const rows: Array<[string, unknown]> = [
@@ -262,7 +405,7 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
     setOpeningFolder(true);
     setFolderStatus("");
     try {
-      await apiPost("/results/open-image-folder", { path });
+      await apiPost("/results/open-image-folder", { path: currentPath });
       setFolderStatus("已在资源管理器中定位图片");
     } catch (requestError) {
       setFolderStatus(errorMessage(requestError));
@@ -283,20 +426,251 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
         <header className="image-detail-header">
           <div>
             <div className="image-detail-title-row">
-              <h2>{metadata?.filename ?? "图片详情"}</h2>
-              <span>{currentIndex + 1} / {paths.length}</span>
+              <h2>{metadata?.filename ?? currentItem?.name ?? currentItem?.label ?? "图片详情"}</h2>
+              {currentItem?.label && currentItem.label !== metadata?.filename ? (
+                <span className="image-detail-variant-name">{currentItem.label}</span>
+              ) : null}
+              {currentItem?.badge ? (
+                <span className="image-detail-badge">{currentItem.badge}</span>
+              ) : null}
+              <span>{currentIndex + 1} / {resolvedItems.length}</span>
             </div>
-            <small>{metadata?.path ?? path}</small>
+            <small>{metadata?.path ?? currentPath}</small>
           </div>
           <button aria-label="关闭图片详情" className="icon-button" onClick={onClose} title="关闭" type="button"><X size={18} /></button>
         </header>
 
         <div className="image-detail-content">
-          <div className="image-detail-canvas">
-            <button aria-label="上一张图片" className="image-nav-button previous" disabled={!hasPrevious} onClick={() => setCurrentIndex((index) => Math.max(0, index - 1))} title="上一张" type="button"><ChevronLeft size={24} /></button>
-            <img alt={metadata?.filename ?? "生成大图"} src={apiUrl(`/results/image?path=${encodeURIComponent(path)}`)} />
-            <button aria-label="下一张图片" className="image-nav-button next" disabled={!hasNext} onClick={() => setCurrentIndex((index) => Math.min(paths.length - 1, index + 1))} title="下一张" type="button"><ChevronRight size={24} /></button>
+          <div className="image-detail-left-pane">
+            {/* Top comparison mode and reference bar */}
+            <div className="image-detail-mode-bar" role="toolbar">
+              <div className="mode-pill-group">
+                <button
+                  className={`mode-pill-btn ${compareMode === "single" ? "active" : ""}`}
+                  onClick={() => setCompareMode("single")}
+                  type="button"
+                >
+                  <Eye size={13} /> 单图查看
+                </button>
+                <button
+                  className={`mode-pill-btn ${compareMode === "split" ? "active" : ""}`}
+                  disabled={!referencePath}
+                  onClick={() => setCompareMode("split")}
+                  title={!referencePath ? "请先选择有效的对比基准" : "左右卷帘滑动对比"}
+                  type="button"
+                >
+                  <Columns size={13} /> 卷帘对比
+                </button>
+                <button
+                  className={`mode-pill-btn ${compareMode === "flicker" ? "active" : ""}`}
+                  disabled={!referencePath}
+                  onClick={() => setCompareMode("flicker")}
+                  title={!referencePath ? "请先选择有效的对比基准" : "按空格键或点击快速闪烁比对"}
+                  type="button"
+                >
+                  <Sparkles size={13} /> 瞬切闪烁
+                </button>
+              </div>
+
+              {resolvedItems.length > 1 ? (
+                <div className="reference-select-group">
+                  <label htmlFor="ref-select">对比基准:</label>
+                  <select
+                    aria-label="选择对比基准"
+                    className="reference-select"
+                    id="ref-select"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setReferenceIndex(val === "" ? null : Number(val));
+                    }}
+                    value={referenceIndex ?? ""}
+                  >
+                    <option value="" disabled>-- 请选择基准 --</option>
+                    {resolvedItems.map((item, idx) => (
+                      <option disabled={idx === currentIndex} key={`${item.path}-${idx}`} value={idx}>
+                        {idx === currentIndex
+                          ? `${item.label || item.name || `第 ${idx + 1} 张`} (当前查看中)`
+                          : `${item.label || item.name || `第 ${idx + 1} 张`}${item.badge ? ` [${item.badge}]` : ""}`}
+                      </option>
+                    ))}
+                  </select>
+
+                  {referenceIndex !== null && referenceIndex !== currentIndex ? (
+                    <button
+                      className="reference-swap-btn"
+                      onClick={() => {
+                        const oldRef = referenceIndex;
+                        setReferenceIndex(currentIndex);
+                        setCurrentIndex(oldRef);
+                      }}
+                      title="对调当前图与对比基准图"
+                      type="button"
+                    >
+                      <ArrowLeftRight size={12} /> 对调
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Canvas Area */}
+            <div className={`image-detail-canvas mode-${compareMode}`}>
+              {compareMode === "single" ? (
+                <>
+                  <button
+                    aria-label="上一张图片"
+                    className="image-nav-button previous"
+                    disabled={!hasPrevious}
+                    onClick={() => handleSelectCurrent(Math.max(0, currentIndex - 1))}
+                    title="上一张 (← 键)"
+                    type="button"
+                  >
+                    <ChevronLeft size={24} />
+                  </button>
+                  <img
+                    alt={metadata?.filename ?? currentItem?.label ?? "生成大图"}
+                    src={apiUrl(`/results/image?path=${encodeURIComponent(currentPath)}`)}
+                  />
+                  <button
+                    aria-label="下一张图片"
+                    className="image-nav-button next"
+                    disabled={!hasNext}
+                    onClick={() => handleSelectCurrent(Math.min(resolvedItems.length - 1, currentIndex + 1))}
+                    title="下一张 (→ 键)"
+                    type="button"
+                  >
+                    <ChevronRight size={24} />
+                  </button>
+                </>
+              ) : null}
+
+              {compareMode === "split" && referencePath ? (
+                <div
+                  className="split-slider-stage"
+                  onMouseDown={(e) => {
+                    if (e.target === e.currentTarget) {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                      setSliderPos(pct);
+                    }
+                  }}
+                  ref={stageRef}
+                >
+                  <img
+                    alt={referenceItem?.label ?? "基准图"}
+                    className="split-stage-img left-img"
+                    draggable={false}
+                    src={apiUrl(`/results/image?path=${encodeURIComponent(referencePath)}`)}
+                  />
+                  <span className="image-layer-label left">
+                    基准: {referenceItem?.label ?? "基准图"}
+                  </span>
+
+                  <div className="split-overlay-container" style={{ clipPath: `inset(0 0 0 ${sliderPos}%)` }}>
+                    <img
+                      alt={currentItem?.label ?? "当前图"}
+                      className="split-stage-img right-img"
+                      draggable={false}
+                      src={apiUrl(`/results/image?path=${encodeURIComponent(currentPath)}`)}
+                    />
+                    <span className="image-layer-label right">
+                      当前: {currentItem?.label ?? "当前图"}
+                    </span>
+                  </div>
+
+                  <div
+                    className="split-slider-line"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setIsDraggingSlider(true);
+                    }}
+                    style={{ left: `${sliderPos}%` }}
+                  >
+                    <div className="split-slider-handle" title="按住左右拖拽对比">
+                      <MoveHorizontal size={14} />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {compareMode === "flicker" && referencePath ? (
+                <div
+                  className="flicker-stage"
+                  onClick={() => setFlickerTarget((prev) => (prev === "current" ? "reference" : "current"))}
+                  title="点击或按空格键切换当前图与基准图"
+                >
+                  <img
+                    alt={flickerTarget === "current" ? (currentItem?.label ?? "当前图") : (referenceItem?.label ?? "基准图")}
+                    className="flicker-image"
+                    draggable={false}
+                    src={apiUrl(`/results/image?path=${encodeURIComponent(flickerTarget === "current" ? currentPath : referencePath)}`)}
+                  />
+                  <div className="flicker-badge">
+                    <span>
+                      正在显示：<strong>{flickerTarget === "current" ? `当前图 · ${currentItem?.label ?? ""}` : `基准图 · ${referenceItem?.label ?? ""}`}</strong>
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFlickerTarget((prev) => (prev === "current" ? "reference" : "current"));
+                      }}
+                      type="button"
+                    >
+                      切换 (空格键)
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Batch Filmstrip Navigation */}
+            {resolvedItems.length > 1 ? (
+              <div aria-label="同批图片缩略图列表" className="image-detail-filmstrip" role="region">
+                {resolvedItems.map((item, idx) => {
+                  const isCurrent = idx === currentIndex;
+                  const isRef = idx === referenceIndex;
+                  return (
+                    <div
+                      className={`filmstrip-card ${isCurrent ? "active" : ""} ${isRef ? "is-reference" : ""}`}
+                      key={`${item.path}-${idx}`}
+                      onClick={() => handleSelectCurrent(idx)}
+                      role="button"
+                      tabIndex={0}
+                      title={`${item.label || item.name || `第 ${idx + 1} 张`} (点击切换查看)`}
+                    >
+                      <img
+                        alt={item.label || `图片 ${idx + 1}`}
+                        src={apiUrl(`/results/image?path=${encodeURIComponent(item.path)}`)}
+                      />
+                      <div className="filmstrip-info">
+                        {item.label || item.name || `第 ${idx + 1} 张`}
+                      </div>
+                      {isCurrent ? <span className="filmstrip-pill current">当前</span> : null}
+                      {isRef ? <span className="filmstrip-pill reference">基准</span> : null}
+                      {item.badge && !isRef && !isCurrent ? (
+                        <span className="filmstrip-pill badge">{item.badge}</span>
+                      ) : null}
+                      {!isRef && idx !== currentIndex ? (
+                        <button
+                          className="set-ref-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReferenceIndex(idx);
+                          }}
+                          title="设为此图为对比基准"
+                          type="button"
+                        >
+                          设基准
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
+
           <aside className="image-metadata-panel">
             {loading ? <div className="image-metadata-message">正在从 PNG 读取元数据...</div> : null}
             {error ? <div className="alert error-alert" role="alert">{error}</div> : null}
@@ -322,29 +696,67 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
                   <summary>全部 PNG Text</summary>
                   <pre className="json-preview">{JSON.stringify(metadata.png_text, null, 2)}</pre>
                 </details>
+
                 <section className={`parameter-diff-panel ${diffExpanded ? "expanded" : ""}`}>
                   <button aria-expanded={diffExpanded} className="parameter-diff-title" onClick={() => {
                     setDiffExpanded((expanded) => !expanded);
                   }} type="button">
-                    <div><h3>参数 Diff</h3><small>{hasPrevious ? `与第 ${currentIndex} 张比较` : "上一张作为比较基准"}</small></div>
-                    {hasPrevious && !diffLoading && !diffError ? <span className={visibleDiffCount ? "changed" : "matched"}>{visibleDiffCount} 项</span> : null}
+                    <div>
+                      <h3>参数 Diff</h3>
+                      <small>
+                        {referenceItem
+                          ? `与【${referenceItem.label || referenceItem.name || `第 ${referenceIndex! + 1} 张`}】比较`
+                          : "选择对比基准以查看差异"}
+                      </small>
+                    </div>
+                    {referencePath && !diffLoading && !diffError ? <span className={visibleDiffCount ? "changed" : "matched"}>{visibleDiffCount} 项</span> : null}
                   </button>
-                  {diffExpanded ? <div className="parameter-diff-summary-content">
-                    {!hasPrevious ? <div className="parameter-diff-empty">这是序列中的第一张，没有上一张可比较。</div> : null}
-                    {diffLoading ? <div className="parameter-diff-empty">正在读取两张 PNG 的参数差异...</div> : null}
-                    {diffError ? <div className="alert error-alert">{diffError}</div> : null}
-                    {diff && !visibleDiffCount ? <div className="parameter-diff-match">生成参数一致</div> : null}
-                    {diff ? (
-                      <>
-                        <div className="parameter-diff-overview">
-                          <DiffGroup category="changed" items={groupedDiffs.changed} />
-                          <DiffGroup category="added" items={groupedDiffs.added} />
-                          <DiffGroup category="removed" items={groupedDiffs.removed} />
+                  {diffExpanded ? (
+                    <div className="parameter-diff-summary-content">
+                      {resolvedItems.length > 1 ? (
+                        <div className="parameter-diff-reference-bar">
+                          <span>对比基准：</span>
+                          <select
+                            aria-label="参数Diff对比基准"
+                            className="parameter-diff-ref-select"
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setReferenceIndex(val === "" ? null : Number(val));
+                            }}
+                            value={referenceIndex ?? ""}
+                          >
+                            <option value="" disabled>-- 请选择基准 --</option>
+                            {resolvedItems.map((item, idx) => (
+                              <option disabled={idx === currentIndex} key={`diff-ref-${item.path}-${idx}`} value={idx}>
+                                {idx === currentIndex
+                                  ? `${item.label || item.name} (当前正在查看)`
+                                  : `${item.label || item.name}${item.badge ? ` [${item.badge}]` : ""}`}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <details className="raw-parameter-diff"><summary>完整参数 Diff</summary><pre className="json-preview">{JSON.stringify(diff.diffs, null, 2)}</pre></details>
-                      </>
-                    ) : null}
-                  </div> : null}
+                      ) : null}
+
+                      {!referencePath ? (
+                        <div className="parameter-diff-empty">
+                          {resolvedItems.length <= 1 ? "这是序列中的第一张，没有上一张可比较。" : "请在上方选择对比基准以查看参数差异。"}
+                        </div>
+                      ) : null}
+                      {diffLoading ? <div className="parameter-diff-empty">正在读取两张 PNG 的参数差异...</div> : null}
+                      {diffError ? <div className="alert error-alert">{diffError}</div> : null}
+                      {diff && !visibleDiffCount ? <div className="parameter-diff-match">生成参数一致</div> : null}
+                      {diff ? (
+                        <>
+                          <div className="parameter-diff-overview">
+                            <DiffGroup category="changed" currentLabel={currentItem?.label} items={groupedDiffs.changed} referenceLabel={referenceItem?.label} />
+                            <DiffGroup category="added" currentLabel={currentItem?.label} items={groupedDiffs.added} referenceLabel={referenceItem?.label} />
+                            <DiffGroup category="removed" currentLabel={currentItem?.label} items={groupedDiffs.removed} referenceLabel={referenceItem?.label} />
+                          </div>
+                          <details className="raw-parameter-diff"><summary>完整参数 Diff</summary><pre className="json-preview">{JSON.stringify(diff.diffs, null, 2)}</pre></details>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </section>
               </>
             ) : null}
@@ -359,3 +771,4 @@ export function ImageDetailDialog({ paths, initialIndex, onClose }: ImageDetailD
     </div>
   );
 }
+

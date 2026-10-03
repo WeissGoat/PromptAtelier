@@ -171,6 +171,86 @@ class PromptPolicyPipelineTest(unittest.TestCase):
             ["school_uniform", "pleated_skirt"],
         )
 
+    def test_clothing_policy_skips_when_character_has_clothing_overlay(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi homura"],
+                "upper_clothes": ["sailor shirt"],
+                "lower_clothes": ["pleated skirt"],
+            },
+            composition={"clothing_overlay_sections": ["upper_clothes", "lower_clothes"]},
+        )
+        action = NodeDocument(
+            kind="action",
+            id="kimono_action",
+            tags={"action": ["kimono, wide sleeves, standing"]},
+            character_scope="full_body",
+            clothing={
+                "state": "specific_outfit",
+                "action_outfit": True,
+            },
+        )
+
+        bundle = GenerationService().compose_nodes(
+            character=character,
+            action=action,
+            prompt_policy={
+                "enabled": True,
+                "profile": "strict",
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertIn("sailor_shirt", bundle.prompt.positive)
+        self.assertIn("pleated_skirt", bundle.prompt.positive)
+        trace = bundle.meta.extra["policy_trace"]
+        clothing_trace = [item for item in trace if item["rule"].startswith("clothing_policy")]
+        self.assertEqual(len(clothing_trace), 1)
+        self.assertEqual(clothing_trace[0]["action"], "skip")
+        self.assertEqual(clothing_trace[0]["reason"], "character_has_clothing_overlay")
+
+    def test_clothing_policy_overlay_skip_disabled_via_options(self):
+        character = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={
+                "character": ["akemi homura"],
+                "upper_clothes": ["sailor shirt"],
+                "lower_clothes": ["pleated skirt"],
+            },
+            composition={"clothing_overlay_sections": ["upper_clothes", "lower_clothes"]},
+        )
+        action = NodeDocument(
+            kind="action",
+            id="kimono_action",
+            tags={"action": ["kimono, wide sleeves, standing"]},
+            character_scope="full_body",
+            clothing={
+                "state": "specific_outfit",
+                "action_outfit": True,
+            },
+        )
+
+        bundle = GenerationService().compose_nodes(
+            character=character,
+            action=action,
+            prompt_policy={
+                "enabled": True,
+                "profile": "strict",
+                "rules": {
+                    "clothing_policy": {
+                        "skip_on_clothing_overlay": False,
+                    }
+                },
+                "apply_to": {"script": True},
+            },
+        )
+
+        self.assertNotIn("sailor_shirt", bundle.prompt.positive)
+        self.assertNotIn("pleated_skirt", bundle.prompt.positive)
+
     def test_clothing_policy_nude_removes_character_default_clothes(self):
         character = NodeDocument(
             kind="character",

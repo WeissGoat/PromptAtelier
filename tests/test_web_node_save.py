@@ -151,3 +151,45 @@ class WebNodeSaveTest(TestCase):
             self.assertEqual(raw["agent"], {"note": "preserve"})
             for key in ("path", "renderers", "generation", "legacy"):
                 self.assertNotIn(key, raw)
+
+    def test_clothing_save_writes_source_fields_without_runtime_snapshots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            clothing = design / "服装" / "swimsuit"
+            clothing.mkdir(parents=True)
+            (clothing / "meta.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "schema": "tags-machine.clothing/v1",
+                        "kind": "clothing",
+                        "id": "swimsuit",
+                        "name": "泳装",
+                        "tags": {
+                            "role": ["{{alternative_clothing}}"],
+                            "full_body_clothes": ["school_swimsuit"],
+                        },
+                        "negative_prompt": ["bikini"],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+            loaded = client.get("/api/nodes/read", params={"ref": str(clothing), "role": "clothing"}).json()
+            values = loaded["editor"]["values"]
+            self.assertEqual(values["tags"]["role"], ["{{alternative_clothing}}"])
+            values["tags"]["shoes"] = ["barefoot"]
+
+            preview = client.post(
+                "/api/nodes/save-preview",
+                json={"ref": str(clothing), "role": "clothing", "values": values},
+            ).json()
+            committed = client.put("/api/nodes/save-commit", json={"preview_id": preview["preview_id"]})
+
+            self.assertEqual(committed.status_code, 200, committed.text)
+            raw = yaml.safe_load((clothing / "meta.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(raw["tags"]["shoes"], ["barefoot"])
+            self.assertEqual(raw["tags"]["role"], ["{{alternative_clothing}}"])
+            self.assertEqual(raw["kind"], "clothing")
+            self.assertEqual(raw["schema"], "tags-machine.clothing/v1")

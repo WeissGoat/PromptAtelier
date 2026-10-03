@@ -10,6 +10,7 @@ from tags_machine_core.composers.cache import PromptCache
 from tags_machine_core.contracts import GenerationResult, PromptBundle, RenderRequest
 from tags_machine_core.json_tools import to_jsonable
 from tags_machine_core.nodes import NodeReader, ResolvedNode, ResolvedNodeSet
+from tags_machine_core.nodes.clothing_overlay import apply_clothing_overlay
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import node_role_order
 from tags_machine_core.services.generation_service import GenerationService
@@ -157,6 +158,8 @@ class GenerationJsonApi:
             model=_optional_string(data.get("model")),
             action=str(data.get("action") or _default_render_action(backend)),
             params=dict(_optional_mapping(data.get("params")) or {}),
+            prompt_policy=_optional_mapping(data.get("prompt_policy")),
+            policy_target=_render_policy_target(bundle, data),
         )
         return to_jsonable(request_model)
 
@@ -171,6 +174,10 @@ class GenerationJsonApi:
                 render_request["artist_node"] = compose_request["artist_node"]
         bundle = self.compose(compose_request)
         render_request["prompt_bundle"] = bundle
+        if "prompt_policy" not in render_request and "prompt_policy" in compose_request:
+            render_request["prompt_policy"] = compose_request["prompt_policy"]
+        if "policy_target" not in render_request:
+            render_request["policy_target"] = _compose_policy_target(compose_request)
         self._copy_render_context_nodes(compose_request, render_request)
         result = ComposeRenderPlanResult(
             prompt_bundle=PromptBundle.model_validate(bundle),
@@ -267,6 +274,12 @@ class GenerationJsonApi:
                 node = self._load_node_for_role(role, item.get("node") or ref)
                 if node is None:
                     raise ValueError("node list item resolved to empty node")
+                if role == "character":
+                    clothing_value = item.get("clothing") or item.get("clothing_ref")
+                    if clothing_value:
+                        clothing_node = self._load_optional_node(clothing_value)
+                        if clothing_node:
+                            node = apply_clothing_overlay(node, clothing_node)
                 items.append((role, ref, node))
         else:
             nodes = _mapping(nodes_value or {}, "compose request nodes")
@@ -395,6 +408,23 @@ def _int_or_default(value: Any, default: int) -> int:
 
 def _default_render_action(backend: str) -> str:
     return "generate" if backend == "novelai" else "render-plan"
+
+
+def _compose_policy_target(data: Mapping[str, Any]) -> str:
+    if _is_agent_compose_request(data):
+        return "agent"
+    if "prompt" in data and not data.get("nodes"):
+        return "full_prompt"
+    return "script"
+
+
+def _render_policy_target(bundle: PromptBundle, data: Mapping[str, Any]) -> str:
+    explicit = _optional_string(data.get("policy_target"))
+    if explicit in {"script", "agent", "full_prompt"}:
+        return explicit
+    if bundle.meta.composer_type == "agent":
+        return "agent"
+    return "script"
 
 
 def _is_agent_compose_request(data: Mapping[str, Any]) -> bool:

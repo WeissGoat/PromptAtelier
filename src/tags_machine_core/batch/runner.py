@@ -73,11 +73,15 @@ class BatchRunner:
         archive_config: ArchiveConfig | None = None,
         report_config: ReportConfig | None = None,
         limit: int | None = None,
+        policy_relative_to: str | Path | None = None,
     ) -> dict[str, Any]:
         run_config = run_config or RunConfig()
         archive_config = archive_config or ArchiveConfig()
         report_config = report_config or ReportConfig()
         self.archive = BatchArchive(archive_config)
+        configure_runtime = getattr(self.executor, "configure_runtime", None)
+        if callable(configure_runtime):
+            configure_runtime(config, policy_relative_to=policy_relative_to)
         effective_config = _config_with_timeout(config, run_config.retry.timeout_seconds)
 
         root = Path(run_dir)

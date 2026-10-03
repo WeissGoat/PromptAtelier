@@ -17,7 +17,9 @@ from tags_machine_core.nodes import (
     ResolvedNode,
     ResolvedNodeSet,
 )
+from tags_machine_core.nodes.clothing_overlay import apply_clothing_overlay
 from tags_machine_core.services import GenerationService
+from tags_machine_core.policies import PromptPolicyProvider
 
 from .models import BatchTask
 
@@ -39,8 +41,24 @@ class BatchExecutor:
         service: GenerationService | None = None,
         node_reader: NodeReader | None = None,
     ):
+        self._service_explicit = service is not None
         self.service = service or GenerationService()
         self.node_reader = node_reader or NodeReader()
+
+    def configure_runtime(
+        self,
+        config: AppConfig,
+        *,
+        policy_relative_to: str | Path | None = None,
+    ) -> None:
+        """注入 batch 运行时路径；显式传入的测试/业务 service 不覆盖。"""
+        if self._service_explicit:
+            return
+        self.service = GenerationService(
+            policy_provider=PromptPolicyProvider.with_builtin_defaults(),
+            design_root=config.legacy.design_root,
+            policy_relative_to=policy_relative_to,
+        )
 
     def execute(
         self,
@@ -69,6 +87,14 @@ class BatchExecutor:
             model=task.render.model if task.render.backend == "novelai" else None,
             action="generate" if task.render.backend == "novelai" else "render-plan",
             params=render_params,
+            prompt_policy=task.policy,
+            policy_target=(
+                "agent"
+                if task.composer == "agent"
+                else "full_prompt"
+                if task.composer == "full"
+                else "script"
+            ),
         )
         if mock:
             generation = execute_mock_generation(
@@ -150,6 +176,9 @@ class BatchExecutor:
                 document = artist_filter.apply(document)
             else:
                 document = self.node_reader.read(node_ref.ref)
+                if node_ref.role == "character" and getattr(node_ref, "clothing_ref", None):
+                    clothing_doc = self.node_reader.read(node_ref.clothing_ref)
+                    document = apply_clothing_overlay(document, clothing_doc)
             items.append(
                 ResolvedNode(
                     role=node_ref.role,

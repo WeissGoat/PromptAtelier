@@ -4,6 +4,7 @@ import copy
 import math
 import random
 import re
+from pathlib import Path
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
@@ -12,6 +13,8 @@ from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.novelai_artist import NovelAIArtist
 from tags_machine_core.nodes.resolved import ResolvedNodeSet
 from tags_machine_core.policies.tokens import parse_prompt_token
+from tags_machine_core.policies.config import PolicyTarget, PromptPolicyConfig
+from tags_machine_core.policies.rendering.novelai import NovelAIRenderPolicyPipeline
 from tags_machine_core.renderers.common import (
     renderer_artist_payload,
     renderer_artist_prompt_parts,
@@ -151,6 +154,12 @@ class NovelAIRenderAdapter:
 
     backend = "novelai"
 
+    def __init__(
+        self,
+        render_policy_pipeline: NovelAIRenderPolicyPipeline | None = None,
+    ) -> None:
+        self.render_policy_pipeline = render_policy_pipeline or NovelAIRenderPolicyPipeline()
+
     def build_request(
         self,
         bundle: PromptBundle,
@@ -162,6 +171,10 @@ class NovelAIRenderAdapter:
         params: dict[str, Any] | None = None,
         artist: NovelAIArtistInput = None,
         resolved_nodes: ResolvedNodeSet | None = None,
+        prompt_policy: PromptPolicyConfig | None = None,
+        design_root: str | None = None,
+        policy_relative_to: str | None = None,
+        policy_target: PolicyTarget = "script",
     ) -> RenderRequest:
         artist = self._resolve_artist(artist, resolved_nodes)
         artist_payload = self._artist_payload(artist)
@@ -218,7 +231,7 @@ class NovelAIRenderAdapter:
         else:
             logger.trace("NovelAIRenderAdapter character prompts not applied")
 
-        return RenderRequest(
+        request = RenderRequest(
             backend=self.backend,
             prompt=prompt,
             negative_prompt=negative_prompt,
@@ -228,6 +241,19 @@ class NovelAIRenderAdapter:
             params=final_params,
             artist_payload=artist_payload,
             meta=meta,
+        )
+        if prompt_policy is None:
+            return request
+        return self.render_policy_pipeline.apply(
+            request,
+            bundle=bundle,
+            resolved_nodes=resolved_nodes,
+            policy=prompt_policy,
+            target=policy_target,
+            design_root=Path(design_root).resolve() if design_root else None,
+            policy_relative_to=(
+                Path(policy_relative_to).resolve() if policy_relative_to else None
+            ),
         )
 
     def _build_parameters(
@@ -364,6 +390,7 @@ class NovelAIRenderAdapter:
             "legacy_v3_extend": params.get("legacy_v3_extend", False),
             "uncond_scale": uncond_scale,
             "negative_prompt": negative,
+            "uc": negative,
             "prompt": positive,
             "reference_image_multiple": params.get("reference_image_multiple", []),
             "reference_information_extracted_multiple": params.get(

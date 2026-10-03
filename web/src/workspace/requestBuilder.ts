@@ -1,10 +1,11 @@
-import { nodeSlotStatus, serializeNodeSlot } from "../nodes/temporaryNodes";
+import { cloneNode, nodeSlotStatus, serializeNodeSlot } from "../nodes/temporaryNodes";
 import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams } from "./types";
 
 export type SelectedNodes = {
   artist: NodeVariantSlot | null;
   character: NodeVariantSlot | null;
   action: NodeVariantSlot | null;
+  clothing?: NodeVariantSlot | null;
 };
 
 export type ComposeRenderRequest = {
@@ -31,7 +32,15 @@ export function buildComposeRenderRequest(
   params: RenderWorkspaceParams,
   options: { compare: boolean; promptBehavior?: PromptBehaviorParams },
 ): ComposeRenderRequest {
-  const ordered = [selected.artist, selected.character, selected.action];
+  let character = selected.character;
+  if (character && selected.clothing) {
+    character = {
+      ...character,
+      clothingRef: selected.clothing.sourceRef ?? null,
+      clothingNode: selected.clothing.draftNode ? cloneNode(selected.clothing.draftNode) : null,
+    };
+  }
+  const ordered = [selected.artist, character, selected.action];
   const nodes = ordered
     .map((slot) => slot ? serializeNodeSlot(slot) : null)
     .filter((node): node is NonNullable<typeof node> => Boolean(node));
@@ -52,6 +61,33 @@ export function buildComposeRenderRequest(
     const rules: NonNullable<ComposeRenderRequest["compose"]["prompt_policy"]>["rules"] = {};
     for (const [ruleId, rule] of Object.entries(promptBehavior.policyRules)) {
       if (rule.state === "inherit") continue;
+      if (ruleId === "novelai_vibe" || ruleId === "novelai_vibe_artist") {
+        if (rule.state === "enabled") {
+          const sourceOptions = (rule.options ?? {}) as Record<string, unknown>;
+          const rawSource = sourceOptions.source && typeof sourceOptions.source === "object" && !Array.isArray(sourceOptions.source)
+            ? (sourceOptions.source as Record<string, unknown>)
+            : null;
+          const artistRef = typeof sourceOptions.artist_ref === "string" && sourceOptions.artist_ref.trim()
+            ? sourceOptions.artist_ref.trim()
+            : (rawSource && typeof rawSource.ref === "string" ? rawSource.ref.trim() : "");
+          if (artistRef) {
+            const vibeOptions: Record<string, unknown> = {
+              source: { type: "artist", ref: artistRef },
+            };
+            if (sourceOptions.mode === "replace" || sourceOptions.mode === "merge") {
+              vibeOptions.mode = sourceOptions.mode;
+            }
+            if (typeof sourceOptions.strength === "number" || Array.isArray(sourceOptions.strength)) {
+              vibeOptions.strength = structuredClone(sourceOptions.strength);
+            }
+            if (typeof sourceOptions.information_extracted === "number" || Array.isArray(sourceOptions.information_extracted)) {
+              vibeOptions.information_extracted = structuredClone(sourceOptions.information_extracted);
+            }
+            rules.novelai_vibe = { enabled: true, options: vibeOptions };
+          }
+        }
+        continue;
+      }
       rules[ruleId] = {
         enabled: rule.state === "enabled",
         ...(rule.state === "enabled" && rule.options

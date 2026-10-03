@@ -50,6 +50,16 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiClientError) {
     return error.code ? `${error.code}: ${error.message}` : error.message;

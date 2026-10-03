@@ -8,6 +8,7 @@ ROLE_DIRS: dict[str, tuple[str, ...]] = {
     "character": ("角色", "character", "characters"),
     "action": ("动作改2", "动作", "action", "actions"),
     "background": ("背景", "background", "backgrounds"),
+    "clothing": ("服装", "clothing", "clothings"),
 }
 
 

@@ -57,15 +57,26 @@ FORBIDDEN_KEYS_BY_KIND = {
         "shot",
         "constraints",
     },
+    "clothing": {
+        "rules",
+        "profiles",
+        "include_scopes",
+        "exclude_scopes",
+        "shot",
+        "constraints",
+        "renderers",
+        "generation",
+    },
 }
 
-SUPPORTED_V1_KINDS = {"character", "action", "background", "artist"}
+SUPPORTED_V1_KINDS = {"character", "action", "background", "artist", "clothing"}
 
 EXPECTED_SCHEMA_BY_KIND = {
     "character": "tags-machine.character/v1",
     "action": "tags-machine.action/v1",
     "background": "tags-machine.background/v1",
     "artist": "tags-machine.artist/v1",
+    "clothing": "tags-machine.clothing/v1",
 }
 
 EXPECTED_FILE_BY_KIND = {
@@ -73,6 +84,7 @@ EXPECTED_FILE_BY_KIND = {
     "action": "meta.yaml",
     "background": "meta.yaml",
     "artist": "node.yaml",
+    "clothing": "meta.yaml",
 }
 
 REQUIRED_TAG_SECTIONS_BY_KIND = {
@@ -80,6 +92,7 @@ REQUIRED_TAG_SECTIONS_BY_KIND = {
     "action": ("action",),
     "background": ("background",),
     "artist": ("artist",),
+    "clothing": (),
 }
 
 

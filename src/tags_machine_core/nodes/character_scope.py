@@ -162,6 +162,15 @@ def character_positive(
         node=node,
         identity_minimal_override=identity_minimal_override,
     )
+    overlay_sections = (
+        node.composition.get("clothing_overlay_sections")
+        if node and isinstance(node.composition, dict)
+        else None
+    ) or []
+    for sec in overlay_sections:
+        if sec in sections and sec not in include_sections:
+            include_sections.append(sec)
+
     include_set = set(include_sections)
     suppressed_sections = [section for section in sections if section not in include_set]
     texts: list[str] = []
@@ -185,8 +194,16 @@ def character_positive_with_selected_keys(
             character_scope,
             identity_minimal_override=identity_minimal_override,
         )
+    overlay_sections = (
+        node.composition.get("clothing_overlay_sections")
+        if node and isinstance(node.composition, dict)
+        else None
+    ) or []
+    overlay_keys = [str(sec).strip() for sec in overlay_sections if str(sec).strip()]
     normalized_keys = dedupe(
-        identity_minimal_sections(node, override=identity_minimal_override) + normalized_keys
+        identity_minimal_sections(node, override=identity_minimal_override)
+        + normalized_keys
+        + overlay_keys
     )
     if node.prompt.positive:
         return _character_prompt_fragments_by_selected_keys(node, normalized_keys)

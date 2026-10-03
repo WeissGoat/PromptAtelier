@@ -12,6 +12,7 @@ from tags_machine_core.contracts import RenderRequest
 from tags_machine_core.json_tools import sanitize_json_for_display
 
 
+
 IMAGE_BASE_URL = "https://image.novelai.net"
 NOVELAI_WEB_HEADERS = {
     "Content-Type": "application/json",
@@ -66,6 +67,7 @@ REQUEST_PARAMETER_KEYS = {
     "sm_dyn",
     "steps",
     "strength",
+    "uc",
     "ucPreset",
     "uncond_scale",
     "use_coords",
@@ -99,6 +101,60 @@ class FixedIntervalRetry(Retry):
         return float(self.retry_interval)
 
 
+VALID_NOVELAI_MODELS = {
+    "nai-diffusion-4-5-full",
+    "nai-diffusion-4-5-curated",
+    "nai-diffusion-4-full",
+    "nai-diffusion-4-curated",
+    "nai-diffusion-3",
+    "nai-diffusion-furry-3",
+    "safe-diffusion",
+    "nai-diffusion",
+    "nai-diffusion-2",
+}
+
+DEFAULT_NOVELAI_MODEL = "nai-diffusion-4-5-full"
+
+
+def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELAI_MODEL) -> str:
+    if not raw_model:
+        return default
+
+    cleaned = str(raw_model).strip()
+    if not cleaned:
+        return default
+
+    lower = cleaned.lower()
+
+    if lower in VALID_NOVELAI_MODELS:
+        return lower
+
+    if "furry" in lower:
+        return "nai-diffusion-furry-3"
+
+    if "4.5" in lower or "4-5" in lower or "v4.5" in lower:
+        if "curated" in lower:
+            return "nai-diffusion-4-5-curated"
+        return "nai-diffusion-4-5-full"
+
+    if "v4" in lower or "diffusion 4" in lower or "diffusion-4" in lower or "4-full" in lower or "4-curated" in lower:
+        if "curated" in lower:
+            return "nai-diffusion-4-curated"
+        return "nai-diffusion-4-full"
+
+    if "v3" in lower or "diffusion 3" in lower or "diffusion-3" in lower:
+        return "nai-diffusion-3"
+
+    if "safe" in lower:
+        return "safe-diffusion"
+    if "v2" in lower or "diffusion-2" in lower:
+        return "nai-diffusion-2"
+    if "v1" in lower:
+        return "nai-diffusion"
+
+    return default
+
+
 @dataclass(frozen=True)
 class NovelAIImage:
     filename: str
@@ -117,7 +173,7 @@ class NovelAIClient:
     def build_payload(self, request: RenderRequest) -> dict[str, Any]:
         return {
             "input": request.prompt,
-            "model": request.model,
+            "model": normalize_novelai_model(request.model),
             "action": request.meta.get("action", "generate"),
             "parameters": self._request_parameters(request),
         }
@@ -189,4 +245,45 @@ class NovelAIClient:
             if key in EMPTY_OPTIONAL_PARAMETER_KEYS and value == []:
                 continue
             parameters[key] = value
+
+        model = normalize_novelai_model(request.model)
+        negative = request.negative_prompt
+        if not negative:
+            negative = str(request.params.get("negative_prompt") or request.params.get("uc") or "")
+            if not negative and isinstance(request.params.get("v4_negative_prompt"), dict):
+                v4_cap = request.params["v4_negative_prompt"].get("caption")
+                if isinstance(v4_cap, dict):
+                    negative = str(v4_cap.get("base_caption") or "")
+
+        if "nai-diffusion-4" in model:
+            parameters.setdefault("params_version", 3)
+            if "v4_prompt" not in parameters or not isinstance(parameters.get("v4_prompt"), dict):
+                parameters["v4_prompt"] = {
+                    "caption": {"base_caption": request.prompt, "char_captions": []},
+                    "use_coords": False,
+                    "use_order": True,
+                }
+            else:
+                v4_p = dict(parameters["v4_prompt"])
+                caption = dict(v4_p.get("caption") or {})
+                caption["base_caption"] = request.prompt
+                v4_p["caption"] = caption
+                parameters["v4_prompt"] = v4_p
+
+            if "v4_negative_prompt" not in parameters or not isinstance(parameters.get("v4_negative_prompt"), dict):
+                parameters["v4_negative_prompt"] = {
+                    "caption": {"base_caption": negative, "char_captions": []},
+                    "use_coords": False,
+                    "use_order": False,
+                }
+            else:
+                v4_np = dict(parameters["v4_negative_prompt"])
+                caption = dict(v4_np.get("caption") or {})
+                caption["base_caption"] = negative
+                v4_np["caption"] = caption
+                parameters["v4_negative_prompt"] = v4_np
+
+        parameters["uc"] = negative
+        parameters["negative_prompt"] = negative
+
         return parameters

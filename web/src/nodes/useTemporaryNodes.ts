@@ -6,23 +6,24 @@ import {
 } from "./temporaryNodes";
 import type {
   ComposeNodeInput,
+  GroupRole,
   NodeDocument,
   NodeRole,
   NodeSlotState,
 } from "./types";
 
-const NODE_ROLES: NodeRole[] = ["artist", "character", "action"];
+const NODE_ROLES: GroupRole[] = ["artist", "character", "action"];
 
 type State = {
-  slots: Record<NodeRole, NodeSlotState>;
+  slots: Record<GroupRole, NodeSlotState>;
   revision: number;
 };
 
 type Action =
   | { type: "replace"; slot: NodeSlotState }
-  | { type: "clear"; role: NodeRole };
+  | { type: "clear"; role: GroupRole };
 
-function emptySlots(): Record<NodeRole, NodeSlotState> {
+function emptySlots(): Record<GroupRole, NodeSlotState> {
   return {
     artist: { role: "artist", sourceRef: null, sourceNode: null, draftNode: null },
     character: { role: "character", sourceRef: null, sourceNode: null, draftNode: null },
@@ -50,21 +51,21 @@ function reduceState(state: State, action: Action): State {
   const nextSlot = action.type === "clear"
     ? { role: action.role, sourceRef: null, sourceNode: null, draftNode: null }
     : action.slot;
-  const previousSlot = state.slots[nextSlot.role];
+  const previousSlot = state.slots[nextSlot.role as GroupRole];
   if (sameValue(previousSlot, nextSlot)) return state;
   return {
-    slots: { ...state.slots, [nextSlot.role]: nextSlot },
+    slots: { ...state.slots, [nextSlot.role as GroupRole]: nextSlot },
     revision: state.revision + 1,
   };
 }
 
 export function useTemporaryNodes(): {
-  slots: Record<NodeRole, NodeSlotState>;
-  selectNode(role: NodeRole, ref: string, node: NodeDocument): void;
-  createBlank(role: NodeRole): void;
-  updateDraft(role: NodeRole, node: NodeDocument): void;
-  restore(role: NodeRole): void;
-  clear(role: NodeRole): void;
+  slots: Record<GroupRole, NodeSlotState>;
+  selectNode(role: GroupRole, ref: string, node: NodeDocument): void;
+  createBlank(role: GroupRole): void;
+  updateDraft(role: GroupRole, node: NodeDocument): void;
+  restore(role: GroupRole): void;
+  clear(role: GroupRole): void;
   composeNodes: ComposeNodeInput[];
   revision: number;
 } {
@@ -73,12 +74,12 @@ export function useTemporaryNodes(): {
     revision: 0,
   });
 
-  const selectNode = (role: NodeRole, ref: string, node: NodeDocument): void => {
+  const selectNode = (role: GroupRole, ref: string, node: NodeDocument): void => {
     const sourceNode = cloneNode(node);
     dispatch({ type: "replace", slot: { role, sourceRef: ref, sourceNode, draftNode: cloneNode(sourceNode) } });
   };
 
-  const createBlank = (role: NodeRole): void => {
+  const createBlank = (role: GroupRole): void => {
     dispatch({ type: "replace", slot: {
       role,
       sourceRef: null,
@@ -87,12 +88,12 @@ export function useTemporaryNodes(): {
     } });
   };
 
-  const updateDraft = (role: NodeRole, node: NodeDocument): void => {
+  const updateDraft = (role: GroupRole, node: NodeDocument): void => {
     const current = slots[role];
     dispatch({ type: "replace", slot: { ...current, draftNode: cloneNode(node) } });
   };
 
-  const restore = (role: NodeRole): void => {
+  const restore = (role: GroupRole): void => {
     const current = slots[role];
     dispatch({ type: "replace", slot: {
       ...current,
@@ -100,7 +101,7 @@ export function useTemporaryNodes(): {
     } });
   };
 
-  const clear = (role: NodeRole): void => {
+  const clear = (role: GroupRole): void => {
     dispatch({ type: "clear", role });
   };
 
