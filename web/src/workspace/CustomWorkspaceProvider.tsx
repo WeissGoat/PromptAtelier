@@ -59,6 +59,8 @@ type CustomWorkspaceContextValue = {
   renamePromptBehavior(slotId: string, label: string): void;
   setPromptBehavior(value: PromptBehaviorParams): void;
   setPreview(preview: ComposePreviewResponse | null): void;
+  advancePoolCursor(slotId: string): void;
+  resetPoolCursor(slotId: string): void;
   resetWorkspace(): void;
 };
 
@@ -536,6 +538,14 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       (variant) => ({ ...variant, value: structuredClone(promptBehavior) }),
     )),
     setPreview: (preview) => setState((current) => ({ ...current, preview })),
+    advancePoolCursor: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
+      ...slot,
+      poolCursor: (slot.poolCursor ?? 0) + 1,
+    }))),
+    resetPoolCursor: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
+      ...slot,
+      poolCursor: 0,
+    }))),
     resetWorkspace: () => {
       clearWorkspaceSnapshot(window.localStorage);
       persistenceBlocked.current = false;

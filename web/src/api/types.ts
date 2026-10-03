@@ -105,6 +105,14 @@ export type NodePoolSampleResponse = {
   stats: NodePoolStats;
 };
 
+export type NodePoolListAllResponse = {
+  schema: "tags-machine-core.web.node-pool-list-all/v1";
+  role: string;
+  total: number;
+  items: NodePoolCandidate[];
+  stats: NodePoolStats;
+};
+
 export type NodePoolScanRequest = {
   role: string;
   spec: NodePoolSpec;

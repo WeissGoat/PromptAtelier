@@ -5,6 +5,8 @@ export type SlotMode = "primary" | "compare";
 
 export type NodePoolSourceType = "folder" | "collection" | "glob";
 
+export type DrawMode = "random" | "sequential";
+
 export type ClassifyFilter = {
   phase: string[];
   species: string[];
@@ -27,6 +29,7 @@ export type NodePoolSpec = {
     exclude_names: string[];
   };
   filters: { classify: ClassifyFilter };
+  drawMode?: DrawMode;
 };
 
 export type NodeVariantSlot = {
@@ -43,6 +46,7 @@ export type NodeVariantSlot = {
   clothingRef?: string | null;
   clothingNode?: NodeDocument | null;
   clothingSlots?: NodeVariantSlot[];
+  poolCursor?: number;
 };
 
 export type RoleNodeGroup = {

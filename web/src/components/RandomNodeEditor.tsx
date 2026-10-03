@@ -1,4 +1,4 @@
-import { Dices, RefreshCw, Search, X } from "lucide-react";
+import { Dices, RefreshCw, RotateCcw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { errorMessage } from "../api/client";
@@ -97,11 +97,43 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
     }
   }
 
+  const isSequential = spec.drawMode === "sequential";
+  const modeLabel = isSequential ? "Sequential" : "Random";
+
   return (
     <section className="random-node-editor">
       <div className="panel-title node-editor-title">
-        <div><h2>Random {slot.role}</h2><small>{slot.mode === "compare" ? "Compare" : "Primary"} · 普通生成逐任务抽取，Compare 组内共享</small></div>
+        <div><h2>{modeLabel} {slot.role}</h2><small>{slot.mode === "compare" ? "Compare" : "Primary"} · {isSequential ? "按次序逐个运行" : "普通生成逐任务抽取，Compare 组内共享"}</small></div>
         <button aria-label="关闭随机节点编辑器" className="icon-button" onClick={workspace.closeEditor} title="关闭" type="button"><X size={17} /></button>
+      </div>
+
+      <div className="draw-mode-toggle" style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "0.5rem" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", cursor: "pointer" }}>
+          <input
+            checked={!isSequential}
+            name={`drawMode-${slot.slotId}`}
+            onChange={() => update({ ...spec, drawMode: "random" })}
+            type="radio"
+            value="random"
+          />
+          🎲 随机抽取
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", cursor: "pointer" }}>
+          <input
+            checked={isSequential}
+            name={`drawMode-${slot.slotId}`}
+            onChange={() => update({ ...spec, drawMode: "sequential" })}
+            type="radio"
+            value="sequential"
+          />
+          📋 按次序运行
+        </label>
+        {isSequential && scan ? (
+          <span style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            当前位置: <strong>{((slot.poolCursor ?? 0) % (scan.source_total || 1)) + 1} / {scan.source_total}</strong>
+            <button className="icon-button" onClick={() => workspace.resetPoolCursor(slot.slotId)} style={{ height: "22px", minHeight: "22px", width: "22px" }} title="重置游标" type="button"><RotateCcw size={13} /></button>
+          </span>
+        ) : null}
       </div>
 
       <div className="random-source-grid">
@@ -178,9 +210,16 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
           void runScan({ refresh: false, append: true });
         }
       }}>
-        {items.map((item) => (
-          <div className="random-candidate-row" key={item.ref}><Dices size={14} /><span>{item.name}</span><small>{item.relative}</small></div>
-        ))}
+        {items.map((item, idx) => {
+          const seqIndex = (scan?.offset ?? 0) + idx;
+          const isCurrent = isSequential && seqIndex === ((slot.poolCursor ?? 0) % (scan?.source_total || 1));
+          return (
+            <div className={`random-candidate-row${isCurrent ? " seq-current" : ""}`} key={item.ref} style={isCurrent ? { fontWeight: 600, background: "var(--highlight-bg, rgba(100, 149, 237, 0.15))" } : undefined}>
+              {isSequential ? <span style={{ minWidth: "2em", textAlign: "right", fontSize: "0.8rem", opacity: 0.7 }}>{seqIndex + 1}.</span> : <Dices size={14} />}
+              <span>{item.name}</span><small>{item.relative}</small>
+            </div>
+          );
+        })}
         {busy ? <div className="random-candidate-loading">正在扫描...</div> : null}
         {!busy && spec.source.value && !items.length ? <div className="empty-workspace">没有匹配的节点。</div> : null}
       </div>

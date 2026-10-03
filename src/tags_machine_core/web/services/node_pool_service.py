@@ -102,6 +102,23 @@ class NodePoolService:
             "stats": result.stats.model_dump(mode="json"),
         }
 
+    def list_all(self, *, role: str, spec: NodePoolSpec) -> dict[str, Any]:
+        """Return the complete ordered candidate list for sequential draw mode."""
+        self._validate_role(role)
+        cache_key = self._cache_key(role, spec)
+        result = self._cached(cache_key)
+        if result is None:
+            result = self._resolver().scan(role, spec)
+            with self._lock:
+                self._cache[cache_key] = _CacheEntry(created_at=time.time(), result=result)
+        return {
+            "schema": "tags-machine-core.web.node-pool-list-all/v1",
+            "role": role,
+            "total": result.stats.total,
+            "items": [item.model_dump(mode="json") for item in result.candidates],
+            "stats": result.stats.model_dump(mode="json"),
+        }
+
     def _resolver(self) -> NodePoolResolver:
         return NodePoolResolver(
             design_root=self.workspace.design_root,

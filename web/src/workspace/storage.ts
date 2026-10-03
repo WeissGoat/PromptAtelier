@@ -165,6 +165,7 @@ function migrateWorkspace(value: unknown): unknown {
         spec.source.value = role === "action" ? "new" : ".";
       }
     }
+    if (!spec.drawMode) spec.drawMode = "random";
     return spec;
   };
 
@@ -201,6 +202,7 @@ function migrateWorkspace(value: unknown): unknown {
       draftNode: isObject(slot.draftNode) ? (slot.draftNode as NodeDocument) : null,
       sourceEditor: isObject(slot.sourceEditor) ? (slot.sourceEditor as any) : null,
       draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
+      poolCursor: typeof slot.poolCursor === "number" ? slot.poolCursor : 0,
     };
 
     if (role === "character") {

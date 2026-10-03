@@ -49,7 +49,10 @@ function requiresConfirmation(slot: NodeVariantSlot): boolean {
 function displayName(slot: NodeVariantSlot): string {
   if (slot.sourceKind === "random") {
     const source = slot.randomSpec?.source;
-    return source?.value ? `Random · ${source.type} · ${source.value}` : "Random · 未配置来源";
+    const isSeq = slot.randomSpec?.drawMode === "sequential";
+    const mode = isSeq ? "Sequential" : "Random";
+    const cursorInfo = isSeq ? ` · #${(slot.poolCursor ?? 0) + 1}` : "";
+    return source?.value ? `${mode} · ${source.type} · ${source.value}${cursorInfo}` : `${mode} · 未配置来源`;
   }
   const name = slot.draftNode?.name || slot.sourceNode?.name || slot.draftNode?.id || "";
   const status = nodeSlotStatus(slot);
