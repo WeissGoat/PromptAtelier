@@ -1,0 +1,173 @@
+"""Modal 适配层：只放 Modal 特有的东西。运行环境来自 ../Dockerfile 和 ../manifest.yaml。
+
+    部署 API：      modal deploy deploy/comfyui/providers/modal_app.py
+    本机上传模型：  modal run deploy/comfyui/providers/modal_app.py::upload --local-roots "D:/models;G:/models"
+    云端下载模型：  modal run deploy/comfyui/providers/modal_app.py::download   (Civitai 模型需要本机 CIVITAI_TOKEN)
+    临时 UI：       modal run deploy/comfyui/providers/modal_app.py::ui
+
+模型清单（../models.yaml）在运行时从本机读取，改清单不需要重新构建镜像。
+
+可用环境变量覆盖：TM_COMFYUI_MODAL_GPU（默认 L40S）、TM_COMFYUI_MODAL_UI_GPU（默认 L4）、
+TM_COMFYUI_MODAL_APP、TM_COMFYUI_MODAL_VOLUME。
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+
+import modal
+
+
+RUNTIME_DIR = Path(__file__).resolve().parents[1]
+APP_NAME = os.environ.get("TM_COMFYUI_MODAL_APP", "tm-comfyui")
+VOLUME_NAME = os.environ.get("TM_COMFYUI_MODAL_VOLUME", "tm-comfyui-models")
+API_GPU = os.environ.get("TM_COMFYUI_MODAL_GPU", "L40S")
+UI_GPU = os.environ.get("TM_COMFYUI_MODAL_UI_GPU", "L4")
+MODELS_DIR = "/models"
+COMFYUI_DIR = "/opt/ComfyUI"
+PORT = 8188
+COMFYUI_COMMAND = ["python", "main.py", "--listen", "0.0.0.0", "--port", str(PORT), "--disable-auto-launch"]
+MINUTES = 60
+
+image = modal.Image.from_dockerfile(RUNTIME_DIR / "Dockerfile", context_dir=RUNTIME_DIR)
+models = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+app = modal.App(APP_NAME)
+
+
+@app.function(
+    image=image,
+    gpu=API_GPU,
+    volumes={MODELS_DIR: models},
+    # ComfyUI 的队列、history 和输出图都在单个容器里，/prompt、/history、/view 必须落到同一个容器；
+    # 这也顺便给 GPU 花费封了顶。
+    max_containers=1,
+    # 不要常驻：一台 L40S 常驻一个月约 $1,400。
+    min_containers=0,
+    scaledown_window=3 * MINUTES,
+    timeout=15 * MINUTES,
+)
+@modal.concurrent(max_inputs=32)
+@modal.web_server(PORT, startup_timeout=5 * MINUTES, requires_proxy_auth=True)
+def api():
+    """ComfyUI 原生 HTTP API。请求需带 Authorization: Bearer <proxy token id>.<secret>。"""
+    subprocess.Popen(COMFYUI_COMMAND, cwd=COMFYUI_DIR)
+
+
+@app.function(
+    image=image,
+    gpu=UI_GPU,
+    volumes={MODELS_DIR: models},
+    max_containers=1,
+    timeout=2 * 60 * MINUTES,
+)
+def ui():
+    """临时交互 UI：打印一个随机隧道地址；Ctrl+C 结束 modal run 或 2 小时后自动关闭。
+
+    ComfyUI 前端会一直连着 websocket，标签页开着就一直按秒计费。
+    """
+    process = subprocess.Popen(COMFYUI_COMMAND, cwd=COMFYUI_DIR)
+    _wait_for_port(PORT, timeout=5 * MINUTES)
+    with modal.forward(PORT) as tunnel:
+        print(f"ComfyUI UI: {tunnel.url}", flush=True)
+        process.wait()
+
+
+@app.function(
+    image=image,
+    volumes={MODELS_DIR: models},
+    timeout=2 * 60 * MINUTES,
+    # 只在本机设置了 CIVITAI_TOKEN 时注入；不设也能下载 source: url 的模型。
+    secrets=[modal.Secret.from_local_environ(["CIVITAI_TOKEN"])]
+    if os.environ.get("CIVITAI_TOKEN")
+    else [],
+)
+def download_models(models_yaml: str, only: str = "", verify: bool = False):
+    """在云端下载并校验模型（不占用本机上行带宽）。models_yaml 是模型清单内容。
+
+    verify=True 时对 Volume 上已有的文件重新计算 sha256。
+    """
+    models_file = Path("/tmp/models.yaml")
+    models_file.write_text(models_yaml, encoding="utf-8")
+    command = [
+        sys.executable,
+        "/opt/tm-comfyui/fetch_models.py",
+        "--models",
+        str(models_file),
+        "--dest",
+        MODELS_DIR,
+    ]
+    for item in filter(None, only.split(";")):
+        command += ["--only", item]
+    if verify:
+        command.append("--verify")
+    result = subprocess.run(command)
+    models.commit()
+    if result.returncode:
+        raise RuntimeError("some models failed to download; see the log above")
+
+
+@app.local_entrypoint()
+def download(only: str = "", verify: bool = False):
+    """按本机的 models.yaml 在云端下载模型；only 用分号分隔多个路径，--verify 重新校验已有文件。"""
+    download_models.remote(
+        (RUNTIME_DIR / "models.yaml").read_text(encoding="utf-8"), only, verify
+    )
+
+
+@app.local_entrypoint()
+def upload(local_roots: str, only: str = "", force: bool = False):
+    """从本机目录上传 manifest 里的模型；Volume 上已有且大小一致的跳过。
+
+    local_roots 用分号分隔，例如 "D:/AI/ComfyUI-aki/ComfyUI-aki-v1.6/ComfyUI/models;G:/AI/draw/models"。
+    """
+    sys.path.insert(0, str(RUNTIME_DIR))
+    import fetch_models
+
+    all_models = fetch_models.load_models(RUNTIME_DIR / "models.yaml")
+    roots = [Path(item.strip()) for item in local_roots.split(";") if item.strip()]
+    selected = fetch_models.select_models(all_models, [item for item in only.split(";") if item])
+    existing = {
+        entry.path.lstrip("/"): entry.size for entry in models.listdir("/", recursive=True)
+    }
+
+    pending: list[tuple[Path, str]] = []
+    missing: list[str] = []
+    for model in selected:
+        if not force and existing.get(model["path"]) == model["size"]:
+            print(f"ok      {model['path']}")
+            continue
+        local = fetch_models.find_local_model(model["path"], roots)
+        if local is None:
+            missing.append(model["path"])
+            continue
+        print(f"verify  {local}")
+        digest = fetch_models.sha256_file(local)
+        if digest != model["sha256"]:
+            raise SystemExit(f"{local}: sha256 {digest} != manifest {model['sha256']}")
+        pending.append((local, model["path"]))
+
+    if pending:
+        with models.batch_upload(force=True) as batch:
+            for local, remote in pending:
+                print(f"upload  {local} -> {remote}")
+                batch.put_file(local, "/" + remote)
+    if missing:
+        print("not found locally (use download_models or add --local-roots):")
+        for path in missing:
+            print(f"  {path}")
+
+
+def _wait_for_port(port: int, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2):
+                return
+        except OSError:
+            time.sleep(1)
+    raise TimeoutError(f"ComfyUI did not listen on port {port} within {timeout:.0f}s")

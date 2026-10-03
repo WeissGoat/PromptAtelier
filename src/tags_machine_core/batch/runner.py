@@ -485,7 +485,7 @@ def _config_with_timeout(config: AppConfig, timeout_seconds: float | None) -> Ap
         deep=True,
         update={
             "novelai": config.novelai.model_copy(update={"timeout": timeout}),
-            "comfyui": config.comfyui.model_copy(update={"timeout": timeout}),
+            "comfyui": config.comfyui.with_timeout(timeout),
             "sd": config.sd.model_copy(update={"timeout": timeout}),
         },
     )

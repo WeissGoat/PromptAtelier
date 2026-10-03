@@ -12,6 +12,7 @@ from unittest.mock import patch
 import yaml
 
 from tags_machine_core.cli import build_parser as build_core_parser, main
+from tags_machine_core.clients import PreparedComfyUIWorkflow
 from tags_machine_core.nodes import NodeReader
 from tags_machine_core.services import GenerationService
 from tags_machine_core.verification import verify_acceptance_suite
@@ -901,11 +902,14 @@ renderers:
 
             with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
-                client.queue_prompt.return_value = SimpleNamespace(
+                client.prepare.return_value = PreparedComfyUIWorkflow(
+                    prompt={"1": {"inputs": {"text": "akemi homura"}}}
+                )
+                client.queue.return_value = SimpleNamespace(
                     prompt_id="abc123",
                     raw={"prompt_id": "abc123"},
                 )
-                client.build_payload.return_value = {
+                client.payload.return_value = {
                     "prompt": {"1": {"inputs": {"text": "akemi homura"}}},
                     "client_id": "client-1",
                 }
@@ -932,10 +936,14 @@ renderers:
                 timeout=30,
                 retry=3,
                 retry_interval=2.0,
+                headers={},
+                prune_to_output_nodes=True,
+                path_style="native",
+                ready_timeout=0,
             )
-            client.queue_prompt.assert_called_once()
-            self.assertEqual(client.queue_prompt.call_args.kwargs["client_id"], "client-1")
-            client.generate_images.assert_not_called()
+            client.queue.assert_called_once()
+            self.assertEqual(client.queue.call_args.kwargs["client_id"], "client-1")
+            client.run.assert_not_called()
             self.assertEqual(data["backend"], "comfyui")
             self.assertEqual(data["images"], [])
             self.assertEqual(data["request_body"]["client_id"], "client-1")
@@ -959,11 +967,12 @@ renderers:
 
             with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
-                client.queue_prompt.return_value = SimpleNamespace(
+                client.prepare.return_value = PreparedComfyUIWorkflow(prompt={})
+                client.queue.return_value = SimpleNamespace(
                     prompt_id="abc123",
                     raw={"prompt_id": "abc123"},
                 )
-                client.build_payload.return_value = {
+                client.payload.return_value = {
                     "prompt": {},
                     "client_id": "client-default",
                 }
@@ -983,7 +992,7 @@ renderers:
 
             data = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
-            client.queue_prompt.assert_called_once()
+            client.queue.assert_called_once()
             self.assertEqual(data["backend"], "comfyui")
             self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
 
@@ -1118,7 +1127,10 @@ renderers:
 
             with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
-                client.generate_images.return_value = SimpleNamespace(
+                client.prepare.return_value = PreparedComfyUIWorkflow(
+                    prompt={"1": {"inputs": {"text": "akemi homura"}}}
+                )
+                client.run.return_value = SimpleNamespace(
                     prompt_id="abc123",
                     queue_raw={"prompt_id": "abc123"},
                     history=history,
@@ -1131,7 +1143,7 @@ renderers:
                         )
                     ],
                 )
-                client.build_payload.return_value = {
+                client.payload.return_value = {
                     "prompt": {"1": {"inputs": {"text": "akemi homura"}}},
                     "client_id": "client-1",
                 }
@@ -1158,10 +1170,10 @@ renderers:
 
             data = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)
-            client.generate_images.assert_called_once()
-            self.assertEqual(client.generate_images.call_args.kwargs["client_id"], "client-1")
-            self.assertEqual(client.generate_images.call_args.kwargs["poll_interval"], 0)
-            self.assertEqual(client.generate_images.call_args.kwargs["max_wait_seconds"], 1)
+            client.run.assert_called_once()
+            self.assertEqual(client.run.call_args.kwargs["client_id"], "client-1")
+            self.assertEqual(client.run.call_args.kwargs["poll_interval"], 0)
+            self.assertEqual(client.run.call_args.kwargs["max_wait_seconds"], 1)
             self.assertEqual(data["backend"], "comfyui")
             self.assertEqual(data["png_info"]["comfyui"]["prompt_id"], "abc123")
             self.assertEqual(data["png_info"]["comfyui"]["history"], history)

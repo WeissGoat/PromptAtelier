@@ -15,13 +15,14 @@ from PIL import Image
 from tags_machine_core.backends import ensure_backend_can_execute
 from tags_machine_core.clients import (
     ComfyUIClient,
+    ComfyUITransport,
     GatewayNovelAIRawClient,
     NovelAIClient,
     NovelAIImage,
     SDClient,
     sanitize_proxy_env,
 )
-from tags_machine_core.config import AppConfig
+from tags_machine_core.config import AppConfig, ResolvedComfyUITarget
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
 from tags_machine_core.logging_config import get_logger
 from tags_machine_core.renderers.comfyui_workflow import normalize_binding_paths
@@ -701,6 +702,49 @@ def execute_render_request(
     raise ValueError(f"Unsupported backend: {request.backend}")
 
 
+def build_comfyui_transport(target: ResolvedComfyUITarget) -> ComfyUITransport:
+    if target.transport == "native":
+        return ComfyUIClient(
+            base_url=target.base_url,
+            timeout=target.timeout,
+            retry=target.retry,
+            retry_interval=target.retry_interval,
+            headers=comfyui_auth_headers(target),
+            prune_to_output_nodes=target.prune_to_output_nodes,
+            path_style=target.path_style,
+            ready_timeout=target.cold_start_wait_seconds,
+        )
+    raise ValueError(f"Unsupported ComfyUI transport: {target.transport!r}")
+
+
+def comfyui_auth_headers(target: ResolvedComfyUITarget) -> dict[str, str]:
+    auth = target.auth
+    headers = dict(auth.headers)
+    for header, env_name in auth.header_envs.items():
+        value = os.environ.get(env_name)
+        if not value:
+            raise RuntimeError(
+                f"Missing ComfyUI header {header} for target {target.name!r}: "
+                f"set environment variable {env_name}"
+            )
+        headers[header] = value
+    if auth.type == "bearer":
+        token = auth.token or (os.environ.get(auth.token_env) if auth.token_env else None)
+        if not token:
+            source = (
+                f"environment variable {auth.token_env}" if auth.token_env else "comfyui auth.token"
+            )
+            raise RuntimeError(
+                f"Missing ComfyUI bearer token for target {target.name!r}: set {source}"
+            )
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def comfyui_target_meta(target: ResolvedComfyUITarget) -> dict[str, Any]:
+    return {"name": target.name, "transport": target.transport, "base_url": target.base_url}
+
+
 def execute_comfyui_generation(
     config: AppConfig,
     request: RenderRequest,
@@ -711,30 +755,35 @@ def execute_comfyui_generation(
     no_wait: bool = False,
     poll_interval: float | None = None,
     max_wait_seconds: float | None = None,
+    target: str | None = None,
 ) -> GenerationResult:
-    client = ComfyUIClient(
-        base_url=config.comfyui.base_url,
-        timeout=config.comfyui.timeout,
-        retry=config.comfyui.retry,
-        retry_interval=config.comfyui.retry_interval,
-    )
+    resolved = config.comfyui.resolve_target(target)
+    if no_wait and not resolved.allow_no_wait:
+        raise ValueError(
+            f"ComfyUI target {resolved.name!r} sets allow_no_wait: false; an unpolled prompt "
+            "can be lost when the serverless instance scales down, so run without "
+            "--comfyui-no-wait"
+        )
+    transport = build_comfyui_transport(resolved)
     output_path = Path(output_dir or config.runtime.output_dir)
     requests = split_comfyui_samples(request)
-    effective_poll_interval = (
-        config.comfyui.poll_interval if poll_interval is None else poll_interval
-    )
+    effective_poll_interval = resolved.poll_interval if poll_interval is None else poll_interval
     effective_max_wait = (
-        config.comfyui.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
+        resolved.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
     )
+    target_meta = comfyui_target_meta(resolved)
     logger.info(
-        "execute_comfyui_generation start workflow=%s split_requests=%s output_dir=%s",
+        "execute_comfyui_generation start target=%s transport=%s workflow=%s "
+        "split_requests=%s output_dir=%s",
+        resolved.name,
+        resolved.transport,
         request.params.get("workflow"),
         len(requests),
         output_path,
     )
     if len(requests) > 1:
         return _execute_split_comfyui_generation(
-            client=client,
+            transport=transport,
             requests=requests,
             output_dir=output_path,
             image_format=image_format,
@@ -742,16 +791,18 @@ def execute_comfyui_generation(
             no_wait=no_wait,
             poll_interval=effective_poll_interval,
             max_wait_seconds=effective_max_wait,
+            target_meta=target_meta,
         )
 
     effective_request = requests[0]
+    prepared = transport.prepare(effective_request)
     if no_wait:
-        queued = client.queue_prompt(effective_request, client_id=client_id)
+        queued = transport.queue(prepared, client_id=client_id)
         images: list[GeneratedImage] = []
         comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
     else:
-        generated = client.generate_images(
-            effective_request,
+        generated = transport.run(
+            prepared,
             client_id=client_id,
             poll_interval=effective_poll_interval,
             max_wait_seconds=effective_max_wait,
@@ -767,12 +818,14 @@ def execute_comfyui_generation(
             "queue_raw": generated.queue_raw,
             "history": generated.history,
         }
+    comfyui_meta["target"] = target_meta
+    comfyui_meta["workflow_preparation"] = prepared.summary()
     png_info = collect_png_info(images)
     png_info["comfyui"] = comfyui_meta
     return GenerationResult(
         backend="comfyui",
         images=images,
-        request_body=client.build_payload(effective_request, client_id=client_id),
+        request_body=transport.payload(prepared, client_id=client_id),
         png_info=png_info,
         cache_hit=False,
     )
@@ -780,7 +833,7 @@ def execute_comfyui_generation(
 
 def _execute_split_comfyui_generation(
     *,
-    client: ComfyUIClient,
+    transport: ComfyUITransport,
     requests: list[RenderRequest],
     output_dir: Path,
     image_format: str,
@@ -788,21 +841,26 @@ def _execute_split_comfyui_generation(
     no_wait: bool,
     poll_interval: float,
     max_wait_seconds: float | None,
+    target_meta: dict[str, Any],
 ) -> GenerationResult:
     images: list[GeneratedImage] = []
     png_records: list[dict[str, Any]] = []
     request_bodies: list[dict[str, Any]] = []
     prompt_records: list[dict[str, Any]] = []
+    preparation_summary: dict[str, Any] | None = None
 
     for index, split_request in enumerate(requests):
+        prepared = transport.prepare(split_request)
+        if preparation_summary is None:
+            preparation_summary = prepared.summary()
         if no_wait:
-            queued = client.queue_prompt(split_request, client_id=client_id)
-            request_bodies.append(client.build_payload(split_request, client_id=client_id))
+            queued = transport.queue(prepared, client_id=client_id)
+            request_bodies.append(transport.payload(prepared, client_id=client_id))
             prompt_records.append({"split_request_index": index, "prompt_id": queued.prompt_id})
             continue
 
-        generated = client.generate_images(
-            split_request,
+        generated = transport.run(
+            prepared,
             client_id=client_id,
             poll_interval=poll_interval,
             max_wait_seconds=max_wait_seconds,
@@ -825,7 +883,7 @@ def _execute_split_comfyui_generation(
             )
             for image in generated_images
         )
-        request_bodies.append(client.build_payload(split_request, client_id=client_id))
+        request_bodies.append(transport.payload(prepared, client_id=client_id))
         prompt_records.append(
             {
                 "split_request_index": index,
@@ -853,6 +911,8 @@ def _execute_split_comfyui_generation(
             "images": png_records,
             "comfyui": {
                 "split_batch": True,
+                "target": target_meta,
+                "workflow_preparation": preparation_summary,
                 "requests": prompt_records,
             },
         },

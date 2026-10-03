@@ -1,0 +1,52 @@
+# 模型清单（与云平台无关）。fetch_models.py 按它下载/复制并校验 sha256；
+# 不打进镜像的安装层：改这里不会触发重新安装 ComfyUI。
+schema: tags-machine.comfyui-models/v1
+
+# 模型放在各平台的持久存储里（Modal Volume / 网络盘 / 本地盘）。
+# path 相对 models 根目录；sha256 用于下载后校验。
+# source: civitai 按 sha256 走 Civitai by-hash 接口（需要 CIVITAI_TOKEN）；url 直接下载，
+# 尽量钉到固定版本（HF 的 resolve/<commit>），上游换文件时 sha256 校验会拦下来。
+models:
+  - path: checkpoints/cocoStyleNoobaiXL_v70.safetensors
+    size: 6938041602
+    sha256: ddf49e8cf45f4257f0103f75695cd02c5b1738daa6a977e9d19607bbecea4a27
+    source: civitai
+  - path: loras/Expressive_H-000001.safetensors
+    size: 228453892
+    sha256: 7b53da0391712dbe9412d5aa5fd074659413058773f72f41bd7a37e886031d43
+    source: civitai
+  - path: loras/character/homura-akemi-s1-illustriousxl-lora-nochekaiser.safetensors
+    size: 228472924
+    sha256: 8a469762b2928e89b2517050188848d36318f640c15e88dbf7f0cf2f3e6b6ba8
+    source: civitai
+  - path: loras/cum wiping_illustrious_V1.0.safetensors
+    size: 127725184
+    sha256: d59d6e72e707f57b917900874bb96e41111af0852e634e7841812bdd084a498c
+    source: civitai
+  - path: loras/画风调整/add_brightness_XL.safetensors
+    size: 57417260
+    sha256: b6186f0dad9c393a5f0a29b8424255ebd0b33e51e260e107df2206d3f0a6d2ba
+    source: civitai
+  - path: loras/画风调整/add_contrast_XL.safetensors
+    size: 57417260
+    sha256: 6cdc01750bae7c05d593c068d215d8e35eaf000f163a9e00c6fa77d2bb8eb596
+    source: civitai
+  - path: loras/画风调整/add_saturation_XL.safetensors
+    size: 57417260
+    sha256: ddc1017313df2b92a11680bf816846d6197815f75c6afd977cbbc3b06319f035
+    source: civitai
+  - path: sams/sam_vit_b_01ec64.pth
+    size: 375042383
+    sha256: ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
+    source: url
+    url: https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+  - path: ultralytics/bbox/face_yolov8m.pt
+    size: 51996128
+    sha256: e3893a92c5c1907136b6cc75404094db767c1e0cfefe1b43e87dad72af2e4c9f
+    source: url
+    url: https://huggingface.co/Bingsu/adetailer/resolve/fdb6e26f5212c6a7184b359f62cc4b41fd731bb3/face_yolov8m.pt
+  - path: ultralytics/bbox/hand_yolov8s.pt
+    size: 22484536
+    sha256: 30878cea9870964d4a238339e9dcff002078bbbaa1a058b07e11c167f67eca1c
+    source: url
+    url: https://huggingface.co/Bingsu/adetailer/resolve/fdb6e26f5212c6a7184b359f62cc4b41fd731bb3/hand_yolov8s.pt

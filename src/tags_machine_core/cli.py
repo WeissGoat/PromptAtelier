@@ -16,9 +16,10 @@ from tags_machine_core.backends import (
     backend_support_report,
     ensure_backend_can_execute,
 )
+from tags_machine_core.comfyui_preflight import preflight_render_request, run_comfyui_preflight
 from tags_machine_core.composers import AgentCompositionRequired, load_agent_result
 from tags_machine_core.composers.cache import PromptCache
-from tags_machine_core.config import build_prompt_policy_provider, load_config
+from tags_machine_core.config import COMFYUI_TARGET_ENV, build_prompt_policy_provider, load_config
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.execution import execute_render_request as _execute_render_request
 from tags_machine_core.json_tools import sanitize_json_for_display
@@ -87,6 +88,11 @@ def _load_command_config(path: str | Path, args=None):
     config = load_config(Path(path))
     if args is None or not getattr(args, "log_level", None):
         configure_logging(config.logging.level)
+    comfyui_target = getattr(args, "comfyui_target", None) if args is not None else None
+    if comfyui_target:
+        config = config.model_copy(
+            update={"comfyui": config.comfyui.with_default_target(comfyui_target)}
+        )
     logger.trace("loaded config path=%s logging.level=%s", path, config.logging.level)
     return config
 
@@ -323,6 +329,28 @@ def cmd_execute_render_request(args) -> int:
     )
     print_json(result, full=args.full)
     return 0
+
+
+def cmd_comfyui_check(args) -> int:
+    target = None
+    if args.config:
+        target = _load_command_config(args.config, args).comfyui.resolve_target()
+    elif args.live or args.comfyui_target:
+        raise ValueError("comfyui-check --live/--comfyui-target requires --config")
+    report = run_comfyui_preflight(
+        preflight_render_request(
+            artist_node=args.artist_node,
+            workflow=args.workflow,
+            output_nodes=args.output_nodes,
+        ),
+        target=target,
+        manifest_path=args.manifest,
+        live=args.live,
+        prune=not args.no_prune,
+        path_style=args.path_style,
+    )
+    print_json(report, full=args.full)
+    return 0 if report["ok"] else 1
 
 
 def cmd_inspect_artist(args) -> int:
@@ -1960,6 +1988,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only print PromptBundle and RenderRequest; do not call the backend",
     )
     run_prompt.add_argument("--config", help="Load runtime config and artist nodes")
+    _add_comfyui_target_argument(run_prompt)
     run_prompt.set_defaults(func=cmd_run_prompt)
 
     run_action = subparsers.add_parser(
@@ -1976,6 +2005,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only print PromptBundle and RenderRequest; do not call the backend",
     )
     run_action.add_argument("--config", help="Load runtime config and artist nodes")
+    _add_comfyui_target_argument(run_action)
     run_action.set_defaults(func=cmd_run_action)
 
     plan_batch = subparsers.add_parser(
@@ -2022,6 +2052,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the full batch pipeline but replace backend API calls with local mock images and payload archives",
     )
+    _add_comfyui_target_argument(run_batch)
     run_batch.set_defaults(func=cmd_run_batch)
 
     resume_batch = subparsers.add_parser(
@@ -2044,6 +2075,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Stop the resumed batch after the first failed task",
     )
+    _add_comfyui_target_argument(resume_batch)
     resume_batch.set_defaults(func=cmd_resume_batch)
 
     inspect_batch = subparsers.add_parser(
@@ -2168,6 +2200,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_api_request_arguments(api_generate)
     api_generate.add_argument("--config", required=True, help="Load runtime and NovelAI config")
     api_generate.add_argument("--output-dir", help="Override generated image output directory")
+    _add_comfyui_target_argument(api_generate)
     api_generate.set_defaults(func=cmd_api_generate)
 
     generate = subparsers.add_parser(
@@ -2222,7 +2255,48 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow executing pre-v1 ComfyUI/SD clients; NovelAI is the only default v1 backend",
     )
+    _add_comfyui_target_argument(execute_render_request)
     execute_render_request.set_defaults(func=cmd_execute_render_request)
+
+    comfyui_check = subparsers.add_parser(
+        "comfyui-check",
+        parents=[output_parent],
+        help="Check which nodes and model files a ComfyUI workflow needs on a target",
+    )
+    comfyui_source = comfyui_check.add_mutually_exclusive_group(required=True)
+    comfyui_source.add_argument("--artist-node", help="ComfyUI artist node directory or file")
+    comfyui_source.add_argument("--workflow", help="ComfyUI API workflow JSON")
+    comfyui_check.add_argument(
+        "--output-nodes",
+        nargs="*",
+        help="Output node ids for --workflow; the artist node declares its own",
+    )
+    comfyui_check.add_argument(
+        "--manifest",
+        help="Runtime manifest to compare against, e.g. deploy/comfyui/manifest.yaml",
+    )
+    comfyui_check.add_argument(
+        "--config",
+        help="Use the selected comfyui target's path_style/prune settings",
+    )
+    _add_comfyui_target_argument(comfyui_check)
+    comfyui_check.add_argument(
+        "--live",
+        action="store_true",
+        help="Query the target's /object_info (may cold-start a serverless GPU)",
+    )
+    comfyui_check.add_argument(
+        "--path-style",
+        choices=("native", "posix"),
+        default="posix",
+        help="Path style when no --config is given",
+    )
+    comfyui_check.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="Check the full workflow instead of the output_nodes subgraph",
+    )
+    comfyui_check.set_defaults(func=cmd_comfyui_check)
 
     inspect_node = subparsers.add_parser(
         "inspect-node",
@@ -2727,6 +2801,16 @@ def _add_node_compose_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--character-scope", help="Override character_scope for node composition")
     parser.add_argument("--body-scope", help="Compatibility alias for --character-scope")
     _add_prompt_policy_arguments(parser)
+
+
+def _add_comfyui_target_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--comfyui-target",
+        help=(
+            "Use this comfyui.targets entry; overrides comfyui.default_target and "
+            f"{COMFYUI_TARGET_ENV}"
+        ),
+    )
 
 
 def _add_prompt_run_arguments(

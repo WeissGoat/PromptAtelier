@@ -1,0 +1,77 @@
+# ComfyUI 云端运行环境的唯一定义：与云平台无关。
+# install_comfyui.py 按它装 ComfyUI 和插件；模型清单在 models_file 指向的 models.yaml。
+# 新增 artist node workflow 后，用 `tm-core comfyui-check --artist-node <dir> --manifest deploy/comfyui/manifest.yaml`
+# 检查缺哪些插件和模型，再补到这里或 models.yaml。
+schema: tags-machine.comfyui-runtime/v1
+
+comfyui:
+  repo: https://github.com/comfyanonymous/ComfyUI
+  # v0.3.59，与 2026-07-04 业务验收用的 aki 本地版本一致。
+  ref: 72212fef660bcd7d9702fa52011d089c027a64d8
+
+torch:
+  # 与本地 aki 一致（torch 2.5.1 + CUDA 12.4）。
+  packages: [torch==2.5.1, torchvision==0.20.1, torchaudio==2.5.1]
+  index_url: https://download.pytorch.org/whl/cu124
+
+# 安装插件依赖时的版本约束，取自本地 aki 的实际版本，避免云端解析到不兼容的新版
+# （例如 numpy 2.x 会让部分节点报错）。
+python_constraints:
+  - numpy==1.26.4
+  - transformers==4.49.0
+  - tokenizers==0.21.0
+  - ultralytics==8.4.116
+  - segment-anything==1.0
+  - scikit-image==0.25.1
+  - scipy==1.15.1
+  - safetensors==0.5.2
+  - spandrel==0.4.1
+  - kornia==0.8.0
+  - pillow==11.1.0
+
+# provides 列出该插件提供的、我们 workflow 用到的节点类，供 comfyui-check 对照。
+# ref 都对齐本地 aki 里实际在跑的版本。
+custom_nodes:
+  - name: comfyui-impact-pack
+    repo: https://github.com/ltdrdata/ComfyUI-Impact-Pack
+    ref: 61bd8397a18e7e7668e6a24e95168967768c2bed
+    # 本地 aki 打过的兼容补丁：这个 commit 调用 DifferentialDiffusion().execute()，
+    # ComfyUI 0.3.59 只有 apply()，不打补丁 FaceDetailer 会直接报错。
+    patches: [patches/comfyui-impact-pack-differential-diffusion.patch]
+    # 本地 aki 没装 sam2，SAMLoader(sam_vit_b) 用的是 segment-anything；跳过它省掉一次源码编译。
+    skip_requirements: [sam2]
+    provides: [FaceDetailer, SAMLoader, ImpactWildcardProcessor]
+  - name: comfyui-impact-subpack
+    repo: https://github.com/ltdrdata/ComfyUI-Impact-Subpack
+    ref: 50c7b71a6a224734cc9b21963c6d1926816a97f1
+    provides: [UltralyticsDetectorProvider]
+  - name: ComfyUI_Comfyroll_CustomNodes
+    repo: https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes
+    ref: d78b780ae43fcf8c6b7c6505e6ffb4584281ceca
+    provides: [CR Seed]
+  - name: cg-image-picker
+    repo: https://github.com/chrisgoringe/cg-image-picker
+    # 本地是 zip 装的 2.15，文件与这个 commit 逐个一致。
+    ref: f349bc0a38ab78a1289e808ec824f3be553594c3
+    provides: [Preview Chooser]
+  - name: ComfyUI_RS_NAI_API_Request
+    repo: https://github.com/raspie10032/ComfyUI_RS_NAI_API_Request
+    # 本地是 zip 装的 1.0.6，文件与这个 commit 逐个一致。
+    ref: dfeac81098de8c240ab5568dcaf5d2bb090300e4
+    provides: [OldNAIToComfyUI]
+
+# 模型清单单独放在 models.yaml，运行时读取，不进镜像安装层。
+models_file: models.yaml
+
+# 写进 ComfyUI 的 extra_model_paths.yaml：模型目录（相对 models 根）→ ComfyUI 的模型类别。
+model_folders:
+  checkpoints: checkpoints
+  loras: loras
+  vae: vae
+  upscale_models: upscale_models
+  controlnet: controlnet
+  embeddings: embeddings
+  sams: sams
+  ultralytics: ultralytics
+  ultralytics_bbox: ultralytics/bbox
+  ultralytics_segm: ultralytics/segm

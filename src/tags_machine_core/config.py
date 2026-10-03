@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from tags_machine_core.nodes.artist_input_filter import ArtistInputFilterConfig
 from tags_machine_core.policies import (
@@ -51,13 +52,96 @@ class NovelAIConfig(BaseModel):
     request_interval: float = 0.0
 
 
-class ComfyUIConfig(BaseModel):
+COMFYUI_TARGET_ENV = "TAGS_MACHINE_CORE_COMFYUI_TARGET"
+DEFAULT_COMFYUI_TARGET = "default"
+
+
+class ComfyUIAuthConfig(BaseModel):
+    """请求 ComfyUI 时附带的鉴权头。密钥放环境变量，配置里只写变量名。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["none", "bearer"] = "none"
+    token: str | None = None
+    token_env: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    header_envs: dict[str, str] = Field(default_factory=dict)
+
+
+class ComfyUIConnectionConfig(BaseModel):
+    """一个 ComfyUI 目标的连接设置；顶层 comfyui 字段也是同一套。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transport: Literal["native"] = "native"
     base_url: str = "http://127.0.0.1:8188"
     timeout: int = 300
     poll_interval: float = 1.0
     max_wait_seconds: float | None = 600
     retry: int = 3
     retry_interval: float = 2.0
+    # posix：提交前把模型路径里的 "\\" 改成 "/"，用于 Linux 上的 ComfyUI。
+    path_style: Literal["native", "posix"] = "native"
+    # 声明了 output_nodes 时，只提交这些输出节点的上游子图。
+    prune_to_output_nodes: bool = True
+    # >0 时首次提交前轮询 /system_stats，等待 serverless 冷启动。
+    cold_start_wait_seconds: float = 0
+    # serverless 目标缩容后结果会丢，应关闭只排队不轮询的模式。
+    allow_no_wait: bool = True
+    auth: ComfyUIAuthConfig = Field(default_factory=ComfyUIAuthConfig)
+
+
+class ResolvedComfyUITarget(ComfyUIConnectionConfig):
+    name: str
+
+
+class ComfyUIConfig(ComfyUIConnectionConfig):
+    """ComfyUI 配置。
+
+    不写 targets 时，顶层字段就是唯一目标 "default"（旧配置保持原样可用）。
+    写了 targets 时，每个目标只需写和顶层不同的字段，其余继承顶层。
+    选择顺序：--comfyui-target > TAGS_MACHINE_CORE_COMFYUI_TARGET > default_target。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    default_target: str | None = None
+    targets: dict[str, ComfyUIConnectionConfig] = Field(default_factory=dict)
+
+    def resolve_target(self, name: str | None = None) -> ResolvedComfyUITarget:
+        selected = name or self.default_target
+        base = self.model_dump(include=set(ComfyUIConnectionConfig.model_fields))
+        if not self.targets:
+            if selected not in (None, DEFAULT_COMFYUI_TARGET):
+                raise ValueError(
+                    f"Unknown ComfyUI target {selected!r}: config has no comfyui.targets"
+                )
+            return ResolvedComfyUITarget(name=DEFAULT_COMFYUI_TARGET, **base)
+        if selected is None:
+            if len(self.targets) != 1:
+                raise ValueError(
+                    "comfyui.targets has several entries; set comfyui.default_target, "
+                    f"{COMFYUI_TARGET_ENV} or --comfyui-target"
+                )
+            selected = next(iter(self.targets))
+        target = self.targets.get(selected)
+        if target is None:
+            allowed = ", ".join(self.targets)
+            raise ValueError(f"Unknown ComfyUI target {selected!r}; expected one of: {allowed}")
+        overrides = target.model_dump(include=target.model_fields_set)
+        return ResolvedComfyUITarget(name=selected, **{**base, **overrides})
+
+    def with_default_target(self, name: str) -> ComfyUIConfig:
+        return self.model_copy(update={"default_target": name})
+
+    def with_timeout(self, timeout: int) -> ComfyUIConfig:
+        targets = {
+            name: target.model_copy(update={"timeout": timeout})
+            if "timeout" in target.model_fields_set
+            else target
+            for name, target in self.targets.items()
+        }
+        return self.model_copy(update={"timeout": timeout, "targets": targets})
 
 
 class SDConfig(BaseModel):
@@ -95,7 +179,16 @@ def load_yaml(path: Path) -> dict[str, Any]:
 def load_config(path: str | Path) -> AppConfig:
     path = Path(path)
     data = load_yaml(path)
-    return AppConfig.model_validate(data)
+    return apply_env_overrides(AppConfig.model_validate(data))
+
+
+def apply_env_overrides(config: AppConfig) -> AppConfig:
+    target = os.environ.get(COMFYUI_TARGET_ENV, "").strip()
+    if target:
+        config = config.model_copy(
+            update={"comfyui": config.comfyui.with_default_target(target)}
+        )
+    return config
 
 
 def build_prompt_policy_provider(

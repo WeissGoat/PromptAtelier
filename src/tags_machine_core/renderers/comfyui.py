@@ -154,6 +154,13 @@ class ComfyUIRenderAdapter:
             final_params["extra_pnginfo"] = {"workflow": workflow_ui_json}
         if output_nodes:
             final_params["output_nodes"] = output_nodes
+        input_files = self._resolve_input_files(
+            artist=artist,
+            artist_payload=artist_payload,
+            params=params,
+        )
+        if input_files:
+            final_params["input_files"] = input_files
         final_params.update(optional_values)
         final_params.update(
             preserve_extra_params(
@@ -174,10 +181,37 @@ class ComfyUIRenderAdapter:
                     "workflow_ui_path",
                     "workflow_ui_json",
                     "extra_pnginfo",
+                    "input_files",
                 },
             )
         )
         return final_params
+
+    def _resolve_input_files(
+        self,
+        *,
+        artist: NodeDocument | dict[str, Any] | None,
+        artist_payload: dict[str, Any],
+        params: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """LoadImage 等节点要用的输入图；提交前会上传到目标 ComfyUI 的 input 目录。"""
+        value = params["input_files"] if "input_files" in params else artist_payload.get("input_files")
+        if not value:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("ComfyUI input_files must be a list")
+        resolved: list[dict[str, str]] = []
+        for index, item in enumerate(value):
+            if isinstance(item, str):
+                item = {"path": item}
+            if not isinstance(item, dict) or not item.get("path"):
+                raise ValueError(f"ComfyUI input_files[{index}] requires a path")
+            path = self._resolve_workflow_path(item["path"], artist)
+            entry = {"name": str(item.get("name") or path.name), "path": str(path)}
+            if item.get("subfolder"):
+                entry["subfolder"] = str(item["subfolder"])
+            resolved.append(entry)
+        return resolved
 
     def _explicit_optional_values(self, params: dict[str, Any]) -> dict[str, Any]:
         values: dict[str, Any] = {}

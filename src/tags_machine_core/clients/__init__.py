@@ -3,7 +3,11 @@ from .comfyui import (
     ComfyUIClientError,
     ComfyUIGenerationResult,
     ComfyUIImage,
+    ComfyUIInputFile,
     ComfyUIPromptResult,
+    ComfyUITransport,
+    PreparedComfyUIWorkflow,
+    prepare_comfyui_workflow,
 )
 from .novelai import (
     DEFAULT_NOVELAI_MODEL,
@@ -21,7 +25,11 @@ __all__ = [
     "ComfyUIClientError",
     "ComfyUIGenerationResult",
     "ComfyUIImage",
+    "ComfyUIInputFile",
     "ComfyUIPromptResult",
+    "ComfyUITransport",
+    "PreparedComfyUIWorkflow",
+    "prepare_comfyui_workflow",
     "NovelAIClient",
     "NovelAIClientError",
     "NovelAIImage",

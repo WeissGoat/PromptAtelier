@@ -1,19 +1,31 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
+import mimetypes
+from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import requests
 
 from tags_machine_core.contracts import RenderRequest
 from tags_machine_core.json_tools import sanitize_json_for_display
+from tags_machine_core.logging_config import get_logger
+from tags_machine_core.renderers.comfyui_workflow import (
+    WorkflowPathStyle,
+    apply_node_overrides,
+    normalize_workflow_file_paths,
+    output_node_ids,
+    prune_workflow_to_outputs,
+)
 
 
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+logger = get_logger(__name__)
 
 
 class ComfyUIClientError(RuntimeError):
@@ -49,52 +61,171 @@ class ComfyUIGenerationResult:
     images: list[ComfyUIImage]
 
 
+@dataclass(frozen=True)
+class ComfyUIInputFile:
+    name: str
+    content: bytes
+    subfolder: str = ""
+
+
+@dataclass(frozen=True)
+class PreparedComfyUIWorkflow:
+    """与平台无关的待提交 workflow：已套用参数、按 output_nodes 裁剪、按目标平台归一化路径。"""
+
+    prompt: dict[str, Any]
+    output_nodes: tuple[str, ...] = ()
+    extra_data: dict[str, Any] = field(default_factory=dict)
+    input_files: tuple[ComfyUIInputFile, ...] = ()
+    pruned_node_ids: tuple[str, ...] = ()
+    normalized_paths: tuple[str, ...] = ()
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "node_count": len(self.prompt),
+            "output_nodes": list(self.output_nodes),
+            "pruned_node_count": len(self.pruned_node_ids),
+            "normalized_paths": list(self.normalized_paths),
+            "input_files": [
+                f"{item.subfolder}/{item.name}" if item.subfolder else item.name
+                for item in self.input_files
+            ],
+        }
+
+
+def prepare_comfyui_workflow(
+    request: RenderRequest,
+    *,
+    prune_to_output_nodes: bool = True,
+    path_style: WorkflowPathStyle = "native",
+) -> PreparedComfyUIWorkflow:
+    params = request.params
+    workflow = params["workflow_json"] if "workflow_json" in params else params.get("workflow")
+    if not isinstance(workflow, dict):
+        raise ValueError(
+            "ComfyUIClient requires params.workflow_json or params.workflow to be a workflow mapping"
+        )
+    workflow = copy.deepcopy(workflow)
+    apply_node_overrides(workflow, params.get("node_overrides") or {})
+    output_nodes = tuple(output_node_ids({"output_nodes": params.get("output_nodes")}))
+    pruned: list[str] = []
+    if prune_to_output_nodes and output_nodes:
+        workflow, pruned = prune_workflow_to_outputs(workflow, output_nodes)
+    normalized = normalize_workflow_file_paths(workflow, path_style)
+    extra_data: dict[str, Any] = {}
+    extra_pnginfo = params.get("extra_pnginfo")
+    if isinstance(extra_pnginfo, dict) and extra_pnginfo:
+        extra_data["extra_pnginfo"] = copy.deepcopy(extra_pnginfo)
+    return PreparedComfyUIWorkflow(
+        prompt=workflow,
+        output_nodes=output_nodes,
+        extra_data=extra_data,
+        input_files=load_comfyui_input_files(params.get("input_files")),
+        pruned_node_ids=tuple(pruned),
+        normalized_paths=tuple(normalized),
+    )
+
+
+def load_comfyui_input_files(value: Any) -> tuple[ComfyUIInputFile, ...]:
+    if not value:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("ComfyUI params.input_files must be a list")
+    files: list[ComfyUIInputFile] = []
+    seen: set[tuple[str, str]] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict) or not item.get("path"):
+            raise ValueError(f"ComfyUI params.input_files[{index}] requires a path")
+        source = Path(str(item["path"]))
+        name = str(item.get("name") or source.name)
+        subfolder = str(item.get("subfolder") or "").strip("/\\")
+        if "/" in name or "\\" in name:
+            raise ValueError(f"ComfyUI input file name must be a plain filename: {name!r}")
+        if (subfolder, name) in seen:
+            raise ValueError(f"Duplicate ComfyUI input file: {name!r} in subfolder {subfolder!r}")
+        seen.add((subfolder, name))
+        files.append(ComfyUIInputFile(name=name, content=source.read_bytes(), subfolder=subfolder))
+    return tuple(files)
+
+
+class ComfyUITransport(Protocol):
+    """把准备好的 workflow 交给某个 ComfyUI 宿主执行。
+
+    native 由 ComfyUIClient 实现（ComfyUI 原生 HTTP：本地、云主机、Modal web_server）。
+    serverless 任务队列类平台（提交 workflow → 轮询 job → 取图）以后按这个接口写 adapter，
+    准备阶段统一复用 prepare_comfyui_workflow。
+    """
+
+    def prepare(self, request: RenderRequest) -> PreparedComfyUIWorkflow: ...
+
+    def payload(
+        self,
+        prepared: PreparedComfyUIWorkflow,
+        *,
+        client_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    def queue(
+        self,
+        prepared: PreparedComfyUIWorkflow,
+        *,
+        client_id: str | None = None,
+    ) -> ComfyUIPromptResult: ...
+
+    def run(
+        self,
+        prepared: PreparedComfyUIWorkflow,
+        *,
+        client_id: str | None = None,
+        poll_interval: float = 1.0,
+        max_wait_seconds: float | None = None,
+    ) -> ComfyUIGenerationResult: ...
+
+
 @dataclass
 class ComfyUIClient:
+    """ComfyUI 原生 HTTP 协议：POST /prompt → 轮询 /history → GET /view。"""
+
     base_url: str = COMFYUI_BASE_URL
     timeout: int = 120
     retry: int = 3
     retry_interval: float = 2.0
     http_client: Any | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+    prune_to_output_nodes: bool = True
+    path_style: WorkflowPathStyle = "native"
+    ready_timeout: float = 0.0
+    _ready: bool = field(default=False, init=False, repr=False)
 
-    def build_payload(self, request: RenderRequest, *, client_id: str | None = None) -> dict[str, Any]:
-        workflow = self.build_workflow(request)
-        payload: dict[str, Any] = {"prompt": workflow}
-        extra_pnginfo = request.params.get("extra_pnginfo")
-        if isinstance(extra_pnginfo, dict) and extra_pnginfo:
-            payload["extra_data"] = {"extra_pnginfo": copy.deepcopy(extra_pnginfo)}
+    def prepare(self, request: RenderRequest) -> PreparedComfyUIWorkflow:
+        return prepare_comfyui_workflow(
+            request,
+            prune_to_output_nodes=self.prune_to_output_nodes,
+            path_style=self.path_style,
+        )
+
+    def payload(
+        self,
+        prepared: PreparedComfyUIWorkflow,
+        *,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"prompt": copy.deepcopy(prepared.prompt)}
+        if prepared.extra_data:
+            payload["extra_data"] = copy.deepcopy(prepared.extra_data)
         if client_id:
             payload["client_id"] = client_id
         return payload
 
-    def build_workflow(self, request: RenderRequest) -> dict[str, Any]:
-        workflow = (
-            request.params["workflow_json"]
-            if "workflow_json" in request.params
-            else request.params.get("workflow")
-        )
-        if not isinstance(workflow, dict):
-            raise ValueError(
-                "ComfyUIClient requires params.workflow_json or params.workflow to be a workflow mapping"
-            )
-        workflow = copy.deepcopy(workflow)
-        for path, value in (request.params.get("node_overrides") or {}).items():
-            self._set_workflow_value(workflow, str(path), value)
-        return workflow
-
-    def queue_prompt(
+    def queue(
         self,
-        request: RenderRequest,
+        prepared: PreparedComfyUIWorkflow,
         *,
         client_id: str | None = None,
     ) -> ComfyUIPromptResult:
-        payload = self.build_payload(request, client_id=client_id)
-        response = self._request(
-            "post",
-            f"{self.base_url.rstrip('/')}/prompt",
-            json=payload,
-            timeout=self.timeout,
-        )
+        self.ensure_ready()
+        self.upload_input_files(prepared)
+        payload = self.payload(prepared, client_id=client_id)
+        response = self._request("post", self._url("/prompt"), json=payload, timeout=self.timeout)
         if response.status_code >= 400:
             raise ComfyUIClientError(
                 status_code=response.status_code,
@@ -111,15 +242,15 @@ class ComfyUIClient:
             raw=data,
         )
 
-    def generate_images(
+    def run(
         self,
-        request: RenderRequest,
+        prepared: PreparedComfyUIWorkflow,
         *,
         client_id: str | None = None,
         poll_interval: float = 1.0,
         max_wait_seconds: float | None = None,
     ) -> ComfyUIGenerationResult:
-        queued = self.queue_prompt(request, client_id=client_id)
+        queued = self.queue(prepared, client_id=client_id)
         if not queued.prompt_id:
             raise ComfyUIClientError(
                 status_code=200,
@@ -138,14 +269,128 @@ class ComfyUIClient:
             images=self.download_history_images(
                 history,
                 prompt_id=queued.prompt_id,
-                output_nodes=request.params.get("output_nodes"),
+                output_nodes=prepared.output_nodes,
             ),
         )
+
+    def build_workflow(self, request: RenderRequest) -> dict[str, Any]:
+        return self.prepare(request).prompt
+
+    def build_payload(self, request: RenderRequest, *, client_id: str | None = None) -> dict[str, Any]:
+        return self.payload(self.prepare(request), client_id=client_id)
+
+    def queue_prompt(
+        self,
+        request: RenderRequest,
+        *,
+        client_id: str | None = None,
+    ) -> ComfyUIPromptResult:
+        return self.queue(self.prepare(request), client_id=client_id)
+
+    def generate_images(
+        self,
+        request: RenderRequest,
+        *,
+        client_id: str | None = None,
+        poll_interval: float = 1.0,
+        max_wait_seconds: float | None = None,
+    ) -> ComfyUIGenerationResult:
+        return self.run(
+            self.prepare(request),
+            client_id=client_id,
+            poll_interval=poll_interval,
+            max_wait_seconds=max_wait_seconds,
+        )
+
+    def ensure_ready(self) -> None:
+        if self._ready or self.ready_timeout <= 0:
+            return
+        self.wait_until_ready(self.ready_timeout)
+        self._ready = True
+
+    def wait_until_ready(self, max_wait_seconds: float) -> dict[str, Any]:
+        """轮询 /system_stats，等 serverless 冷启动的 ComfyUI 能接请求。"""
+        started_at = time.monotonic()
+        delay = 2.0
+        last_error = "no response"
+        while True:
+            remaining = max_wait_seconds - (time.monotonic() - started_at)
+            try:
+                response = self._send(
+                    "get",
+                    self._url("/system_stats"),
+                    timeout=max(1.0, min(float(self.timeout), remaining)),
+                )
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+            else:
+                if response.status_code < 400:
+                    data = _json_or_none(response)
+                    return data if isinstance(data, dict) else {}
+                if response.status_code in {401, 403}:
+                    raise ComfyUIClientError(
+                        status_code=response.status_code,
+                        response_text=(
+                            "ComfyUI target rejected the credentials; check comfyui auth: "
+                            + self._error_text(response)
+                        ),
+                        sanitized_payload={"endpoint": "system_stats"},
+                    )
+                if response.status_code not in RETRYABLE_STATUS_CODES:
+                    raise ComfyUIClientError(
+                        status_code=response.status_code,
+                        response_text=self._error_text(response),
+                        sanitized_payload={"endpoint": "system_stats"},
+                    )
+                last_error = f"HTTP {response.status_code}"
+            elapsed = time.monotonic() - started_at
+            if elapsed >= max_wait_seconds:
+                raise TimeoutError(
+                    f"ComfyUI at {self.base_url} was not ready after "
+                    f"{max_wait_seconds:.0f}s; last error: {last_error}"
+                )
+            logger.info(
+                "waiting for ComfyUI url=%s elapsed=%.0fs last_error=%s",
+                self.base_url,
+                elapsed,
+                last_error,
+            )
+            time.sleep(min(delay, max(0.0, max_wait_seconds - elapsed)))
+            delay = min(delay * 1.5, 15.0)
+
+    def upload_input_files(self, prepared: PreparedComfyUIWorkflow) -> list[dict[str, Any]]:
+        uploaded: list[dict[str, Any]] = []
+        for item in prepared.input_files:
+            mime_type = mimetypes.guess_type(item.name)[0] or "application/octet-stream"
+            sanitized = {"endpoint": "upload/image", "name": item.name, "subfolder": item.subfolder}
+            response = self._request(
+                "post",
+                self._url("/upload/image"),
+                files={"image": (item.name, item.content, mime_type)},
+                data={"type": "input", "subfolder": item.subfolder, "overwrite": "true"},
+                timeout=self.timeout,
+            )
+            if response.status_code >= 400:
+                raise ComfyUIClientError(
+                    status_code=response.status_code,
+                    response_text=self._error_text(response),
+                    sanitized_payload=sanitized,
+                )
+            data = _json_or_none(response)
+            stored = data if isinstance(data, dict) else {}
+            if stored.get("name") != item.name or str(stored.get("subfolder") or "") != item.subfolder:
+                raise ComfyUIClientError(
+                    status_code=response.status_code,
+                    response_text=f"ComfyUI stored the input file as {stored!r}",
+                    sanitized_payload=sanitized,
+                )
+            uploaded.append(stored)
+        return uploaded
 
     def get_history(self, prompt_id: str) -> dict[str, Any]:
         response = self._request(
             "get",
-            f"{self.base_url.rstrip('/')}/history/{prompt_id}",
+            self._url(f"/history/{prompt_id}"),
             timeout=self.timeout,
         )
         if response.status_code >= 400:
@@ -247,7 +492,7 @@ class ComfyUIClient:
         )
         response = self._request(
             "get",
-            f"{self.base_url.rstrip('/')}/view?{query}",
+            self._url(f"/view?{query}"),
             timeout=self.timeout,
         )
         if response.status_code >= 400:
@@ -264,9 +509,10 @@ class ComfyUIClient:
         return response.content
 
     def object_info(self) -> dict[str, Any]:
+        self.ensure_ready()
         response = self._request(
             "get",
-            f"{self.base_url.rstrip('/')}/object_info",
+            self._url("/object_info"),
             timeout=self.timeout,
         )
         if response.status_code >= 400:
@@ -279,17 +525,24 @@ class ComfyUIClient:
         data = response.json()
         return data if isinstance(data, dict) else {"raw": data}
 
+    def _url(self, path: str) -> str:
+        return f"{self.base_url.rstrip('/')}{path}"
+
     def _session(self):
         return self.http_client or requests
+
+    def _send(self, method: str, url: str, **kwargs):
+        if self.headers:
+            kwargs["headers"] = {**self.headers, **(kwargs.get("headers") or {})}
+        return getattr(self._session(), method)(url, **kwargs)
 
     def _request(self, method: str, url: str, **kwargs):
         attempts = max(1, int(self.retry or 1))
         last_exc: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
-                func = getattr(self._session(), method)
-                response = func(url, **kwargs)
-                if response.status_code in {429, 500, 502, 503, 504} and attempt < attempts:
+                response = self._send(method, url, **kwargs)
+                if response.status_code in RETRYABLE_STATUS_CODES and attempt < attempts:
                     time.sleep(max(0.0, float(self.retry_interval or 0.0)))
                     continue
                 return response
@@ -367,18 +620,12 @@ class ComfyUIClient:
     def _status_text(self, status: dict[str, Any]) -> str:
         return str(status.get("status_str") or status.get("status") or "").lower()
 
-    def _set_workflow_value(self, workflow: dict[str, Any], path: str, value: Any) -> None:
-        parts = [part for part in path.split(".") if part]
-        if not parts:
-            raise ValueError("node_overrides path cannot be empty")
-        current: Any = workflow
-        for part in parts[:-1]:
-            if not isinstance(current, dict):
-                raise ValueError(f"Cannot apply node override through non-mapping path: {path}")
-            current = current.setdefault(part, {})
-        if not isinstance(current, dict):
-            raise ValueError(f"Cannot apply node override to non-mapping path: {path}")
-        current[parts[-1]] = value
+
+def _json_or_none(response: Any) -> Any:
+    try:
+        return response.json()
+    except Exception:
+        return None
 
 
 def json_like(value: Any) -> str:

@@ -1,0 +1,2 @@
+# 这些文件会在 Linux 容器里使用：Windows 检出时也保持 LF，补丁才能 git apply。
+* text=auto eol=lf
