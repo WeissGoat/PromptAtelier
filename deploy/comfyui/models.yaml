@@ -6,6 +6,14 @@ schema: tags-machine.comfyui-models/v1
 # path 相对 models 根目录；sha256 用于下载后校验。
 # source: civitai 按 sha256 走 Civitai by-hash 接口（需要 CIVITAI_TOKEN）；url 直接下载，
 # 尽量钉到固定版本（HF 的 resolve/<commit>），上游换文件时 sha256 校验会拦下来。
+# source: mirror 表示没有公开来源（私有、自己训练的），只能从下面的模型仓库或本机目录取。
+
+# 自己的模型仓库：先从这里拉，没有再走每个模型的 source。目录结构和下面的 path 一致。
+# 写的是 rclone remote；连接信息不在这里：本机用 rclone config，云端用 RCLONE_CONFIG_<NAME>_* 环境变量。
+# tmgdrive 是谷歌云盘，tm-models 是云盘里的文件夹（本机由 Google Drive 桌面版同步上传）。
+mirrors:
+  - rclone: tmgdrive:tm-models
+
 models:
   - path: checkpoints/cocoStyleNoobaiXL_v70.safetensors
     size: 6938041602

@@ -6,9 +6,9 @@
 | 层 | 文件 | 换云时 |
 |---|---|---|
 | 平台无关 | `manifest.yaml`：ComfyUI 版本、插件 @commit、补丁、依赖版本约束 | 不动 |
-| | `models.yaml`：模型路径 + 大小 + sha256 + 来源（运行时读取，不进镜像安装层） | 不动 |
+| | `models.yaml`：模型路径 + 大小 + sha256 + 来源，`mirrors` 指向自己的模型仓库（运行时读取，不进镜像安装层） | 不动 |
 | | `install_comfyui.py`：按 manifest 装 ComfyUI 和插件（Docker 和裸主机都能跑） | 不动 |
-| | `fetch_models.py`：按 models.yaml 下载/复制模型到任意目录并校验 sha256 | 不动 |
+| | `fetch_models.py`：按 models.yaml 从本机目录、模型仓库或公开来源取模型到任意目录，并校验 sha256 | 不动 |
 | | `Dockerfile`：唯一的镜像定义，模型运行时挂载到 `/models` | 不动 |
 | 平台适配 | `providers/modal_app.py`：Modal 的 GPU、Volume、web_server、入口鉴权 | 新平台写一个 `providers/<平台>/` |
 
@@ -43,16 +43,17 @@
 
 3. **放模型**（二选一，已存在且大小一致的会跳过）：
 
+   - 在云端下载（推荐）：先从模型仓库（见下面「模型仓库」）拉，仓库里没有的再走 Civitai
+     （需要本机 `CIVITAI_TOKEN` 环境变量）或原链接。走的是机房带宽，不占本机上行：
+
+     ```bash
+     modal run deploy/comfyui/providers/modal_app.py::download
+     ```
+
    - 从本机上传（会先校验 sha256）：
 
      ```bash
      modal run deploy/comfyui/providers/modal_app.py::upload --local-roots "D:/AI/ComfyUI-aki/ComfyUI-aki-v1.6/ComfyUI/models;G:/AI/draw/models"
-     ```
-
-   - 在云端直接下载（Civitai 模型需要先在本机设置 `CIVITAI_TOKEN` 环境变量）：
-
-     ```bash
-     modal run deploy/comfyui/providers/modal_app.py::download
      ```
 
 4. **创建 proxy token**（API 开了入口鉴权，没有 token 的请求在 Modal 边缘就被拒绝，不会唤醒 GPU）：
@@ -108,16 +109,49 @@
 - Batch 页也有「ComfyUI 运行位置」，只对用 ComfyUI 画风的任务生效，选择会记在浏览器里。
 - Web 后端从环境变量 `TM_COMFYUI_MODAL_TOKEN` 读 proxy token；设置后要重启 Web 控制台。
 
+## 模型仓库（谷歌云盘）
+
+所有模型在谷歌云盘的 `tm-models` 文件夹里存一份，目录结构和 `models.yaml` 的 `path` 一致。
+换平台时从这里拉：不怕 Civitai 下架，私有或自己训练的模型也有地方放，也不走家里的上行带宽。
+
+- **账号**：专门放模型的谷歌小号。本机 Google Drive 桌面版把「我的云端硬盘」镜像到 `G:\GoogleDrive`，
+  放进 `G:\GoogleDrive	m-models` 的文件会自动上传。
+- **放进仓库**（只复制清单里的模型，复制后校验 sha256）：
+
+  ```bash
+  uv run python deploy/comfyui/fetch_models.py --no-mirrors --local-root "D:/AI/ComfyUI-aki/ComfyUI-aki-v1.6/ComfyUI/models" --local-root "G:/AI/draw/models" --dest "G:/GoogleDrive/tm-models"
+  ```
+
+- **让云端能读**：用 rclone。本机配置一次，会打开浏览器登录谷歌小号，只要只读权限：
+
+  ```bash
+  rclone config create tmgdrive drive scope=drive.readonly
+  ```
+
+  之后 `modal run ...::download` 会从本机 rclone 配置里取出 `tmgdrive` 的连接信息，只随这次调用传给云端，不写进部署好的 app。
+  其他平台：把 `rclone config dump` 里 `tmgdrive` 段的每一项设成环境变量 `RCLONE_CONFIG_TMGDRIVE_<项名大写>`
+  （至少 `TYPE`、`SCOPE`、`TOKEN`），再在容器里跑 `fetch_models.py`。这个 token 能读整个云盘，所以仓库只放在小号里。
+- **检查仓库是否齐全**（对比大小和云盘给出的 sha256，不下载）：
+
+  ```bash
+  uv run python deploy/comfyui/fetch_models.py --check-mirrors
+  ```
+
+- 以后想换成 R2、B2 这类对象存储：改 `models.yaml` 的 `mirrors` 和 rclone 配置，代码不用动。
+
 ## 新增 workflow / 插件 / 模型
 
 1. 在本地 aki 里做好 workflow，`File -> Export (API)`，放进 artist node。
 2. 跑 `comfyui-check --artist-node <dir> --manifest deploy/comfyui/manifest.yaml`，看 `manifest.not_provided_by_manifest`（内置节点或漏掉的插件）和 `missing_models`。
 3. 插件：在 `manifest.yaml` 的 `custom_nodes` 里加 repo + commit（对齐本地 aki 的版本）和 `provides`，然后重新 `modal deploy`。
-4. 模型：在 `models.yaml` 里加路径、大小、sha256、来源（URL 尽量钉到固定版本），然后跑上面的上传或下载；不需要重新部署。
+   Modal 把整个 Dockerfile 当成一步：改 `manifest.yaml`、补丁或 Dockerfile 指令都会从头重建镜像（约 15 分钟）；
+   改 `models.yaml`、`fetch_models.py` 或注释不会（这两个文件在容器启动时挂载）。
+4. 模型：在 `models.yaml` 里加路径、大小、sha256、来源（Civitai，或钉到固定版本的 URL；只在自己手里的写 `source: mirror`），
+   用上面的命令放进模型仓库，再跑云端下载；不需要重新部署。
 
 ## 换到其他平台
 
-- **能跑 Docker 镜像、能暴露端口的平台**（GPU 云主机、RunPod Pod 等）：用这里的 `Dockerfile` 构建，把持久盘挂到 `/models`，在容器里跑 `python /opt/tm-comfyui/fetch_models.py --dest /models` 填充模型，暴露 8188。
+- **能跑 Docker 镜像、能暴露端口的平台**（GPU 云主机、RunPod Pod 等）：用这里的 `Dockerfile` 构建，把持久盘挂到 `/models`，在容器里跑 `python /opt/tm-comfyui/fetch_models.py --dest /models` 填充模型（设好 `RCLONE_CONFIG_TMGDRIVE_*` 就先从模型仓库拉），暴露 8188。
   平台没有入口鉴权的话需要在前面加一层鉴权反向代理（还没做）。最后在 `comfyui.targets` 里加一条。
 - **不支持自定义镜像的主机**：直接运行 `install_comfyui.py --comfyui-dir ... --models-dir ...` 和 `fetch_models.py`。
 - **serverless 任务队列型平台**（RunPod Serverless 等，提交 workflow → 轮询任务 → 取图）：需要按 `tags_machine_core.clients.ComfyUITransport` 写一个 transport adapter，并在 `ComfyUIConnectionConfig.transport` 里登记（还没做）。

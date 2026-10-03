@@ -18,8 +18,15 @@ COPY patches/ /opt/tm-comfyui/patches/
 RUN pip install pyyaml requests \
     && python /opt/tm-comfyui/install_comfyui.py --manifest /opt/tm-comfyui/manifest.yaml
 
-# 放在安装层之后：改模型清单或下载脚本不会触发重新安装。
+# fetch_models.py 先从自己的模型仓库（rclone remote）拉模型；单独一层，用 Docker 构建时不动上面的安装层。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends rclone \
+    && rm -rf /var/lib/apt/lists/*
+
+# 放在最后：用 Docker 构建时改模型清单或下载脚本只重跑这一层。
+# Modal 把整个 Dockerfile 当成一步，所以 Modal 上不拷这两个文件，改为容器启动时挂载（见 providers/modal_app.py）。
 # 容器里填充模型：python /opt/tm-comfyui/fetch_models.py --dest /models
+# 仓库的连接信息用环境变量传入，例如 -e RCLONE_CONFIG_TMGDRIVE_TYPE=drive -e RCLONE_CONFIG_TMGDRIVE_TOKEN=...
 COPY models.yaml fetch_models.py /opt/tm-comfyui/
 
 WORKDIR /opt/ComfyUI
