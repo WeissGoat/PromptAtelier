@@ -6,6 +6,30 @@ export type NodeSummary = {
   name: string;
   ref: string;
   relative?: string;
+  backends?: string[];
+};
+
+export type ComfyUITargetState = "online" | "offline" | "running" | "stopped" | "unknown";
+
+export type ComfyUITarget = {
+  name: string;
+  label: string;
+  location: "local" | "cloud";
+  base_url: string;
+  status: {
+    state: ComfyUITargetState;
+    detail?: string;
+    containers?: number;
+    shutdown_in_seconds?: number;
+  };
+  active_jobs: number;
+  last_used_at: number | null;
+};
+
+export type ComfyUITargetsResponse = {
+  schema: "tags-machine-core.web.comfyui-targets/v1";
+  default_target: string | null;
+  targets: ComfyUITarget[];
 };
 
 export type NodeReadResponse = {
@@ -102,6 +126,14 @@ export type NodePoolSampleResponse = {
   schema: "tags-machine-core.web.node-pool-sample/v1";
   role: string;
   items: SampledNode[];
+  stats: NodePoolStats;
+};
+
+export type NodePoolListAllResponse = {
+  schema: "tags-machine-core.web.node-pool-list-all/v1";
+  role: string;
+  total: number;
+  items: NodePoolCandidate[];
   stats: NodePoolStats;
 };
 

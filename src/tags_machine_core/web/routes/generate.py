@@ -18,7 +18,8 @@ def generate(payload: dict[str, Any], request: Request) -> dict[str, Any]:
 
     def worker(ctx):
         ctx.emit("generation_started", {})
-        result = api.generate(prepared)
+        # on_progress 只在进程内传给执行器（ComfyUI 的启动/排队/下载进度），不会序列化进结果。
+        result = api.generate({**prepared, "on_progress": ctx.emit})
         if prepared.get("random_selections"):
             result["random_selections"] = prepared["random_selections"]
         ctx.emit(

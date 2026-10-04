@@ -1,0 +1,32 @@
+schema: tags-machine-core.batch/v1
+name: homura-sleep-album
+description: 通过 final AlbumPlan 执行既有故事集衍生图集。
+
+config: ../../configs/local.example.yaml
+work_root: G:/ai_auto/{date}
+output_dir: G:/ai_auto/{date}
+
+album_plan:
+  action_root: F:/my_project/new/tags_machine/design/动作改2
+  path: st_rp_sleep_4/AlbumPlan.yaml
+
+defaults:
+  backend: novelai
+  composer: agent
+  artist: 20260412
+  nt: 1
+  resolution: random_standard
+  model: nai-diffusion-4-5-full
+  character_prompts: auto
+
+expand:
+  mode: album_plan
+
+run:
+  resume: true
+  retry:
+    max_attempts: 3
+    retry_on: ["429", "502", "503", "504", timeout]
+
+archive:
+  save_parameter_image: true

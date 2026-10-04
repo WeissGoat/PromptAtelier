@@ -165,6 +165,7 @@ function migrateWorkspace(value: unknown): unknown {
         spec.source.value = role === "action" ? "new" : ".";
       }
     }
+    if (!spec.drawMode) spec.drawMode = "random";
     return spec;
   };
 
@@ -201,6 +202,7 @@ function migrateWorkspace(value: unknown): unknown {
       draftNode: isObject(slot.draftNode) ? (slot.draftNode as NodeDocument) : null,
       sourceEditor: isObject(slot.sourceEditor) ? (slot.sourceEditor as any) : null,
       draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
+      poolCursor: typeof slot.poolCursor === "number" ? slot.poolCursor : 0,
     };
 
     if (role === "character") {
@@ -251,6 +253,9 @@ function migrateWorkspace(value: unknown): unknown {
     nt: typeof rawParams.nt === "number" && rawParams.nt > 0 ? rawParams.nt : 1,
     seed: rawParams.seed !== undefined && rawParams.seed !== null ? String(rawParams.seed) : "-1",
   };
+  if (typeof rawParams.comfyuiTarget === "string" && rawParams.comfyuiTarget) {
+    params.comfyuiTarget = rawParams.comfyuiTarget;
+  }
 
   const rawEditor = isObject(value.editor) ? value.editor : {};
   const editorSlotId = typeof rawEditor.slotId === "string" ? rawEditor.slotId : null;

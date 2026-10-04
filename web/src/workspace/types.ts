@@ -5,6 +5,8 @@ export type SlotMode = "primary" | "compare";
 
 export type NodePoolSourceType = "folder" | "collection" | "glob";
 
+export type DrawMode = "random" | "sequential";
+
 export type ClassifyFilter = {
   phase: string[];
   species: string[];
@@ -27,6 +29,7 @@ export type NodePoolSpec = {
     exclude_names: string[];
   };
   filters: { classify: ClassifyFilter };
+  drawMode?: DrawMode;
 };
 
 export type NodeVariantSlot = {
@@ -43,6 +46,7 @@ export type NodeVariantSlot = {
   clothingRef?: string | null;
   clothingNode?: NodeDocument | null;
   clothingSlots?: NodeVariantSlot[];
+  poolCursor?: number;
 };
 
 export type RoleNodeGroup = {
@@ -56,6 +60,8 @@ export type RenderWorkspaceParams = {
   height: number;
   nt: number;
   seed: string;
+  /** ComfyUI 画风在哪个运行位置出图（comfyui.targets 的名字）；空表示用后端默认。 */
+  comfyuiTarget?: string;
 };
 
 export type PolicyRuleState = "inherit" | "enabled" | "disabled";

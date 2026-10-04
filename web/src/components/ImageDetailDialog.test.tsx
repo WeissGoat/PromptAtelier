@@ -61,6 +61,34 @@ describe("ImageDetailDialog", () => {
     expect(JSON.parse(String(folderCall?.[1]?.body))).toEqual({ path: "outputs/generated.png" });
   });
 
+  it("labels ComfyUI images with their run location, workflow and converted prompt", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      ...metadata(),
+      model: null,
+      png_text: {},
+      parameters: {
+        backend: "comfyui",
+        prompt: "{{1girl}}, smile",
+        negative_prompt: "lowres",
+        comfyui_prompt: "(1girl:1.1025), smile",
+        seed: 4242,
+        target: "modal",
+        workflow: "cunyfunky",
+        cfg: 6.5,
+        scale: 6.5,
+      },
+    }));
+
+    render(<ImageDetailDialog initialIndex={0} onClose={vi.fn()} paths={["outputs/generated.png"]} />);
+
+    expect(await screen.findByText("4242")).toBeTruthy();
+    expect(screen.getByText("ComfyUI")).toBeTruthy();
+    expect(screen.getByText("modal")).toBeTruthy();
+    expect(screen.getByText("cunyfunky")).toBeTruthy();
+    expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe("{{1girl}}, smile");
+    expect((screen.getByLabelText("ComfyUI Prompt（权重已换算）") as HTMLTextAreaElement).value).toBe("(1girl:1.1025), smile");
+  });
+
   it("closes with Escape or by clicking the backdrop", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response(metadata()));
     const onClose = vi.fn();

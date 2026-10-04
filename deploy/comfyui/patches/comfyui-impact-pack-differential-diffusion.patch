@@ -1,0 +1,104 @@
+diff --git a/modules/impact/animatediff_nodes.py b/modules/impact/animatediff_nodes.py
+index 5b45e82..4b62523 100644
+--- a/modules/impact/animatediff_nodes.py
++++ b/modules/impact/animatediff_nodes.py
+@@ -66,7 +66,7 @@ class SEGSDetailerForAnimateDiff:
+         cnet_image_list = []
+ 
+         if not (isinstance(model, str) and model == "DUMMY") and noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++            model = core.apply_differential_diffusion(model)
+ 
+         for seg in segs[1]:
+             cropped_image_frames = None
+diff --git a/modules/impact/core.py b/modules/impact/core.py
+index 801b71f..4e3e65e 100644
+--- a/modules/impact/core.py
++++ b/modules/impact/core.py
+@@ -43,6 +43,14 @@ except Exception:
+     raise Exception("[Impact Pack] ComfyUI is an outdated version.")
+ 
+ 
++def apply_differential_diffusion(model):
++    differential_diffusion = nodes_differential_diffusion.DifferentialDiffusion()
++    runner = getattr(differential_diffusion, "execute", None)
++    if runner is None:
++        runner = differential_diffusion.apply
++    return runner(model)[0]
++
++
+ SEG = namedtuple("SEG",
+                  ['cropped_image', 'cropped_mask', 'confidence', 'crop_region', 'bbox', 'label', 'control_net_wrapper'],
+                  defaults=[None])
+@@ -262,7 +270,7 @@ def enhance_detail(image, model, clip, vae, guide_size, guide_size_for_bbox, max
+         noise_mask = noise_mask.squeeze(3)
+ 
+         if noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++            model = apply_differential_diffusion(model)
+ 
+     if wildcard_opt is not None and wildcard_opt != "":
+         model, _, wildcard_positive = wildcards.process_with_loras(wildcard_opt, model, clip)
+@@ -435,7 +443,7 @@ def enhance_detail_for_animatediff(image_frames, model, clip, vae, guide_size, g
+         noise_mask = noise_mask.squeeze(3)
+ 
+     if noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-        model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++        model = apply_differential_diffusion(model)
+ 
+     if wildcard_opt is not None and wildcard_opt != "":
+         model, _, wildcard_positive = wildcards.process_with_loras(wildcard_opt, model, clip)
+diff --git a/modules/impact/impact_pack.py b/modules/impact/impact_pack.py
+index 0c66786..645e208 100644
+--- a/modules/impact/impact_pack.py
++++ b/modules/impact/impact_pack.py
+@@ -301,7 +301,7 @@ class DetailerForEach:
+             ordered_segs = segs[1]
+ 
+         if not (isinstance(model, str) and model == "DUMMY") and noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++            model = core.apply_differential_diffusion(model)
+ 
+         for i, seg in enumerate(ordered_segs):
+             cropped_image = utils.crop_ndarray4(image.cpu().numpy(), seg.crop_region)  # Never use seg.cropped_image to handle overlapping area
+@@ -518,7 +518,7 @@ class DetailerForEachAutoRetry:
+             ordered_segs = segs[1]
+ 
+         if not (isinstance(model, str) and model == "DUMMY") and noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++            model = core.apply_differential_diffusion(model)
+ 
+         for i, seg in enumerate(ordered_segs):
+             cropped_image = utils.crop_ndarray4(image.cpu().numpy(), seg.crop_region)  # Never use seg.cropped_image to handle overlapping area
+diff --git a/modules/impact/segs_nodes.py b/modules/impact/segs_nodes.py
+index ee46df1..2f9308e 100644
+--- a/modules/impact/segs_nodes.py
++++ b/modules/impact/segs_nodes.py
+@@ -86,7 +86,7 @@ class SEGSDetailer:
+         cnet_pil_list = []
+ 
+         if not (isinstance(model, str) and model == "DUMMY") and noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++            model = core.apply_differential_diffusion(model)
+ 
+         for i in range(batch_size):
+             seed += 1
+diff --git a/modules/impact/segs_upscaler.py b/modules/impact/segs_upscaler.py
+index fb3cd30..39fc32f 100644
+--- a/modules/impact/segs_upscaler.py
++++ b/modules/impact/segs_upscaler.py
+@@ -1,4 +1,5 @@
+ from impact import impact_sampling
++from impact import core
+ from comfy import model_management
+ from impact import utils
+ from PIL import Image
+@@ -102,7 +103,7 @@ def img2img_segs(image, model, clip, vae, seed, steps, cfg, sampler_name, schedu
+         noise_mask = noise_mask.squeeze(3)
+ 
+         if noise_mask_feather > 0 and 'denoise_mask_function' not in model.model_options:
+-            model = nodes_differential_diffusion.DifferentialDiffusion().execute(model)[0]
++            model = core.apply_differential_diffusion(model)
+ 
+     if control_net_wrapper is not None:
+         positive, negative, _ = control_net_wrapper.apply(positive, negative, image, noise_mask)

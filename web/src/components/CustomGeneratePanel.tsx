@@ -1,17 +1,20 @@
-import { Eye, Grid2X2, Play, RotateCcw } from "lucide-react";
+import { Eye, Grid2X2, ListOrdered, Play, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
-import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord } from "../api/types";
+import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord, NodePoolCandidate, NodeReadResponse } from "../api/types";
 import { compareDimensions } from "../compare/matrix";
 import { compareRunCount } from "../compare/runPlan";
 import { createCompareGroupOutputDir, createCompareOutputDir } from "../compare/useCompareRunController";
 import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
-import { hasRandomSlots, resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
+import { listAllPoolNodes } from "../randomNodes/api";
+import { hasRandomSlots, hasSequentialSlot, isSequentialSlot, resolveRandomItems, type RandomSelectionRecord } from "../randomNodes/resolve";
 import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
-import { buildComposeRenderRequest } from "../workspace/requestBuilder";
+import { buildComposeRenderRequest, buildGeneratePayload } from "../workspace/requestBuilder";
+import { describeJobProgress } from "../comfyui/jobProgress";
+import { notifyComfyTargetsChanged } from "../comfyui/targetStatus";
 import type { NodeVariantSlot } from "../workspace/types";
 import { PromptPreview } from "./PromptPreview";
 import { ImageDetailDialog } from "./ImageDetailDialog";
@@ -101,6 +104,12 @@ function validateSelected(slots: Partial<Record<NodeRole, NodeVariantSlot | null
 
 type ImageSelection = { paths: string[]; index: number };
 
+/** ComfyUI 任务的当前阶段（启动 / 生成 / 下载）；任务轮询时整块重新渲染，已等待的秒数跟着走。 */
+function JobProgress({ job }: { job: JobRecord | null | undefined }) {
+  const text = job ? describeJobProgress(job, Date.now() / 1000) : null;
+  return text ? <small className="job-progress">{text}</small> : null;
+}
+
 function ImageGrid({
   job,
   prefix = "Generated",
@@ -149,6 +158,7 @@ export function CustomGeneratePanel() {
     clothing: groups.character.primary.clothingSlots?.[0] ?? null,
   }), [groups]);
   const primaryHasRandom = hasRandomSlots(primary);
+  const primaryHasSequential = hasSequentialSlot(primary);
   const previewRequest = useMemo(() => primaryHasRandom ? null : buildComposeRenderRequest(primary, params, {
     compare: false,
     promptBehavior: activeBehavior.value,
@@ -168,6 +178,7 @@ export function CustomGeneratePanel() {
   const [previewSignature, setPreviewSignature] = useState("");
   const [job, setJob] = useState<JobRecord | null>(null);
   const [randomJobs, setRandomJobs] = useState<Array<{ job: JobRecord; selections: RandomSelectionRecord[] }>>([]);
+  const [sequentialJobs, setSequentialJobs] = useState<Array<{ job: JobRecord; actionName: string; actionIndex: number }>>([]);
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -181,6 +192,9 @@ export function CustomGeneratePanel() {
     ? job.result?.images?.map((image) => image.path) ?? []
     : [];
   const randomImagePaths = randomJobs.flatMap((item) => item.job.status === "succeeded"
+    ? item.job.result?.images?.map((image) => image.path) ?? []
+    : []);
+  const sequentialImagePaths = sequentialJobs.flatMap((item) => item.job.status === "succeeded"
     ? item.job.result?.images?.map((image) => image.path) ?? []
     : []);
   const compareImagePaths = compare.results.flatMap((result) => result.job?.status === "succeeded"
@@ -260,6 +274,10 @@ export function CustomGeneratePanel() {
     setError("");
     setStatus("Generating Primary");
     try {
+      if (primaryHasSequential) {
+        await generateSequentialStep();
+        return;
+      }
       if (primaryHasRandom) {
         await generateRandomPrimary();
         return;
@@ -274,10 +292,130 @@ export function CustomGeneratePanel() {
           activeBehavior.slotId === primaryBehavior.slotId,
         );
       if (!ready.render_request) throw new Error("该节点组合需要外部 Agent 先完成提示词拼接。");
-      const queued = await apiPost<JobRecord>("/generate", { render_request: ready.render_request });
+      const queued = await apiPost<JobRecord>("/generate", buildGeneratePayload(ready.render_request, params));
+      notifyComfyTargetsChanged(ready.render_request);
       await pollJob(queued);
+      notifyComfyTargetsChanged(ready.render_request);
     } catch (requestError) {
       setStatus("Generate failed");
+      setError(errorMessage(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resolveSequentialAction(
+    actionSlot: NodeVariantSlot,
+    cursor: number,
+  ): Promise<{ resolved: NodeVariantSlot; candidate: NodePoolCandidate; total: number }> {
+    const response = await listAllPoolNodes(actionSlot.role, actionSlot.randomSpec!);
+    if (!response.items.length) throw new Error("顺序池中没有可用候选节点。");
+    const index = cursor % response.items.length;
+    const candidate = response.items[index];
+    const nodeResponse = await apiGet<NodeReadResponse>(
+      `/nodes/read?${new URLSearchParams({ ref: candidate.ref, role: actionSlot.role })}`,
+    );
+    return {
+      resolved: {
+        ...actionSlot,
+        sourceKind: "fixed",
+        randomSpec: null,
+        sourceRef: candidate.ref,
+        sourceNode: structuredClone(nodeResponse.node),
+        draftNode: structuredClone(nodeResponse.node),
+      },
+      candidate,
+      total: response.items.length,
+    };
+  }
+
+  async function runSingleSequentialGenerate(
+    actionSlot: NodeVariantSlot,
+    cursor: number,
+    token: number,
+    outputDir: string,
+    seedBase: number,
+    explicitSeed: boolean,
+  ): Promise<boolean> {
+    if (pollToken.current !== token) return false;
+    const { resolved, candidate, total } = await resolveSequentialAction(actionSlot, cursor);
+    const actionName = candidate.name || candidate.ref;
+    const nt = Math.max(1, Math.trunc(params.nt));
+    for (let ntIndex = 0; ntIndex < nt; ntIndex += 1) {
+      if (pollToken.current !== token) return false;
+      const seed = explicitSeed ? seedBase + ntIndex : randomSeed();
+      setStatus(`Sequential ${cursor + 1}/${total}: ${actionName} (${ntIndex + 1}/${nt})`);
+      const runParams = { ...params, nt: 1, seed: String(seed) };
+      const fixedPrimary = { ...primary, action: resolved };
+      const request = buildComposeRenderRequest(fixedPrimary, runParams, {
+        compare: true,
+        promptBehavior: primaryBehavior.value,
+      });
+      const ready = await apiPost<ComposePreviewResponse>("/compose-preview", request);
+      if (!ready.render_request) throw new Error(`Action ${actionName}: 需要外部 Agent 先完成提示词拼接。`);
+      let current = await apiPost<JobRecord>("/generate", buildGeneratePayload(ready.render_request, runParams, {
+        output_dir: createCompareGroupOutputDir(outputDir, cursor + 1, seed),
+      }));
+      setSequentialJobs((jobs) => [...jobs, { job: current, actionName, actionIndex: cursor }]);
+      notifyComfyTargetsChanged(ready.render_request);
+      while (!terminalJobStatuses.has(current.status) && pollToken.current === token) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        current = await apiGet<JobRecord>(`/jobs/${encodeURIComponent(current.id)}`);
+        setSequentialJobs((jobs) => jobs.map((item) => item.job.id === current.id ? { ...item, job: current } : item));
+      }
+      notifyComfyTargetsChanged(ready.render_request);
+      if (current.status !== "succeeded") throw new Error(current.error || `Generation ${current.status}`);
+    }
+    return true;
+  }
+
+  async function generateSequentialStep() {
+    const actionSlot = primary.action;
+    if (!actionSlot || !isSequentialSlot(actionSlot)) return;
+    const cursor = actionSlot.poolCursor ?? 0;
+    const parsedSeed = Number(params.seed);
+    const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
+    const outputDir = createCompareOutputDir("sequential");
+    const token = ++pollToken.current;
+    setJob(null);
+    setSequentialJobs([]);
+    const ok = await runSingleSequentialGenerate(actionSlot, cursor, token, outputDir, explicitSeed ? parsedSeed : 0, explicitSeed);
+    if (ok) workspace.advancePoolCursor(actionSlot.slotId);
+    setStatus(`Sequential step complete · action ${cursor + 1}`);
+  }
+
+  async function generateAllSequential() {
+    const actionSlot = primary.action;
+    if (!actionSlot || !isSequentialSlot(actionSlot)) return;
+    const validation = validateSelected(primary);
+    if (validation) {
+      setError(validation);
+      setStatus("Generate blocked");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const startCursor = actionSlot.poolCursor ?? 0;
+    const parsedSeed = Number(params.seed);
+    const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
+    const outputDir = createCompareOutputDir("sequential-all");
+    const token = ++pollToken.current;
+    setJob(null);
+    setSequentialJobs([]);
+    try {
+      const listResponse = await listAllPoolNodes(actionSlot.role, actionSlot.randomSpec!);
+      const total = listResponse.items.length;
+      if (!total) throw new Error("顺序池中没有可用候选节点。");
+      for (let cursor = startCursor; cursor < total; cursor += 1) {
+        if (pollToken.current !== token) break;
+        const seedBase = explicitSeed ? parsedSeed + (cursor - startCursor) * Math.max(1, Math.trunc(params.nt)) : 0;
+        const ok = await runSingleSequentialGenerate(actionSlot, cursor, token, outputDir, seedBase, explicitSeed);
+        if (!ok) break;
+        workspace.advancePoolCursor(actionSlot.slotId);
+      }
+      if (pollToken.current === token) setStatus(`Sequential All complete · ${total - startCursor} actions`);
+    } catch (requestError) {
+      setStatus("Sequential All failed");
       setError(errorMessage(requestError));
     } finally {
       setBusy(false);
@@ -304,17 +442,18 @@ export function CustomGeneratePanel() {
       });
       const ready = await apiPost<ComposePreviewResponse>("/compose-preview", request);
       if (!ready.render_request) throw new Error("该随机节点组合需要外部 Agent 先完成提示词拼接。");
-      let current = await apiPost<JobRecord>("/generate", {
-        render_request: ready.render_request,
+      let current = await apiPost<JobRecord>("/generate", buildGeneratePayload(ready.render_request, runParams, {
         output_dir: createCompareGroupOutputDir(outputDir, index + 1, seed),
         random_selections: resolved[index].randomSelections,
-      });
+      }));
       setRandomJobs((jobs) => [...jobs, { job: current, selections: resolved[index].randomSelections }]);
+      notifyComfyTargetsChanged(ready.render_request);
       while (!terminalJobStatuses.has(current.status) && pollToken.current === token) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));
         current = await apiGet<JobRecord>(`/jobs/${encodeURIComponent(current.id)}`);
         setRandomJobs((jobs) => jobs.map((item) => item.job.id === current.id ? { ...item, job: current } : item));
       }
+      notifyComfyTargetsChanged(ready.render_request);
       if (current.status !== "succeeded") throw new Error(current.error || `Generation ${current.status}`);
     }
     setStatus(`Random Primary complete · ${resolved.length}`);
@@ -344,10 +483,12 @@ export function CustomGeneratePanel() {
       />
       <div className="button-row ordinary-generate-actions">
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>
-        <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> Generate Primary</button>
+        <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> {primaryHasSequential ? "Generate Next" : "Generate Primary"}</button>
+        {primaryHasSequential ? <button disabled={busy} onClick={() => void generateAllSequential()} type="button"><ListOrdered size={16} /> Run All</button> : null}
       </div>
-      {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
-      {randomJobs.length ? <section className="job-result"><strong>Random Primary</strong><span>{randomJobs.filter((item) => item.job.status === "succeeded").length} / {randomJobs.length}</span>{randomJobs.map((item) => <ImageGrid job={item.job} key={item.job.id} onOpenImage={setSelectedImage} prefix="Random" sequencePaths={randomImagePaths} />)}</section> : null}
+      {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><JobProgress job={job} /><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
+      {randomJobs.length ? <section className="job-result"><strong>Random Primary</strong><span>{randomJobs.filter((item) => item.job.status === "succeeded").length} / {randomJobs.length}</span>{randomJobs.map((item) => <div key={item.job.id}><JobProgress job={item.job} /><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Random" sequencePaths={randomImagePaths} /></div>)}</section> : null}
+      {sequentialJobs.length ? <section className="job-result"><strong>Sequential Actions</strong><span>{sequentialJobs.filter((item) => item.job.status === "succeeded").length} / {sequentialJobs.length}</span>{sequentialJobs.map((item) => <div key={item.job.id}><small>#{item.actionIndex + 1} {item.actionName} · {item.job.status}</small><JobProgress job={item.job} /><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Sequential" sequencePaths={sequentialImagePaths} /></div>)}</section> : null}
 
       <section className="compare-generate-section">
         <div className="section-title-row">
@@ -376,6 +517,7 @@ export function CustomGeneratePanel() {
                 {compare.results.filter((result) => result.groupIndex === group.groupIndex).map((result) => (
                   <article className={`compare-result-card ${result.status}`} key={result.runId}>
                     <div className="compare-result-header"><strong>{result.status}</strong>{result.job ? <span>{result.job.id}</span> : null}</div>
+                    {result.status === "running" ? <JobProgress job={result.job} /> : null}
                     <dl>
                       <dt>Artist</dt><dd>{result.labels.artist}</dd>
                       <dt>Character</dt><dd>{result.labels.character}</dd>

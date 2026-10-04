@@ -1,3 +1,4 @@
+import copy
 import json
 import tempfile
 import unittest
@@ -132,8 +133,9 @@ class MultiBackendRendererTest(unittest.TestCase):
         self.assertEqual(request.meta["backend"], "comfyui")
 
     def test_comfyui_adapter_uses_inline_workflow_json(self):
-        workflow = {"1": {"class_type": "CLIPTextEncode", "inputs": {"text": "before"}}}
         artist = _artist_node().model_copy(deep=True)
+        workflow = copy.deepcopy(artist.renderers["comfyui"]["workflow_json"])
+        workflow["1"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "before"}}
         artist.renderers["comfyui"]["workflow"] = "inline_workflow"
         artist.renderers["comfyui"]["workflow_json"] = workflow
 
@@ -149,11 +151,10 @@ class MultiBackendRendererTest(unittest.TestCase):
             workflow_dir = artist_dir / "workflows"
             workflow_dir.mkdir(parents=True)
             workflow_path = workflow_dir / "portrait.json"
-            workflow_path.write_text(
-                json.dumps({"12": {"class_type": "KSampler", "inputs": {"cfg": 6.5}}}),
-                encoding="utf-8",
-            )
             artist = _artist_node().model_copy(update={"path": artist_dir}, deep=True)
+            workflow = copy.deepcopy(artist.renderers["comfyui"]["workflow_json"])
+            workflow["12"] = {"class_type": "KSampler", "inputs": {"cfg": 6.5}}
+            workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
             artist.renderers["comfyui"]["workflow"] = "portrait_workflow"
             artist.renderers["comfyui"].pop("workflow_json", None)
             artist.renderers["comfyui"]["workflow_path"] = "workflows/portrait.json"
@@ -165,6 +166,15 @@ class MultiBackendRendererTest(unittest.TestCase):
 
     def test_comfyui_adapter_resolves_node_override_templates(self):
         artist = _artist_node().model_copy(deep=True)
+        artist.renderers["comfyui"]["workflow_json"].update(
+            {
+                "2": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}},
+                "4": {"class_type": "EmptyLatentImage", "inputs": {"width": 512, "height": 512}},
+                "5": {"class_type": "KSampler", "inputs": {"seed": 0, "steps": 20, "cfg": 7}},
+                "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI"}},
+            }
+        )
+        artist.renderers["comfyui"]["workflow_json"]["3"]["inputs"]["text"] = ""
         artist.renderers["comfyui"]["node_overrides"] = {
             "2.inputs.text": "{positive_prompt}",
             "3.inputs.text": "{negative_prompt}",

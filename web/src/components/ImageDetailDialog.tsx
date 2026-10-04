@@ -383,8 +383,13 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [compareMode, currentIndex, onClose, resolvedItems.length, referenceIndex]);
 
+  const comfyui = parameter(metadata, "backend") === "comfyui";
   const commonParameters = useMemo(() => {
+    // ComfyUI 出的图没有 NovelAI 参数块，参数来自 core 写入的 render 段，额外标出运行位置和 workflow。
     const rows: Array<[string, unknown]> = [
+      ["Backend", comfyui ? "ComfyUI" : undefined],
+      ["运行位置", comfyui ? parameter(metadata, "target") : undefined],
+      ["Workflow", comfyui ? parameter(metadata, "workflow") : undefined],
       ["Seed", parameter(metadata, "seed")],
       ["Model", metadata?.model ?? parameter(metadata, "model")],
       ["Sampler", parameter(metadata, "sampler")],
@@ -393,7 +398,7 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
       ["Noise schedule", parameter(metadata, "noise_schedule")],
     ];
     return rows.filter((row) => row[1] !== undefined && row[1] !== null);
-  }, [metadata]);
+  }, [comfyui, metadata]);
 
   const groupedDiffs = useMemo(() => {
     const grouped: Record<DiffCategory, ImageParameterDiffItem[]> = { changed: [], added: [], removed: [] };
@@ -416,6 +421,7 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
 
   const prompt = parameter(metadata, "prompt");
   const negative = parameter(metadata, "uc") ?? parameter(metadata, "negative_prompt");
+  const comfyuiPrompt = comfyui ? parameter(metadata, "comfyui_prompt") : undefined;
   const visibleDiffCount = groupedDiffs.changed.length + groupedDiffs.added.length + groupedDiffs.removed.length;
 
   return (
@@ -688,6 +694,7 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
 
                 {prompt !== undefined ? <label className="field"><span>Prompt</span><textarea readOnly value={String(prompt)} /></label> : null}
                 {negative !== undefined ? <label className="field compact"><span>Negative</span><textarea readOnly value={String(negative)} /></label> : null}
+                {comfyuiPrompt !== undefined && comfyuiPrompt !== prompt ? <label className="field compact"><span>ComfyUI Prompt（权重已换算）</span><textarea readOnly value={String(comfyuiPrompt)} /></label> : null}
                 <details>
                   <summary>完整 PNG Parameters</summary>
                   <pre className="json-preview">{JSON.stringify(metadata.parameters, null, 2)}</pre>

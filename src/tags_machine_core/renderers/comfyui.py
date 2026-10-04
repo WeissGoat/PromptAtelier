@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import random
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
@@ -12,14 +13,23 @@ from tags_machine_core.renderers.common import (
     render_meta,
     renderer_artist_payload,
 )
+from tags_machine_core.renderers.comfyui_prompt import novelai_to_comfyui_prompt
 from tags_machine_core.renderers.comfyui_workflow import (
     build_bound_overrides,
+    check_override_paths,
     optional_input_paths,
     output_node_ids,
     required_input_paths,
     validate_api_workflow,
     workflow_hash,
 )
+
+
+# prompt_format 是 workflow 期望的提示词写法：
+# comfyui（默认）由这里把 NovelAI 写法转成 ComfyUI 写法；novelai 原样传入，由 workflow 自己转换。
+PROMPT_FORMATS = ("comfyui", "novelai")
+_SEED_RANDOM = random.SystemRandom()
+_RANDOM_SEED_MAX = 4294967295
 
 
 class ComfyUIRenderAdapter:
@@ -95,13 +105,29 @@ class ComfyUIRenderAdapter:
             params=params,
         )
 
-        seed_value = seed if seed is not None else params.get("seed", 0)
+        seed_value = seed if seed is not None else params.get("seed")
+        # 没给 seed 或给了负数（Web 的 -1）都表示随机，和 NovelAI 渲染层一致；
+        # 抽到的 seed 写进请求，归档和 PNG 里看到的就是实际用的值。
+        if seed_value is None or (isinstance(seed_value, int) and seed_value < 0):
+            seed_value = _SEED_RANDOM.randint(0, _RANDOM_SEED_MAX)
         input_paths = required_input_paths(artist_payload)
         optional_paths = optional_input_paths(artist_payload)
         output_nodes = output_node_ids(artist_payload)
+        prompt_format = str(
+            params.get("prompt_format") or artist_payload.get("prompt_format") or "comfyui"
+        )
+        if prompt_format not in PROMPT_FORMATS:
+            raise ValueError(
+                f"ComfyUI prompt_format must be one of {', '.join(PROMPT_FORMATS)}, got {prompt_format!r}"
+            )
+        positive_prompt = bundle.prompt.positive
+        negative_prompt = bundle.prompt.negative
+        if prompt_format == "comfyui":
+            positive_prompt = novelai_to_comfyui_prompt(positive_prompt)
+            negative_prompt = novelai_to_comfyui_prompt(negative_prompt)
         semantic_values = {
-            "positive_prompt": bundle.prompt.positive,
-            "negative_prompt": bundle.prompt.negative,
+            "positive_prompt": positive_prompt,
+            "negative_prompt": negative_prompt,
             "width": width,
             "height": height,
             "seed": seed_value,
@@ -133,13 +159,17 @@ class ComfyUIRenderAdapter:
                 source="renderers.comfyui.optional_inputs",
             )
         )
+        strict_bindings = params.get("strict_bindings", artist_payload.get("strict_bindings", True))
+        if strict_bindings is not False:
+            check_override_paths(workflow_json, node_overrides, source=f"workflow {workflow}")
 
         final_params: dict[str, Any] = {
             "workflow": workflow,
             "workflow_json": workflow_json,
             "workflow_hash": workflow_hash(workflow_json),
-            "positive_prompt": bundle.prompt.positive,
-            "negative_prompt": bundle.prompt.negative,
+            "positive_prompt": positive_prompt,
+            "negative_prompt": negative_prompt,
+            "prompt_format": prompt_format,
             "seed": seed_value,
             "width": width,
             "height": height,
@@ -154,6 +184,15 @@ class ComfyUIRenderAdapter:
             final_params["extra_pnginfo"] = {"workflow": workflow_ui_json}
         if output_nodes:
             final_params["output_nodes"] = output_nodes
+        if strict_bindings is False:
+            final_params["strict_bindings"] = False
+        input_files = self._resolve_input_files(
+            artist=artist,
+            artist_payload=artist_payload,
+            params=params,
+        )
+        if input_files:
+            final_params["input_files"] = input_files
         final_params.update(optional_values)
         final_params.update(
             preserve_extra_params(
@@ -174,10 +213,38 @@ class ComfyUIRenderAdapter:
                     "workflow_ui_path",
                     "workflow_ui_json",
                     "extra_pnginfo",
+                    "input_files",
+                    "strict_bindings",
                 },
             )
         )
         return final_params
+
+    def _resolve_input_files(
+        self,
+        *,
+        artist: NodeDocument | dict[str, Any] | None,
+        artist_payload: dict[str, Any],
+        params: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """LoadImage 等节点要用的输入图；提交前会上传到目标 ComfyUI 的 input 目录。"""
+        value = params["input_files"] if "input_files" in params else artist_payload.get("input_files")
+        if not value:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("ComfyUI input_files must be a list")
+        resolved: list[dict[str, str]] = []
+        for index, item in enumerate(value):
+            if isinstance(item, str):
+                item = {"path": item}
+            if not isinstance(item, dict) or not item.get("path"):
+                raise ValueError(f"ComfyUI input_files[{index}] requires a path")
+            path = self._resolve_workflow_path(item["path"], artist)
+            entry = {"name": str(item.get("name") or path.name), "path": str(path)}
+            if item.get("subfolder"):
+                entry["subfolder"] = str(item["subfolder"])
+            resolved.append(entry)
+        return resolved
 
     def _explicit_optional_values(self, params: dict[str, Any]) -> dict[str, Any]:
         values: dict[str, Any] = {}

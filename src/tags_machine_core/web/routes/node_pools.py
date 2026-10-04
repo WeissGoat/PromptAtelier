@@ -49,3 +49,14 @@ def sample_node_pool(data: dict[str, Any], request: Request) -> dict[str, Any]:
         )
     except (FileNotFoundError, ValueError, ValidationError) as exc:
         raise ApiError(code="node_pool_sample_failed", message=str(exc), status_code=400) from exc
+
+
+@router.post("/node-pools/list-all")
+def list_all_pool_nodes(data: dict[str, Any], request: Request) -> dict[str, Any]:
+    try:
+        return request.app.state.node_pool_service.list_all(
+            role=str(data.get("role") or "").strip(),
+            spec=NodePoolSpec.model_validate(data.get("spec") or {}),
+        )
+    except (FileNotFoundError, ValueError, ValidationError) as exc:
+        raise ApiError(code="node_pool_list_all_failed", message=str(exc), status_code=400) from exc

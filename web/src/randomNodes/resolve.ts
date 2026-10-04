@@ -34,6 +34,16 @@ export function hasRandomSlots(slots: ResolvedSlotSet): boolean {
   return (Object.keys(slots) as NodeRole[]).some((role) => slots[role]?.sourceKind === "random");
 }
 
+export function hasSequentialSlot(slots: ResolvedSlotSet): boolean {
+  return (Object.keys(slots) as NodeRole[]).some(
+    (role) => slots[role]?.sourceKind === "random" && slots[role]?.randomSpec?.drawMode === "sequential",
+  );
+}
+
+export function isSequentialSlot(slot: NodeVariantSlot | null | undefined): boolean {
+  return isRandomSlot(slot) && slot.randomSpec?.drawMode === "sequential";
+}
+
 export async function resolveRandomItems<T>(items: Array<SlotSetItem<T>>): Promise<Array<ResolvedRandomItem<T>>> {
   const occurrences = new Map<string, {
     slot: NodeVariantSlot & { randomSpec: NodePoolSpec };

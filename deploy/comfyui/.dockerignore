@@ -1,0 +1,4 @@
+providers/
+README.md
+**/__pycache__
+**/*.pyc

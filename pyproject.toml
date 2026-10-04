@@ -23,6 +23,8 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+# cloud 组提供 Modal SDK：Web 用它读取云端 ComfyUI 是否还开着（代码里按需导入）。
+default-groups = ["dev", "cloud"]
 
 [tool.uv.sources]
 ai-image-gateway = { path = "vendor/ai-image-gateway", editable = true }
@@ -32,8 +34,12 @@ line-length = 100
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+]
+cloud = [
+    "modal>=1.6",
 ]

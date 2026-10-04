@@ -75,6 +75,11 @@ class BatchWorkspace:
         limit = _optional_int(data, "limit")
         config_path = self._config_path(spec, spec_path=spec_path, override=_optional_string(data, "config"))
         config = load_config(config_path)
+        comfyui_target = _optional_string(data, "comfyui_target")
+        if comfyui_target:
+            config = config.model_copy(
+                update={"comfyui": config.comfyui.with_default_target(comfyui_target)}
+            )
 
         self._archive_source(
             run_dir,

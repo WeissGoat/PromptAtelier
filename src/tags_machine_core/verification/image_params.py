@@ -43,11 +43,27 @@ def read_image_parameters(path: str | Path) -> dict[str, Any]:
     chunks = read_png_text_chunks(path)
     decoded = {key: _maybe_json(value) for key, value in chunks.items()}
     comment = decoded.get("Comment")
+    parameters = comment if isinstance(comment, dict) else {}
+    if not parameters:
+        parameters = _core_render_parameters(decoded.get("tags_machine_core"))
     return {
         "source_path": str(path),
         "png_text": decoded,
-        "parameters": comment if isinstance(comment, dict) else {},
+        "parameters": parameters,
     }
+
+
+def _core_render_parameters(core_info: Any) -> dict[str, Any]:
+    """ComfyUI 出的图没有 NovelAI 的 Comment 参数块，从 core 写入的 render 段还原参数。"""
+    if not isinstance(core_info, dict) or core_info.get("backend") != "comfyui":
+        return {}
+    render = core_info.get("render")
+    if not isinstance(render, dict):
+        return {}
+    parameters: dict[str, Any] = {"backend": "comfyui", **render}
+    if "cfg" in render:
+        parameters.setdefault("scale", render["cfg"])
+    return parameters
 
 
 def read_png_dimensions(path: str | Path) -> dict[str, int]:

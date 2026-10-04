@@ -1,6 +1,7 @@
 import { apiGet, apiPost } from "../api/client";
 import type {
   NodePoolCollectionsResponse,
+  NodePoolListAllResponse,
   NodePoolSampleResponse,
   NodePoolScanRequest,
   NodePoolScanResponse,
@@ -17,4 +18,8 @@ export function scanNodePool(request: NodePoolScanRequest): Promise<NodePoolScan
 
 export function sampleNodePool(role: string, spec: NodePoolSpec, count: number): Promise<NodePoolSampleResponse> {
   return apiPost("/node-pools/sample", { role, spec, count });
+}
+
+export function listAllPoolNodes(role: string, spec: NodePoolSpec): Promise<NodePoolListAllResponse> {
+  return apiPost("/node-pools/list-all", { role, spec });
 }

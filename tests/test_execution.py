@@ -7,7 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from tags_machine_core.clients import GatewayNovelAIRawClient, NovelAIClient
+from tags_machine_core.clients import (
+    GatewayNovelAIRawClient,
+    NovelAIClient,
+    PreparedComfyUIWorkflow,
+)
 from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, RenderRequest
@@ -544,14 +548,16 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                 prompt="akemi homura",
                 params={"workflow_json": {"1": {"inputs": {"text": "akemi homura"}}}},
             )
+            prepared = PreparedComfyUIWorkflow(prompt={"1": {"inputs": {"text": "akemi homura"}}})
 
             with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
-                client.queue_prompt.return_value = SimpleNamespace(
+                client.prepare.return_value = prepared
+                client.queue.return_value = SimpleNamespace(
                     prompt_id="abc123",
                     raw={"prompt_id": "abc123"},
                 )
-                client.build_payload.return_value = {
+                client.payload.return_value = {
                     "prompt": {"1": {"inputs": {"text": "akemi homura"}}},
                     "client_id": "client-1",
                 }
@@ -570,14 +576,24 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                 timeout=31,
                 retry=3,
                 retry_interval=2.0,
+                headers={},
+                prune_to_output_nodes=True,
+                path_style="native",
+                ready_timeout=0,
             )
-            client.queue_prompt.assert_called_once_with(request, client_id="client-1")
-            client.generate_images.assert_not_called()
-            client.build_payload.assert_called_once_with(request, client_id="client-1")
+            client.prepare.assert_called_once()
+            self.assertEqual(client.prepare.call_args.args[0].meta["comfyui_target"], "default")
+            client.queue.assert_called_once_with(prepared, client_id="client-1", on_progress=None)
+            client.run.assert_not_called()
+            client.payload.assert_called_once_with(prepared, client_id="client-1")
             self.assertEqual(result.backend, "comfyui")
             self.assertEqual(result.images, [])
             self.assertEqual(result.request_body["client_id"], "client-1")
             self.assertEqual(result.png_info["comfyui"]["prompt_id"], "abc123")
+            self.assertEqual(
+                result.png_info["comfyui"]["target"],
+                {"name": "default", "transport": "native", "base_url": "http://comfy.local"},
+            )
 
     def test_execute_comfyui_generation_saves_images_and_history(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -597,10 +613,12 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                 }
             )
             history = {"abc123": {"outputs": {"7": {"images": []}}}}
+            prepared = PreparedComfyUIWorkflow(prompt={"1": {}}, output_nodes=("7",))
 
             with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
                 client = client_cls.return_value
-                client.generate_images.return_value = SimpleNamespace(
+                client.prepare.return_value = prepared
+                client.run.return_value = SimpleNamespace(
                     prompt_id="abc123",
                     queue_raw={"prompt_id": "abc123"},
                     history=history,
@@ -613,7 +631,7 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                         )
                     ],
                 )
-                client.build_payload.return_value = {"prompt": {"1": {}}}
+                client.payload.return_value = {"prompt": {"1": {}}}
 
                 result = execute_comfyui_generation(
                     config,
@@ -625,11 +643,16 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
                     max_wait_seconds=1,
                 )
 
-            client.generate_images.assert_called_once_with(
-                request,
+            client.run.assert_called_once_with(
+                prepared,
                 client_id="client-1",
                 poll_interval=0,
                 max_wait_seconds=1,
+                on_progress=None,
+            )
+            self.assertEqual(
+                result.png_info["comfyui"]["workflow_preparation"]["output_nodes"],
+                ["7"],
             )
             self.assertEqual(result.backend, "comfyui")
             self.assertEqual(result.png_info["comfyui"]["history"], history)

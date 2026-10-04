@@ -55,5 +55,6 @@ export function createDefaultNodePoolSpec(role?: NodeRole): NodePoolSpec {
       exclude_names: [],
     },
     filters: { classify: createEmptyClassifyFilter() },
+    drawMode: "random",
   };
 }
