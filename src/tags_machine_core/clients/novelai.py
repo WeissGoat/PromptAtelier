@@ -46,15 +46,19 @@ REQUEST_PARAMETER_KEYS = {
     "extra_noise_seed",
     "height",
     "image",
+    "inpaintImg2ImgStrength",
     "legacy",
+    "legacy_uc",
     "legacy_v3_extend",
     "mask",
     "n_samples",
     "negative_prompt",
     "noise",
     "noise_schedule",
+    "normalize_reference_strength_multiple",
     "params_version",
     "prefer_brownian",
+    "qualityPresetId",
     "qualityToggle",
     "reference_image_multiple",
     "reference_information_extracted_multiple",
@@ -66,9 +70,11 @@ REQUEST_PARAMETER_KEYS = {
     "sm",
     "sm_dyn",
     "steps",
+    "straight_alpha",
     "strength",
     "uc",
     "ucPreset",
+    "ucPresetId",
     "uncond_scale",
     "use_coords",
     "v4_negative_prompt",
@@ -102,6 +108,8 @@ class FixedIntervalRetry(Retry):
 
 
 VALID_NOVELAI_MODELS = {
+    "nai-diffusion-5-full",
+    "nai-diffusion-5-curated",
     "nai-diffusion-4-5-full",
     "nai-diffusion-4-5-curated",
     "nai-diffusion-4-full",
@@ -131,6 +139,11 @@ def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELA
 
     if "furry" in lower:
         return "nai-diffusion-furry-3"
+
+    if "v5" in lower or ("diffusion" in lower and "5" in lower and "4" not in lower):
+        if "curated" in lower:
+            return "nai-diffusion-5-curated"
+        return "nai-diffusion-5-full"
 
     if "4.5" in lower or "4-5" in lower or "v4.5" in lower:
         if "curated" in lower:
@@ -255,7 +268,7 @@ class NovelAIClient:
                 if isinstance(v4_cap, dict):
                     negative = str(v4_cap.get("base_caption") or "")
 
-        if "nai-diffusion-4" in model:
+        if "nai-diffusion-4" in model or "nai-diffusion-5" in model:
             parameters.setdefault("params_version", 3)
             if "v4_prompt" not in parameters or not isinstance(parameters.get("v4_prompt"), dict):
                 parameters["v4_prompt"] = {

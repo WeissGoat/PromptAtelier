@@ -291,6 +291,10 @@ class NovelAIRenderAdapter:
         height = _validate_int_parameter("height", height, minimum=64, maximum=49152)
         sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_artist else "k_euler")
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
+        is_nai5 = str(model or "").startswith("nai-diffusion-5")
+        if is_nai5:
+            # V5 强制 karras 调度器，与参考项目 Auto-NovelAI-Refactor 对齐。
+            scheduler = "karras"
         if sampler == "ddim":
             sampler = "ddim_v3"
         resolved_seed = _resolve_seed(seed, params.get("seed"))
@@ -373,6 +377,23 @@ class NovelAIRenderAdapter:
                 },
             },
         }
+        if is_nai5:
+            # V5 使用字符串 preset ID，替代旧的 ucPreset(int) / qualityToggle(bool)。
+            final_params.pop("ucPreset", None)
+            final_params.pop("qualityToggle", None)
+            final_params["ucPresetId"] = params.get("ucPresetId", "heavy")
+            final_params["qualityPresetId"] = params.get("qualityPresetId", "standard")
+            final_params["straight_alpha"] = params.get("straight_alpha", True)
+            final_params["normalize_reference_strength_multiple"] = params.get(
+                "normalize_reference_strength_multiple", True
+            )
+            final_params["inpaintImg2ImgStrength"] = params.get("inpaintImg2ImgStrength", 1.0)
+            final_params["legacy_uc"] = params.get("legacy_uc", False)
+            # V5 支持自由坐标（use_coords），可从 params 传入启用。
+            use_coords = params.get("use_coords", False)
+            final_params["v4_prompt"]["use_coords"] = use_coords
+            final_params["use_coords"] = use_coords
+
         if char_captions:
             final_params["characterPrompts"] = _character_prompts_parameter(
                 char_captions,
@@ -438,7 +459,10 @@ class NovelAIRenderAdapter:
         matched_positive_tag_set: set[str] = set()
         matched_negative_tag_set: set[str] = set()
         default_caption_prefix = str(config.get("default_caption_prefix", "girl")).strip()
-        max_characters = _bounded_int(config.get("max_characters"), default=6, minimum=1, maximum=6)
+        model_max_characters = 32 if str(model or "").startswith("nai-diffusion-5") else 6
+        max_characters = _bounded_int(
+            config.get("max_characters"), default=model_max_characters, minimum=1, maximum=model_max_characters
+        )
         male_caption_added = False
 
         for material in materials[:max_characters]:
@@ -520,7 +544,8 @@ class NovelAIRenderAdapter:
         )
 
     def _supports_character_prompts(self, model: str | None) -> bool:
-        return str(model or "").startswith("nai-diffusion-4")
+        prefix = str(model or "")
+        return prefix.startswith("nai-diffusion-4") or prefix.startswith("nai-diffusion-5")
 
     def _character_prompt_materials(
         self,
@@ -855,7 +880,9 @@ class NovelAIRenderAdapter:
             "seed",
             "n_samples",
             "ucPreset",
+            "ucPresetId",
             "qualityToggle",
+            "qualityPresetId",
             "sm",
             "sm_dyn",
             "dynamic_thresholding",
@@ -871,8 +898,13 @@ class NovelAIRenderAdapter:
             "reference_image_multiple",
             "reference_information_extracted_multiple",
             "reference_strength_multiple",
+            "normalize_reference_strength_multiple",
             "director_reference_images",
             "extra_noise_seed",
+            "straight_alpha",
+            "inpaintImg2ImgStrength",
+            "legacy_uc",
+            "use_coords",
             "v4_prompt",
             "v4_negative_prompt",
             "characterPrompts",
