@@ -19,6 +19,7 @@ from tags_machine_core.renderers.common import (
     renderer_artist_payload,
     renderer_artist_prompt_parts,
 )
+from tags_machine_core.renderers.sizes import resolve_render_size
 
 
 logger = get_logger(__name__)
@@ -129,7 +130,14 @@ class NovelAIRenderAdapter:
         artist = self._resolve_artist(artist, resolved_nodes)
         artist_payload = self._artist_payload(artist)
         artist_params = self._artist_params(artist, artist_payload)
-        render_params = {**artist_params, **(params or {})}
+        # params.size（random / portrait / landscape / square / custom）按画风的预设定宽高，见 renderers/sizes.py。
+        width, height, size_preset, render_params = resolve_render_size(
+            artist_payload,
+            {**artist_params, **(params or {})},
+            width=width,
+            height=height,
+            rng=_SEED_RANDOM,
+        )
         model = self._resolve_model(
             default_model=model,
             artist_payload=artist_payload,
@@ -172,6 +180,8 @@ class NovelAIRenderAdapter:
         trace_meta = self._node_trace_meta(bundle, resolved_nodes)
         if trace_meta:
             meta.update(trace_meta)
+        if size_preset is not None:
+            meta["size_preset"] = size_preset
         if character_prompt_meta:
             meta["character_prompts"] = character_prompt_meta
             logger.info(

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { NodeDocument } from "../nodes/types";
 import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams } from "./types";
-import { artistBackend, buildComposeRenderRequest, buildGeneratePayload, workspaceMayUseComfyUI } from "./requestBuilder";
+import { STANDARD_SIZE_PRESETS, artistBackend, artistSizePresets, buildComposeRenderRequest, buildGeneratePayload, workspaceMayUseComfyUI } from "./requestBuilder";
 
 const params: RenderWorkspaceParams = { negative: "", width: 832, height: 1216, nt: 3, seed: "-1" };
 const artistNode: NodeDocument = { schema: "tags-machine-core.node/v1", kind: "artist", id: "artist-a", prompt: { positive: [], negative: [] } };
@@ -223,6 +223,24 @@ describe("request builder", () => {
       });
       expect(buildGeneratePayload({ backend: "novelai" }, withTarget)).toEqual({ render_request: { backend: "novelai" } });
       expect(buildGeneratePayload({ backend: "comfyui" }, params)).toEqual({ render_request: { backend: "comfyui" } });
+    });
+
+    it("sends the size choice for every backend and reads each artist's presets", () => {
+      const presetNode: NodeDocument = {
+        ...comfyNode,
+        renderers: { comfyui: { workflow: "p4", size_presets: { portrait: { width: 1024, height: 1536 }, landscape: { width: 1536, height: 1024 } } } },
+      };
+      const presetSlot: NodeVariantSlot = { ...comfySlot, sourceNode: presetNode, draftNode: presetNode };
+      const build = (slot: NodeVariantSlot, extra: Partial<RenderWorkspaceParams> = {}) =>
+        buildComposeRenderRequest({ artist: slot, character: null, action: null }, { ...params, ...extra }, { compare: true });
+
+      expect(artistSizePresets(presetSlot)).toEqual({ portrait: { width: 1024, height: 1536 }, landscape: { width: 1536, height: 1024 } });
+      expect(artistSizePresets(artistSlot())).toEqual(STANDARD_SIZE_PRESETS);
+      expect(artistSizePresets(comfySlot)).toEqual(STANDARD_SIZE_PRESETS);
+      expect(build(presetSlot).render.params.size).toBe("random");
+      expect(build(artistSlot()).render.params.size).toBe("random");
+      expect(build(presetSlot, { size: "landscape" }).render.params.size).toBe("landscape");
+      expect(build(artistSlot(), { size: "custom" }).render).toMatchObject({ width: 832, height: 1216, params: { size: "custom" } });
     });
 
     it("shows the run location for comfyui or random artists", () => {

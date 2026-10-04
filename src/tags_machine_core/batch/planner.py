@@ -789,6 +789,15 @@ class BatchPlanner:
             width=spec.defaults.width,
             height=spec.defaults.height,
         )
+        # 实际尺寸由渲染层按 size 和画风的预设定（ComfyUI 画风可能有自己的竖横尺寸），见 renderers/sizes.py；
+        # 上面算出的标准宽高只在 size 为 custom 时使用。
+        size_choice = _size_choice(
+            resolution=spec.defaults.resolution,
+            width=spec.defaults.width,
+            height=spec.defaults.height,
+        )
+        if size_choice is not None:
+            render_params.setdefault("size", size_choice)
         render = RenderOptions(
             backend=spec.defaults.backend,
             artist=artist or spec.defaults.artist,
@@ -934,6 +943,24 @@ def _zip_item(values: list[str | None], index: int) -> str | None:
     if not values:
         return None
     return values[index % len(values)]
+
+
+_RESOLUTION_SIZE_CHOICES = {
+    "random_standard": "random",
+    "square": "square",
+    "landscape": "landscape",
+    "portrait": "portrait",
+    "normal_square": "square",
+    "normal_landscape": "landscape",
+    "normal_portrait": "portrait",
+}
+
+
+def _size_choice(*, resolution: str, width: int | None, height: int | None) -> str | None:
+    """batch 的 resolution → 渲染层的 size 选择；写了 width/height 就用它们（custom）。"""
+    if width and height:
+        return "custom"
+    return _RESOLUTION_SIZE_CHOICES.get(resolution)
 
 
 def _resolve_dimensions(

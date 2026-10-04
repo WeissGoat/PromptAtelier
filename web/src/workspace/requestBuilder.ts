@@ -1,5 +1,5 @@
 import { cloneNode, nodeSlotStatus, serializeNodeSlot } from "../nodes/temporaryNodes";
-import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams } from "./types";
+import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams, SizeOrientation } from "./types";
 
 export type SelectedNodes = {
   artist: NodeVariantSlot | null;
@@ -35,6 +35,34 @@ export function artistBackend(slot: NodeVariantSlot | null | undefined): RenderB
   if (!renderers || typeof renderers !== "object" || Array.isArray(renderers)) return "novelai";
   const names = Object.keys(renderers);
   return names.includes("comfyui") && !names.includes("novelai") ? "comfyui" : "novelai";
+}
+
+/** 没声明 size_presets 的画风用的标准尺寸（和后端 renderers/sizes.py 一致）。 */
+export const STANDARD_SIZE_PRESETS: Record<SizeOrientation, { width: number; height: number }> = {
+  portrait: { width: 832, height: 1216 },
+  landscape: { width: 1216, height: 832 },
+  square: { width: 1024, height: 1024 },
+};
+
+/** 画风的竖横方尺寸：renderers.<backend>.size_presets，没声明时用标准尺寸；随机节点等还不知道画风时也用标准尺寸。 */
+export function artistSizePresets(slot: NodeVariantSlot | null | undefined): Partial<Record<SizeOrientation, { width: number; height: number }>> {
+  const renderers = slot?.draftNode?.renderers;
+  const payload = renderers && typeof renderers === "object" && !Array.isArray(renderers)
+    ? (renderers as Record<string, unknown>)[artistBackend(slot)]
+    : null;
+  const presets = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>).size_presets
+    : null;
+  if (!presets || typeof presets !== "object" || Array.isArray(presets)) return STANDARD_SIZE_PRESETS;
+  const result: Partial<Record<SizeOrientation, { width: number; height: number }>> = {};
+  for (const orientation of ["portrait", "landscape", "square"] as const) {
+    const item = (presets as Record<string, unknown>)[orientation];
+    if (!item || typeof item !== "object") continue;
+    const width = Number((item as Record<string, unknown>).width);
+    const height = Number((item as Record<string, unknown>).height);
+    if (Number.isInteger(width) && Number.isInteger(height)) result[orientation] = { width, height };
+  }
+  return result;
 }
 
 /** 工作区里是否可能用到 ComfyUI：有 ComfyUI 画风，或画风来自随机池（抽到哪个事先不知道）。 */
@@ -130,6 +158,8 @@ export function buildComposeRenderRequest(
   const renderParams: Record<string, unknown> = {
     n_samples: options.compare ? 1 : params.nt,
   };
+  // 后端按 size 和画风的竖横方预设定宽高（random 每次抽一个，抽到的写进请求）；custom 才用 width/height。
+  renderParams.size = params.size || "random";
   // 多角色分区提示词是 NovelAI V4 的功能，ComfyUI 收到的是合并后的一段提示词。
   if (backend === "novelai" && promptBehavior?.characterPrompts.mode === "auto") {
     renderParams.character_prompts = {

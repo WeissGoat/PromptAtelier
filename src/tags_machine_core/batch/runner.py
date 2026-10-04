@@ -143,7 +143,7 @@ class BatchRunner:
                 f"{position}/{total_selected} started task_id={run_task.id} "
                 f"{_source_text(run_task)} "
                 f"artist={run_task.render.artist or '-'} "
-                f"resolution={run_task.render.width}x{run_task.render.height}"
+                f"resolution={_resolution_text(run_task)}"
             )
             result = self._execute_with_retry(
                 root=root,
@@ -499,6 +499,14 @@ def _source_log(task: BatchTask) -> dict[str, Any]:
         "action": _basename(source.get("action")),
         "artist": source.get("artist") or task.render.artist,
     }
+
+
+def _resolution_text(task: BatchTask) -> str:
+    """按预设选尺寸时（宽高由渲染层按画风决定）显示选择，固定宽高时显示宽高。"""
+    size = task.render.params.get("size")
+    if size and size != "custom":
+        return str(size)
+    return f"{task.render.width}x{task.render.height}"
 
 
 def _source_text(task: BatchTask) -> str:

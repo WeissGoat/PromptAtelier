@@ -26,6 +26,8 @@ artist node 只声明三件事：
 | `renderers.comfyui.node_overrides` | 否 | 高级固定覆盖，用于 workflow 特殊节点。 |
 | `renderers.comfyui.input_files` | 否 | LoadImage 等节点要读的输入图，提交前上传到目标 ComfyUI 的 input 目录。每项是路径字符串，或 `{path, name, subfolder}`；相对路径基于 artist node 目录。 |
 | `renderers.comfyui.prompt_format` | 否 | workflow 期望的提示词写法。`comfyui`（默认）：渲染层把节点里的 NovelAI 写法转成 ComfyUI 写法（`{x}`→`(x:1.05)`、`[x]`→`(x:0.95)`、`1.2::x::`→`(x:1.2)`、字面圆括号转义），正向和负向都转；`novelai`：原样传入，由 workflow 自己的转换节点处理。 |
+| `renderers.comfyui.size_presets` | 否 | 画风的竖横方尺寸：`portrait` / `landscape` / `square` 各一个 `{width, height}`（8 的倍数），可以只写其中几个。不写时用标准尺寸。见「尺寸」。 |
+| `renderers.comfyui.default_size` | 否 | 请求没给 `size` 时用的选择，常用 `random`；不写等同 `custom`（用请求的宽高）。 |
 | `renderers.comfyui.strict_bindings` | 否 | 默认 `true`：`inputs`、`optional_inputs`、`node_overrides` 指向的节点和输入必须在 workflow 里存在，否则直接报错。只有确实要给节点新增输入时才设成 `false`。 |
 
 路径使用 ComfyUI API workflow 的点路径，例如：
@@ -69,6 +71,28 @@ optional_inputs:
 ```
 
 UI workflow 顶层通常包含 `nodes` 和 `links`，不能直接提交给 `/prompt`。
+
+不用在界面上手动导出：`scripts/comfyui_ui_to_api.mjs` 用 comfyui-mcp 的转换器（和 Codex 里的 comfyui MCP
+`get_workflow` 同一套）把 UI 工作流转成 API 工作流，需要一个运行中的 ComfyUI 提供 `/object_info`：
+
+```bash
+npx -y -p comfyui-mcp@0.49.4 -c "node scripts/comfyui_ui_to_api.mjs <ui.json> <api.json>"
+```
+
+和手动导出比对过（cunyfunky）：节点、连线、取值一致，只少了界面扩展的显示控件（`speak_and_recognation`、ShowText 显示文本）。
+
+## 尺寸
+
+尺寸选择对所有后端（NovelAI、ComfyUI、SD）通用，实现在 `renderers/sizes.py`。请求参数 `size`：
+
+- `random`：从画风的预设里抽一个；`portrait` / `landscape` / `square`：竖 / 横 / 方，用画风对应的那个；`custom`：用请求的 width/height。
+- 画风在 `renderers.<backend>.size_presets` 里声明自己的竖横方尺寸（不同模型适合的尺寸不同）；没声明时用标准尺寸
+  竖 832×1216、横 1216×832、方 1024×1024。选了画风没有的方向会报错。
+- Web 的「尺寸」下拉默认随机，Width/Height 只在「自定义宽高」时生效。batch 的 `resolution`
+  （`random_standard` / `portrait` / `normal_landscape` ...）换成对应的 `size`，写了 width/height 就是 `custom`。
+- 不给 `size` 时用画风的 `default_size`，再没有就是 `custom`（CLI / API 直接传宽高的行为不变）。
+- 尺寸在拼提示词时就定下（Web 的 Preview 里看到的就是出图用的），实际宽高写进请求，选中的方向写进 `meta.size_preset` 和 PNG 的 render 段。
+- 横竖两路的原工作流合成一路即可：宽高绑到那一路的 EmptyLatentImage，横图竖图都走它。
 
 ## 种子与提示词
 

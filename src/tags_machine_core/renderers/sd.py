@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import random
 from typing import Any
 
 from tags_machine_core.contracts import PromptBundle, RenderRequest, RenderSize
@@ -10,6 +11,9 @@ from tags_machine_core.renderers.common import (
     render_meta,
     renderer_artist_payload,
 )
+from tags_machine_core.renderers.sizes import resolve_render_size
+
+_SIZE_RANDOM = random.SystemRandom()
 
 
 class SDRenderAdapter:
@@ -30,6 +34,16 @@ class SDRenderAdapter:
     ) -> RenderRequest:
         artist_payload = renderer_artist_payload(artist, self.backend)
         artist_params = copy.deepcopy(artist_payload.get("params", {}) or {})
+        width, height, size_preset, merged_params = resolve_render_size(
+            artist_payload,
+            {**artist_params, **(params or {})},
+            width=width,
+            height=height,
+            rng=_SIZE_RANDOM,
+        )
+        meta = render_meta(bundle, action=action, backend=self.backend)
+        if size_preset is not None:
+            meta["size_preset"] = size_preset
         final_params = self._build_parameters(
             bundle=bundle,
             seed=seed,
@@ -37,7 +51,7 @@ class SDRenderAdapter:
             height=height,
             model=model,
             artist_payload=artist_payload,
-            params={**artist_params, **(params or {})},
+            params=merged_params,
         )
         return RenderRequest(
             backend=self.backend,
@@ -48,7 +62,7 @@ class SDRenderAdapter:
             size=RenderSize(width=width, height=height),
             params=final_params,
             artist_payload=artist_payload,
-            meta=render_meta(bundle, action=action, backend=self.backend),
+            meta=meta,
         )
 
     def _build_parameters(

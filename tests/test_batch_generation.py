@@ -350,6 +350,7 @@ batch:
             self.assertEqual(len(tasks), 1)
             self.assertEqual(tasks[0].render.width, 1216)
             self.assertEqual(tasks[0].render.height, 832)
+            self.assertEqual(tasks[0].render.params["size"], "landscape")
 
     def test_prompt_list_plan_writes_two_tasks(self):
         spec = BatchSpec.model_validate(

@@ -6,7 +6,7 @@ import { PromptBehaviorGroupPanel } from "../components/PromptBehaviorGroupPanel
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
 import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
-import { workspaceMayUseComfyUI } from "../workspace/requestBuilder";
+import { artistSizePresets, workspaceMayUseComfyUI } from "../workspace/requestBuilder";
 
 function nodeSections(node: NodeDocument | null): string[] {
   if (!node) return [];
@@ -25,6 +25,7 @@ export function CustomStudio() {
   const params = workspace.state.params;
   const groups = workspace.state.groups;
   const mayUseComfyUI = workspaceMayUseComfyUI([groups.artist.primary, ...groups.artist.compares]);
+  const sizePresets = artistSizePresets(groups.artist.primary);
   const characterSections = [...new Set([
     ...nodeSections(groups.character.primary.draftNode),
     ...groups.character.compares.flatMap((slot) => nodeSections(slot.draftNode)),
@@ -48,7 +49,10 @@ export function CustomStudio() {
           onNtChange={(nt) => workspace.setParams({ nt })}
           onSeedChange={(seed) => workspace.setParams({ seed })}
           onWidthChange={(width) => workspace.setParams({ width })}
+          onSizeChange={(size) => workspace.setParams({ size })}
           seed={params.seed}
+          size={params.size ?? "random"}
+          sizePresets={sizePresets}
           width={params.width}
         />
         {mayUseComfyUI ? (
