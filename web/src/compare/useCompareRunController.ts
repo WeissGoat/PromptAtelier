@@ -72,18 +72,80 @@ function slotLabel(slot: CompareCombination[NodeRole]): string {
   return slot?.draftNode?.name || slot?.draftNode?.id || slot?.sourceNode?.name || slot?.sourceRef || "未选择";
 }
 
+export function compareItemLabels(combination: CompareCombination): Record<NodeRole, string> {
+  return {
+    artist: slotLabel(combination.artist),
+    character: slotLabel(combination.character),
+    action: slotLabel(combination.action),
+    clothing: slotLabel(combination.clothing),
+  };
+}
+
+export type ExecutableCompareItem = CompareRunItem & { randomSelections: RandomSelectionRecord[] };
+
+/** Compare 要跑的每一项：展开矩阵、分组 seed、先抽好随机节点。前台和后台运行共用。 */
+export async function planCompareRun(
+  groups: Record<GroupRole, RoleNodeGroup>,
+  params: RenderWorkspaceParams,
+  promptBehaviorGroup: PromptBehaviorGroup,
+  randomSeed: () => number,
+): Promise<ExecutableCompareItem[]> {
+  if (!selectedSlots(groups.character).length && !selectedSlots(groups.action).length) {
+    throw new Error("Compare Generate 至少需要一个 Character 或 Action 节点。");
+  }
+  const matrix = buildCompareMatrix(groups, promptBehaviorGroup);
+  const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
+  const resolvedPlan = await resolveRandomItems(plan.items.map((item) => ({
+    value: item,
+    randomScope: `group-${item.groupIndex}`,
+    slots: {
+      artist: item.combination.artist,
+      character: item.combination.character,
+      action: item.combination.action,
+      clothing: item.combination.clothing ?? null,
+    },
+  })));
+  return resolvedPlan.map(({ value, slots, randomSelections }) => {
+    const rawCharacter = slots.character;
+    const clothing = slots.clothing;
+    const effectiveCharacter = rawCharacter ? {
+      ...rawCharacter,
+      clothingRef: clothing?.sourceRef ?? null,
+      clothingNode: clothing?.draftNode ? cloneNode(clothing.draftNode) : null,
+    } : null;
+    return {
+      ...value,
+      combination: {
+        ...value.combination,
+        artist: slots.artist,
+        character: effectiveCharacter,
+        action: slots.action,
+        clothing,
+      },
+      randomSelections,
+    };
+  });
+}
+
+/** 一项 Compare 的 compose 请求：用这一组的 seed，单张出图。 */
+export function compareComposeRequest(item: CompareRunItem, params: RenderWorkspaceParams) {
+  const runParams: RenderWorkspaceParams = { ...params, seed: String(item.groupSeed) };
+  return {
+    runParams,
+    request: buildComposeRenderRequest(item.combination, runParams, {
+      compare: true,
+      promptBehavior: item.combination.promptBehavior.value,
+    }),
+  };
+}
+
 function initialResult(item: CompareRunItem, randomSelections: RandomSelectionRecord[] = []): CompareCombinationResult {
   return {
     runId: item.runId,
     groupIndex: item.groupIndex,
     groupSeed: item.groupSeed,
     combination: item.combination,
-    labels: {
-      artist: slotLabel(item.combination.artist),
-      character: slotLabel(item.combination.character),
-      action: slotLabel(item.combination.action),
-      clothing: slotLabel(item.combination.clothing),
-    },
+    labels: compareItemLabels(item.combination),
     behavior: {
       slotId: item.combination.promptBehavior.slotId,
       label: item.combination.promptBehavior.label,
@@ -157,51 +219,16 @@ export function useCompareRunController(dependencies: ControllerDependencies = {
       throw new Error("Compare Generate 至少需要一个 Character 或 Action 节点。");
     }
     const token = ++runToken.current;
-    const matrix = buildCompareMatrix(groups, promptBehaviorGroup);
-    const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
-    const resolvedPlan = await resolveRandomItems(plan.items.map((item) => ({
-      value: item,
-      randomScope: `group-${item.groupIndex}`,
-      slots: {
-        artist: item.combination.artist,
-        character: item.combination.character,
-        action: item.combination.action,
-        clothing: item.combination.clothing ?? null,
-      },
-    })));
-    const executableItems = resolvedPlan.map(({ value, slots, randomSelections }) => {
-      const rawCharacter = slots.character;
-      const clothing = slots.clothing;
-      const effectiveCharacter = rawCharacter ? {
-        ...rawCharacter,
-        clothingRef: clothing?.sourceRef ?? null,
-        clothingNode: clothing?.draftNode ? cloneNode(clothing.draftNode) : null,
-      } : null;
-      return {
-        ...value,
-        combination: {
-          ...value.combination,
-          artist: slots.artist,
-          character: effectiveCharacter,
-          action: slots.action,
-          clothing,
-        },
-        randomSelections,
-      };
-    });
+    const executableItems = await planCompareRun(groups, params, promptBehaviorGroup, randomSeed);
     const outputDir = outputDirFactory();
     setResults(executableItems.map((item) => initialResult(item, item.randomSelections)));
     setRunning(true);
     let nextIndex = 0;
 
-    async function runItem(item: CompareRunItem & { randomSelections: RandomSelectionRecord[] }) {
+    async function runItem(item: ExecutableCompareItem) {
       updateResult(token, item.runId, { status: "running", error: "" });
       try {
-        const runParams: RenderWorkspaceParams = { ...params, seed: String(item.groupSeed) };
-        const request = buildComposeRenderRequest(item.combination, runParams, {
-          compare: true,
-          promptBehavior: item.combination.promptBehavior.value,
-        });
+        const { runParams, request } = compareComposeRequest(item, params);
         const preview = await post("/compose-preview", request) as ComposePreviewResponse;
         if (!preview.render_request) throw new Error("该组合需要外部 Agent 先完成提示词拼接。");
         const queued = await post("/generate", buildGeneratePayload(preview.render_request, runParams, {

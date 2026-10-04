@@ -44,8 +44,37 @@ function response(body: unknown): Response {
 
 function mockGeneration() {
   let job = 0;
+  const backgroundJobs: unknown[] = [];
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
+    if (url.includes("/generate/batch")) {
+      const body = JSON.parse(String(init?.body));
+      const record = {
+        id: "bg-1",
+        name: "generate-batch",
+        status: "succeeded",
+        created_at: 1_780_000_000,
+        events: [],
+        result: {
+          label: body.label,
+          kind: body.kind,
+          output_dir: body.output_dir,
+          total: body.items.length,
+          counts: { queued: 0, running: 0, succeeded: body.items.length, failed: 0, cancelled: 0 },
+          items: body.items.map((item: { label: string; seed: number }, index: number) => ({
+            index,
+            label: item.label,
+            seed: item.seed,
+            status: "succeeded",
+            images: [{ path: `outputs/bg-${index}.png` }],
+            error: null,
+          })),
+        },
+      };
+      backgroundJobs.unshift(record);
+      return response(record);
+    }
+    if (url.includes("/jobs?name=generate-batch")) return response({ jobs: backgroundJobs });
     if (url.includes("/compose-preview")) {
       const body = JSON.parse(String(init?.body));
       return response({
@@ -140,6 +169,36 @@ describe("CustomStudio", () => {
     expect(await screen.findByRole("dialog", { name: "图片详情" })).toBeTruthy();
   });
 
+  it("background Compare hands the whole matrix to the backend in one request", async () => {
+    const fetchMock = mockGeneration();
+    renderStudio();
+    fireEvent.click(screen.getByText("configure matrix"));
+    fireEvent.change(screen.getByLabelText("NT"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
+    fireEvent.click(screen.getByLabelText("后台运行"));
+    expect(localStorage.getItem("promptatelier.background-run/v1")).toBe("1");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Generate · 8（后台）" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate/batch"))).toHaveLength(1));
+    const posted = fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"));
+    expect(posted).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/compose-preview"))).toBe(false);
+    const body = JSON.parse(String(posted[0][1]?.body));
+    expect(body.kind).toBe("compare");
+    expect(body.label).toBe("Compare · 8 张");
+    expect(body.items).toHaveLength(8);
+    expect(body.items.map((item: { seed: number }) => item.seed)).toEqual([42, 42, 42, 42, 43, 43, 43, 43]);
+    expect(body.items.every((item: { compose_request: { render: { params: { n_samples: number } } } }) => item.compose_request.render.params.n_samples === 1)).toBe(true);
+    expect(body.items[0].generate.output_dir).toContain("group_001_seed_42");
+    expect(body.items[7].generate.output_dir).toContain("group_002_seed_43");
+    expect(body.items[0].label).toBe("artist-a · homura · standing · Default");
+
+    expect(await screen.findByText("Compare · 8 张")).toBeTruthy();
+    expect(await screen.findByText("成功 8 / 8")).toBeTruthy();
+    expect(screen.getAllByRole("img", { name: /artist-a · homura/ }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/已交给后台：Compare · 8 张/)).toBeTruthy();
+  });
+
   it("Preview renders readable prompt fields and hides raw parameters by default", async () => {
     mockGeneration();
     renderStudio();
@@ -159,7 +218,8 @@ describe("CustomStudio", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"))).toHaveLength(1));
-    const previewBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const previewCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/compose-preview"));
+    const previewBody = JSON.parse(String(previewCall?.[1]?.body));
     expect(previewBody.render.params.character_prompts).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Generate Primary" }));

@@ -4341,3 +4341,60 @@ button {
   font-size: 11px;
   margin-left: 6px;
 }
+
+.background-toggle {
+  margin-left: auto;
+}
+
+.background-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.background-runs h3 {
+  font-size: 13px;
+  margin: 0 0 3px;
+}
+
+.background-run {
+  border-top: 1px solid #dce2ea;
+  padding-top: 10px;
+}
+
+.background-run > * + * {
+  margin-top: 8px;
+}
+
+.background-run summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px 12px;
+}
+
+.background-run summary small {
+  color: #687182;
+}
+
+.background-run-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+}
+
+.background-status-failed {
+  color: #b42318;
+}
+
+.background-run-errors {
+  color: #b42318;
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding-left: 18px;
+}

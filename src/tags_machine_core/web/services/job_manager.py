@@ -48,6 +48,10 @@ class JobContext:
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         self.manager.emit(self.job_id, event_type, payload)
 
+    def set_result(self, result: Any) -> None:
+        """运行中先公开一份阶段性结果（如后台批量的逐项进度）；任务结束时以 worker 的返回值为准。"""
+        self.manager._update(self.job_id, result=result)
+
 
 class JobManager:
     def __init__(self):
@@ -83,6 +87,13 @@ class JobManager:
             if job_id not in self._jobs:
                 raise KeyError(job_id)
             return self._jobs[job_id]
+
+    def list(self, *, name: str | None = None, limit: int = 20) -> list[JobRecord]:
+        """最新的在前；只在内存里，Web 后端重启后清空。"""
+        with self._lock:
+            jobs = [job for job in self._jobs.values() if name is None or job.name == name]
+        jobs.sort(key=lambda job: job.created_at, reverse=True)
+        return jobs[:limit]
 
     def cancel(self, job_id: str) -> JobRecord:
         self._update(job_id, status="cancelling")

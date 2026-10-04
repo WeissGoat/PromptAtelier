@@ -5,7 +5,7 @@ import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type { ComposePreviewResponse, GenerationImage, GenerationResult, JobRecord, NodePoolCandidate, NodeReadResponse } from "../api/types";
 import { compareDimensions } from "../compare/matrix";
 import { compareRunCount } from "../compare/runPlan";
-import { createCompareGroupOutputDir, createCompareOutputDir } from "../compare/useCompareRunController";
+import { compareComposeRequest, compareItemLabels, createCompareGroupOutputDir, createCompareOutputDir, planCompareRun } from "../compare/useCompareRunController";
 import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
 import { listAllPoolNodes } from "../randomNodes/api";
@@ -16,6 +16,16 @@ import { buildComposeRenderRequest, buildGeneratePayload } from "../workspace/re
 import { describeJobProgress } from "../comfyui/jobProgress";
 import { notifyComfyTargetsChanged } from "../comfyui/targetStatus";
 import type { NodeVariantSlot } from "../workspace/types";
+import {
+  backgroundGenerateOptions,
+  loadBackgroundPreference,
+  randomSelectionLabel,
+  saveBackgroundPreference,
+  submitBackgroundBatch,
+  type BackgroundBatchRequest,
+  type BackgroundRequestItem,
+} from "../generation/backgroundRun";
+import { BackgroundRunsPanel } from "./BackgroundRunsPanel";
 import { PromptPreview } from "./PromptPreview";
 import { ImageDetailDialog } from "./ImageDetailDialog";
 
@@ -183,6 +193,7 @@ export function CustomGeneratePanel() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ImageSelection | null>(null);
+  const [background, setBackground] = useState(loadBackgroundPreference);
   const pollToken = useRef(0);
   const dimensions = compareDimensions(groups, promptBehaviorGroup);
   const matrixTotal = dimensions.artist * dimensions.character * dimensions.action * dimensions.behavior;
@@ -275,11 +286,11 @@ export function CustomGeneratePanel() {
     setStatus("Generating Primary");
     try {
       if (primaryHasSequential) {
-        await generateSequentialStep();
+        await (background ? submitSequential(false) : generateSequentialStep());
         return;
       }
       if (primaryHasRandom) {
-        await generateRandomPrimary();
+        await (background ? submitRandomPrimary() : generateRandomPrimary());
         return;
       }
       const primaryPreviewCurrent = previewSignature === primaryRequestSignature;
@@ -395,6 +406,17 @@ export function CustomGeneratePanel() {
     }
     setBusy(true);
     setError("");
+    if (background) {
+      try {
+        await submitSequential(true);
+      } catch (requestError) {
+        setStatus("Sequential All failed");
+        setError(errorMessage(requestError));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const startCursor = actionSlot.poolCursor ?? 0;
     const parsedSeed = Number(params.seed);
     const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
@@ -459,8 +481,120 @@ export function CustomGeneratePanel() {
     setStatus(`Random Primary complete · ${resolved.length}`);
   }
 
+  async function submitBackground(request: BackgroundBatchRequest) {
+    const job = await submitBackgroundBatch(request);
+    // 刷新运行位置状态：ComfyUI 可能马上要冷启动。
+    notifyComfyTargetsChanged({ backend: "comfyui" });
+    setJob(null);
+    setRandomJobs([]);
+    setSequentialJobs([]);
+    setStatus(`已交给后台：${request.label}（${job.id}）`);
+  }
+
+  /** 随机组合 × NT：先在浏览器里抽好节点，再整批交给后端。 */
+  async function submitRandomPrimary() {
+    const count = Math.max(1, Math.trunc(params.nt));
+    const resolved = await resolveRandomItems(Array.from({ length: count }, (_, index) => ({ value: index, slots: primary })));
+    const parsedSeed = Number(params.seed);
+    const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
+    const outputDir = createCompareOutputDir("random");
+    const items: BackgroundRequestItem[] = resolved.map((entry, index) => {
+      const seed = explicitSeed ? parsedSeed + index : randomSeed();
+      const runParams = { ...params, nt: 1, seed: String(seed) };
+      return {
+        label: randomSelectionLabel(entry.randomSelections) || `随机 ${index + 1}`,
+        seed,
+        compose_request: buildComposeRenderRequest(entry.slots, runParams, { compare: true, promptBehavior: primaryBehavior.value }),
+        generate: backgroundGenerateOptions(params, {
+          output_dir: createCompareGroupOutputDir(outputDir, index + 1, seed),
+          random_selections: entry.randomSelections,
+        }),
+      };
+    });
+    await submitBackground({ label: `Random · ${items.length} 张`, kind: "random", output_dir: outputDir, items });
+  }
+
+  /** 顺序池：all=false 只交当前这一个动作，all=true 交从当前位置到池末尾的全部动作；交出去就推进游标。 */
+  async function submitSequential(all: boolean) {
+    const actionSlot = primary.action;
+    if (!actionSlot || !isSequentialSlot(actionSlot)) return;
+    const startCursor = actionSlot.poolCursor ?? 0;
+    const parsedSeed = Number(params.seed);
+    const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
+    const nt = Math.max(1, Math.trunc(params.nt));
+    const pool = await listAllPoolNodes(actionSlot.role, actionSlot.randomSpec!);
+    const total = pool.items.length;
+    if (!total) throw new Error("顺序池中没有可用候选节点。");
+    const cursors = all
+      ? Array.from({ length: Math.max(0, total - startCursor) }, (_, offset) => startCursor + offset)
+      : [startCursor];
+    if (!cursors.length) throw new Error("顺序池已经跑到末尾，请先重置游标。");
+    const outputDir = createCompareOutputDir(all ? "sequential-all" : "sequential");
+    const items: BackgroundRequestItem[] = [];
+    for (const [offset, cursor] of cursors.entries()) {
+      setStatus(`准备后台任务 ${offset + 1}/${cursors.length}`);
+      const { resolved, candidate } = await resolveSequentialAction(actionSlot, cursor);
+      const actionName = candidate.name || candidate.ref;
+      for (let ntIndex = 0; ntIndex < nt; ntIndex += 1) {
+        const seed = explicitSeed ? parsedSeed + offset * nt + ntIndex : randomSeed();
+        const runParams = { ...params, nt: 1, seed: String(seed) };
+        items.push({
+          label: `#${(cursor % total) + 1} ${actionName}${nt > 1 ? ` (${ntIndex + 1}/${nt})` : ""}`,
+          seed,
+          compose_request: buildComposeRenderRequest({ ...primary, action: resolved }, runParams, {
+            compare: true,
+            promptBehavior: primaryBehavior.value,
+          }),
+          generate: backgroundGenerateOptions(params, { output_dir: createCompareGroupOutputDir(outputDir, cursor + 1, seed) }),
+        });
+      }
+    }
+    const label = all ? `Sequential All · ${cursors.length} 个动作 × ${nt}` : `Sequential #${(startCursor % total) + 1} × ${nt}`;
+    await submitBackground({ label, kind: "sequential", output_dir: outputDir, items });
+    for (let step = 0; step < cursors.length; step += 1) workspace.advancePoolCursor(actionSlot.slotId);
+  }
+
+  async function submitCompare() {
+    const plan = await planCompareRun(groups, params, promptBehaviorGroup, randomSeed);
+    const outputDir = createCompareOutputDir();
+    const items: BackgroundRequestItem[] = plan.map((item) => {
+      const labels = compareItemLabels(item.combination);
+      const shown = Object.fromEntries(Object.entries({
+        artist: labels.artist,
+        character: labels.character,
+        clothing: labels.clothing,
+        action: labels.action,
+        behavior: item.combination.promptBehavior.label,
+      }).filter(([, value]) => value && value !== "未选择"));
+      return {
+        label: Object.values(shown).join(" · "),
+        group: item.groupIndex,
+        seed: item.groupSeed,
+        labels: shown,
+        compose_request: compareComposeRequest(item, params).request,
+        generate: backgroundGenerateOptions(params, {
+          output_dir: createCompareGroupOutputDir(outputDir, item.groupIndex, item.groupSeed),
+          random_selections: item.randomSelections,
+        }),
+      };
+    });
+    await submitBackground({ label: `Compare · ${items.length} 张`, kind: "compare", output_dir: outputDir, items });
+  }
+
   async function generateCompare() {
     setError("");
+    if (background) {
+      setBusy(true);
+      try {
+        await submitCompare();
+      } catch (requestError) {
+        setStatus("Compare failed");
+        setError(errorMessage(requestError));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       await compare.start(groups, params, promptBehaviorGroup);
     } catch (requestError) {
@@ -485,10 +619,23 @@ export function CustomGeneratePanel() {
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>
         <button disabled={busy} onClick={() => void generate()} type="button"><Play size={16} /> {primaryHasSequential ? "Generate Next" : "Generate Primary"}</button>
         {primaryHasSequential ? <button disabled={busy} onClick={() => void generateAllSequential()} type="button"><ListOrdered size={16} /> Run All</button> : null}
+        <label className="toggle-row background-toggle" title="随机、顺序和 Compare 整批交给 Web 后端逐张跑，关掉网页也会继续；单张 Generate Primary 本来就在后端跑。">
+          <input
+            checked={background}
+            onChange={(event) => {
+              setBackground(event.target.checked);
+              saveBackgroundPreference(event.target.checked);
+            }}
+            type="checkbox"
+          />
+          后台运行
+        </label>
       </div>
       {job ? <section className="job-result"><strong>Job {job.id}</strong><span>Status: {job.status}</span><JobProgress job={job} /><ImageGrid job={job} onOpenImage={setSelectedImage} sequencePaths={ordinaryImagePaths} /></section> : null}
       {randomJobs.length ? <section className="job-result"><strong>Random Primary</strong><span>{randomJobs.filter((item) => item.job.status === "succeeded").length} / {randomJobs.length}</span>{randomJobs.map((item) => <div key={item.job.id}><JobProgress job={item.job} /><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Random" sequencePaths={randomImagePaths} /></div>)}</section> : null}
       {sequentialJobs.length ? <section className="job-result"><strong>Sequential Actions</strong><span>{sequentialJobs.filter((item) => item.job.status === "succeeded").length} / {sequentialJobs.length}</span>{sequentialJobs.map((item) => <div key={item.job.id}><small>#{item.actionIndex + 1} {item.actionName} · {item.job.status}</small><JobProgress job={item.job} /><ImageGrid job={item.job} onOpenImage={setSelectedImage} prefix="Sequential" sequencePaths={sequentialImagePaths} /></div>)}</section> : null}
+
+      <BackgroundRunsPanel onOpenImage={setSelectedImage} />
 
       <section className="compare-generate-section">
         <div className="section-title-row">
@@ -498,7 +645,7 @@ export function CustomGeneratePanel() {
           </div>
           <div className="button-row">
             {compare.results.length ? <button disabled={compare.running} onClick={compare.reset} title="清空 Compare 结果" type="button"><RotateCcw size={15} /></button> : null}
-            <button disabled={compare.running || busy} onClick={() => void generateCompare()} type="button"><Grid2X2 size={16} /> Compare Generate · {compareTotal}</button>
+            <button disabled={compare.running || busy} onClick={() => void generateCompare()} type="button"><Grid2X2 size={16} /> Compare Generate · {compareTotal}{background ? "（后台）" : ""}</button>
           </div>
         </div>
         {compare.results.length ? (
