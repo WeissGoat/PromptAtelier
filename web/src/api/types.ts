@@ -230,16 +230,6 @@ export type ImageParameterDiffResponse = {
   current_normalized: Record<string, unknown>;
 };
 
-export type BatchPreviewResponse = {
-  schema: string;
-  batch: string;
-  task_count: number;
-  run_dir: string;
-  output_dir: string;
-  selector_summary?: Record<string, unknown>;
-  sample_tasks: Array<Record<string, unknown>>;
-};
-
 export type ResultRun = {
   name: string;
   path: string;
