@@ -15,6 +15,7 @@ from PIL import Image
 from tags_machine_core.backends import ensure_backend_can_execute
 from tags_machine_core.clients import (
     ComfyUIClient,
+    ComfyUIGenerationResult,
     ComfyUITransport,
     ProgressCallback,
     GatewayNovelAIRawClient,
@@ -42,10 +43,12 @@ def save_generated_images(
     output_dir: Path,
     request: RenderRequest,
     default_format: str,
+    timing: dict[str, float] | None = None,
 ) -> list[GeneratedImage]:
+    """timing 是这次请求的耗时（秒），写进每张图的 meta 和 PNG 元数据。"""
     output_dir.mkdir(parents=True, exist_ok=True)
     batch_id = uuid4().hex[:8]
-    png_text = build_core_png_text(request)
+    png_text = build_core_png_text(request, timing=timing)
     generated_images: list[GeneratedImage] = []
     for index, image in enumerate(images, start=1):
         suffix = Path(image.filename).suffix or f".{default_format}"
@@ -54,7 +57,7 @@ def save_generated_images(
         path.write_bytes(image.content)
         if path.suffix.lower() == ".png":
             write_png_text_chunks(path, png_text)
-        meta = {"source_filename": image.filename, "index": index}
+        meta: dict[str, Any] = {"source_filename": image.filename, "index": index, **(timing or {})}
         for attr in ("subfolder", "image_type", "node_id"):
             value = getattr(image, attr, None)
             if value:
@@ -70,7 +73,11 @@ def save_generated_images(
     return generated_images
 
 
-def build_core_png_text(request: RenderRequest) -> dict[str, str]:
+def build_core_png_text(
+    request: RenderRequest,
+    *,
+    timing: dict[str, float] | None = None,
+) -> dict[str, str]:
     core_info = {
         "schema": "tags-machine-core.png-info/v1",
         "mode": request.meta.get("mode"),
@@ -89,6 +96,8 @@ def build_core_png_text(request: RenderRequest) -> dict[str, str]:
         ),
         "random_nodes": request.meta.get("random_nodes") or [],
         "render": _comfyui_render_info(request) if request.backend == "comfyui" else None,
+        # 不放进 render 段：耗时每次都不同，不该算进参数 Diff。
+        "timing": timing or None,
     }
     result = {
         CORE_PNG_INFO_KEY: json.dumps(_drop_none(core_info), ensure_ascii=False),
@@ -347,15 +356,17 @@ def execute_novelai_generation(
     )
     if len(requests) == 1:
         effective_request = requests[0]
+        raw_images, timing = _generate_novelai_images(
+            client,
+            effective_request,
+            request_interval=config.novelai.request_interval,
+        )
         images = save_generated_images(
-            _generate_novelai_images(
-                client,
-                effective_request,
-                request_interval=config.novelai.request_interval,
-            ),
+            raw_images,
             output_dir=output_path,
             request=effective_request,
             default_format=image_format,
+            timing=timing,
         )
         png_info = collect_png_info(images)
         _attach_gateway_retry_records(png_info, client)
@@ -372,15 +383,17 @@ def execute_novelai_generation(
     request_bodies: list[dict[str, Any]] = []
     gateway_records: list[dict[str, Any]] = []
     for index, split_request in enumerate(requests):
+        raw_images, timing = _generate_novelai_images(
+            client,
+            split_request,
+            request_interval=config.novelai.request_interval,
+        )
         generated = save_generated_images(
-            _generate_novelai_images(
-                client,
-                split_request,
-                request_interval=config.novelai.request_interval,
-            ),
+            raw_images,
             output_dir=output_path,
             request=split_request,
             default_format=image_format,
+            timing=timing,
         )
         images.extend(
             image.model_copy(
@@ -599,8 +612,44 @@ def _generate_novelai_images(
     *,
     request_interval: float,
 ):
+    """返回图片和耗时；耗时从发出请求算起，不含两次请求之间的限速等待。"""
     _wait_for_novelai_request_slot(request_interval)
-    return client.generate_images(request)
+    started_at = time.monotonic()
+    images = client.generate_images(request)
+    return images, {"elapsed_seconds": _seconds_since(started_at)}
+
+
+def _seconds_since(started_at: float) -> float:
+    return round(time.monotonic() - started_at, 1)
+
+
+def comfyui_execution_seconds(history: dict[str, Any], prompt_id: str | None) -> float | None:
+    """ComfyUI 服务端从开始执行到执行完的秒数，不含排队和冷启动；取自 history 里的状态消息。"""
+    entry = history.get(prompt_id) if prompt_id else None
+    status = entry.get("status") if isinstance(entry, dict) else None
+    messages = status.get("messages") if isinstance(status, dict) else None
+    if not isinstance(messages, list):
+        return None
+    stamps: dict[str, float] = {}
+    for message in messages:
+        if isinstance(message, list) and len(message) == 2 and isinstance(message[1], dict):
+            timestamp = message[1].get("timestamp")
+            if isinstance(timestamp, (int, float)):
+                stamps[str(message[0])] = float(timestamp)
+    started = stamps.get("execution_start")
+    finished = stamps.get("execution_success")
+    if started is None or finished is None or finished < started:
+        return None
+    return round((finished - started) / 1000, 1)
+
+
+def _comfyui_timing(started_at: float, generated: ComfyUIGenerationResult) -> dict[str, float]:
+    """elapsed_seconds 是提交到拿回图片的总时间；execution_seconds 只算 ComfyUI 实际执行。"""
+    timing = {"elapsed_seconds": _seconds_since(started_at)}
+    execution = comfyui_execution_seconds(generated.history, generated.prompt_id)
+    if execution is not None:
+        timing["execution_seconds"] = execution
+    return timing
 
 
 def _wait_for_novelai_request_slot(request_interval: float) -> None:
@@ -836,6 +885,7 @@ def execute_comfyui_generation(
         images: list[GeneratedImage] = []
         comfyui_meta = {"prompt_id": queued.prompt_id, "queue_raw": queued.raw}
     else:
+        started_at = time.monotonic()
         generated = transport.run(
             prepared,
             client_id=client_id,
@@ -848,6 +898,7 @@ def execute_comfyui_generation(
             output_dir=output_path,
             request=effective_request,
             default_format=image_format,
+            timing=_comfyui_timing(started_at, generated),
         )
         comfyui_meta = {
             "prompt_id": generated.prompt_id,
@@ -897,6 +948,7 @@ def _execute_split_comfyui_generation(
             prompt_records.append({"split_request_index": index, "prompt_id": queued.prompt_id})
             continue
 
+        started_at = time.monotonic()
         generated = transport.run(
             prepared,
             client_id=client_id,
@@ -909,6 +961,7 @@ def _execute_split_comfyui_generation(
             output_dir=output_dir,
             request=split_request,
             default_format=image_format,
+            timing=_comfyui_timing(started_at, generated),
         )
         images.extend(
             image.model_copy(
@@ -1057,11 +1110,14 @@ def execute_sd_generation(
         base_url=config.sd.base_url,
         timeout=config.sd.timeout,
     )
+    started_at = time.monotonic()
+    raw_images = client.generate_images(request)
     images = save_generated_images(
-        client.generate_images(request),
+        raw_images,
         output_dir=Path(output_dir or config.runtime.output_dir),
         request=request,
         default_format=image_format,
+        timing={"elapsed_seconds": _seconds_since(started_at)},
     )
     return GenerationResult(
         backend="sd",
