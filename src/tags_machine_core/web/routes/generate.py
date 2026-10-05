@@ -5,6 +5,14 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from tags_machine_core.web.errors import ApiError
+from tags_machine_core.web.routes.compose import _validate_prompt_policy_override
+from tags_machine_core.web.services.generate_batch import (
+    GENERATE_BATCH_JOB,
+    attach_random_selections,
+    run_generate,
+    run_generate_batch,
+    validate_generate_batch,
+)
 
 
 router = APIRouter()
@@ -14,19 +22,17 @@ router = APIRouter()
 def generate(payload: dict[str, Any], request: Request) -> dict[str, Any]:
     manager = request.app.state.job_manager
     api = request.app.state.generation_api
-    prepared = _attach_random_selections(payload)
+    try:
+        prepared = attach_random_selections(payload)
+    except ValueError as exc:
+        raise ApiError(
+            code="invalid_random_selections",
+            message=str(exc),
+            status_code=400,
+        ) from exc
 
     def worker(ctx):
-        ctx.emit("generation_started", {})
-        # on_progress 只在进程内传给执行器（ComfyUI 的启动/排队/下载进度），不会序列化进结果。
-        result = api.generate({**prepared, "on_progress": ctx.emit})
-        if prepared.get("random_selections"):
-            result["random_selections"] = prepared["random_selections"]
-        ctx.emit(
-            "generation_finished",
-            {"image_count": len(result.get("images") or [])},
-        )
-        return result
+        return run_generate(api, prepared, ctx.emit)
 
     try:
         job = manager.submit("generate", worker)
@@ -39,28 +45,23 @@ def generate(payload: dict[str, Any], request: Request) -> dict[str, Any]:
     return job.to_dict()
 
 
-def _attach_random_selections(payload: dict[str, Any]) -> dict[str, Any]:
-    selections = payload.get("random_selections")
-    if selections is None:
-        return payload
-    if not isinstance(selections, list) or not all(isinstance(item, dict) for item in selections):
+@router.post("/generate/batch")
+def generate_batch(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    """后台批量出图：浏览器把逐项的 compose 请求一次交给后端，关掉网页也会跑完。"""
+    manager = request.app.state.job_manager
+    api = request.app.state.generation_api
+    try:
+        batch = validate_generate_batch(payload)
+        for item in batch["items"]:
+            _validate_prompt_policy_override(item["compose_request"])
+    except ValueError as exc:
         raise ApiError(
-            code="invalid_random_selections",
-            message="random_selections must be a list of objects",
+            code="invalid_generate_batch",
+            message=str(exc),
             status_code=400,
-        )
-    request_data = payload.get("render_request") or payload.get("request")
-    if not isinstance(request_data, dict):
-        raise ApiError(
-            code="invalid_random_selections",
-            message="random selections require render_request",
-            status_code=400,
-        )
-    render_request = dict(request_data)
-    meta = dict(render_request.get("meta") or {})
-    meta["random_nodes"] = selections
-    render_request["meta"] = meta
-    result = dict(payload)
-    result["render_request"] = render_request
-    result["random_selections"] = selections
-    return result
+        ) from exc
+
+    def worker(ctx):
+        return run_generate_batch(api, batch, ctx)
+
+    return manager.submit(GENERATE_BATCH_JOB, worker).to_dict()

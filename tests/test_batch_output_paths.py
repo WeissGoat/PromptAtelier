@@ -7,7 +7,6 @@ from pathlib import Path
 from tags_machine_core import cli
 from tags_machine_core.batch.models import BatchSpec
 from tags_machine_core.batch.paths import resolve_batch_output_path
-from tags_machine_core.web.services.batch_workspace import BatchWorkspace
 
 
 def test_resolve_batch_output_path_expands_date() -> None:
@@ -46,19 +45,4 @@ def test_cli_batch_output_dir_expands_override_date(tmp_path: Path) -> None:
     )
 
     assert result.parent == tmp_path / "override"
-    assert re.fullmatch(r"\d{8}", result.name)
-
-
-def test_web_batch_output_dir_uses_same_date_template(tmp_path: Path) -> None:
-    workspace = BatchWorkspace(base_dir=tmp_path)
-    spec = BatchSpec(name="daily", output_dir=str(tmp_path / "{date}"))
-
-    result = workspace._output_dir(
-        spec,
-        data={},
-        spec_path=tmp_path / "batch.yaml",
-        run_dir=tmp_path / "work",
-    )
-
-    assert result.parent == tmp_path
     assert re.fullmatch(r"\d{8}", result.name)

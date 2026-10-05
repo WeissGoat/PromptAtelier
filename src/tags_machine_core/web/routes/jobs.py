@@ -17,6 +17,12 @@ def _manager(request: Request) -> JobManager:
     return request.app.state.job_manager
 
 
+@router.get("/jobs")
+def list_jobs(request: Request, name: str | None = None, limit: int = 20) -> dict:
+    jobs = _manager(request).list(name=name, limit=max(1, min(limit, 100)))
+    return {"jobs": [job.to_dict() for job in jobs]}
+
+
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str, request: Request) -> dict:
     try:

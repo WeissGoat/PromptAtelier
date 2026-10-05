@@ -18,7 +18,6 @@ from tags_machine_core.services.json_api import GenerationExecutor
 
 from .errors import ApiError, api_error_handler
 from .routes import (
-    batch,
     comfyui,
     compare,
     compose,
@@ -30,7 +29,6 @@ from .routes import (
     nodes,
     results,
 )
-from .services.batch_workspace import BatchWorkspace
 from .services.comfyui_targets import ComfyUITargetService
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
@@ -61,7 +59,6 @@ def create_app(
     job_manager: JobManager | None = None,
     node_workspace: NodeWorkspace | None = None,
     result_index: ResultIndex | None = None,
-    batch_workspace: BatchWorkspace | None = None,
     generation_executor: GenerationExecutor | None = None,
     config_path: str | Path | None = None,
 ) -> FastAPI:
@@ -95,7 +92,6 @@ def create_app(
         if getattr(config.legacy, "tags_machine_root", None):
             roots.append(config.legacy.tags_machine_root)
     app.state.result_index = result_index or ResultIndex(roots=roots)
-    app.state.batch_workspace = batch_workspace or BatchWorkspace(base_dir=Path.cwd())
     app.state.comfyui_targets = ComfyUITargetService(config.comfyui)
     policy_provider = build_prompt_policy_provider(
         config,
@@ -127,7 +123,6 @@ def create_app(
     app.include_router(compose.router, prefix="/api", tags=["compose"])
     app.include_router(generate.router, prefix="/api", tags=["generate"])
     app.include_router(results.router, prefix="/api", tags=["results"])
-    app.include_router(batch.router, prefix="/api", tags=["batch"])
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
     app.include_router(compare.router, prefix="/api", tags=["compare"])
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])

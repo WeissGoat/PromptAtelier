@@ -184,6 +184,7 @@ def _comfyui_render_info(request: RenderRequest) -> dict[str, Any]:
         "seed": request.seed,
         "width": request.size.width,
         "height": request.size.height,
+        "size_preset": request.meta.get("size_preset"),
         "workflow": params.get("workflow"),
         "workflow_hash": params.get("workflow_hash"),
         "target": request.meta.get("comfyui_target"),

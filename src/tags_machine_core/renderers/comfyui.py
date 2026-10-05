@@ -14,6 +14,7 @@ from tags_machine_core.renderers.common import (
     renderer_artist_payload,
 )
 from tags_machine_core.renderers.comfyui_prompt import novelai_to_comfyui_prompt
+from tags_machine_core.renderers.sizes import resolve_render_size
 from tags_machine_core.renderers.comfyui_workflow import (
     build_bound_overrides,
     check_override_paths,
@@ -50,6 +51,14 @@ class ComfyUIRenderAdapter:
     ) -> RenderRequest:
         artist_payload = renderer_artist_payload(artist, self.backend)
         artist_params = copy.deepcopy(artist_payload.get("params", {}) or {})
+        # params.size（random / portrait / landscape / square / custom）按画风的预设定宽高，见 renderers/sizes.py。
+        width, height, size_preset, merged_params = resolve_render_size(
+            artist_payload,
+            {**artist_params, **(params or {})},
+            width=width,
+            height=height,
+            rng=_SEED_RANDOM,
+        )
         resolved_model = (
             model
             or artist_payload.get("model")
@@ -63,8 +72,11 @@ class ComfyUIRenderAdapter:
             model=resolved_model,
             artist=artist,
             artist_payload=artist_payload,
-            params={**artist_params, **(params or {})},
+            params=merged_params,
         )
+        meta = render_meta(bundle, action=action, backend=self.backend)
+        if size_preset is not None:
+            meta["size_preset"] = size_preset
         return RenderRequest(
             backend=self.backend,
             prompt=bundle.prompt.positive,
@@ -74,7 +86,7 @@ class ComfyUIRenderAdapter:
             size=RenderSize(width=width, height=height),
             params=final_params,
             artist_payload=artist_payload,
-            meta=render_meta(bundle, action=action, backend=self.backend),
+            meta=meta,
         )
 
     def _build_parameters(

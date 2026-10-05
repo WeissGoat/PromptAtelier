@@ -19,6 +19,15 @@ models:
     size: 6938041602
     sha256: ddf49e8cf45f4257f0103f75695cd02c5b1738daa6a977e9d19607bbecea4a27
     source: civitai
+  - path: checkpoints/cocoIllustriousNoobai_v55.safetensors
+    size: 6938040682
+    sha256: d8deaed7461e8dc09fd1bd41868dc7fac83ab87f6336ecafed32feb6a3f38bb1
+    # Civitai 按 hash 已查不到（2026-10），只能从模型仓库取。
+    source: mirror
+  - path: loras/add_outline_XL.safetensors
+    size: 57417260
+    sha256: 65fef54277d90079c5fab4bcac8ab06ce6d896858a9de06b8f6a62705c1d483e
+    source: civitai
   - path: loras/Expressive_H-000001.safetensors
     size: 228453892
     sha256: 7b53da0391712dbe9412d5aa5fd074659413058773f72f41bd7a37e886031d43

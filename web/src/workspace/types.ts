@@ -62,7 +62,12 @@ export type RenderWorkspaceParams = {
   seed: string;
   /** ComfyUI 画风在哪个运行位置出图（comfyui.targets 的名字）；空表示用后端默认。 */
   comfyuiTarget?: string;
+  /** 尺寸选择：random 从画风的竖横方预设里抽，portrait/landscape/square 用画风对应的那个，custom 用 width/height；空等同 random。 */
+  size?: SizeChoice;
 };
+
+export type SizeOrientation = "portrait" | "landscape" | "square";
+export type SizeChoice = "random" | SizeOrientation | "custom";
 
 export type PolicyRuleState = "inherit" | "enabled" | "disabled";
 

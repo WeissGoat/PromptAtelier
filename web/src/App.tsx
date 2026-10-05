@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import { Layout, type PageKey } from "./components/Layout";
-import { BatchStudio } from "./pages/BatchStudio";
 import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
 import { ResultsGallery } from "./pages/ResultsGallery";
@@ -13,11 +12,11 @@ const PAGE_STORAGE_KEY = "promptatelier.active-page/v1";
 function getInitialPage(): PageKey {
   if (typeof window !== "undefined") {
     const rawHash = window.location.hash.replace(/^#\/?/, "");
-    if (rawHash === "custom" || rawHash === "batch" || rawHash === "results" || rawHash === "compare") {
+    if (rawHash === "custom" || rawHash === "results" || rawHash === "compare") {
       return rawHash;
     }
     const saved = window.localStorage?.getItem(PAGE_STORAGE_KEY) as PageKey;
-    if (saved === "custom" || saved === "batch" || saved === "results" || saved === "compare") {
+    if (saved === "custom" || saved === "results" || saved === "compare") {
       return saved;
     }
   }
@@ -38,7 +37,7 @@ export function App() {
   useEffect(() => {
     function onHashChange() {
       const rawHash = window.location.hash.replace(/^#\/?/, "");
-      if (rawHash === "custom" || rawHash === "batch" || rawHash === "results" || rawHash === "compare") {
+      if (rawHash === "custom" || rawHash === "results" || rawHash === "compare") {
         setPage(rawHash);
       }
     }
@@ -48,7 +47,6 @@ export function App() {
 
   const content = {
     custom: <CustomStudio />,
-    batch: <BatchStudio />,
     results: <ResultsGallery />,
     compare: <CompareStudio />,
   }[page];
