@@ -1,4 +1,5 @@
 import random
+import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
@@ -219,3 +220,42 @@ class NodePoolTest(TestCase):
                     "action",
                     NodePoolSpec.model_validate({"source": {"type": "glob", "value": "../角色/*"}}),
                 )
+
+    def test_symlinked_source_directory_outside_design_root(self):
+        with tempfile.TemporaryDirectory() as design_tmp, tempfile.TemporaryDirectory() as external_tmp:
+            design_root = Path(design_tmp)
+            action_root = design_root / "动作改2"
+            action_root.mkdir()
+            external_dir = Path(external_tmp) / "external_actions"
+            external_dir.mkdir()
+            self._node(external_dir, "01_外部动作")
+
+            link_path = action_root / "linked"
+            try:
+                link_path.symlink_to(external_dir, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are not available on this machine")
+
+            res = self._resolver(design_root).scan(
+                "action",
+                NodePoolSpec.model_validate({"source": {"type": "folder", "value": "linked"}}),
+            )
+            self.assertEqual(len(res.candidates), 1)
+            self.assertEqual(res.candidates[0].name, "01_外部动作")
+            self.assertEqual(res.candidates[0].relative, "linked/01_外部动作")
+
+    def test_dotdot_after_symlink_stays_lexically_inside_root(self):
+        from tags_machine_core.nodes.path_guard import contained_path
+
+        with tempfile.TemporaryDirectory() as design_tmp, tempfile.TemporaryDirectory() as external_tmp:
+            design_root = Path(design_tmp)
+            external_dir = Path(external_tmp) / "deep" / "target"
+            external_dir.mkdir(parents=True)
+            try:
+                (design_root / "link").symlink_to(external_dir, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are not available on this machine")
+
+            contained = contained_path(design_root, design_root / "link" / ".." / "secret")
+            self.assertEqual(contained, Path(os.path.normpath(design_root / "secret")))
+            self.assertIsNone(contained_path(design_root, design_root / ".." / "secret"))

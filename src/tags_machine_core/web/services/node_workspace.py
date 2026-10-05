@@ -9,6 +9,7 @@ import yaml
 
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
+from tags_machine_core.nodes.path_guard import contained_path, relative_within
 from tags_machine_core.nodes.reader import NodeReader
 from tags_machine_core.nodes.role_paths import role_roots
 from tags_machine_core.web.node_editing import FileMutation, NodeSourceAdapterRegistry, create_default_registry
@@ -193,12 +194,11 @@ class NodeWorkspace:
         candidate = Path(ref)
         if not candidate.is_absolute():
             candidate = self.design_root / candidate
-        resolved = candidate.resolve()
-        try:
-            resolved.relative_to(self.design_root)
-        except ValueError as exc:
-            raise ValueError("node path must be inside design_root") from exc
-        return resolved
+
+        contained = contained_path(self.design_root, candidate)
+        if contained is None:
+            raise ValueError("node path must be inside design_root")
+        return contained
 
     def preview_node(self, raw: dict[str, Any]) -> dict[str, Any]:
         node = NodeDocument.model_validate(raw)
@@ -226,11 +226,7 @@ class NodeWorkspace:
             and (path / "tags.txt").exists()
             and not any((path / name).exists() for name in ("meta.yaml", "node.yaml"))
         ):
-            resolved = path.resolve()
-            try:
-                artist_ref = resolved.relative_to(self.artist_repository.artist_root.resolve()).as_posix()
-            except ValueError:
-                artist_ref = str(resolved)
+            artist_ref = relative_within(self.artist_repository.artist_root, path) or str(path.resolve())
             return self.artist_repository.load_node(artist_ref)
         return self.reader.read(path)
 
@@ -238,12 +234,11 @@ class NodeWorkspace:
         candidate = Path(ref)
         if not candidate.is_absolute():
             candidate = self.design_root / candidate
-        resolved = candidate.resolve()
-        try:
-            resolved.relative_to(self.design_root)
-        except ValueError as exc:
-            raise ValueError("node save target must be inside design_root") from exc
-        return resolved
+
+        contained = contained_path(self.design_root, candidate)
+        if contained is None:
+            raise ValueError("node save target must be inside design_root")
+        return contained
 
     def to_form(self, node: NodeDocument) -> dict[str, Any]:
         return {
