@@ -31,8 +31,12 @@ export function CustomStudio() {
     ...groups.character.compares.flatMap((slot) => nodeSections(slot.draftNode)),
   ])];
 
+  // 没在编辑节点时 Node Editor 只是一句提示，把位置让给右边的出图任务。
+  const editor = workspace.state.editor;
+  const editorIdle = !editor.slotId || (editor.kind !== "random" && !editor.draftNode);
+
   return (
-    <main className="studio-grid">
+    <main className={editorIdle ? "studio-grid editor-idle" : "studio-grid"}>
       <section className="panel controls-panel">
         <div className="panel-title"><h2>Nodes</h2></div>
         <NodeRoleGroup onEditSlot={workspace.openEditor} role="artist" />

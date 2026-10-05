@@ -8,6 +8,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 
 from tags_machine_core.web.errors import ApiError
+from tags_machine_core.web.services.generate_batch import GENERATE_BATCH_JOB
+from tags_machine_core.web.services.output_history import OutputHistory
 from tags_machine_core.web.services.result_index import ResultIndex
 
 
@@ -24,6 +26,63 @@ def list_runs(request: Request) -> dict:
         "schema": "tags-machine-core.web.result-runs/v1",
         "runs": _index(request).list_runs(),
     }
+
+
+def _history(request: Request) -> OutputHistory:
+    return request.app.state.output_history
+
+
+def _jobs_by_output_dir(request: Request) -> dict[str, dict]:
+    """出图历史里给批次配上提交时的任务名（如"Random · 3 轮"）；只有后端记得的任务才有。"""
+    history = _history(request)
+    jobs: dict[str, dict] = {}
+    for job in request.app.state.job_manager.list(name=GENERATE_BATCH_JOB, limit=500):
+        result = job.result if isinstance(job.result, dict) else {}
+        output_dir = result.get("output_dir")
+        if not output_dir:
+            continue
+        resolved = Path(output_dir)
+        if not resolved.is_absolute():
+            resolved = Path.cwd() / resolved
+        try:
+            run_id = resolved.resolve().relative_to(history.root).as_posix()
+        except ValueError:
+            continue
+        jobs[run_id] = {"id": job.id, "label": result.get("label"), "status": job.status}
+    return jobs
+
+
+@router.get("/history/runs")
+def list_history_runs(request: Request) -> dict:
+    runs = _history(request).list_runs()
+    jobs = _jobs_by_output_dir(request)
+    for run in runs:
+        run["job"] = jobs.get(run["id"])
+    return {"schema": "tags-machine-core.web.history-runs/v1", "runs": runs}
+
+
+@router.get("/history/images")
+def list_history_images(run_id: str, request: Request, offset: int = 0, limit: int = 300) -> dict:
+    try:
+        return _history(request).run_images(run_id, offset=max(0, offset), limit=max(1, min(limit, 1000)))
+    except FileNotFoundError as exc:
+        raise ApiError(code="history_run_not_found", message=f"History run not found: {run_id}", status_code=404) from exc
+
+
+@router.get("/results/thumb")
+def read_thumbnail(path: str, request: Request, size: int = 320) -> FileResponse:
+    try:
+        thumb = _index(request).thumbnail(path, size)
+    except FileNotFoundError as exc:
+        raise ApiError(
+            code="result_image_not_found",
+            message=f"Result image not found: {path}",
+            status_code=404,
+        ) from exc
+    except OSError as exc:
+        raise ApiError(code="thumbnail_failed", message=str(exc), status_code=400) from exc
+    media_type = "image/webp" if thumb.suffix.lower() == ".webp" else None
+    return FileResponse(thumb, media_type=media_type, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/results/task")

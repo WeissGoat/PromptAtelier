@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Layout, type PageKey } from "./components/Layout";
 import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
-import { ResultsGallery } from "./pages/ResultsGallery";
+import { HistoryPage } from "./pages/HistoryPage";
 import { CustomWorkspaceProvider } from "./workspace/CustomWorkspaceProvider";
 import "./styles.css";
 
@@ -47,7 +47,7 @@ export function App() {
 
   const content = {
     custom: <CustomStudio />,
-    results: <ResultsGallery />,
+    results: <HistoryPage />,
     compare: <CompareStudio />,
   }[page];
 

@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from tags_machine_core.web.services.job_manager import JobContext
+from tags_machine_core.web.services.job_manager import JobContext, JobRecord
 
 
 GENERATE_BATCH_JOB = "generate-batch"
@@ -80,33 +80,67 @@ def validate_generate_batch(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_generate_batch(api: Any, batch: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
+def _batch_snapshot(batch: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema": GENERATE_BATCH_SCHEMA,
+        "label": batch["label"],
+        "kind": batch["kind"],
+        "output_dir": batch["output_dir"],
+        "total": len(items),
+        "counts": _count_items(items),
+        # 浅拷贝每一项：轮询序列化时不会碰到正在修改的字典。
+        "items": [dict(item) for item in items],
+    }
+
+
+def _count_items(items: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {status: 0 for status in ("queued", "running", "succeeded", "failed", "cancelled")}
+    for item in items:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    return counts
+
+
+def recover_interrupted_batch(job: JobRecord) -> None:
+    """后端重启时还在跑的批量任务：正在跑的那一项退回排队，供"继续剩余项"重跑。"""
+    result = job.result
+    if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+        return
+    for item in result["items"]:
+        if item.get("status") == "running":
+            item["status"] = "queued"
+    result["counts"] = _count_items(result["items"])
+
+
+def run_generate_batch(
+    api: Any,
+    batch: dict[str, Any],
+    ctx: JobContext,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """逐项出图。previous 是同一任务上次的结果：已成功的项原样保留，其余的重跑。"""
+    done = {
+        item.get("index"): item
+        for item in (previous or {}).get("items") or []
+        if isinstance(item, dict) and item.get("status") == "succeeded"
+    }
     items = [
-        {"index": index, **entry["display"], "status": "queued", "images": [], "error": None}
+        dict(done[index]) if index in done
+        else {"index": index, **entry["display"], "status": "queued", "images": [], "error": None}
         for index, entry in enumerate(batch["items"])
     ]
 
     def snapshot() -> dict[str, Any]:
-        counts = {status: 0 for status in ("queued", "running", "succeeded", "failed", "cancelled")}
-        for item in items:
-            counts[item["status"]] += 1
-        return {
-            "schema": GENERATE_BATCH_SCHEMA,
-            "label": batch["label"],
-            "kind": batch["kind"],
-            "output_dir": batch["output_dir"],
-            "total": len(items),
-            "counts": counts,
-            # 浅拷贝每一项：轮询序列化时不会碰到正在修改的字典。
-            "items": [dict(item) for item in items],
-        }
+        return _batch_snapshot(batch, items)
 
     ctx.set_result(snapshot())
     for index, entry in enumerate(batch["items"]):
         item = items[index]
+        if item["status"] == "succeeded":
+            continue
         if ctx.cancel_requested:
             for rest in items[index:]:
-                rest["status"] = "cancelled"
+                if rest["status"] != "succeeded":
+                    rest["status"] = "cancelled"
             break
         item.update(status="running", started_at=time.time())
         ctx.set_result(snapshot())
@@ -121,7 +155,7 @@ def run_generate_batch(api: Any, batch: dict[str, Any], ctx: JobContext) -> dict
                 raise ValueError("该组合需要外部 Agent 先完成提示词拼接。")
             prepared = attach_random_selections({"render_request": plan["render_request"], **entry["generate"]})
             result = run_generate(api, prepared, emit)
-            item.update(status="succeeded", images=result.get("images") or [])
+            item.update(status="succeeded", images=result.get("images") or [], error=None)
         except Exception as exc:  # noqa: BLE001  单项失败记在该项上，继续下一项
             item.update(status="failed", error=str(exc) or type(exc).__name__)
         item["finished_at"] = time.time()

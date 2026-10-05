@@ -1,3 +1,4 @@
+import type { ImageTiming } from "../generation/timing";
 import type { NodeDocument } from "../nodes/types";
 import type { NodePoolSpec } from "../workspace/types";
 
@@ -174,7 +175,7 @@ export type ComposePreviewResponse = {
 export type JobRecord = {
   id: string;
   name: string;
-  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
   created_at?: number;
   updated_at?: number;
   result?: GenerationResult;
@@ -209,6 +210,8 @@ export type ImageMetadataResponse = {
   dimensions: { width: number; height: number } | null;
   png_text: Record<string, unknown>;
   parameters: Record<string, unknown>;
+  /** 本项目出的图才有；旧图和外部图为 null。 */
+  timing?: ImageTiming | null;
   metadata_error?: string;
 };
 
@@ -230,8 +233,45 @@ export type ImageParameterDiffResponse = {
   current_normalized: Record<string, unknown>;
 };
 
-export type ResultRun = {
+export type HistoryRunKind = "compare" | "random" | "sequential" | "sequential-all" | "primary" | "loose" | "other";
+
+export type HistoryRun = {
+  id: string;
   name: string;
+  kind: HistoryRunKind;
   path: string;
-  task_count: number;
+  created_at: number;
+  image_count: number;
+  group_count: number;
+  covers: string[];
+  /** 后端还记得的出图任务（提交时的名字和状态）；更早的批次为 null。 */
+  job: { id: string; label: string | null; status: JobRecord["status"] } | null;
+};
+
+export type HistoryImageInfo = {
+  backend: string | null;
+  seed: number | string | null;
+  width: number | null;
+  height: number | null;
+  nodes: Array<{ role: string; name: string }>;
+  timing: ImageTiming | null;
+};
+
+export type HistoryImage = {
+  path: string;
+  filename: string;
+  group: string;
+  created_at: number;
+  size_bytes: number;
+  info: HistoryImageInfo;
+};
+
+export type HistoryRunImagesResponse = {
+  schema: "tags-machine-core.web.history-run-images/v1";
+  run_id: string;
+  path: string;
+  total: number;
+  offset: number;
+  limit: number;
+  images: HistoryImage[];
 };

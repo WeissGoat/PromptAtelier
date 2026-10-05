@@ -11,7 +11,7 @@ type LayoutProps = {
 
 const nav = [
   { key: "custom", label: "Custom", icon: PanelLeft },
-  { key: "results", label: "Results", icon: Images },
+  { key: "results", label: "出图历史", icon: Images },
   { key: "compare", label: "Compare", icon: GitCompare },
 ] as const;
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,9 +17,40 @@ from tags_machine_core.verification.render_params import (
 )
 
 
+THUMBNAIL_SIZES = (160, 240, 320, 480, 640)
+
+
 class ResultIndex:
-    def __init__(self, *, roots: list[str | Path]):
+    def __init__(self, *, roots: list[str | Path], thumb_dir: str | Path | None = None):
         self.roots = [Path(root).resolve() for root in roots]
+        self.thumb_dir = Path(thumb_dir) if thumb_dir else None
+        self._thumb_lock = threading.Lock()
+
+    def thumbnail(self, path: str | Path, size: int) -> Path:
+        """缩略图（WebP，长边 size 像素），按原图路径 + mtime 缓存；没有缓存目录时直接返回原图。"""
+        target = self.resolve_image(path)
+        if self.thumb_dir is None:
+            return target
+        size = min(THUMBNAIL_SIZES, key=lambda allowed: abs(allowed - size))
+        stat = target.stat()
+        key = hashlib.sha1(f"{target}|{stat.st_mtime_ns}|{stat.st_size}|{size}".encode("utf-8")).hexdigest()
+        cached = self.thumb_dir / key[:2] / f"{key}.webp"
+        if cached.is_file():
+            return cached
+        from PIL import Image
+
+        with self._thumb_lock:
+            if cached.is_file():
+                return cached
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            with Image.open(target) as image:
+                image.draft("RGB", (size, size))
+                image = image.convert("RGBA" if image.mode in {"RGBA", "LA", "P"} else "RGB")
+                image.thumbnail((size, size), Image.Resampling.LANCZOS)
+                temp = cached.with_suffix(".tmp")
+                image.save(temp, "WEBP", quality=82, method=4)
+            temp.replace(cached)
+        return cached
 
     def list_runs(self) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = []
@@ -102,6 +135,7 @@ class ResultIndex:
             "png_text": {},
             "parameters": {},
             "model": None,
+            "timing": None,
         }
         if target.suffix.lower() != ".png":
             result["metadata_error"] = "PNG metadata is only available for PNG images"
@@ -111,11 +145,14 @@ class ResultIndex:
         metadata = read_image_parameters(target)
         png_text = metadata.get("png_text", {})
         parameters = metadata.get("parameters", {})
+        core_info = png_text.get("tags_machine_core")
+        timing = core_info.get("timing") if isinstance(core_info, dict) else None
         result.update(
             dimensions=dimensions,
             png_text=png_text,
             parameters=parameters,
             model=parameters.get("model") or png_text.get("Source"),
+            timing=timing if isinstance(timing, dict) else None,
         )
         return result
 

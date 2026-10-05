@@ -42,6 +42,12 @@ function response(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
+function batchBodies(fetchMock: ReturnType<typeof mockGeneration>) {
+  return fetchMock.mock.calls
+    .filter(([input]) => String(input).includes("/generate/batch"))
+    .map(([, init]) => JSON.parse(String(init?.body)));
+}
+
 function mockGeneration() {
   let job = 0;
   const backgroundJobs: unknown[] = [];
@@ -49,8 +55,9 @@ function mockGeneration() {
     const url = String(input);
     if (url.includes("/generate/batch")) {
       const body = JSON.parse(String(init?.body));
+      job += 1;
       const record = {
-        id: "bg-1",
+        id: `bg-${job}`,
         name: "generate-batch",
         status: "succeeded",
         created_at: 1_780_000_000,
@@ -61,10 +68,12 @@ function mockGeneration() {
           output_dir: body.output_dir,
           total: body.items.length,
           counts: { queued: 0, running: 0, succeeded: body.items.length, failed: 0, cancelled: 0 },
-          items: body.items.map((item: { label: string; seed: number }, index: number) => ({
+          items: body.items.map((item: { label: string; seed: number; group?: number; labels?: Record<string, string> }, index: number) => ({
             index,
             label: item.label,
             seed: item.seed,
+            group: item.group,
+            labels: item.labels,
             status: "succeeded",
             images: [{ path: `outputs/bg-${index}.png` }],
             error: null,
@@ -82,10 +91,6 @@ function mockGeneration() {
         prompt_bundle: { prompt: { positive: "composed prompt", negative: body.compose.negative } },
         render_request: { model: "nai-diffusion-4-5-full", width: body.render.width, height: body.render.height, parameters: body.render.params },
       });
-    }
-    if (url.includes("/generate")) {
-      job += 1;
-      return response({ id: `job-${job}`, name: "generate", status: "succeeded", result: { images: [{ path: `outputs/${job}.png`, meta: { seed: job } }] } });
     }
     if (url.includes("/results/image-metadata")) {
       const path = new URL(url).searchParams.get("path") ?? "";
@@ -122,25 +127,32 @@ describe("CustomStudio", () => {
     expect(screen.queryByText("Compare", { selector: "nav *" })).toBeNull();
   });
 
-  it("ordinary Generate uses primary nodes and the configured NT", async () => {
+  it("Generate Primary hands the job to the backend and shows it in the task panel", async () => {
     const fetchMock = mockGeneration();
     renderStudio();
     fireEvent.click(screen.getByText("configure primary"));
     fireEvent.change(screen.getByLabelText("NT"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate Primary" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(1));
-    const compose = fetchMock.mock.calls.find(([input]) => String(input).includes("/compose-preview"));
-    const body = JSON.parse(String(compose?.[1]?.body));
-    expect(body.compose.nodes.map((item: { ref: string }) => item.ref)).toEqual(["artists/a", "characters/homura", "actions/standing"]);
-    expect(body.render.params.n_samples).toBe(3);
-    expect(await screen.findByRole("img", { name: "Generated image 1" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "打开 Generated image 1 大图" }));
+    await waitFor(() => expect(batchBodies(fetchMock)).toHaveLength(1));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/compose-preview"))).toBe(false);
+    const body = batchBodies(fetchMock)[0];
+    expect(body.kind).toBe("primary");
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].compose_request.compose.nodes.map((item: { ref: string }) => item.ref)).toEqual(["artists/a", "characters/homura", "actions/standing"]);
+    expect(body.items[0].compose_request.render.params.n_samples).toBe(3);
+    // 每次出图一个独立文件夹：outputs/compares/primary_<时间>_<id>/group_001_seed_<seed>
+    expect(body.output_dir).toMatch(/^outputs\/compares\/primary_\d{14}_[0-9a-f]{8}$/);
+    expect(body.items[0].generate.output_dir).toBe(`${body.output_dir}/group_001_seed_${body.items[0].seed}`);
+
+    expect(await screen.findByText(/已提交：Primary · 1 轮/)).toBeTruthy();
+    expect(await screen.findByText("成功 1 / 1")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /^打开 Primary · Seed \d+ 大图$/ }));
     expect(await screen.findByRole("dialog", { name: "图片详情" })).toBeTruthy();
     expect(screen.getByText("123456")).toBeTruthy();
   });
 
-  it("ordinary Generate retains all N rounds without overwriting", async () => {
+  it("Generate Primary plans N rounds with consecutive seeds in one job", async () => {
     const fetchMock = mockGeneration();
     renderStudio();
     fireEvent.click(screen.getByText("configure primary"));
@@ -148,58 +160,27 @@ describe("CustomStudio", () => {
     fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate Primary (2 轮)" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(2));
-    expect(await screen.findByText("Primary Results")).toBeTruthy();
-    expect(screen.getByText("Round 1 / 2")).toBeTruthy();
-    expect(screen.getByText("Round 2 / 2")).toBeTruthy();
-    expect(screen.getByText("100")).toBeTruthy();
-    expect(screen.getByText("101")).toBeTruthy();
+    await waitFor(() => expect(batchBodies(fetchMock)).toHaveLength(1));
+    const body = batchBodies(fetchMock)[0];
+    expect(body.label).toBe("Primary · 2 轮");
+    expect(body.items.map((item: { seed: number }) => item.seed)).toEqual([100, 101]);
+    expect(body.items[1].generate.output_dir).toBe(`${body.output_dir}/group_002_seed_101`);
+    expect(await screen.findByText("Round 1 · Seed 100")).toBeTruthy();
+    expect(screen.getByText("Round 2 · Seed 101")).toBeTruthy();
   });
 
-  it("Compare Generate repeats the full matrix for every N group", async () => {
+  it("Compare Generate hands the whole matrix to the backend grouped by N", async () => {
     const fetchMock = mockGeneration();
     renderStudio();
     fireEvent.click(screen.getByText("configure matrix"));
     fireEvent.change(screen.getByLabelText("N"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
-    const compareButton = await screen.findByRole("button", { name: "Compare Generate · 8" });
-    fireEvent.click(compareButton);
+    expect(screen.queryByLabelText("后台运行")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Generate · 8" }));
 
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(8));
-    const composeCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"));
-    expect(composeCalls).toHaveLength(8);
-    expect(composeCalls.every(([, init]) => JSON.parse(String(init?.body)).render.params.n_samples === 1)).toBe(true);
-    const seeds = composeCalls.map(([, init]) => JSON.parse(String(init?.body)).render.seed);
-    expect(seeds.slice(0, 4)).toEqual([42, 42, 42, 42]);
-    expect(seeds.slice(4)).toEqual([43, 43, 43, 43]);
-    const generateCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"));
-    const outputDirs = generateCalls.map(([, init]) => JSON.parse(String(init?.body)).output_dir);
-    expect(outputDirs.slice(0, 4).every((dir) => String(dir).includes("group_001_seed_42"))).toBe(true);
-    expect(outputDirs.slice(4).every((dir) => String(dir).includes("group_002_seed_43"))).toBe(true);
-    expect(screen.getByText("Artist 2 × Character 1 × Action 2 × Behavior 1 × Groups 2 = 8")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("成功 8")).toBeTruthy());
-    expect(screen.getByText("Group 1 · Seed 42")).toBeTruthy();
-    expect(screen.getByText("Group 2 · Seed 43")).toBeTruthy();
-    expect(screen.getAllByRole("img", { name: /Compare image/ })).toHaveLength(8);
-    fireEvent.click(screen.getAllByRole("button", { name: "打开 Compare image 1 大图" })[0]);
-    expect(await screen.findByRole("dialog", { name: "图片详情" })).toBeTruthy();
-  });
-
-  it("background Compare hands the whole matrix to the backend in one request", async () => {
-    const fetchMock = mockGeneration();
-    renderStudio();
-    fireEvent.click(screen.getByText("configure matrix"));
-    fireEvent.change(screen.getByLabelText("N"), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
-    fireEvent.click(screen.getByLabelText("后台运行"));
-    expect(localStorage.getItem("promptatelier.background-run/v1")).toBe("1");
-    fireEvent.click(await screen.findByRole("button", { name: "Compare Generate · 8（后台）" }));
-
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate/batch"))).toHaveLength(1));
-    const posted = fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"));
-    expect(posted).toHaveLength(1);
+    await waitFor(() => expect(batchBodies(fetchMock)).toHaveLength(1));
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/compose-preview"))).toBe(false);
-    const body = JSON.parse(String(posted[0][1]?.body));
+    const body = batchBodies(fetchMock)[0];
     expect(body.kind).toBe("compare");
     expect(body.label).toBe("Compare · 8 张");
     expect(body.items).toHaveLength(8);
@@ -208,11 +189,16 @@ describe("CustomStudio", () => {
     expect(body.items[0].generate.output_dir).toContain("group_001_seed_42");
     expect(body.items[7].generate.output_dir).toContain("group_002_seed_43");
     expect(body.items[0].label).toBe("artist-a · homura · standing · Default");
+    expect(screen.getByText("Artist 2 × Character 1 × Action 2 × Behavior 1 × Groups 2 = 8")).toBeTruthy();
 
-    expect(await screen.findByText("Compare · 8 张")).toBeTruthy();
     expect(await screen.findByText("成功 8 / 8")).toBeTruthy();
-    expect(screen.getAllByRole("img", { name: /artist-a · homura/ }).length).toBeGreaterThan(0);
-    expect(screen.getByText(/已交给后台：Compare · 8 张/)).toBeTruthy();
+    expect(screen.getByText("Group 1 · Seed 42")).toBeTruthy();
+    expect(screen.getByText("Group 2 · Seed 43")).toBeTruthy();
+    // 图下只写各项之间不同的维度，相同的写在"共同"里。
+    expect(screen.getByText("共同：homura · Default")).toBeTruthy();
+    expect(screen.getAllByRole("img", { name: "artist-a · standing" })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "打开 artist-b · sitting 大图" })[0]);
+    expect(await screen.findByRole("dialog", { name: "图片详情" })).toBeTruthy();
   });
 
   it("Preview renders readable prompt fields and hides raw parameters by default", async () => {
@@ -239,9 +225,8 @@ describe("CustomStudio", () => {
     expect(previewBody.render.params.character_prompts).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Generate Primary" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(1));
-    const composeCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"));
-    const primaryBody = JSON.parse(String(composeCalls[1][1]?.body));
+    await waitFor(() => expect(batchBodies(fetchMock)).toHaveLength(1));
+    const primaryBody = batchBodies(fetchMock)[0].items[0].compose_request;
     expect(primaryBody.render.params.character_prompts).toEqual({ mode: "auto", add_male_caption: true });
   });
 
@@ -255,11 +240,12 @@ describe("CustomStudio", () => {
     const compareButton = await screen.findByRole("button", { name: "Compare Generate · 8" });
     fireEvent.click(compareButton);
 
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(8));
-    const composeCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/compose-preview"));
-    expect(composeCalls).toHaveLength(8);
-    expect(composeCalls.map(([, init]) => JSON.parse(String(init?.body)).render.seed)).toEqual(Array(8).fill(42));
-    expect(composeCalls.filter(([, init]) => JSON.parse(String(init?.body)).render.params.character_prompts).length).toBe(4);
+    await waitFor(() => expect(batchBodies(fetchMock)).toHaveLength(1));
+    type ComposeBody = { render: { seed: number; params: Record<string, unknown> } };
+    const composeRequests: ComposeBody[] = batchBodies(fetchMock)[0].items.map((item: { compose_request: ComposeBody }) => item.compose_request);
+    expect(composeRequests).toHaveLength(8);
+    expect(composeRequests.map((request) => request.render.seed)).toEqual(Array(8).fill(42));
+    expect(composeRequests.filter((request) => request.render.params.character_prompts).length).toBe(4);
     expect(screen.getByText("Artist 2 × Character 1 × Action 2 × Behavior 2 × Groups 1 = 8")).toBeTruthy();
     expect(screen.getAllByText("Default").length).toBeGreaterThan(0);
     expect(screen.getAllByText("No Character Prompts").length).toBeGreaterThan(0);

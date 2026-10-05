@@ -4,6 +4,16 @@ export function apiUrl(path: string): string {
   return `${API_ROOT}${path}`;
 }
 
+/** 原图地址（大图、下载）。 */
+export function imageUrl(path: string): string {
+  return apiUrl(`/results/image?path=${encodeURIComponent(path)}`);
+}
+
+/** 网格用的缩略图：后端按长边 size 生成 WebP 并缓存，比直接加载 1~2MB 的原图快得多。 */
+export function thumbUrl(path: string, size = 320): string {
+  return apiUrl(`/results/thumb?path=${encodeURIComponent(path)}&size=${size}`);
+}
+
 export class ApiClientError extends Error {
   status: number;
   code?: string;
