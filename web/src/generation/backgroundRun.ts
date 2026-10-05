@@ -26,7 +26,7 @@ export type BackgroundRequestItem = {
 
 export type BackgroundBatchRequest = {
   label: string;
-  kind: "random" | "sequential" | "compare";
+  kind: "primary" | "random" | "sequential" | "compare";
   output_dir?: string;
   items: BackgroundRequestItem[];
 };

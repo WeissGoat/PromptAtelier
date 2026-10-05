@@ -94,7 +94,7 @@ export async function planCompareRun(
     throw new Error("Compare Generate 至少需要一个 Character 或 Action 节点。");
   }
   const matrix = buildCompareMatrix(groups, promptBehaviorGroup);
-  const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
+  const plan = buildCompareRunPlan(matrix, { n: params.n, nt: params.nt, seed: params.seed, randomSeed });
   const resolvedPlan = await resolveRandomItems(plan.items.map((item) => ({
     value: item,
     randomScope: `group-${item.groupIndex}`,
@@ -133,7 +133,6 @@ export function compareComposeRequest(item: CompareRunItem, params: RenderWorksp
   return {
     runParams,
     request: buildComposeRenderRequest(item.combination, runParams, {
-      compare: true,
       promptBehavior: item.combination.promptBehavior.value,
     }),
   };

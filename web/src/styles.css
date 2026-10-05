@@ -2333,6 +2333,21 @@ button {
   padding-bottom: 10px;
 }
 
+.job-result-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.job-result-section h3 {
+  font-size: 13px;
+  margin: 0 0 3px;
+}
+
+.job-result-section small {
+  color: #687182;
+}
+
 .compare-generate-section {
   display: flex;
   flex-direction: column;

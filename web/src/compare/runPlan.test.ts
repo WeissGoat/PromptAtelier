@@ -11,7 +11,7 @@ const matrix = [
 
 describe("buildCompareRunPlan", () => {
   it("expands complete matrix groups in group-first order with explicit seeds", () => {
-    const plan = buildCompareRunPlan(matrix, { nt: 3, seed: "42", randomSeed: vi.fn() });
+    const plan = buildCompareRunPlan(matrix, { n: 3, seed: "42", randomSeed: vi.fn() });
 
     expect(plan.groups.map((group) => group.seed)).toEqual([42, 43, 44]);
     expect(plan.items.map((item) => item.runId)).toEqual([
@@ -29,19 +29,27 @@ describe("buildCompareRunPlan", () => {
       .mockReturnValueOnce(100)
       .mockReturnValueOnce(100)
       .mockReturnValueOnce(200);
-    const plan = buildCompareRunPlan(matrix, { nt: 3, seed: "-1", randomSeed });
+    const plan = buildCompareRunPlan(matrix, { n: 3, seed: "-1", randomSeed });
 
     expect(plan.groups.map((group) => group.seed)).toEqual([100, 101, 200]);
     expect(randomSeed).toHaveBeenCalledTimes(3);
   });
 
-  it.each([0, -1, 1.5, Number.NaN])("rejects invalid nt %s", (nt) => {
-    expect(() => buildCompareRunPlan(matrix, { nt, seed: "-1", randomSeed: () => 1 }))
-      .toThrow("Compare NT 必须是大于等于 1 的整数");
+  it.each([0, -1, 1.5, Number.NaN])("rejects invalid n %s", (n) => {
+    expect(() => buildCompareRunPlan(matrix, { n, seed: "-1", randomSeed: () => 1 }))
+      .toThrow("Compare N 必须是大于等于 1 的整数");
+  });
+
+  it("spaces explicit seeds by nt to prevent sample seed collisions across groups", () => {
+    const plan = buildCompareRunPlan(matrix, { n: 3, nt: 2, seed: "42", randomSeed: vi.fn() });
+
+    expect(plan.groups.map((group) => group.seed)).toEqual([42, 44, 46]);
   });
 
   it("calculates the total number of run items", () => {
     expect(compareRunCount(12, 4)).toBe(48);
+    expect(compareRunCount(12, 4, 2)).toBe(96);
     expect(compareRunCount(12, 0)).toBe(0);
+    expect(compareRunCount(12, 4, 0)).toBe(0);
   });
 });

@@ -140,11 +140,27 @@ describe("CustomStudio", () => {
     expect(screen.getByText("123456")).toBeTruthy();
   });
 
-  it("Compare Generate repeats the full matrix for every NT group", async () => {
+  it("ordinary Generate retains all N rounds without overwriting", async () => {
+    const fetchMock = mockGeneration();
+    renderStudio();
+    fireEvent.click(screen.getByText("configure primary"));
+    fireEvent.change(screen.getByLabelText("N"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Primary (2 轮)" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/generate"))).toHaveLength(2));
+    expect(await screen.findByText("Primary Results")).toBeTruthy();
+    expect(screen.getByText("Round 1 / 2")).toBeTruthy();
+    expect(screen.getByText("Round 2 / 2")).toBeTruthy();
+    expect(screen.getByText("100")).toBeTruthy();
+    expect(screen.getByText("101")).toBeTruthy();
+  });
+
+  it("Compare Generate repeats the full matrix for every N group", async () => {
     const fetchMock = mockGeneration();
     renderStudio();
     fireEvent.click(screen.getByText("configure matrix"));
-    fireEvent.change(screen.getByLabelText("NT"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("N"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
     const compareButton = await screen.findByRole("button", { name: "Compare Generate · 8" });
     fireEvent.click(compareButton);
@@ -173,7 +189,7 @@ describe("CustomStudio", () => {
     const fetchMock = mockGeneration();
     renderStudio();
     fireEvent.click(screen.getByText("configure matrix"));
-    fireEvent.change(screen.getByLabelText("NT"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("N"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "42" } });
     fireEvent.click(screen.getByLabelText("后台运行"));
     expect(localStorage.getItem("promptatelier.background-run/v1")).toBe("1");

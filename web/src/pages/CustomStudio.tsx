@@ -44,8 +44,10 @@ export function CustomStudio() {
         </label>
         <RenderParamsPanel
           height={params.height}
+          n={params.n}
           nt={params.nt}
           onHeightChange={(height) => workspace.setParams({ height })}
+          onNChange={(n) => workspace.setParams({ n })}
           onNtChange={(nt) => workspace.setParams({ nt })}
           onSeedChange={(seed) => workspace.setParams({ seed })}
           onWidthChange={(width) => workspace.setParams({ width })}

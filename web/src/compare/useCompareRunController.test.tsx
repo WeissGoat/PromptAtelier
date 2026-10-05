@@ -12,7 +12,7 @@ const sampleNodePool = vi.fn();
 
 vi.mock("../randomNodes/api", () => ({ sampleNodePool: (...args: unknown[]) => sampleNodePool(...args) }));
 
-const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" };
+const params: RenderWorkspaceParams = { negative: "", width: 1024, height: 1024, nt: 1, n: 1, seed: "-1" };
 
 function behaviorGroup(): PromptBehaviorGroup {
   return createDefaultPromptBehaviorGroup();
@@ -69,7 +69,7 @@ describe("useCompareRunController", () => {
     }));
     const groups = { artist: group("artist", 2), character: group("character", 1), action: group("action", 2) };
 
-    await act(async () => { await result.current.start(groups, { ...params, nt: 2 }, behaviorGroup()); });
+    await act(async () => { await result.current.start(groups, { ...params, n: 2 }, behaviorGroup()); });
 
     expect(maxActivePreviews).toBe(1);
     expect(result.current.summary.succeeded).toBe(8);
@@ -131,7 +131,7 @@ describe("useCompareRunController", () => {
     await act(async () => {
       await result.current.start(
         { artist: group("artist", 2), character: group("character", 1), action: group("action", 1) },
-        { ...params, nt: 2, seed: "42" },
+        { ...params, n: 2, seed: "42" },
         behaviorGroup(),
       );
     });
@@ -250,7 +250,7 @@ describe("useCompareRunController", () => {
     await act(async () => {
       await result.current.start(
         { artist: group("artist", 2), character: group("character", 1), action: actions },
-        { ...params, nt: 2 },
+        { ...params, n: 2 },
         behaviorGroup(),
       );
     });
