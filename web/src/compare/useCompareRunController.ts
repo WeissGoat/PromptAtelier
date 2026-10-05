@@ -68,7 +68,7 @@ export function createCompareGroupOutputDir(parent: string, groupIndex: number, 
 }
 
 function slotLabel(slot: CompareCombination[NodeRole]): string {
-  if (slot?.sourceKind === "random") return `Random · ${slot.randomSpec?.source.type ?? "未配置"}`;
+  if (slot?.sourceKind === "random") return `节点组 · ${slot.randomSpec?.source.value || "未配置"}`;
   return slot?.draftNode?.name || slot?.draftNode?.id || slot?.sourceNode?.name || slot?.sourceRef || "未选择";
 }
 

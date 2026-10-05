@@ -59,6 +59,7 @@ type CustomWorkspaceContextValue = {
   setPreview(preview: ComposePreviewResponse | null): void;
   advancePoolCursor(slotId: string): void;
   resetPoolCursor(slotId: string): void;
+  setPoolCursor(slotId: string, cursor: number): void;
   resetWorkspace(): void;
 };
 
@@ -541,6 +542,10 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
     resetPoolCursor: (slotId) => setState((current) => mapSlot(current, slotId, (slot) => ({
       ...slot,
       poolCursor: 0,
+    }))),
+    setPoolCursor: (slotId, cursor) => setState((current) => mapSlot(current, slotId, (slot) => ({
+      ...slot,
+      poolCursor: Math.max(0, Math.trunc(cursor)),
     }))),
     resetWorkspace: () => {
       clearWorkspaceSnapshot(window.localStorage);

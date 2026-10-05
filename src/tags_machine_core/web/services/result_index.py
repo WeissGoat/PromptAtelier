@@ -28,7 +28,10 @@ class ResultIndex:
 
     def thumbnail(self, path: str | Path, size: int) -> Path:
         """缩略图（WebP，长边 size 像素），按原图路径 + mtime 缓存；没有缓存目录时直接返回原图。"""
-        target = self.resolve_image(path)
+        return self.thumbnail_for(self.resolve_image(path), size)
+
+    def thumbnail_for(self, target: Path, size: int) -> Path:
+        """给已经校验过位置的图片生成缩略图（如节点预览图，可能经目录链接指到 design_root 之外）。"""
         if self.thumb_dir is None:
             return target
         size = min(THUMBNAIL_SIZES, key=lambda allowed: abs(allowed - size))

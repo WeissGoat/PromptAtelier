@@ -8,6 +8,8 @@ export type NodeSummary = {
   ref: string;
   relative?: string;
   backends?: string[];
+  /** 节点目录里有可用的预览图（规则见后端 node_previews）。 */
+  has_preview?: boolean;
 };
 
 export type ComfyUITargetState = "online" | "offline" | "running" | "stopped" | "unknown";
@@ -83,6 +85,9 @@ export type NodePoolCandidate = {
   ref: string;
   name: string;
   relative?: string | null;
+  /** 只在 /node-pools/scan 里有：在整个池里的次序（从 0 开始），搜索过滤后不变。 */
+  position?: number;
+  has_preview?: boolean;
 };
 
 export type NodePoolStats = {

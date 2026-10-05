@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from tags_machine_core.web.errors import ApiError
@@ -54,6 +55,26 @@ def read_node(ref: str, request: Request, role: str | None = None) -> dict:
         return _workspace(request).read_node(ref, role=role)
     except FileNotFoundError as exc:
         raise ApiError(code="node_not_found", message=str(exc), status_code=404) from exc
+
+
+@router.get("/nodes/preview-image")
+def node_preview_image(ref: str, request: Request, size: int = 320) -> FileResponse:
+    """节点预览图；size=0 返回原图（点开看大图），其他值返回缓存的缩略图。没有图时 404，前端显示占位。"""
+    try:
+        image = _workspace(request).preview_image(ref)
+    except ValueError as exc:
+        raise ApiError(code="invalid_node_ref", message=str(exc), status_code=400) from exc
+    if image is None:
+        raise ApiError(code="node_preview_not_found", message=f"No preview image for {ref}", status_code=404)
+    headers = {"Cache-Control": "private, max-age=300"}
+    if size <= 0:
+        return FileResponse(image, headers=headers)
+    try:
+        thumb = request.app.state.result_index.thumbnail_for(image, size)
+    except OSError as exc:
+        raise ApiError(code="thumbnail_failed", message=str(exc), status_code=400) from exc
+    media_type = "image/webp" if thumb.suffix.lower() == ".webp" else None
+    return FileResponse(thumb, media_type=media_type, headers=headers)
 
 
 @router.post("/nodes/preview")

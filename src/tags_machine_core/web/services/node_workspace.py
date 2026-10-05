@@ -14,6 +14,7 @@ from tags_machine_core.nodes.reader import NodeReader
 from tags_machine_core.nodes.role_paths import role_roots
 from tags_machine_core.web.node_editing import FileMutation, NodeSourceAdapterRegistry, create_default_registry
 from tags_machine_core.web.node_editing.text_utils import source_hash
+from tags_machine_core.web.services.node_previews import NodePreviewIndex
 from tags_machine_core.web.services.node_save_preview_store import SourceChangedError
 
 
@@ -29,6 +30,21 @@ class NodeWorkspace:
         self.reader = reader or NodeReader()
         self.artist_repository = NovelAIArtistRepository(self.design_root)
         self.adapter_registry = adapter_registry or create_default_registry(self.design_root, self.reader)
+        self.previews = NodePreviewIndex()
+
+    def preview_image(self, ref: str | Path) -> Path | None:
+        """节点目录里用作预览的那张图；规则见 node_previews。
+
+        /nodes/read 返回的是解析链接后的物理路径（如 design 里的目录链接指到 G:\\ 盘），
+        所以 design_root 之外的路径只要本身是节点目录也认；其他路径抛 ValueError。
+        """
+        try:
+            node_dir = self.resolve_node_path(ref)
+        except ValueError:
+            node_dir = Path(ref)
+            if not node_dir.is_absolute() or not node_dir.is_dir() or not self._has_node_file(node_dir):
+                raise
+        return self.previews.preview_for(node_dir) if node_dir.is_dir() else None
 
     def list_nodes(
         self,
@@ -72,6 +88,7 @@ class NodeWorkspace:
                     "name": item.name,
                     "ref": str(item),
                     "relative": relative,
+                    "has_preview": self.previews.preview_for(item) is not None,
                 }
                 if role == "artist":
                     entry["backends"] = self._artist_backends(item)
