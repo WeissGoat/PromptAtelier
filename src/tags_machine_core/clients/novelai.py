@@ -137,6 +137,15 @@ def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELA
     if lower in VALID_NOVELAI_MODELS:
         return lower
 
+    # inpaint/infill 需要保留 -inpainting 后缀；v5 的 curated 与 full 共用 full 的 inpainting 模型
+    # (与 Auto-NovelAI-Refactor 一致)。
+    if lower.endswith("-inpainting"):
+        base = normalize_novelai_model(lower[: -len("-inpainting")], default="")
+        if base.startswith("nai-diffusion-5"):
+            return "nai-diffusion-5-full-inpainting"
+        if base.startswith("nai-diffusion-4"):
+            return f"{base}-inpainting"
+
     if "furry" in lower:
         return "nai-diffusion-furry-3"
 

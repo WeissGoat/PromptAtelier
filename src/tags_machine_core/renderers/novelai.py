@@ -379,10 +379,12 @@ class NovelAIRenderAdapter:
         }
         if is_nai5:
             # V5 使用字符串 preset ID，替代旧的 ucPreset(int) / qualityToggle(bool)。
+            # 默认 none，与 4.5 的 ucPreset=3 / qualityToggle=False 一致：负面词和质量标签由本项目自己拼好，
+            # 不让服务端再额外注入 heavy / standard。
             final_params.pop("ucPreset", None)
             final_params.pop("qualityToggle", None)
-            final_params["ucPresetId"] = params.get("ucPresetId", "heavy")
-            final_params["qualityPresetId"] = params.get("qualityPresetId", "standard")
+            final_params["ucPresetId"] = params.get("ucPresetId", "none")
+            final_params["qualityPresetId"] = params.get("qualityPresetId", "none")
             final_params["straight_alpha"] = params.get("straight_alpha", True)
             final_params["normalize_reference_strength_multiple"] = params.get(
                 "normalize_reference_strength_multiple", True
