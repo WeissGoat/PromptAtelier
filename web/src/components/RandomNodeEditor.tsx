@@ -1,4 +1,4 @@
-import { Dices, RefreshCw, RotateCcw, Search, X } from "lucide-react";
+import { EyeOff, ListOrdered, Play, RefreshCw, RotateCcw, Search, Shuffle, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { errorMessage } from "../api/client";
@@ -7,6 +7,7 @@ import { listNodePoolCollections, scanNodePool } from "../randomNodes/api";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import type { NodePoolSpec, NodeVariantSlot } from "../workspace/types";
 import { ClassifyFilterEditor } from "./ClassifyFilterEditor";
+import { NodePreviewImage } from "./NodePreviewImage";
 
 const roleLabels: Record<NodeVariantSlot["role"], string> = {
   artist: "Artist",
@@ -79,7 +80,7 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
         spec: current,
         q: query,
         offset: options.append ? scan?.next_offset ?? 0 : 0,
-        limit: 30,
+        limit: 48,
         refresh: options.refresh,
       });
       if (id !== requestId.current) return;
@@ -98,40 +99,44 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
   }
 
   const isSequential = spec.drawMode === "sequential";
-  const modeLabel = isSequential ? "Sequential" : "Random";
+  const poolTotal = scan?.source_total ?? 0;
+  const cursor = slot.poolCursor ?? 0;
+  const canExclude = spec.source.type === "folder";
+
+  function exclude(item: NodePoolCandidate, position: number) {
+    if (spec!.source.exclude_names.includes(item.name)) return;
+    updateSource({ exclude_names: [...spec!.source.exclude_names, item.name] });
+    // 排除已经跑过的成员后，后面的都前移一位；游标跟着退一位，下一个还是原来那个节点。
+    if (isSequential && position < cursor) workspace.setPoolCursor(slot.slotId, cursor - 1);
+  }
 
   return (
     <section className="random-node-editor">
       <div className="panel-title node-editor-title">
-        <div><h2>{modeLabel} {slot.role}</h2><small>{slot.mode === "compare" ? "Compare" : "Primary"} · {isSequential ? "按次序逐个运行" : "普通生成逐任务抽取，Compare 组内共享"}</small></div>
-        <button aria-label="关闭随机节点编辑器" className="icon-button" onClick={workspace.closeEditor} title="关闭" type="button"><X size={17} /></button>
+        <div>
+          <h2>节点组 · {roleLabels[slot.role]}</h2>
+          <small>
+            {slot.mode === "compare" ? "Compare" : "Primary"} · {isSequential
+              ? "按顺序一个一个跑，每次出图后前进一位"
+              : "普通出图每轮随机抽一个，Compare 同一组内共享"}
+          </small>
+        </div>
+        <button aria-label="关闭节点组编辑器" className="icon-button" onClick={workspace.closeEditor} title="关闭" type="button"><X size={17} /></button>
       </div>
 
-      <div className="draw-mode-toggle" style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "0.5rem" }}>
-        <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", cursor: "pointer" }}>
-          <input
-            checked={!isSequential}
-            name={`drawMode-${slot.slotId}`}
-            onChange={() => update({ ...spec, drawMode: "random" })}
-            type="radio"
-            value="random"
-          />
-          🎲 随机抽取
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", cursor: "pointer" }}>
-          <input
-            checked={isSequential}
-            name={`drawMode-${slot.slotId}`}
-            onChange={() => update({ ...spec, drawMode: "sequential" })}
-            type="radio"
-            value="sequential"
-          />
-          📋 按次序运行
-        </label>
+      <div className="node-group-mode">
+        <div aria-label="抽取方式" className="segmented-control node-group-mode-toggle" role="group">
+          <button aria-pressed={!isSequential} className={!isSequential ? "active" : ""} onClick={() => update({ ...spec, drawMode: "random" })} type="button">
+            <Shuffle size={14} /> 随机抽取
+          </button>
+          <button aria-pressed={isSequential} className={isSequential ? "active" : ""} onClick={() => update({ ...spec, drawMode: "sequential" })} type="button">
+            <ListOrdered size={14} /> 按顺序
+          </button>
+        </div>
         {isSequential && scan ? (
-          <span style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            当前位置: <strong>{((slot.poolCursor ?? 0) % (scan.source_total || 1)) + 1} / {scan.source_total}</strong>
-            <button className="icon-button" onClick={() => workspace.resetPoolCursor(slot.slotId)} style={{ height: "22px", minHeight: "22px", width: "22px" }} title="重置游标" type="button"><RotateCcw size={13} /></button>
+          <span className="node-group-cursor">
+            {cursor >= poolTotal ? "已跑完" : <>下一个：<strong>#{cursor + 1}</strong> / {poolTotal}</>}
+            <button aria-label="重置顺序位置" className="icon-button" onClick={() => workspace.resetPoolCursor(slot.slotId)} title="回到第一个" type="button"><RotateCcw size={13} /></button>
           </span>
         ) : null}
       </div>
@@ -201,23 +206,34 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
       {error ? <div className="alert error-alert" role="alert">{error}</div> : null}
 
       <div className="random-candidate-toolbar">
-        <label className="node-search random-candidate-search"><Search size={16} /><input aria-label="搜索随机候选" onChange={(event) => setQuery(event.target.value)} placeholder="搜索扫描结果" value={query} /></label>
-        <span>{scan ? `${scan.total} 个候选` : "等待扫描"}</span>
+        <label className="node-search random-candidate-search"><Search size={16} /><input aria-label="搜索节点组成员" onChange={(event) => setQuery(event.target.value)} placeholder="搜索成员" value={query} /></label>
+        <span>{scan ? `${scan.total} 个成员` : "等待扫描"}</span>
       </div>
-      <div className="random-candidate-list" onScroll={(event) => {
+      <div className="node-group-grid" onScroll={(event) => {
         const element = event.currentTarget;
-        if (!busy && scan?.has_more && element.scrollTop + element.clientHeight >= element.scrollHeight - 48) {
+        if (!busy && scan?.has_more && element.scrollTop + element.clientHeight >= element.scrollHeight - 80) {
           void runScan({ refresh: false, append: true });
         }
       }}>
-        {items.map((item, idx) => {
-          const seqIndex = (scan?.offset ?? 0) + idx;
-          const isCurrent = isSequential && seqIndex === ((slot.poolCursor ?? 0) % (scan?.source_total || 1));
+        {items.map((item, index) => {
+          const position = item.position ?? (scan?.offset ?? 0) + index;
+          const isCurrent = isSequential && position === cursor;
+          const isDone = isSequential && position < cursor;
           return (
-            <div className={`random-candidate-row${isCurrent ? " seq-current" : ""}`} key={item.ref} style={isCurrent ? { fontWeight: 600, background: "var(--highlight-bg, rgba(100, 149, 237, 0.15))" } : undefined}>
-              {isSequential ? <span style={{ minWidth: "2em", textAlign: "right", fontSize: "0.8rem", opacity: 0.7 }}>{seqIndex + 1}.</span> : <Dices size={14} />}
-              <span>{item.name}</span><small>{item.relative}</small>
-            </div>
+            <article className={`node-group-member${isCurrent ? " current" : ""}${isDone ? " done" : ""}`} key={item.ref} title={item.relative ?? item.name}>
+              <NodePreviewImage className="node-group-member-image" hasPreview={item.has_preview} name={item.name} nodeRef={item.ref} size={240} />
+              <span className="node-group-order">#{position + 1}</span>
+              {isCurrent ? <span className="node-group-next">下一个</span> : null}
+              <div className="node-group-member-name">{item.name}</div>
+              <div className="node-group-member-actions">
+                {isSequential && !isCurrent ? (
+                  <button aria-label={`从 ${item.name} 开始`} onClick={() => workspace.setPoolCursor(slot.slotId, position)} title="从这里开始按顺序跑" type="button"><Play size={12} /></button>
+                ) : null}
+                {canExclude ? (
+                  <button aria-label={`排除 ${item.name}`} onClick={() => exclude(item, position)} title="从节点组里排除（写进名称排除）" type="button"><EyeOff size={12} /></button>
+                ) : null}
+              </div>
+            </article>
           );
         })}
         {busy ? <div className="random-candidate-loading">正在扫描...</div> : null}

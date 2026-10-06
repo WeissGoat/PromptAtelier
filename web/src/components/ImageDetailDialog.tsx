@@ -11,12 +11,13 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
-import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
+import { apiGet, apiPost, apiUrl, errorMessage, thumbUrl } from "../api/client";
 import type {
   ImageMetadataResponse,
   ImageParameterDiffItem,
   ImageParameterDiffResponse,
 } from "../api/types";
+import { formatImageTiming } from "../generation/timing";
 
 export type ImageDetailItem = {
   path: string;
@@ -647,7 +648,9 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
                     >
                       <img
                         alt={item.label || `图片 ${idx + 1}`}
-                        src={apiUrl(`/results/image?path=${encodeURIComponent(item.path)}`)}
+                        decoding="async"
+                        loading="lazy"
+                        src={thumbUrl(item.path, 160)}
                       />
                       <div className="filmstrip-info">
                         {item.label || item.name || `第 ${idx + 1} 张`}
@@ -685,6 +688,7 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
                 <dl className="image-file-summary">
                   <div><dt>尺寸</dt><dd>{metadata.dimensions ? `${metadata.dimensions.width} × ${metadata.dimensions.height}` : "未知"}</dd></div>
                   <div><dt>文件大小</dt><dd>{formatBytes(metadata.size_bytes)}</dd></div>
+                  {formatImageTiming(metadata.timing) ? <div><dt>生成耗时</dt><dd>{formatImageTiming(metadata.timing)}</dd></div> : null}
                   <div><dt>修改时间</dt><dd>{new Date(metadata.modified_at).toLocaleString()}</dd></div>
                 </dl>
                 {metadata.metadata_error ? <div className="alert error-alert">{metadata.metadata_error}</div> : null}

@@ -1,4 +1,7 @@
+import tempfile
+import threading
 import time
+from pathlib import Path
 from unittest import TestCase
 
 from fastapi.testclient import TestClient
@@ -57,3 +60,75 @@ class WebJobsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "succeeded")
+
+
+class JobPersistenceTest(TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.jobs_dir = Path(self._tmp.name) / "jobs"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_persisted_jobs_survive_restart_and_running_ones_become_interrupted(self):
+        manager = JobManager(persist_dir=self.jobs_dir, persist_names={"batch"})
+        release = threading.Event()
+
+        def finished(ctx: JobContext):
+            ctx.set_result({"items": [1]})
+            return {"items": [1, 2]}
+
+        def stuck(ctx: JobContext):
+            ctx.set_result({"items": [{"status": "running"}]})
+            release.wait(timeout=5)
+            return {}
+
+        done = manager.submit("batch", finished, request={"items": ["a", "b"]})
+        manager.wait(done.id, timeout=5)
+        running = manager.submit("batch", stuck)
+        other = manager.submit("not-persisted", lambda ctx: {})
+        manager.wait(other.id, timeout=5)
+        for _ in range(500):
+            if manager.get(running.id).status == "running":
+                break
+            time.sleep(0.01)
+
+        recovered: list[str] = []
+        restarted = JobManager(
+            persist_dir=self.jobs_dir,
+            persist_names={"batch"},
+            recover=lambda job: recovered.append(job.id),
+        )
+        release.set()
+        manager.wait(running.id, timeout=5)
+
+        self.assertEqual({job.id for job in restarted.list()}, {done.id, running.id})
+        self.assertEqual(restarted.get(done.id).status, "succeeded")
+        self.assertEqual(restarted.get(done.id).result, {"items": [1, 2]})
+        self.assertEqual(restarted.request_of(done.id), {"items": ["a", "b"]})
+        self.assertEqual(restarted.get(running.id).status, "interrupted")
+        self.assertEqual(recovered, [running.id])
+
+    def test_resume_reruns_a_stopped_job_in_place(self):
+        manager = JobManager(persist_dir=self.jobs_dir, persist_names={"batch"})
+
+        def broken(ctx: JobContext):
+            raise RuntimeError("boom")
+
+        job = manager.submit("batch", broken)
+        manager.wait(job.id, timeout=5)
+        self.assertEqual(manager.get(job.id).status, "failed")
+
+        manager.resume(job.id, lambda ctx: {"ok": True})
+        manager.wait(job.id, timeout=5)
+
+        record = manager.get(job.id)
+        self.assertEqual(record.status, "succeeded")
+        self.assertIsNone(record.error)
+
+        release = threading.Event()
+        manager.resume(job.id, lambda ctx: release.wait(timeout=5))
+        with self.assertRaises(ValueError):
+            manager.resume(job.id, lambda ctx: {})
+        release.set()
+        manager.wait(job.id, timeout=5)

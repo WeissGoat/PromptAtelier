@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .path_guard import contained_path
+
 
 ROLE_DIRS: dict[str, tuple[str, ...]] = {
     "artist": ("画风", "artist", "artists"),
@@ -32,10 +34,8 @@ def resolve_role_relative_path(design_root: str | Path, role: str, value: str) -
     if raw.is_absolute():
         raise ValueError(f"随机节点路径必须相对 {role} 根目录")
 
-    root = primary_role_root(design_root, role).resolve()
-    resolved = (root / raw).resolve()
-    try:
-        resolved.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"随机节点路径必须位于 {role} 根目录内") from exc
-    return resolved
+    root = primary_role_root(design_root, role)
+    contained = contained_path(root, root / raw)
+    if contained is None:
+        raise ValueError(f"随机节点路径必须位于 {role} 根目录内")
+    return contained

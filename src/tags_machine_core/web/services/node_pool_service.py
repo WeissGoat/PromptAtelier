@@ -70,9 +70,10 @@ class NodePoolService:
             with self._lock:
                 self._cache[cache_key] = _CacheEntry(created_at=time.time(), result=result)
         needle = (query or "").strip().lower()
+        # position 是候选在整个池里的次序（顺序模式的第几个），搜索过滤后也不变。
         filtered = [
-            item
-            for item in result.candidates
+            (position, item)
+            for position, item in enumerate(result.candidates)
             if not needle or needle in f"{item.name} {item.ref} {item.relative or ''}".lower()
         ]
         page = filtered[offset : offset + limit]
@@ -82,7 +83,14 @@ class NodePoolService:
             "role": role,
             "total": len(filtered),
             "source_total": result.stats.total,
-            "items": [item.model_dump(mode="json") for item in page],
+            "items": [
+                {
+                    **item.model_dump(mode="json"),
+                    "position": position,
+                    "has_preview": self._has_preview(item.ref),
+                }
+                for position, item in page
+            ],
             "offset": offset,
             "limit": limit,
             "has_more": offset + len(page) < len(filtered),
@@ -118,6 +126,12 @@ class NodePoolService:
             "items": [item.model_dump(mode="json") for item in result.candidates],
             "stats": result.stats.model_dump(mode="json"),
         }
+
+    def _has_preview(self, ref: str) -> bool:
+        try:
+            return self.workspace.preview_image(ref) is not None
+        except ValueError:
+            return False
 
     def _resolver(self) -> NodePoolResolver:
         return NodePoolResolver(

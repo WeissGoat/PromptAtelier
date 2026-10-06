@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeListResponse, NodeSummary } from "../api/types";
 import type { NodeRole } from "../nodes/types";
+import { NodePreviewImage } from "./NodePreviewImage";
 
 type NodePickerProps = {
   label: string;
@@ -217,7 +218,8 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
               role="option"
               type="button"
             >
-              <span>{node.name}</span>
+              <NodePreviewImage className="node-picker-thumb" hasPreview={node.has_preview ?? false} name={node.name} nodeRef={node.ref} size={160} zoomable={false} />
+              <span className="node-picker-name">{node.name}</span>
               {node.backends?.includes("comfyui") ? <small className="node-badge">ComfyUI</small> : null}
             </button>
           )) : null}

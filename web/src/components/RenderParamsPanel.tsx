@@ -6,6 +6,7 @@ type RenderParamsPanelProps = {
   width: number;
   height: number;
   nt: number;
+  n: number;
   seed: string;
   /** 尺寸选择；Width / Height 只在「自定义」时生效。 */
   size: SizeChoice;
@@ -14,6 +15,7 @@ type RenderParamsPanelProps = {
   onWidthChange: (value: number) => void;
   onHeightChange: (value: number) => void;
   onNtChange: (value: number) => void;
+  onNChange: (value: number) => void;
   onSeedChange: (value: string) => void;
   onSizeChange: (value: SizeChoice) => void;
 };
@@ -22,12 +24,14 @@ export function RenderParamsPanel({
   width,
   height,
   nt,
+  n,
   seed,
   size,
   sizePresets,
   onWidthChange,
   onHeightChange,
   onNtChange,
+  onNChange,
   onSeedChange,
   onSizeChange,
 }: RenderParamsPanelProps) {
@@ -72,13 +76,23 @@ export function RenderParamsPanel({
         />
       </label>
       <label className="field">
-        <span>NT</span>
+        <span title="每次生成张数 (n_samples)">NT</span>
         <input
           aria-label="NT"
           min={1}
           onChange={(event) => onNtChange(Number(event.target.value))}
           type="number"
           value={nt}
+        />
+      </label>
+      <label className="field">
+        <span title="轮数 (Random/Sequential/Compare Groups)">N</span>
+        <input
+          aria-label="N"
+          min={1}
+          onChange={(event) => onNChange(Number(event.target.value))}
+          type="number"
+          value={n}
         />
       </label>
       <label className="field">

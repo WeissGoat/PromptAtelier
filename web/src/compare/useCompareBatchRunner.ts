@@ -10,6 +10,9 @@ export function normalizeNovelAIModel(raw?: string): string {
   if (!raw) return "nai-diffusion-4-5-full";
   const lower = raw.trim().toLowerCase();
   if (lower.includes("furry")) return "nai-diffusion-furry-3";
+  if (lower.includes("v5") || (lower.includes("diffusion") && lower.includes("5") && !lower.includes("4"))) {
+    return lower.includes("curated") ? "nai-diffusion-5-curated" : "nai-diffusion-5-full";
+  }
   if (lower.includes("4.5") || lower.includes("4-5") || lower.includes("v4.5")) {
     return lower.includes("curated") ? "nai-diffusion-4-5-curated" : "nai-diffusion-4-5-full";
   }

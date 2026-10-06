@@ -1,7 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ComposePreviewResponse, NodeEditorDocument, NodeReadResponse } from "../api/types";
-import { useCompareRunController, type CompareRunController } from "../compare/useCompareRunController";
 import { cloneNode, createTemporaryNode } from "../nodes/temporaryNodes";
 import type { GroupRole, NodeDocument, NodeRole } from "../nodes/types";
 import { createDefaultNodePoolSpec } from "../randomNodes/spec";
@@ -30,7 +29,6 @@ import type {
 type CustomWorkspaceContextValue = {
   state: CustomWorkspaceState;
   storageWarning: string;
-  compareRun: CompareRunController;
   findSlot(slotId: string): NodeVariantSlot | null;
   selectNode(slotId: string, ref: string, node: NodeDocument, editor?: NodeEditorDocument | null): void;
   applySavedNode(slotId: string, response: NodeReadResponse): void;
@@ -61,6 +59,7 @@ type CustomWorkspaceContextValue = {
   setPreview(preview: ComposePreviewResponse | null): void;
   advancePoolCursor(slotId: string): void;
   resetPoolCursor(slotId: string): void;
+  setPoolCursor(slotId: string, cursor: number): void;
   resetWorkspace(): void;
 };
 
@@ -184,7 +183,6 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
   const [storageWarning, setStorageWarning] = useState(initial.status === "invalid" ? initial.message : "");
   const persistenceBlocked = useRef(initial.status === "invalid");
   const skipNextPersist = useRef(false);
-  const compareRun = useCompareRunController();
 
   useEffect(() => {
     if (persistenceBlocked.current) return;
@@ -205,7 +203,6 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<CustomWorkspaceContextValue>(() => ({
     state,
     storageWarning,
-    compareRun,
     findSlot: (slotId) => findSlotInState(state, slotId),
     findPromptBehavior: (slotId) => findPromptBehaviorVariant(state.promptBehaviorGroup, slotId),
     selectNode: (slotId, ref, node, editor = null) => setState((current) => mapSlot(current, slotId, (slot) => {
@@ -546,6 +543,10 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       ...slot,
       poolCursor: 0,
     }))),
+    setPoolCursor: (slotId, cursor) => setState((current) => mapSlot(current, slotId, (slot) => ({
+      ...slot,
+      poolCursor: Math.max(0, Math.trunc(cursor)),
+    }))),
     resetWorkspace: () => {
       clearWorkspaceSnapshot(window.localStorage);
       persistenceBlocked.current = false;
@@ -553,7 +554,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       setStorageWarning("");
       setState(createEmptyWorkspace());
     },
-  }), [compareRun, state, storageWarning]);
+  }), [state, storageWarning]);
 
   return <CustomWorkspaceContext.Provider value={value}>{children}</CustomWorkspaceContext.Provider>;
 }

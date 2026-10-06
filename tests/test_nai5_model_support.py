@@ -245,6 +245,20 @@ class NAI5ModelSupportTest(unittest.TestCase):
         )
         self.assertEqual(request.params["noise_schedule"], "karras")
 
+    def test_inpainting_suffix_is_preserved(self):
+        # v5 curated 与 full 共用 full 的 inpainting 模型，与参考项目一致
+        for raw in (
+            "nai-diffusion-5-full-inpainting",
+            "nai-diffusion-5-curated-inpainting",
+        ):
+            self.assertEqual(normalize_novelai_model(raw), "nai-diffusion-5-full-inpainting")
+        self.assertEqual(
+            normalize_novelai_model("nai-diffusion-4-5-curated-inpainting"),
+            "nai-diffusion-4-5-curated-inpainting",
+        )
+        # 无 inpainting 变体的旧模型行为不变
+        self.assertEqual(normalize_novelai_model("nai-diffusion-3-inpainting"), "nai-diffusion-3")
+
     def test_nai5_adapter_uses_preset_ids_not_legacy_toggles(self):
         request = NovelAIRenderAdapter().build_request(
             _simple_bundle(),
@@ -253,9 +267,9 @@ class NAI5ModelSupportTest(unittest.TestCase):
         )
         p = request.params
 
-        # V5 用字符串 preset ID
-        self.assertEqual(p["ucPresetId"], "heavy")
-        self.assertEqual(p["qualityPresetId"], "standard")
+        # V5 用字符串 preset ID，默认 none（与 4.5 行为一致，不让服务端额外注入）
+        self.assertEqual(p["ucPresetId"], "none")
+        self.assertEqual(p["qualityPresetId"], "none")
 
         # 旧的 ucPreset / qualityToggle 不应存在
         self.assertNotIn("ucPreset", p)

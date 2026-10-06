@@ -25,28 +25,40 @@ function normalizeSeed(value: number): number {
   return ((integer % UINT32_SIZE) + UINT32_SIZE) % UINT32_SIZE;
 }
 
-function distinctSeed(candidate: number, used: Set<number>): number {
+function distinctSeedBlock(candidate: number, blockSize: number, used: Set<number>): number {
   let seed = normalizeSeed(candidate);
-  while (used.has(seed)) seed = normalizeSeed(seed + 1);
-  used.add(seed);
+  const conflicts = (s: number) => {
+    for (let i = 0; i < blockSize; i += 1) {
+      if (used.has(normalizeSeed(s + i))) return true;
+    }
+    return false;
+  };
+  while (conflicts(seed)) {
+    seed = normalizeSeed(seed + blockSize);
+  }
+  for (let i = 0; i < blockSize; i += 1) {
+    used.add(normalizeSeed(seed + i));
+  }
   return seed;
 }
 
 export function buildCompareRunPlan(
   matrix: CompareCombination[],
-  options: { nt: number; seed: string; randomSeed(): number },
+  options: { n: number; nt?: number; seed: string; randomSeed(): number },
 ): CompareRunPlan {
-  if (!Number.isSafeInteger(options.nt) || options.nt < 1) {
-    throw new Error("Compare NT 必须是大于等于 1 的整数");
+  if (!Number.isSafeInteger(options.n) || options.n < 1) {
+    throw new Error("Compare N 必须是大于等于 1 的整数");
   }
 
+  const nt = Math.max(1, Math.trunc(options.nt ?? 1));
   const parsedSeed = Number(options.seed);
   const explicitSeed = Number.isInteger(parsedSeed) && parsedSeed >= 0;
   const usedSeeds = new Set<number>();
-  const groups = Array.from({ length: options.nt }, (_, offset) => {
+  const groups = Array.from({ length: options.n }, (_, offset) => {
     const groupIndex = offset + 1;
-    const seed = distinctSeed(
-      explicitSeed ? parsedSeed + offset : options.randomSeed(),
+    const seed = distinctSeedBlock(
+      explicitSeed ? parsedSeed + offset * nt : options.randomSeed(),
+      nt,
       usedSeeds,
     );
     const prefix = `group-${String(groupIndex).padStart(3, "0")}`;
@@ -62,6 +74,8 @@ export function buildCompareRunPlan(
   return { groups, items: groups.flatMap((group) => group.items) };
 }
 
-export function compareRunCount(matrixCount: number, nt: number): number {
-  return Number.isSafeInteger(nt) && nt >= 1 ? matrixCount * nt : 0;
+export function compareRunCount(matrixCount: number, n: number, nt: number = 1): number {
+  const safeN = Number.isSafeInteger(n) && n >= 1 ? n : 0;
+  const safeNt = Number.isSafeInteger(nt) && nt >= 1 ? nt : 0;
+  return matrixCount * safeN * safeNt;
 }

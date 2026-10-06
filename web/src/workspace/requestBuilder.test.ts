@@ -4,7 +4,7 @@ import type { NodeDocument } from "../nodes/types";
 import type { NodeVariantSlot, PromptBehaviorParams, RenderWorkspaceParams } from "./types";
 import { STANDARD_SIZE_PRESETS, artistBackend, artistSizePresets, buildComposeRenderRequest, buildGeneratePayload, workspaceMayUseComfyUI } from "./requestBuilder";
 
-const params: RenderWorkspaceParams = { negative: "", width: 832, height: 1216, nt: 3, seed: "-1" };
+const params: RenderWorkspaceParams = { negative: "", width: 832, height: 1216, nt: 3, n: 1, seed: "-1" };
 const artistNode: NodeDocument = { schema: "tags-machine-core.node/v1", kind: "artist", id: "artist-a", prompt: { positive: [], negative: [] } };
 const promptBehavior: PromptBehaviorParams = {
   identityMinimal: { mode: "override", sections: ["character", "role"] },
@@ -25,7 +25,7 @@ function artistSlot(modified = false): NodeVariantSlot {
 
 describe("request builder", () => {
   it("uses refs for original nodes and ordinary NT", () => {
-    const request = buildComposeRenderRequest({ artist: artistSlot(), character: null, action: null }, params, { compare: false });
+    const request = buildComposeRenderRequest({ artist: artistSlot(), character: null, action: null }, params, {});
     expect(request.compose.nodes[0]).toEqual({ role: "artist", ref: "F:/artists/a" });
     expect(request.render.artist).toBe("F:/artists/a");
     expect(request.render.params.n_samples).toBe(3);
@@ -33,14 +33,14 @@ describe("request builder", () => {
   });
 
   it("serializes modified Artist inline without duplicate render.artist", () => {
-    const request = buildComposeRenderRequest({ artist: artistSlot(true), character: null, action: null }, params, { compare: false });
+    const request = buildComposeRenderRequest({ artist: artistSlot(true), character: null, action: null }, params, {});
     expect(request.compose.nodes[0].node).toBeTruthy();
     expect(request.render.artist).toBeUndefined();
   });
 
-  it("forces one sample for every compare combination", () => {
-    const request = buildComposeRenderRequest({ artist: artistSlot(), character: null, action: null }, { ...params, seed: "42" }, { compare: true });
-    expect(request.render.params.n_samples).toBe(1);
+  it("n_samples follows params.nt", () => {
+    const request = buildComposeRenderRequest({ artist: artistSlot(), character: null, action: null }, { ...params, seed: "42" }, {});
+    expect(request.render.params.n_samples).toBe(3);
     expect(request.render.seed).toBe(42);
     expect(request.compose.negative).toBe("");
   });
@@ -49,7 +49,7 @@ describe("request builder", () => {
     const request = buildComposeRenderRequest(
       { artist: artistSlot(), character: null, action: null },
       params,
-      { compare: false, promptBehavior },
+      { promptBehavior },
     );
 
     expect(request.compose.identity_minimal_sections).toEqual(["character", "role"]);
@@ -62,7 +62,6 @@ describe("request builder", () => {
       { artist: artistSlot(), character: null, action: null },
       params,
       {
-        compare: false,
         promptBehavior: {
           identityMinimal: { mode: "inherit", sections: [] },
           characterPrompts: { mode: "off", addMaleCaption: true },
@@ -81,7 +80,6 @@ describe("request builder", () => {
       { artist: artistSlot(), character: null, action: null },
       params,
       {
-        compare: false,
         promptBehavior: {
           ...promptBehavior,
           identityMinimal: { mode: "override", sections: [] },
@@ -95,7 +93,6 @@ describe("request builder", () => {
       { artist: artistSlot(), character: null, action: null },
       params,
       {
-        compare: false,
         promptBehavior: {
           ...promptBehavior,
           policyRules: {
@@ -129,7 +126,6 @@ describe("request builder", () => {
       { artist: artistSlot(), character: null, action: null },
       params,
       {
-        compare: false,
         promptBehavior: {
           ...promptBehavior,
           policyRules: {
@@ -164,7 +160,6 @@ describe("request builder", () => {
       { artist: artistSlot(), character: null, action: null },
       params,
       {
-        compare: false,
         promptBehavior: {
           ...promptBehavior,
           policyRules: {
@@ -203,7 +198,7 @@ describe("request builder", () => {
       const request = buildComposeRenderRequest(
         { artist: comfySlot, character: null, action: null },
         params,
-        { compare: false, promptBehavior: vibeBehavior },
+        { promptBehavior: vibeBehavior },
       );
 
       expect(request.render.backend).toBe("comfyui");
@@ -232,7 +227,7 @@ describe("request builder", () => {
       };
       const presetSlot: NodeVariantSlot = { ...comfySlot, sourceNode: presetNode, draftNode: presetNode };
       const build = (slot: NodeVariantSlot, extra: Partial<RenderWorkspaceParams> = {}) =>
-        buildComposeRenderRequest({ artist: slot, character: null, action: null }, { ...params, ...extra }, { compare: true });
+        buildComposeRenderRequest({ artist: slot, character: null, action: null }, { ...params, ...extra }, {});
 
       expect(artistSizePresets(presetSlot)).toEqual({ portrait: { width: 1024, height: 1536 }, landscape: { width: 1536, height: 1024 } });
       expect(artistSizePresets(artistSlot())).toEqual(STANDARD_SIZE_PRESETS);

@@ -68,7 +68,7 @@ export function createCompareGroupOutputDir(parent: string, groupIndex: number, 
 }
 
 function slotLabel(slot: CompareCombination[NodeRole]): string {
-  if (slot?.sourceKind === "random") return `Random · ${slot.randomSpec?.source.type ?? "未配置"}`;
+  if (slot?.sourceKind === "random") return `节点组 · ${slot.randomSpec?.source.value || "未配置"}`;
   return slot?.draftNode?.name || slot?.draftNode?.id || slot?.sourceNode?.name || slot?.sourceRef || "未选择";
 }
 
@@ -94,7 +94,7 @@ export async function planCompareRun(
     throw new Error("Compare Generate 至少需要一个 Character 或 Action 节点。");
   }
   const matrix = buildCompareMatrix(groups, promptBehaviorGroup);
-  const plan = buildCompareRunPlan(matrix, { nt: params.nt, seed: params.seed, randomSeed });
+  const plan = buildCompareRunPlan(matrix, { n: params.n, nt: params.nt, seed: params.seed, randomSeed });
   const resolvedPlan = await resolveRandomItems(plan.items.map((item) => ({
     value: item,
     randomScope: `group-${item.groupIndex}`,
@@ -133,7 +133,6 @@ export function compareComposeRequest(item: CompareRunItem, params: RenderWorksp
   return {
     runParams,
     request: buildComposeRenderRequest(item.combination, runParams, {
-      compare: true,
       promptBehavior: item.combination.promptBehavior.value,
     }),
   };

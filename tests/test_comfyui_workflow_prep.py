@@ -343,7 +343,7 @@ class RuntimeManifestTest(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "deploy" / "comfyui" / "manifest.yaml"
         )
 
-        self.assertEqual(len(manifest["models"]), 10)
+        self.assertEqual(len(manifest["models"]), 12)
         self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest["models"]))
 
 

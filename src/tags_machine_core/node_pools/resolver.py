@@ -4,6 +4,7 @@ import random
 from pathlib import Path
 from typing import Any, Callable
 
+from tags_machine_core.nodes.path_guard import contained_path, relative_within
 from tags_machine_core.nodes.role_paths import primary_role_root, resolve_role_relative_path
 
 from .classify import MissingClassifyError, load_classify_tags
@@ -40,7 +41,7 @@ class NodePoolResolver:
         source = spec.source
         relative_root: Path | None = None
         if source.type in {"folder", "glob"}:
-            relative_root = primary_role_root(self.design_root, role).resolve()
+            relative_root = primary_role_root(self.design_root, role)
             if not relative_root.is_dir():
                 raise FileNotFoundError(f"{role} node root not found: {relative_root}")
             source = source.model_copy(update={
@@ -160,18 +161,14 @@ class NodePoolResolver:
                 path = next((item for item in matches if item.exists()), matches[0])
             else:
                 path = self.design_root / path
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(self.design_root)
-        except ValueError as exc:
-            raise ValueError("node pool candidate must be inside design_root") from exc
-        return str(resolved)
+
+        contained = contained_path(self.design_root, path)
+        if contained is None:
+            raise ValueError("node pool candidate must be inside design_root")
+        return str(contained)
 
     def _relative(self, path: Path, *, root: Path | None = None) -> str | None:
-        try:
-            return path.resolve().relative_to(root or self.design_root).as_posix()
-        except ValueError:
-            return None
+        return relative_within(root or self.design_root, path)
 
 
 def _matches_classify(classify: dict[str, set[str]], spec: NodePoolSpec) -> bool:

@@ -662,6 +662,60 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
             self.assertEqual(result.png_info["images"][0]["parameters"]["seed"], 222)
             self.assertEqual(result.png_info["images"][0]["png_text"]["Source"], "ComfyUI")
             self.assertIn("tags_machine_core", result.png_info["images"][0]["png_text"])
+            # 测试里的 history 没有状态消息，只有总耗时。
+            self.assertIn("elapsed_seconds", result.images[0].meta)
+            self.assertNotIn("execution_seconds", result.images[0].meta)
+
+    def test_execute_comfyui_generation_records_timing_from_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            request = RenderRequest(
+                backend="comfyui",
+                prompt="akemi homura",
+                seed=222,
+                params={"workflow_json": {"1": {"inputs": {"text": "akemi homura"}}}},
+            )
+            history = {
+                "abc123": {
+                    "outputs": {"7": {"images": []}},
+                    "status": {
+                        "status_str": "success",
+                        "messages": [
+                            ["execution_start", {"prompt_id": "abc123", "timestamp": 1_000_000}],
+                            ["execution_cached", {"prompt_id": "abc123", "timestamp": 1_000_010}],
+                            ["execution_success", {"prompt_id": "abc123", "timestamp": 1_078_440}],
+                        ],
+                    },
+                }
+            }
+
+            with patch("tags_machine_core.execution.ComfyUIClient") as client_cls:
+                client = client_cls.return_value
+                client.prepare.return_value = PreparedComfyUIWorkflow(prompt={"1": {}}, output_nodes=("7",))
+                client.run.return_value = SimpleNamespace(
+                    prompt_id="abc123",
+                    queue_raw={"prompt_id": "abc123"},
+                    history=history,
+                    images=[SimpleNamespace(filename="ComfyUI_00001_.png", content=_png_bytes_with_text({}))],
+                )
+                client.payload.return_value = {"prompt": {"1": {}}}
+
+                result = execute_comfyui_generation(
+                    _app_config(root),
+                    request,
+                    output_dir=root / "out",
+                    image_format="png",
+                    poll_interval=0,
+                    max_wait_seconds=1,
+                )
+
+            meta = result.images[0].meta
+            self.assertEqual(meta["execution_seconds"], 78.4)
+            self.assertGreaterEqual(meta["elapsed_seconds"], 0)
+            core_info = json.loads(read_png_text_chunks(result.images[0].path)["tags_machine_core"])
+            self.assertEqual(core_info["timing"], {k: meta[k] for k in ("elapsed_seconds", "execution_seconds")})
+            # 耗时不进 render 段，不会出现在参数 Diff 里。
+            self.assertNotIn("execution_seconds", core_info["render"])
 
     def test_execute_sd_generation_saves_images_and_request_body(self):
         with tempfile.TemporaryDirectory() as tmp:

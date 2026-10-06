@@ -4,10 +4,9 @@ import type { RandomSelectionRecord } from "../randomNodes/resolve";
 import type { ComposeRenderRequest } from "../workspace/requestBuilder";
 import type { RenderWorkspaceParams } from "../workspace/types";
 
-/** 后台批量任务在 /api/jobs 里的名字（对应后端 /generate/batch）。 */
+/** 出图任务在 /api/jobs 里的名字（对应后端 /generate/batch）；所有出图都走这里，刷新网页、重启后端都不丢。 */
 export const BACKGROUND_BATCH_JOB = "generate-batch";
 export const BACKGROUND_RUNS_CHANGED = "promptatelier:background-runs-changed";
-const PREFERENCE_KEY = "promptatelier.background-run/v1";
 
 export type BackgroundItemStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -26,7 +25,7 @@ export type BackgroundRequestItem = {
 
 export type BackgroundBatchRequest = {
   label: string;
-  kind: "random" | "sequential" | "compare";
+  kind: "primary" | "random" | "sequential" | "compare";
   output_dir?: string;
   items: BackgroundRequestItem[];
 };
@@ -55,22 +54,6 @@ export type BackgroundBatchResult = {
 
 export type BackgroundBatchJob = Omit<JobRecord, "result"> & { result?: BackgroundBatchResult | null };
 
-export function loadBackgroundPreference(): boolean {
-  try {
-    return window.localStorage.getItem(PREFERENCE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function saveBackgroundPreference(enabled: boolean): void {
-  try {
-    window.localStorage.setItem(PREFERENCE_KEY, enabled ? "1" : "0");
-  } catch {
-    // 浏览器禁用存储时只在当前页面生效。
-  }
-}
-
 /** 每一项出图时附带的选项；运行位置只对 ComfyUI 画风生效，后端按实际 backend 决定用不用。 */
 export function backgroundGenerateOptions(
   params: RenderWorkspaceParams,
@@ -88,6 +71,13 @@ export function randomSelectionLabel(selections: RandomSelectionRecord[]): strin
 
 export async function submitBackgroundBatch(request: BackgroundBatchRequest): Promise<JobRecord> {
   const job = await apiPost<JobRecord>("/generate/batch", request);
+  window.dispatchEvent(new Event(BACKGROUND_RUNS_CHANGED));
+  return job;
+}
+
+/** 在原任务里继续没成功的项（停止、失败或后端重启打断的），图片写回原目录。 */
+export async function resumeBackgroundBatch(jobId: string): Promise<JobRecord> {
+  const job = await apiPost<JobRecord>(`/generate/batch/${encodeURIComponent(jobId)}/resume`, {});
   window.dispatchEvent(new Event(BACKGROUND_RUNS_CHANGED));
   return job;
 }

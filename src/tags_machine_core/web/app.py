@@ -30,8 +30,10 @@ from .routes import (
     results,
 )
 from .services.comfyui_targets import ComfyUITargetService
+from .services.generate_batch import GENERATE_BATCH_JOB, recover_interrupted_batch
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
+from .services.output_history import OutputHistory
 from .services.node_pool_service import NodePoolService
 from .services.node_save_preview_store import NodeSavePreviewStore
 from .services.result_index import ResultIndex
@@ -66,7 +68,12 @@ def create_app(
     resolved_config_path = resolve_web_config_path(config_path)
     config = load_config(resolved_config_path)
     app = FastAPI(title="PromptAtelier Web Console", version="0.1.0")
-    app.state.job_manager = job_manager or JobManager()
+    web_data_dir = Path(config.runtime.output_dir) / ".web"
+    app.state.job_manager = job_manager or JobManager(
+        persist_dir=web_data_dir / "jobs",
+        persist_names={GENERATE_BATCH_JOB},
+        recover=recover_interrupted_batch,
+    )
     app.state.config = config
     app.state.config_path = resolved_config_path
     app.state.node_workspace = node_workspace or NodeWorkspace(design_root=config.legacy.design_root)
@@ -91,7 +98,8 @@ def create_app(
             roots.append(config.legacy.design_root)
         if getattr(config.legacy, "tags_machine_root", None):
             roots.append(config.legacy.tags_machine_root)
-    app.state.result_index = result_index or ResultIndex(roots=roots)
+    app.state.result_index = result_index or ResultIndex(roots=roots, thumb_dir=web_data_dir / "thumbs")
+    app.state.output_history = OutputHistory(config.runtime.output_dir)
     app.state.comfyui_targets = ComfyUITargetService(config.comfyui)
     policy_provider = build_prompt_policy_provider(
         config,

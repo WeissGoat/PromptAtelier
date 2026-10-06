@@ -86,7 +86,7 @@ export function buildGeneratePayload(
 export function buildComposeRenderRequest(
   selected: SelectedNodes,
   params: RenderWorkspaceParams,
-  options: { compare: boolean; promptBehavior?: PromptBehaviorParams },
+  options: { promptBehavior?: PromptBehaviorParams } = {},
 ): ComposeRenderRequest {
   let character = selected.character;
   if (character && selected.clothing) {
@@ -156,7 +156,7 @@ export function buildComposeRenderRequest(
     if (Object.keys(rules).length) compose.prompt_policy = { rules };
   }
   const renderParams: Record<string, unknown> = {
-    n_samples: options.compare ? 1 : params.nt,
+    n_samples: Math.max(1, Math.trunc(params.nt || 1)),
   };
   // 后端按 size 和画风的竖横方预设定宽高（random 每次抽一个，抽到的写进请求）；custom 才用 width/height。
   renderParams.size = params.size || "random";

@@ -1,11 +1,16 @@
+import tempfile
 import threading
 from unittest import TestCase
 
 from fastapi.testclient import TestClient
 
 from tags_machine_core.web import create_app
-from tags_machine_core.web.services.generate_batch import run_generate_batch, validate_generate_batch
-from tags_machine_core.web.services.job_manager import JobManager
+from tags_machine_core.web.services.generate_batch import (
+    recover_interrupted_batch,
+    run_generate_batch,
+    validate_generate_batch,
+)
+from tags_machine_core.web.services.job_manager import JobManager, JobRecord
 
 
 class FakeApi:
@@ -151,3 +156,39 @@ class GenerateBatchHttpTest(TestCase):
         bad = client.post("/api/generate/batch", json={"items": []})
         self.assertEqual(bad.status_code, 400)
         self.assertEqual(bad.json()["error"]["code"], "invalid_generate_batch")
+
+    def test_resume_keeps_succeeded_items_and_reruns_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = JobManager(persist_dir=tmp, persist_names={"generate-batch"})
+            app = create_app(job_manager=manager)
+            api = FakeApi()
+            app.state.generation_api = api
+            client = TestClient(app)
+
+            job_id = client.post("/api/generate/batch", json={"items": [_item(1), _item(13), _item(2)]}).json()["id"]
+            manager.wait(job_id, timeout=5)
+            self.assertEqual(manager.get(job_id).result["counts"]["failed"], 1)
+
+            # 失败的那项修好后继续：已成功的 1 和 2 不重跑。
+            api.generated.clear()
+            api.resolve_compose_render_plan = lambda request: {"status": "ready", "render_request": {"seed": 7}}
+            response = client.post(f"/api/generate/batch/{job_id}/resume")
+            self.assertEqual(response.status_code, 200)
+            manager.wait(job_id, timeout=5)
+
+            record = manager.get(job_id)
+            self.assertEqual(record.status, "succeeded")
+            self.assertEqual([item["status"] for item in record.result["items"]], ["succeeded"] * 3)
+            self.assertEqual(record.result["items"][0]["images"], [{"path": "out/1.png", "meta": {"seed": 1}}])
+            self.assertEqual([item["render_request"]["seed"] for item in api.generated], [7])
+            self.assertEqual(client.post(f"/api/generate/batch/{job_id}/resume").status_code, 409)
+            self.assertEqual(client.post("/api/generate/batch/missing/resume").status_code, 404)
+
+    def test_recover_interrupted_batch_requeues_the_running_item(self):
+        job = JobRecord(id="x", name="generate-batch", status="interrupted", result={
+            "items": [{"status": "succeeded"}, {"status": "running"}, {"status": "queued"}],
+            "counts": {"succeeded": 1, "running": 1, "queued": 1},
+        })
+        recover_interrupted_batch(job)
+        self.assertEqual([item["status"] for item in job.result["items"]], ["succeeded", "queued", "queued"])
+        self.assertEqual(job.result["counts"], {"queued": 2, "running": 0, "succeeded": 1, "failed": 0, "cancelled": 0})

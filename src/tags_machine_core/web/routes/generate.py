@@ -64,4 +64,34 @@ def generate_batch(payload: dict[str, Any], request: Request) -> dict[str, Any]:
     def worker(ctx):
         return run_generate_batch(api, batch, ctx)
 
-    return manager.submit(GENERATE_BATCH_JOB, worker).to_dict()
+    return manager.submit(GENERATE_BATCH_JOB, worker, request=batch).to_dict()
+
+
+@router.post("/generate/batch/{job_id}/resume")
+def resume_generate_batch(job_id: str, request: Request) -> dict[str, Any]:
+    """被停止、失败或后端重启打断的批量任务：在原任务里接着跑没成功的项，图片还写回原目录。"""
+    manager = request.app.state.job_manager
+    api = request.app.state.generation_api
+    try:
+        job = manager.get(job_id)
+        batch = manager.request_of(job_id)
+    except KeyError as exc:
+        raise ApiError(code="job_not_found", message=f"Job not found: {job_id}", status_code=404) from exc
+    if job.name != GENERATE_BATCH_JOB or not isinstance(batch, dict):
+        raise ApiError(
+            code="job_not_resumable",
+            message="这个任务没有保存原始请求，无法继续。",
+            status_code=400,
+        )
+    previous = job.result if isinstance(job.result, dict) else None
+    items = (previous or {}).get("items") or []
+    if items and all(isinstance(item, dict) and item.get("status") == "succeeded" for item in items):
+        raise ApiError(code="job_not_resumable", message="这个任务的每一项都已经成功。", status_code=409)
+
+    def worker(ctx):
+        return run_generate_batch(api, batch, ctx, previous=previous)
+
+    try:
+        return manager.resume(job_id, worker).to_dict()
+    except ValueError as exc:
+        raise ApiError(code="job_not_resumable", message=str(exc), status_code=409) from exc

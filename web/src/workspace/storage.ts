@@ -80,7 +80,7 @@ export function createEmptyWorkspace(): CustomWorkspaceState {
       character: createEmptyGroup("character"),
       action: createEmptyGroup("action"),
     },
-    params: { negative: "", width: 1024, height: 1024, nt: 1, seed: "-1" },
+    params: { negative: "", width: 1024, height: 1024, nt: 1, n: 1, seed: "-1" },
     promptBehaviorGroup: createDefaultPromptBehaviorGroup(),
     activePromptBehaviorSlotId: PRIMARY_PROMPT_BEHAVIOR_SLOT_ID,
     editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
@@ -251,6 +251,7 @@ function migrateWorkspace(value: unknown): unknown {
     width: typeof rawParams.width === "number" && rawParams.width > 0 ? rawParams.width : 1024,
     height: typeof rawParams.height === "number" && rawParams.height > 0 ? rawParams.height : 1024,
     nt: typeof rawParams.nt === "number" && rawParams.nt > 0 ? rawParams.nt : 1,
+    n: typeof rawParams.n === "number" && rawParams.n > 0 ? rawParams.n : 1,
     seed: rawParams.seed !== undefined && rawParams.seed !== null ? String(rawParams.seed) : "-1",
   };
   if (typeof rawParams.comfyuiTarget === "string" && rawParams.comfyuiTarget) {

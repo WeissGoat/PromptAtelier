@@ -28,12 +28,31 @@ novelai:
   request_interval: 3
 
 comfyui:
-  base_url: "http://127.0.0.1:8188"
   timeout: 300
   poll_interval: 1.0
   max_wait_seconds: 600
   retry: 3
   retry_interval: 2.0
+  # 切换目标：--comfyui-target modal，或环境变量 TAGS_MACHINE_CORE_COMFYUI_TARGET=modal
+  default_target: local
+  targets:
+    local:
+      label: "本机 aki"
+      base_url: "http://127.0.0.1:8188"
+    modal:
+      label: "Modal 云端"
+      base_url: "https://efreetknift--tm-comfyui-api.modal.run"
+      path_style: posix
+      cold_start_wait_seconds: 300
+      allow_no_wait: false
+      auth:
+        type: bearer
+        token_env: TM_COMFYUI_MODAL_TOKEN
+      status_probe:
+        type: modal
+        app: tm-comfyui
+        function: api
+        idle_shutdown_seconds: 180
 
 sd:
   base_url: "http://127.0.0.1:7860"
