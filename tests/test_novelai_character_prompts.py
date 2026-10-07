@@ -532,6 +532,119 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         # 男角色块：独立存在，不追加女角色特征
         self.assertEqual(char_captions[3]["char_caption"], "boy, faceless male, grabbing")
 
+    def test_male_count_adds_matching_boy_character_captions(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, 2boys, threesome",
+        )
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]],
+            [
+                "girl, akemi homura",
+                "boy, ",
+                "boy, ",
+            ],
+        )
+        self.assertTrue(request.meta["character_prompts"]["male_caption_added"])
+
+    def test_3boys_adds_three_boy_character_captions(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, 3boys, group scene",
+        )
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]],
+            [
+                "girl, akemi homura",
+                "boy, ",
+                "boy, ",
+                "boy, ",
+            ],
+        )
+
+    def test_unspecified_boys_or_multiple_boys_adds_no_boy_captions(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        for tag in ["multiple boys", "boys", "6+boys"]:
+            bundle = ScriptComposer().compose_full_prompt(
+                prompt=f"akemi homura, {tag}, standing",
+            )
+            request = NovelAIRenderAdapter().build_request(
+                bundle,
+                model="nai-diffusion-4-5-full",
+                params={"character_prompts": {"mode": "auto"}},
+                resolved_nodes=resolved,
+            )
+            caption = request.params["v4_prompt"]["caption"]
+            self.assertEqual(
+                [item["char_caption"] for item in caption["char_captions"]],
+                ["girl, akemi homura"],
+                f"Failed for tag {tag}",
+            )
+            self.assertFalse(
+                request.meta["character_prompts"]["male_caption_added"],
+                f"male_caption_added should be False for {tag}",
+            )
+
+    def test_male_count_is_capped_at_max_characters(self):
+        homura = NodeDocument(
+            kind="character",
+            id="homura",
+            tags={"character": ["akemi homura"]},
+        )
+        resolved = ResolvedNodeSet(
+            [ResolvedNode(role="character", ref="homura", index=0, node=homura)]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt="akemi homura, 10boys, crowd",
+        )
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto", "max_characters": 4}},
+            resolved_nodes=resolved,
+        )
+        caption = request.params["v4_prompt"]["caption"]
+        # 1 girl + 3 boys = max 4
+        self.assertEqual(len(caption["char_captions"]), 4)
+        self.assertEqual(caption["char_captions"][0]["char_caption"], "girl, akemi homura")
+        for i in range(1, 4):
+            self.assertEqual(caption["char_captions"][i]["char_caption"], "boy, ")
+
 
 if __name__ == "__main__":
     unittest.main()

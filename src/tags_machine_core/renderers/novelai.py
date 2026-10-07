@@ -631,21 +631,25 @@ class NovelAIRenderAdapter:
                         }
                     )
 
+            detected_male_count = _extract_male_character_count(base_tags)
             if (
                 char_captions
                 and _enabled_config(config.get("add_male_caption"), default=True)
-                and _contains_male_character(base_tags)
+                and detected_male_count > 0
                 and not _contains_male_character(
                     [caption.get("char_caption") for caption in char_captions]
                 )
             ):
-                char_captions.append(
-                    {
-                        "char_caption": MALE_CHARACTER_CAPTION,
-                        "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
-                    }
-                )
-                male_caption_added = True
+                num_to_add = min(detected_male_count, max(0, max_characters - len(char_captions)))
+                for _ in range(num_to_add):
+                    char_captions.append(
+                        {
+                            "char_caption": MALE_CHARACTER_CAPTION,
+                            "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS),
+                        }
+                    )
+                if num_to_add > 0:
+                    male_caption_added = True
 
         negative_char_captions = _pad_negative_character_captions(
             negative_char_captions,
@@ -1058,6 +1062,49 @@ def _enabled_config(value: Any, *, default: bool) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _tag_male_character_count(value: str) -> int:
+    text = _normalize_character_prompt_tag(value)
+    if not text:
+        return 0
+
+    # 1. 匹配无具体数字的复数 -> 不补充（计 0）
+    if (
+        text in {"boys", "men", "males", "multiple boys", "multiple men", "multiple males"}
+        or re.fullmatch(r"(?:multiple|multi|several|group of)\s+(?:boys?|men|males)", text)
+        or re.fullmatch(r"\d+\+\s*(?:boys?|men|males)", text)
+    ):
+        return 0
+
+    # 2. 匹配具体数字：1boy, 2boys, 3boys, 1 boy, 2 boys, 2men, 1boy1girl 等
+    match = re.search(r"\b(\d+)\s*(?:boys?|men|males)(?=\b|\d|$)", text)
+    if match:
+        try:
+            return int(match.group(1))
+        except (ValueError, TypeError):
+            return 0
+
+    # 3. 如果包含复数词 (boys, men, males)，没有具体数字的 -> 0
+    if re.search(r"\b(boys|men|males)\b", text):
+        return 0
+
+    # 4. 单数男性词：boy, man, male, faceless male, etc. -> 1
+    if re.search(r"\b(boy|male|man)\b", text):
+        return 1
+
+    return 0
+
+
+def _extract_male_character_count(values: list[Any] | tuple[Any, ...]) -> int:
+    counts: list[int] = []
+    for value in values:
+        if value is None:
+            continue
+        count = _tag_male_character_count(str(value))
+        if count > 0:
+            counts.append(count)
+    return max(counts, default=0)
 
 
 def _contains_male_character(values: list[Any] | tuple[Any, ...]) -> bool:
