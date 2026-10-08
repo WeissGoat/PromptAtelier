@@ -5,6 +5,7 @@ from tags_machine_core.clients import NovelAIClient
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 from tags_machine_core.renderers import NovelAIRenderAdapter
+from tags_machine_core.renderers.novelai import _extract_character_blocks
 
 
 class NovelAICharacterPromptsTest(unittest.TestCase):
@@ -644,6 +645,107 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         self.assertEqual(caption["char_captions"][0]["char_caption"], "girl, akemi homura")
         for i in range(1, 4):
             self.assertEqual(caption["char_captions"][i]["char_caption"], "boy, ")
+
+    def test_legacy_quality_and_style_suffix_stay_in_base_caption(self):
+        """画风后缀与质量词不能被塞进最后一个角色框。
+
+        NAI 把最后一个角色块闭合 `::` 之后的文本并入该角色框，所以追加在整串末尾的
+        质量词会变成最后一个角色的 caption（实测 Character 3 尾部出现
+        `::,very aesthetic,masterpiece,no text`）。
+        """
+        homura = NodeDocument(
+            kind="character", id="homura", tags={"character": ["akemi homura"]}
+        )
+        madoka = NodeDocument(
+            kind="character", id="madoka", tags={"character": ["kaname madoka"]}
+        )
+        artist = NodeDocument(
+            kind="artist",
+            id="legacy_artist",
+            renderers={
+                "novelai": {
+                    "legacy_compat": True,
+                    "model": "nai-diffusion-4-5-full",
+                    "prompt_prefix": ["official style"],
+                    "prompt_suffix": ["artist style"],
+                }
+            },
+        )
+        resolved = ResolvedNodeSet(
+            [
+                ResolvedNode(role="character", ref="homura", index=0, node=homura),
+                ResolvedNode(role="character", ref="madoka", index=1, node=madoka),
+            ]
+        )
+        bundle = ScriptComposer().compose_full_prompt(
+            prompt=(
+                "2girls, on bed, "
+                "::character A: girl, akemi homura, head tilted ::, "
+                "::character B: girl, kaname madoka, looking up ::"
+            )
+        )
+
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            artist=artist,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "auto"}},
+            resolved_nodes=resolved,
+        )
+
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertIn("official style", caption["base_caption"])
+        self.assertIn("artist style", caption["base_caption"])
+        self.assertIn("very aesthetic", caption["base_caption"])
+        for item in caption["char_captions"]:
+            self.assertNotIn("artist style", item["char_caption"])
+            self.assertNotIn("very aesthetic", item["char_caption"])
+            self.assertNotIn("no text", item["char_caption"])
+        # legacy 通道走 `_join_legacy_prompt_parts`，逗号后不带空格；角色框只保留
+        # 角色块自身内容，画风后缀与质量词一律留在 base_caption。
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]],
+            ["girl,akemi homura,head tilted", "girl,kaname madoka,looking up"],
+        )
+
+
+class ExtractCharacterBlocksTest(unittest.TestCase):
+    """`::character X: ... ::` 的边界解析。"""
+
+    def test_weighted_tags_inside_block_are_not_truncated(self):
+        base, blocks = _extract_character_blocks(
+            "base, ::character A: boy,3::trembling,face in ass::,1.2::sweating,2::lying on back ::"
+        )
+        self.assertEqual(base, "base")
+        self.assertEqual(
+            [block["raw_content"] for block in blocks],
+            ["boy,3::trembling,face in ass::,1.2::sweating,2::lying on back"],
+        )
+
+    def test_trailing_text_after_last_block_returns_to_base(self):
+        base, blocks = _extract_character_blocks("base, ::character A: girl, smile ::, tail tags")
+        self.assertEqual([block["raw_content"] for block in blocks], ["girl, smile"])
+        self.assertIn("tail tags", base)
+        self.assertNotIn("::", base)
+
+    def test_appended_quality_tail_is_not_absorbed_by_last_block(self):
+        base, blocks = _extract_character_blocks(
+            "base, ::character A: girl, x ::, ::character B: girl, y ::,"
+            "::,very aesthetic, masterpiece, no text,"
+        )
+        self.assertEqual(
+            [block["raw_content"] for block in blocks], ["girl, x", "girl, y"]
+        )
+        self.assertIn("very aesthetic", base)
+
+    def test_block_without_closing_delimiter_still_parses(self):
+        base, blocks = _extract_character_blocks(
+            "base, ::character A: girl, x ::character B: girl, y"
+        )
+        self.assertEqual(base, "base")
+        self.assertEqual(
+            [block["raw_content"] for block in blocks], ["girl, x", "girl, y"]
+        )
 
 
 if __name__ == "__main__":

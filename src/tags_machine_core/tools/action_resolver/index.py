@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -71,10 +72,13 @@ class ActionNodeIndex:
         return candidates
 
     def relative_to_action_root(self, path: str | Path) -> str | None:
-        try:
-            return Path(path).resolve().relative_to(self.action_root).as_posix()
-        except (OSError, ValueError):
-            return None
+        # pn_* category entries are links to new/<node>: try the lexical path before following links.
+        for candidate in (Path(os.path.abspath(path)), Path(path).resolve()):
+            try:
+                return candidate.relative_to(self.action_root).as_posix()
+            except (OSError, ValueError):
+                continue
+        return None
 
     def relative_to_design_root(self, path: str | Path) -> str:
         try:
@@ -96,7 +100,8 @@ class ActionNodeIndex:
             for child in sorted(root.iterdir(), key=lambda item: item.name):
                 if not child.is_dir():
                     continue
-                resolved = child.resolve()
+                # Keep the lexical path: pn_* children are links pointing outside action_root.
+                resolved = child
                 relative = resolved.relative_to(self.action_root).as_posix()
                 self.category_by_relative[relative] = resolved
                 self.category_by_root[root.name].append(resolved)

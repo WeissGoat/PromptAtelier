@@ -46,6 +46,14 @@ LEGACY_DEFAULT_NEGATIVE_PROMPT = (
 DEFAULT_CHARACTER_CENTERS = [{"x": 0.5, "y": 0.5}]
 MALE_CHARACTER_CAPTION = "boy, "
 
+# 角色块起始 `::character A:`
+_CHARACTER_BLOCK_START_RE = re.compile(r"::character\s*([A-Za-z0-9_]+)\s*:")
+# 角色块闭合 `::`：后面只能跟「下一个角色块」或「串尾/串尾逗号」。
+# 逗号后若是权重语法（1.2::tag::）则不算闭合，否则 `face in ass::,1.2::sweating` 会被截断。
+_CHARACTER_BLOCK_CLOSE_RE = re.compile(
+    r"\s*::(?=\s*(?:,\s*(?!\d+(?:\.\d+)?\s*::)|::character|$))"
+)
+
 
 def _join_prompt_parts(*parts: str | list[str] | None) -> str:
     items: list[str] = []
@@ -81,18 +89,32 @@ def _legacy_prompt_tags(text: str) -> list[str]:
 
 
 def _extract_character_blocks(text: str) -> tuple[str, list[dict[str, Any]]]:
-    """提取 ::character X: ... :: 语法块，并返回分离后的 base prompt 和 blocks。"""
-    # 宽松匹配 ::character X: ... ::，允许内容包含嵌套 :: 或无闭合直到下一块/末尾
-    pattern = r"::character\s*([A-Za-z0-9_]+)\s*:\s*(.*?)(?=\s*::character|\s*::$|$)"
-    matches = list(re.finditer(pattern, text, flags=re.DOTALL))
-    if not matches:
-        return text, []
+    """提取 ::character X: ... :: 语法块，并返回分离后的 base prompt 和 blocks。
 
-    base_text = text
+    闭合定界符必须是真的 `::`（后面跟下一个角色块或串尾），否则块内容里合法的
+    权重语法（`1.2::tag::`）会被误当成闭合。找不到闭合时退回旧行为：吃到下一个
+    角色块或串尾。
+    """
     blocks: list[dict[str, Any]] = []
-    for m in matches:
-        block_id = m.group(1).strip()
-        raw_val = m.group(2).strip()
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    while True:
+        start_match = _CHARACTER_BLOCK_START_RE.search(text, cursor)
+        if start_match is None:
+            break
+        content_start = start_match.end()
+        close_match = _CHARACTER_BLOCK_CLOSE_RE.search(text, content_start)
+        if close_match is not None:
+            content_end = close_match.start()
+            span_end = close_match.end()
+        else:
+            next_start = _CHARACTER_BLOCK_START_RE.search(text, content_start)
+            content_end = next_start.start() if next_start is not None else len(text)
+            span_end = content_end
+        cursor = max(span_end, content_start)
+
+        block_id = start_match.group(1).strip()
+        raw_val = text[content_start:content_end].strip()
         # 清理可能残留的末尾定界符
         content = re.sub(r"::+$", "", raw_val).strip()
         content = re.sub(r"::+$", "", content).strip().rstrip(",")
@@ -117,17 +139,58 @@ def _extract_character_blocks(text: str) -> tuple[str, list[dict[str, Any]]]:
             "tags": tags,
             "gender": gender,
         })
+        spans.append((start_match.start(), span_end))
 
-    # 从 base_text 中移除整个 ::character 区域
-    first_start = matches[0].start()
-    last_end = matches[-1].end()
+    if not blocks:
+        return text, []
+
+    # 从 base_text 中移除整个 ::character 区域（角色块按约定连续排在串尾）
+    first_start = spans[0][0]
+    last_end = spans[-1][1]
     # 同时吃掉结尾可能存在的闭合 ::
-    tail_match = re.match(r"\s*::", base_text[last_end:])
+    tail_match = re.match(r"\s*::", text[last_end:])
     if tail_match:
         last_end += tail_match.end()
-    base_text = (base_text[:first_start] + base_text[last_end:]).strip().rstrip(",")
+    head = text[:first_start].strip().rstrip(",").strip()
+    tail = text[last_end:].strip().lstrip(",").strip().rstrip(",")
+    base_text = ", ".join(part for part in (head, tail) if part)
 
     return base_text, blocks
+
+
+def _split_character_region(text: str) -> tuple[str, str]:
+    """把含 `::character X: ... ::` 的 prompt 切成 (base 区, 分角色区)。
+
+    NAI 会把最后一个角色块闭合 `::` 之后的文本并入该角色框，所以画风后缀与质量词
+    必须落在 base 区，不能追加在整串末尾。
+    """
+    match = _CHARACTER_BLOCK_START_RE.search(text or "")
+    if match is None:
+        return text, ""
+    return text[:match.start()].rstrip(" ,"), text[match.start():].strip()
+
+
+def _compose_positive_with_character_blocks(
+    *,
+    prefix: str | list[str] | None,
+    positive: str | None,
+    suffix: str | list[str] | None,
+    quality: str = "",
+    legacy: bool,
+) -> str:
+    """按「prefix + base + suffix + quality + 分角色区」拼装正向 prompt。
+
+    只要 prompt 里出现 `::character X: ... ::`，画风后缀与质量词就必须插到首个
+    角色块之前：NAI 把最后一个角色块闭合 `::` 之后的内容归进该角色框，直接追加
+    在串尾会让质量词变成最后一个角色的 caption（实测 Character 3 尾部出现
+    `::,very aesthetic,masterpiece,no text`）。
+    """
+    joiner = _join_legacy_prompt_parts if legacy else _join_prompt_parts
+    text = str(positive or "")
+    base_region, character_region = _split_character_region(text)
+    if not character_region:
+        return joiner(prefix, text, suffix, quality)
+    return joiner(prefix, base_region, suffix, quality, character_region)
 
 
 def _dedupe_prompt_tags(values: Any) -> list[str]:
@@ -303,10 +366,11 @@ class NovelAIRenderAdapter:
                 artist_prompt=artist_prompt,
             )
         else:
-            positive = _join_prompt_parts(
-                artist_prompt["prompt_prefix"],
-                bundle.prompt.positive,
-                artist_prompt["prompt_suffix"],
+            positive = _compose_positive_with_character_blocks(
+                prefix=artist_prompt["prompt_prefix"],
+                positive=bundle.prompt.positive,
+                suffix=artist_prompt["prompt_suffix"],
+                legacy=False,
             )
             negative = _join_prompt_parts(
                 bundle.prompt.negative,
@@ -735,17 +799,13 @@ class NovelAIRenderAdapter:
             if flags.intersection({"not_quailty_prompts", "not_quality_prompts"})
             else LEGACY_NAI4_QUALITY_PROMPT
         )
-        parts: list[str | list[str] | None] = []
-        if artist_prompt["prompt_prefix"]:
-            parts.append(artist_prompt["prompt_prefix"])
-        parts.extend(
-            [
-                bundle.prompt.positive,
-                artist_prompt["prompt_suffix"],
-                quality_prompt,
-            ]
+        return _compose_positive_with_character_blocks(
+            prefix=artist_prompt["prompt_prefix"],
+            positive=bundle.prompt.positive,
+            suffix=artist_prompt["prompt_suffix"],
+            quality=quality_prompt,
+            legacy=True,
         )
-        return _join_legacy_prompt_parts(*parts)
 
     def _legacy_negative_prompt(
         self,
