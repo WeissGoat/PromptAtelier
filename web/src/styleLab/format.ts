@@ -39,6 +39,7 @@ export const verdictLabels: Record<CompareVerdict, string> = {
   match: "链路正常",
   drift: "参数一致，画面有差异",
   param_diff: "参数不一致",
+  reference: "与原图对照",
 };
 
 export const runStatusLabels: Record<RunStatus, string> = {

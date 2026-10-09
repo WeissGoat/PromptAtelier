@@ -13,7 +13,7 @@ export const defaultRegenSettings: RegenSettings = {
   overrides: {},
 };
 
-const MODELS = [
+export const MODELS = [
   "nai-diffusion-4-5-full",
   "nai-diffusion-4-5-curated",
   "nai-diffusion-4-full",
@@ -22,9 +22,9 @@ const MODELS = [
   "nai-diffusion-5-curated",
   "nai-diffusion-3",
 ];
-const SAMPLERS = ["k_euler", "k_euler_ancestral", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_2m_sde", "k_dpmpp_sde"];
-const SCHEDULES = ["native", "karras", "exponential", "polyexponential"];
-const SIZE_PRESETS: Array<[number, number]> = [
+export const SAMPLERS = ["k_euler", "k_euler_ancestral", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_2m_sde", "k_dpmpp_sde"];
+export const SCHEDULES = ["native", "karras", "exponential", "polyexponential"];
+export const SIZE_PRESETS: Array<[number, number]> = [
   [832, 1216],
   [1216, 832],
   [1024, 1024],
@@ -212,7 +212,7 @@ export function RegenPanel({ image, settings, submitting, error, onChange, onSub
   );
 }
 
-function Segmented({
+export function Segmented({
   options,
   value,
   onChange,

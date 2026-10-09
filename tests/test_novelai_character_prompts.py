@@ -8,6 +8,40 @@ from tags_machine_core.renderers import NovelAIRenderAdapter
 
 
 class NovelAICharacterPromptsTest(unittest.TestCase):
+    def test_explicit_character_prompts_keep_base_and_add_male_caption(self):
+        bundle = ScriptComposer().compose_full_prompt(prompt="1girl, 1boy, sitting, smooth shading")
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            seed=1,
+            model="nai-diffusion-4-5-full",
+            params={
+                "character_prompts": {
+                    "mode": "explicit",
+                    "captions": [{"positive": "girl, silver hair", "negative": "bad hands"}, {"positive": "  "}],
+                }
+            },
+        )
+        caption = request.params["v4_prompt"]["caption"]
+        self.assertEqual(caption["base_caption"], "1girl, 1boy, sitting, smooth shading")
+        self.assertEqual(
+            [item["char_caption"] for item in caption["char_captions"]], ["girl, silver hair", "boy, "]
+        )
+        self.assertEqual(
+            [item["char_caption"] for item in request.params["v4_negative_prompt"]["caption"]["char_captions"]],
+            ["bad hands", ""],
+        )
+        self.assertEqual(request.meta["character_prompts"], {"mode": "explicit", "count": 2, "male_caption_added": True})
+
+    def test_explicit_character_prompts_without_male_caption(self):
+        bundle = ScriptComposer().compose_full_prompt(prompt="1girl, 1boy")
+        request = NovelAIRenderAdapter().build_request(
+            bundle,
+            seed=1,
+            model="nai-diffusion-4-5-full",
+            params={"character_prompts": {"mode": "explicit", "captions": [{"positive": "girl"}], "add_male_caption": False}},
+        )
+        self.assertEqual(len(request.params["v4_prompt"]["caption"]["char_captions"]), 1)
+
     def test_v45_auto_character_prompts_move_character_tags_to_char_captions(self):
         homura = NodeDocument(
             kind="character",

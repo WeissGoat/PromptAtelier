@@ -59,10 +59,11 @@ function toggle<T>(values: T[], value: T): T[] {
 type FilterPanelProps = {
   images: ImageRecord[];
   filters: ImageFilters;
+  header?: React.ReactNode;
   onChange: (filters: ImageFilters) => void;
 };
 
-export function FilterPanel({ images, filters, onChange }: FilterPanelProps) {
+export function FilterPanel({ images, filters, header, onChange }: FilterPanelProps) {
   const models = useMemo(() => countBy(images, (image) => [image.model ?? ""]), [images]);
   const vibes = useMemo(() => countBy(images, (image) => [vibeKey(image)]), [images]);
   const flags = useMemo(() => countBy(images, (image) => image.flags), [images]);
@@ -70,6 +71,7 @@ export function FilterPanel({ images, filters, onChange }: FilterPanelProps) {
 
   return (
     <aside className="sl-filters" aria-label="筛选">
+      {header}
       <label className="sl-search">
         <Search size={14} aria-hidden="true" />
         <input

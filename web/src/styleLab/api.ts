@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiUrl, ApiClientError } from "../api/client";
+import { apiDelete, apiGet, apiPost, apiPut, apiUrl, ApiClientError } from "../api/client";
 
 export type PostInfo = {
   dir_name: string;
@@ -67,7 +67,7 @@ export type WorkspacePayload = {
   scanned_at: number | null;
   images: ImageRecord[];
   scan?: ScanStats | null;
-  pretranslate_job_id?: string | null;
+  analysis_job_id?: string | null;
 };
 
 export type ImageDetail = {
@@ -108,7 +108,7 @@ export type ParamDiff = {
   note?: string;
 };
 
-export type CompareVerdict = "match" | "drift" | "param_diff";
+export type CompareVerdict = "match" | "drift" | "param_diff" | "reference";
 
 export type CompareResult = {
   verdict: CompareVerdict;
@@ -135,12 +135,13 @@ export type RunItem = {
 
 export type StyleLabRun = {
   id: string;
-  kind: "regenerate";
+  kind: "regenerate" | "recipe";
+  recipe?: { id: string; version: number; name: string };
   status: RunStatus;
   created_at: number;
   finished_at: number | null;
   job_id: string | null;
-  source: { image_id: string; path: string; rel_path: string };
+  source: { image_id: string; path: string; rel_path: string } | null;
   settings: RegenSettings;
   expected_diff_keys: string[];
   warnings: string[];
@@ -245,3 +246,171 @@ export function translateTexts(texts: string[]): Promise<{ available: boolean; t
 }
 
 export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running"]);
+
+// ---- P2：分析、分组、配方、素材 ----
+
+export type TagCategory =
+  | "artist"
+  | "style"
+  | "quality"
+  | "meta"
+  | "count"
+  | "character"
+  | "appearance"
+  | "clothing"
+  | "action"
+  | "expression"
+  | "scene"
+  | "camera"
+  | "nsfw"
+  | "other";
+
+export type GroupChild = {
+  id: string;
+  variant: string;
+  vibe: string;
+  model: string | null;
+  post_count: number;
+  image_count: number;
+  date_from: string | null;
+  date_to: string | null;
+  image_ids: string[];
+};
+
+export type StyleGroup = {
+  id: string;
+  name: string;
+  signature: Array<{ tag: string; posts: number }>;
+  signature_kind: "artist" | "style";
+  post_count: number;
+  image_count: number;
+  date_from: string | null;
+  date_to: string | null;
+  image_ids: string[];
+  children: GroupChild[];
+};
+
+export type Analysis = {
+  categories: Record<string, TagCategory>;
+  classified: number;
+  total_tags: number;
+  job_id: string | null;
+  groups: StyleGroup[];
+};
+
+export type RecipeToken = { id: string; text: string; sep: string; origins: string[] };
+
+export type Recipe = {
+  schema: string;
+  id: string;
+  name: string;
+  version: number;
+  created_at: number;
+  updated_at: number;
+  source_image_id: string | null;
+  group_id: string | null;
+  stage: "split" | "edit";
+  locked: boolean;
+  prefix: RecipeToken[];
+  subject: RecipeToken[];
+  suffix: RecipeToken[];
+  dropped: RecipeToken[];
+  character: { enabled: boolean; tokens: RecipeToken[]; negative: RecipeToken[]; add_male_caption: boolean };
+  negative: RecipeToken[];
+  model: string | null;
+  params: Record<string, unknown>;
+  use_source_vibe: boolean;
+  flags: string[];
+  notes: string;
+};
+
+export type RecipeSummary = Pick<
+  Recipe,
+  "id" | "name" | "version" | "stage" | "locked" | "source_image_id" | "group_id" | "updated_at"
+>;
+
+export type RecipePreview = {
+  prompt: string;
+  negative_prompt: string;
+  char_captions: string[];
+  negative_char_captions: string[];
+  character_prompts: { mode: string; count?: number; male_caption_added?: boolean; status?: string } | null;
+  model: string | null;
+  size: { width: number; height: number } | null;
+  params: Record<string, unknown>;
+  vibe_count: number;
+};
+
+export type LibraryNodeSummary = { role: string; name: string; ref: string; relative?: string; has_preview?: boolean };
+export type LibraryNode = {
+  ref: string;
+  role: "character" | "action";
+  name: string;
+  sections: Array<{ name: string; tags: string[] }>;
+  has_preview: boolean;
+};
+
+const ws = (id: string) => `${base}/workspaces/${encodeURIComponent(id)}`;
+
+export function getAnalysis(workspaceId: string): Promise<Analysis> {
+  return apiGet(`${ws(workspaceId)}/analysis`);
+}
+
+export function listRecipes(workspaceId: string): Promise<{ recipes: RecipeSummary[] }> {
+  return apiGet(`${ws(workspaceId)}/recipes`);
+}
+
+export function createRecipe(
+  workspaceId: string,
+  imageId: string,
+  options: { name?: string; groupId?: string | null } = {},
+): Promise<{ recipe: Recipe }> {
+  return apiPost(`${ws(workspaceId)}/recipes`, { image_id: imageId, name: options.name, group_id: options.groupId });
+}
+
+export function getRecipe(
+  workspaceId: string,
+  recipeId: string,
+): Promise<{ recipe: Recipe; history: Array<{ version: number; updated_at: number }> }> {
+  return apiGet(`${ws(workspaceId)}/recipes/${encodeURIComponent(recipeId)}`);
+}
+
+export function saveRecipe(workspaceId: string, recipe: Recipe, baseVersion: number): Promise<{ recipe: Recipe }> {
+  return apiPut(`${ws(workspaceId)}/recipes/${encodeURIComponent(recipe.id)}`, { recipe, base_version: baseVersion });
+}
+
+export function deleteRecipe(workspaceId: string, recipeId: string): Promise<unknown> {
+  return apiDelete(`${ws(workspaceId)}/recipes/${encodeURIComponent(recipeId)}`);
+}
+
+export function previewRecipe(workspaceId: string, recipe: Recipe): Promise<{ preview: RecipePreview }> {
+  return apiPost(`${ws(workspaceId)}/recipes/preview`, { recipe });
+}
+
+export function generateRecipe(
+  workspaceId: string,
+  recipeId: string,
+  settings: RegenSettings,
+): Promise<{ run: StyleLabRun }> {
+  return apiPost(`${ws(workspaceId)}/recipes/${encodeURIComponent(recipeId)}/generate`, { settings });
+}
+
+export function searchLibrary(
+  role: "character" | "action",
+  query: string,
+  limit = 12,
+): Promise<{ nodes: LibraryNodeSummary[]; has_more: boolean }> {
+  const params = new URLSearchParams({ role, limit: String(limit) });
+  if (query.trim()) {
+    params.set("q", query.trim());
+  }
+  return apiGet(`/nodes?${params}`);
+}
+
+export function getLibraryNode(ref: string, role: "character" | "action"): Promise<LibraryNode> {
+  return apiGet(`${base}/library/node?${new URLSearchParams({ ref, role })}`);
+}
+
+export function analyzeWorkspace(workspaceId: string): Promise<{ job_id: string | null }> {
+  return apiPost(`${ws(workspaceId)}/analyze`, {});
+}

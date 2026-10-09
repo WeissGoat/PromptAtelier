@@ -138,7 +138,7 @@ class TranslateTagsTest(TestCase):
         )
 
     def test_translate_tries_fast_model_first(self):
-        session = _Session([_Response({"error": "blocked"}), _Response(_chat('{"translations": {"nude": "裸体"}}'))])
+        session = _Session([_Response({"error": "blocked"}), _Response(_chat('{"results": {"nude": "裸体"}}'))])
         client = LLMClient(LLMConfig(base_url="https://llm.test/v1", api_key="sk"), session=session, cache=self.cache)
         self.assertEqual(translate_tags(client, ["nude"]), {"nude": "裸体"})
         self.assertEqual(
@@ -149,7 +149,7 @@ class TranslateTagsTest(TestCase):
         def reply(body):
             tags = json.loads(body["messages"][1]["content"])
             self.assertEqual(tags, ["official art", "silver hair"])
-            return _Response(_chat(json.dumps({"translations": {"official art": "官方原画", "silver hair": "银发"}})))
+            return _Response(_chat(json.dumps({"results": {"official art": "官方原画", "silver hair": "银发"}})))
 
         session = _Session([reply])
         client = LLMClient(
@@ -166,7 +166,7 @@ class TranslateTagsTest(TestCase):
 
     def test_translate_skips_tags_missing_from_reply(self):
         session = _Session(
-            [_Response(_chat(json.dumps({"translations": {"a": "甲"}}))), _Response(_chat('{"translations": {}}'))]
+            [_Response(_chat(json.dumps({"results": {"a": "甲"}}))), _Response(_chat('{"results": {}}'))]
         )
         client = LLMClient(LLMConfig(base_url="https://llm.test/v1", api_key="sk"), session=session, cache=self.cache)
         self.assertEqual(translate_tags(client, ["a", "b"]), {"a": "甲"})

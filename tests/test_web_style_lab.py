@@ -32,7 +32,11 @@ class _TranslateSession:
     def post(self, url, json=None, headers=None, timeout=None):
         self.calls += 1
         tags = __import__("json").loads(json["messages"][1]["content"])
-        content = __import__("json").dumps({"translations": {tag: f"译:{tag}" for tag in tags}}, ensure_ascii=False)
+        if "分类" in json["messages"][0]["content"]:
+            results = {tag: "artist" if tag.startswith("foo") else "appearance" for tag in tags}
+        else:
+            results = {tag: f"译:{tag}" for tag in tags}
+        content = __import__("json").dumps({"results": results}, ensure_ascii=False)
         return _Response({"data": {"choices": [{"message": {"content": content}}]}})
 
 
@@ -165,9 +169,10 @@ class WebStyleLabTest(TestCase):
         bad = self.client.post("/api/style-lab/translate", json={"texts": "solo"})
         self.assertEqual(bad.status_code, 400)
 
-    def test_open_workspace_pretranslates_prompts_into_cache(self):
+    def test_open_workspace_analyzes_prompts_and_groups(self):
         data = self._open()
-        job_id = data["pretranslate_job_id"]
+        workspace_id = data["workspace"]["id"]
+        job_id = data["analysis_job_id"]
         self.assertTrue(job_id)
         self.app.state.job_manager.wait(job_id, timeout=10)
         job = self.client.get(f"/api/jobs/{job_id}").json()
@@ -176,6 +181,56 @@ class WebStyleLabTest(TestCase):
         response = self.client.post("/api/style-lab/translate", json={"texts": ["girl", "silver hair", "lowres"]})
         self.assertEqual(response.json()["translations"]["silver hair"], "译:silver hair")
         self.assertEqual(self.session.calls, calls)
+
+        analysis = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/analysis").json()
+        self.assertEqual(analysis["categories"]["foo"], "artist")
+        self.assertEqual(analysis["categories"]["1girl"], "count")
+        self.assertEqual(analysis["groups"][0]["name"], "foo")
+        self.assertEqual(analysis["groups"][0]["post_count"], 2)
+        self.assertEqual(self.session.calls, calls)
+
+    def test_recipe_create_preview_save_and_generate(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
+        recipe = self.client.post(base, json={"image_id": image_id, "name": "测试配方"}).json()["recipe"]
+        self.assertEqual(recipe["stage"], "split")
+
+        # 划分：artist:foo 作前缀，最后一个 token 作后缀，开启角色提示词。
+        recipe["prefix"], recipe["subject"], recipe["suffix"] = (
+            recipe["subject"][:1],
+            recipe["subject"][1:-1],
+            recipe["subject"][-1:],
+        )
+        recipe["stage"], recipe["locked"] = "edit", True
+        preview = self.client.post(f"{base}/preview", json={"recipe": recipe})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview = preview.json()["preview"]
+        self.assertTrue(preview["prompt"].startswith("artist:foo"))
+        # legacy 画风的拼接格式：逗号不带空格、末尾带逗号，和导出后正式出图一致。
+        self.assertEqual(preview["prompt"], "artist:foo,1girl,solo,sitting,")
+        self.assertEqual(preview["char_captions"], ["girl, silver hair"])
+        self.assertEqual(preview["character_prompts"]["mode"], "explicit")
+
+        saved = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["recipe"]["version"], 2)
+        conflict = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})
+        self.assertEqual(conflict.status_code, 409)
+
+        listed = self.client.get(base).json()["recipes"]
+        self.assertEqual([item["name"] for item in listed], ["测试配方"])
+        detail = self.client.get(f"{base}/{recipe['id']}").json()
+        self.assertEqual([item["version"] for item in detail["history"]], [1])
+
+        run = self.client.post(f"{base}/{recipe['id']}/generate", json={"settings": {"count": 1}})
+        self.assertEqual(run.status_code, 200, run.text)
+        run = self._wait_run(workspace_id, run.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["kind"], "recipe")
+        self.assertEqual(run["recipe"]["version"], 2)
+        self.assertEqual(run["items"][0]["compare"]["verdict"], "reference")
 
     def test_files_workspace_upload(self):
         created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "拖入"}).json()

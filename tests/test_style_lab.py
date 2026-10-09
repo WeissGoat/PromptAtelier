@@ -329,3 +329,135 @@ class StyleLabServiceTest(TestCase):
         reconciled = service.reconcile_run(self.info, self.store.get_run(self.info, run["id"]))
         self.assertEqual(reconciled["status"], "interrupted")
         self.assertEqual(reconciled["items"][0]["status"], "interrupted")
+
+
+class ClassifyAndGroupingTest(TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_rule_categories(self):
+        from tags_machine_core.style_lab.classify import rule_category
+
+        self.assertEqual(rule_category("1girl"), "count")
+        self.assertEqual(rule_category("solo"), "count")
+        self.assertEqual(rule_category("best quality"), "quality")
+        self.assertEqual(rule_category("16k resolution"), "quality")
+        self.assertEqual(rule_category("year 2023"), "meta")
+        self.assertIsNone(rule_category("silver hair"))
+
+    def test_token_category(self):
+        from tags_machine_core.style_lab.classify import token_category
+
+        categories = {"shirabi": "artist", "akipeko": "artist", "silver hair": "appearance", "smooth shading": "style"}
+        self.assertEqual(token_category("artist:[[unknown name]]", {}), "artist")
+        self.assertEqual(token_category("[[akipeko]]", categories), "artist")
+        self.assertEqual(token_category("1.2::silver hair, akipeko::", categories), "artist")
+        self.assertEqual(token_category("smooth shading", categories), "style")
+        self.assertIsNone(token_category("mystery", categories))
+
+    def _image(self, post_dir, name, prompt, **params):
+        path = write_nai_png(self.tmp / post_dir / name, prompt=prompt, v4_prompt=None, **params)
+        return build_image_record(path, base=self.tmp)
+
+    def test_groups_cluster_posts_by_artist_stack_then_vibe_and_model(self):
+        from tags_machine_core.style_lab.grouping import build_groups
+
+        categories = {"shirabi": "artist", "akipeko": "artist", "ame": "artist", "other artist": "artist", "silver hair": "appearance"}
+        images = [
+            self._image("2026-01-01_1_a", "1.png", "shirabi, [[akipeko]], 1girl, silver hair"),
+            self._image("2026-01-01_1_a", "2.png", "shirabi, [[akipeko]], 1girl"),
+            self._image("2026-01-02_2_b", "1.png", "shirabi, [[akipeko]], ame, 1girl"),
+            self._image("2026-01-03_3_c", "1.png", "artist:other artist, 1girl", reference_image_multiple=["AAAA"], reference_strength_multiple=[0.5]),
+            self._image("2026-01-04_4_d", "1.png", "1girl, silver hair"),
+        ]
+        groups = build_groups(images, categories)
+        self.assertEqual([g["id"] for g in groups], ["g1", "g2", "unassigned"])
+        main = groups[0]
+        self.assertEqual((main["post_count"], main["image_count"]), (2, 3))
+        self.assertTrue(main["name"].startswith("shirabi · akipeko") or main["name"].startswith("akipeko · shirabi"))
+        self.assertEqual(main["date_from"], "2026-01-01")
+        self.assertEqual(main["children"][0]["vibe"], "no_vibe")
+        self.assertTrue(groups[1]["children"][0]["vibe"].startswith("vibe_"))
+        self.assertEqual(groups[2]["name"], "未识别画风栈")
+
+    def test_stable_artist_variants_split_inside_a_family(self):
+        from tags_machine_core.style_lab.grouping import build_groups
+
+        categories = {"a": "artist", "b": "artist", "c": "artist", "azuuru": "artist", "once": "artist"}
+        images = []
+        for index in range(4):
+            images.append(self._image(f"2026-01-0{index + 1}_{index}_p", "1.png", "artist:[[a, b, c]], 1girl"))
+        for index in range(3):
+            images.append(self._image(f"2026-02-0{index + 1}_{index + 10}_p", "1.png", "artist:[[a, b, c, azuuru]], 1girl"))
+        images.append(self._image("2026-03-01_99_p", "1.png", "artist:[[a, b, c, once]], 1girl"))
+        groups = build_groups(images, categories)
+        self.assertEqual(len(groups), 1)
+        variants = [(child["variant"], child["post_count"]) for child in groups[0]["children"]]
+        self.assertEqual(variants, [("基础栈", 5), ("+azuuru", 3)])
+
+
+class RecipeTest(TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self.temp_dir.name)
+        path = write_nai_png(
+            self.tmp / "2026-01-01_1_t" / "a.png",
+            prompt="shirabi|[[akipeko]], 1girl, sitting, smooth shading",
+            v4_prompt=None,
+            uc="lowres, bad hands",
+            v4_negative_prompt=None,
+            reference_image_multiple=["VIBEDATA"],
+            reference_strength_multiple=[0.6],
+            reference_information_extracted_multiple=[1.0],
+        )
+        self.record = build_image_record(path, base=self.tmp)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_recipe_from_image_starts_in_split_stage(self):
+        from tags_machine_core.style_lab.recipe import recipe_from_image, tokens_text
+
+        recipe = recipe_from_image(self.record)
+        self.assertEqual(recipe.stage, "split")
+        self.assertEqual([t.text for t in recipe.subject], ["shirabi", "[[akipeko]]", "1girl", "sitting", "smooth shading"])
+        self.assertEqual(tokens_text(recipe.subject), "shirabi|[[akipeko]], 1girl, sitting, smooth shading")
+        self.assertEqual(tokens_text(recipe.negative), "lowres, bad hands")
+        self.assertEqual(recipe.params["steps"], 28)
+        self.assertNotIn("width", recipe.params)
+        self.assertNotIn("seed", recipe.params)
+        self.assertTrue(recipe.use_source_vibe)
+        self.assertIn("not_quailty_prompts", recipe.flags)
+
+    def test_artist_node_matches_tags_txt_shape(self):
+        from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
+
+        recipe = recipe_from_image(self.record)
+        recipe.prefix, recipe.subject, recipe.suffix = recipe.subject[:2], recipe.subject[2:4], recipe.subject[4:]
+        node = artist_node(recipe, source_path=self.record.path)["renderers"]["novelai"]
+        self.assertEqual(node["prompt_prefix"], ["shirabi|[[akipeko]]"])
+        self.assertEqual(node["prompt_suffix"], ["smooth shading"])
+        self.assertEqual(node["negative_prompt"], ["lowres, bad hands"])
+        self.assertEqual(node["params"]["reference_image_multiple"], ["VIBEDATA"])
+        self.assertEqual(node["params"]["model"], "nai-diffusion-4-5-full")
+        recipe.use_source_vibe = False
+        node = artist_node(recipe, source_path=self.record.path)["renderers"]["novelai"]
+        self.assertNotIn("reference_image_multiple", node["params"])
+        self.assertNotIn("reference_strength_multiple", node["params"])
+
+    def test_store_versions_and_conflicts(self):
+        from tags_machine_core.style_lab.recipe import RecipeConflictError, RecipeStore, recipe_from_image
+
+        store = RecipeStore(self.tmp / ".stylelab")
+        recipe = store.create(recipe_from_image(self.record, name="测试"))
+        saved = store.save(recipe.model_copy(update={"name": "改名"}), base_version=1)
+        self.assertEqual((saved.version, saved.name), (2, "改名"))
+        with self.assertRaises(RecipeConflictError):
+            store.save(recipe, base_version=1)
+        self.assertEqual(store.get_version(recipe.id, 1).name, "测试")
+        self.assertEqual([item["version"] for item in store.history(recipe.id)], [1])
+        self.assertEqual([item.id for item in store.list()], [recipe.id])

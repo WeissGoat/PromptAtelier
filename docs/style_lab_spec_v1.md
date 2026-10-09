@@ -117,7 +117,7 @@ llm:
 
 - 输入 tag 列表，输出 `{tag: 中文}`。查询前去掉权重符号（`{}`、`[]`、`1.2::x::`），`{{official art}}` 和 `official art` 共用一条翻译。
 - 每个 tag 单独缓存（与模型无关），先查缓存，只把未命中的按每批 40 个、最多 4 批并发发给 LLM。
-- 打开或重扫工作区后，后台任务把全部提示词、负面和角色提示词预翻译进缓存（`POST /workspaces/{id}/pretranslate` 也可手动触发）。
+- 打开或重扫工作区后，后台分析任务把全部提示词、负面和角色提示词的 token 翻译进缓存，并给正向 tag 分类（见 P2）。
 - 画师名标为"画师"，不翻译（P2 接入画师名单后生效，P1 由 LLM 判断）。
 
 ## Web API（P1）
@@ -129,7 +129,8 @@ llm:
 | GET | `/api/style-lab/workspaces/{id}` | 工作区设置 + 图片记录列表 |
 | POST | `/api/style-lab/workspaces/{id}/scan` | 增量重扫 |
 | POST | `/api/style-lab/workspaces/{id}/upload` | 图片组工作区上传图片（multipart `files`） |
-| POST | `/api/style-lab/workspaces/{id}/pretranslate` | 后台预翻译，返回 job_id |
+| POST | `/api/style-lab/workspaces/{id}/analyze` | 后台分析（翻译 + tag 分类），返回 job_id；打开、重扫、上传后自动触发 |
+| GET | `/api/style-lab/workspaces/{id}/analysis` | tag 类别和自动分组（只读缓存，不调用 LLM） |
 | GET | `/api/style-lab/workspaces/{id}/images/{image_id}` | 单张图片完整元数据（含原始参数，vibe 图片数据截断） |
 | GET | `/api/style-lab/workspaces/{id}/file` | 读取图片：`image_id` 或 `path`（只允许工作区图片和 runs 目录），`size>0` 返回缩略图 |
 | POST | `/api/style-lab/workspaces/{id}/regenerate` | 原参重生：`{"image_id": "...", "settings": {...}}`，返回 run 记录（含 job_id） |
@@ -138,12 +139,90 @@ llm:
 | GET | `/api/style-lab/llm/status` | LLM 是否已配置、模型名 |
 | POST | `/api/style-lab/translate` | `{"texts": [...]}` -> `{"translations": {...}}` |
 
-## 已确定的后续约束（P2+）
+## P2：分词、分组、配方编辑
 
-- 先只支持单角色：一条 base caption + 一条角色提示词。
-- 配方编辑器从原始提示词开始：放两条分界线切出前缀 / 主体 / 后缀，或按 1/2/3/X 刷选，或采用"同组词频 + LLM"建议，然后锁定画风。
-- 锁定只阻止批量操作（恢复原图主体、替换角色、清空主体）改动画风区；主动把主体 token 划为画风（S / Shift+S）始终允许。
-- 每个 token 记录来源（原图、角色卡、动作卡、手打、LLM），素材卡片的"移除"只删只属于这张卡的 token。
-- 角色提示词区同时显示原图的 `char_captions`、可编辑的 #1、以及渲染器预测会生成的角色提示词（含根据 `1boy` 等计数标签自动添加的），不一致时标黄并写明原因。
-- 分词器必须无损：没改动的 token 重新拼回去要和原文逐字节相同，包括 `|` 分隔符和权重语法。
-- 导出的 `tags.txt` 沿用现有格式：第 1 行前缀，第 2 行 `,`，第 3 行后缀，`gen_json` 不含宽高。
+### 无损分词
+
+后端 `style_lab/tokens.py` 和前端 `web/src/styleLab/tokens.ts` 是同一套规则，共用 `tests/fixtures/prompt_tokens.json`：
+
+- 按逗号（含全角）、竖线、换行切开；
+- 成对的 `{}` `[]` `()` 内部不切，`artist:[[a, b]]` 是一个 token；没配对的括号当普通字符；
+- `1.2::a, b::` 权重组整体是一个 token，支持嵌套（`数字::` 开、单独的 `::` 关）；没闭合的权重不成组；
+- 每个 token 记住前面的原始分隔符，原样拼回去逐字节相同。用 artist_parse 下 4002 段真实提示词验证过往返无差异。
+- `inner_tags` 把权重组、括号组拆成普通 tag（去掉权重、`artist:` 前缀、SD 风格的 `:0.5`），用于统计、分类和翻译。
+
+### tag 分类
+
+- 类别：画风侧 `artist` `style` `quality` `meta`；内容侧 `count` `character` `appearance` `clothing` `action` `expression` `scene` `camera` `nsfw`；以及 `other`。
+- 规则先处理确定的（人数、质量词、年份、`no text` 等），其余用 LLM（`fast -> text -> fallback`），按 tag 缓存。
+- token 的类别：`artist:` 前缀算画师；组里有画师算画师；否则取多数。
+
+### 自动分组
+
+一个投稿算一个单位：
+
+1. 每个投稿的签名 = 画师 tag 集合（没有画师 tag 时用风格 tag）。
+2. 按签名 Jaccard 相似度 >= 0.5 聚成画风家族。
+3. 家族内按"相对共有基础栈多出的 tag"拆稳定变体：至少 max(2, 10%) 个投稿才单独成组，零星变化并到最接近的变体。
+4. 再按 vibe 状态（`no_vibe` / `vibe_<hash>` / `missing`）和模型细分。
+
+实测 105845157 的 50 个投稿：一个家族，拆成"基础栈 28"和"+azuuru 22"，和已有的 `Crisp_Manga_Ink` / `Azuuru_Manga_Ink` 两个预设一致。
+
+### 配方
+
+配方存在 `.stylelab/recipes/<id>.json`，每次保存版本号加一，旧版本在 `<id>.history/v<n>.json`；保存时带 `base_version`，版本不一致返回 409。
+
+| 字段 | 含义 |
+| --- | --- |
+| `stage` | `split`（划分中）/ `edit`（已锁定画风，编辑主体） |
+| `locked` | 锁定时画风区不能改文字、不能回到划分；主动移入移出 token 始终允许 |
+| `prefix` / `suffix` | 画风，导出到 tags.txt 第 1、3 行 |
+| `subject` / `character` | 只用于测试出图；`character` 是单角色的正向、负向提示词 |
+| `dropped` | 不进提示词的 token |
+| `negative` | 画风负面，导出为 `origin_uc` |
+| `model` / `params` | 画风参数（导出到 `gen_json`，不含宽高、种子、张数） |
+| `use_source_vibe` | 出图时带上原图内嵌的 vibe 图 |
+| `flags` | 默认带 `not_quailty_prompts`，避免 legacy 画风自动追加项目质量词 |
+
+每个 token 记录来源：`source`、`character:<ref>`、`action:<ref>`、`manual`。素材卡片按来源整体加入或移除；同一 tag 已在主体里时只多记一个来源，不重复添加。带数字权重的 token（如 `0.0::loli::`）不和无权重的同名 tag 合并。
+
+### 划分建议
+
+- 画风类 tag：画师总是画风，其余同组出现率 >= 50% 才算；
+- 同组出现率 >= 80% 的场景、其他类 tag 算画风调味；
+- 高频的镜头、外貌、作品/角色名标为"待判断"（如 `shallow depth of field` 是画风，`face focus` 是内容），不自动划分；
+- 人数、服装、动作、表情、NSFW 永远是主体；
+- 画风 token 后面的主体 token 比前面多就进前缀，否则进后缀。
+
+### 预览与出图
+
+配方拼成一个和导出后读回来完全一致的 legacy artist 节点（`prompt_prefix` / `prompt_suffix` / `negative_prompt` / `params` / `flags`），主体作为完整提示词，走正式的 compose -> render 链路。
+
+角色提示词用渲染器新增的显式模式：
+
+```json
+{"character_prompts": {"mode": "explicit", "captions": [{"positive": "...", "negative": "..."}], "add_male_caption": true}}
+```
+
+base 提示词不动；`add_male_caption` 开着时，和 auto 模式一样按主体里的 `1boy` 等计数补男角色提示词。之前考虑过用 `::character A: ...::` 块语法，但块后面的画风后缀会被一起吞进角色提示词，所以改为显式模式。
+
+配方出图的 run 记为 `kind: "recipe"`，带配方 id 和版本；和原图对照只看相似度和提示词差异，结论记为 `reference`。
+
+### Web API（P2）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/style-lab/workspaces/{id}/recipes` | 配方列表 |
+| POST | `/api/style-lab/workspaces/{id}/recipes` | 从图片新建：`{"image_id", "name"?, "group_id"?}` |
+| GET | `/api/style-lab/workspaces/{id}/recipes/{rid}` | 配方 + 历史版本列表 |
+| PUT | `/api/style-lab/workspaces/{id}/recipes/{rid}` | 保存：`{"recipe", "base_version"}`，冲突返回 409 |
+| DELETE | `/api/style-lab/workspaces/{id}/recipes/{rid}` | 删除 |
+| GET | `/api/style-lab/workspaces/{id}/recipes/{rid}/versions/{v}` | 读历史版本 |
+| POST | `/api/style-lab/workspaces/{id}/recipes/preview` | 预览未保存的草稿：实际发送的提示词、负面、角色提示词 |
+| POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/generate` | 用已保存的配方出图，设置同原参重生 |
+| GET | `/api/style-lab/library/node?ref=&role=` | 素材卡片：节点 tag 按部位分组，下划线换成空格 |
+
+## 后续（P3+）
+
+- 导出的 `tags.txt` 沿用现有格式：第 1 行前缀，第 2 行 `,`，第 3 行后缀，`gen_json` 不含宽高；导出前预览 diff，同名时建并列版本。
+- 回归对照、泛化矩阵、替换角色、消融测试、配方版本 diff、视觉差异诊断。

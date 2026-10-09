@@ -240,6 +240,44 @@ Artist 1 × Character 1 × Action 1 × Behavior 2 × Groups 1 = 2
 - 对照支持并排和滑块两种看法。结果保存在 `<文件夹>/.stylelab/runs/<run_id>/`，切换图片后可以回看历史记录。
 - 常见的 NovelAI 错误（401 token 失效、402、429 限流）会直接给出处理办法，原始错误在鼠标悬停提示里。
 
+### 分组
+
+左栏顶部是自动分组：按投稿把画师栈相近的归成一个画风家族，家族内再按稳定的画师变体（如"+azuuru"）、vibe 和模型细分，数字是投稿数。点分组只看这组的图片。
+
+分组依赖 tag 分类，由打开工作区后的后台分析任务完成，顶栏显示进度，分析过程中分组会逐步变准。没有配置 LLM 时只能识别 `artist:` 前缀的画师。
+
+### 配方
+
+在右栏点 `从这张图新建配方` 进入配方工作区：左边是原图和所属分组的画风栈，中间是配方，右边是素材卡片。
+
+划分画风：
+
+- 整段原始提示词按原顺序平铺。点 token 之间的缝放分界线（先放前缀/主体线，再放主体/后缀线）。
+- 或者选中 token（Shift 连选、Ctrl 多选）后按 `1` 前缀、`2` 主体、`3` 后缀、`X` 丢弃。
+- `采用建议` 按 tag 类别和同组出现率自动划分；琥珀色虚线框是同组高频、但拿不准是画风还是内容的 token（如镜头词），需要自己判断。
+- 鼠标悬停 token 可以看类别和同组出现率。划好后点 `锁定画风`。
+
+编辑：
+
+- 紫色是画风（导出到 artist），青色是主体（只用于测试）。选中 token 后按 `1`/`S` 进前缀、`2` 回主体、`3`/`Shift+S` 进后缀、`X` 丢弃；也可以直接拖动跨区或调顺序。
+- 主体可以切到文本视图直接改：文字没变的 tag 保留原来的来源，新写的记为手打。`恢复原图主体` 只换主体，画风区不动。
+- 锁定时画风区不能改文字；点 `解锁` 后可以文本编辑画风区，或回到划分视图重新划分。
+- 角色提示词（单角色）可以用原图的 #1、手写，或从角色卡片填入；下面显示实际发送的角色提示词，渲染器按 `1boy` 等自动补的男角色会标出来。
+- `实际发送` 显示的是正式出图链路算出的提示词和负面，和导出后的 artist 出图完全一致。
+- 画风参数里可以改模型、采样器、步数、CFG 等，选择是否带原图的 vibe，以及是否追加项目默认质量词（复刻时默认关）。
+
+素材卡片：
+
+- 搜索角色或动作，卡片按部位分组显示 tag。点单个 tag 加入或移出主体，`全部` 一次加入，`移除` 只删这张卡加进来的 tag（主体里原有的同名 tag 保留）。
+- 角色卡可以 `作角色提示词`。`已加入` 页签汇总主体里来自各张卡片的 tag。
+- 来自角色卡的 tag 左边是橙色条，来自动作卡的是蓝色条。
+
+保存与出图：
+
+- `Ctrl+S` 保存，每次保存版本号加一。
+- 没保存的修改会备份在浏览器里，刷新或误关页面后重新打开会提示恢复。
+- `生成` 会先保存再出图，结果和原图并排或滑块对照，记录配方版本。
+
 ## Batch
 
 Batch 页继续使用现有 BatchPlanner 和 BatchExecutor。可以编辑 inline batch 参数，也可以指定 Batch YAML；`Plan Preview` 与真实运行使用同一套规划链路。
@@ -258,7 +296,7 @@ Batch 结果还包含 `run_dir`、`output_dir`、任务状态、`prompt_bundle.j
 
 ```powershell
 uv run python -m unittest tests.test_web_app tests.test_web_jobs tests.test_web_nodes tests.test_web_compose tests.test_web_results tests.test_web_batch tests.test_novelai_artist_dedup -v
-uv run python -m pytest tests/test_style_lab.py tests/test_web_style_lab.py tests/test_llm_client.py -q
+uv run python -m pytest tests/test_style_lab.py tests/test_web_style_lab.py tests/test_llm_client.py tests/test_prompt_tokens.py tests/test_novelai_character_prompts.py -q
 
 cd web
 npm run test

@@ -1,21 +1,14 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
 
-from pydantic import BaseModel, Field
-
-from .cache import cache_key
-from .client import LLMClient, LLMError
+from .client import LLMClient
+from .tag_tasks import annotate_tags
 
 
 TRANSLATE_TASK = "translate_tag"
 TRANSLATE_VERSION = "1"
-# DeepSeek 一次翻 100 个要半分钟以上；小批并发，首批结果能更快回到界面。
-TRANSLATE_BATCH_SIZE = 40
-TRANSLATE_CONCURRENCY = 4
 
 _LEADING_WEIGHT_RE = re.compile(r"^-?\d+(?:\.\d+)?::")
 _WRAPPERS = "{}[]"
@@ -25,12 +18,8 @@ _SYSTEM_PROMPT = (
     "译文要简短（通常 2 到 8 个字），按画面含义翻译，不要解释。"
     "画师名译为“画师”；角色名译为“角色:中文名”，不知道中文名就保留原名；作品名译为“作品:中文名”。"
     "自然语言句子整句翻译。"
-    '只输出 JSON：{"translations": {"原文": "译文"}}，键必须和输入完全一致。'
+    '只输出 JSON：{"results": {"原文": "译文"}}，键必须和输入完全一致。'
 )
-
-
-class _TranslationReply(BaseModel):
-    translations: dict[str, str] = Field(default_factory=dict)
 
 
 def normalize_tag(tag: str) -> str:
@@ -69,52 +58,17 @@ def translate_tags(client: LLMClient, tags: Iterable[str]) -> dict[str, str]:
         normalized = normalize_tag(tag)
         if normalized:
             originals.setdefault(normalized, []).append(tag)
-    if not originals:
-        return {}
-
-    keys = {normalized: cache_key(TRANSLATE_TASK, TRANSLATE_VERSION, normalized) for normalized in originals}
-    cached = client.cache.get_many(list(keys.values()))
-    resolved: dict[str, str] = {
-        normalized: str(cached[key]) for normalized, key in keys.items() if key in cached
-    }
-
-    missing = [normalized for normalized in originals if normalized not in resolved]
-    if missing and client.available:
-        batches = [missing[start : start + TRANSLATE_BATCH_SIZE] for start in range(0, len(missing), TRANSLATE_BATCH_SIZE)]
-        with ThreadPoolExecutor(max_workers=min(TRANSLATE_CONCURRENCY, len(batches))) as pool:
-            for batch, reply in zip(batches, pool.map(lambda batch: _translate_batch(client, batch), batches)):
-                if reply is None:
-                    continue
-                fresh: list[tuple[str, str]] = []
-                for key, value in reply.translations.items():
-                    normalized = normalize_tag(key)
-                    if normalized in originals and normalized not in resolved and str(value).strip():
-                        resolved[normalized] = str(value).strip()
-                        fresh.append((keys[normalized], resolved[normalized]))
-                if fresh:
-                    client.cache.set_many(fresh, task=TRANSLATE_TASK, model=None)
-
+    resolved = annotate_tags(
+        client,
+        originals,
+        task=TRANSLATE_TASK,
+        version=TRANSLATE_VERSION,
+        system_prompt=_SYSTEM_PROMPT,
+        normalize=normalize_tag,
+    )
     return {
         original: resolved[normalized]
         for normalized, items in originals.items()
         if normalized in resolved
         for original in items
     }
-
-
-def _translate_batch(client: LLMClient, batch: list[str]) -> _TranslationReply | None:
-    try:
-        return client.run_json(
-            task=TRANSLATE_TASK,
-            version=TRANSLATE_VERSION,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(batch, ensure_ascii=False)},
-            ],
-            schema=_TranslationReply,
-            cache_input=batch,
-            fast=True,
-            use_cache=False,
-        )
-    except LLMError:
-        return None

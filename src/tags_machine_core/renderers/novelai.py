@@ -482,7 +482,7 @@ class NovelAIRenderAdapter:
         dict[str, Any] | None,
     ]:
         config = params.get("character_prompts")
-        if not isinstance(config, dict) or config.get("mode") != "auto":
+        if not isinstance(config, dict) or config.get("mode") not in {"auto", "explicit"}:
             return positive, negative, [], [], None
         if not self._supports_character_prompts(model):
             return (
@@ -490,8 +490,10 @@ class NovelAIRenderAdapter:
                 negative,
                 [],
                 [],
-                {"mode": "auto", "status": "unsupported_model"},
+                {"mode": config["mode"], "status": "unsupported_model"},
             )
+        if config["mode"] == "explicit":
+            return self._explicit_character_prompts(config, positive=positive, negative=negative, model=model)
         materials = self._character_prompt_materials(bundle, resolved_nodes)
         if not materials:
             return (
@@ -670,6 +672,55 @@ class NovelAIRenderAdapter:
                 "removed_negative_tags": removed_negative_tags,
                 "male_caption_added": male_caption_added,
             },
+        )
+
+    def _explicit_character_prompts(
+        self,
+        config: dict[str, Any],
+        *,
+        positive: str,
+        negative: str,
+        model: str | None,
+    ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+        """直接使用调用方给的角色提示词（Style Lab 配方），base 提示词不动。
+
+        config["captions"] 是 [{"positive": ..., "negative": ...}]；和 auto 模式一样，
+        add_male_caption 开着时按 base 里的 1boy 等计数补男角色提示词。
+        """
+        model_max_characters = 32 if str(model or "").startswith("nai-diffusion-5") else 6
+        captions = [
+            item
+            for item in config.get("captions") or []
+            if isinstance(item, dict) and str(item.get("positive") or "").strip()
+        ][:model_max_characters]
+        char_captions = [
+            {"char_caption": str(item["positive"]).strip(), "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS)}
+            for item in captions
+        ]
+        negative_char_captions = [
+            {"char_caption": str(item.get("negative") or "").strip(), "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS)}
+            for item in captions
+        ]
+        male_caption_added = False
+        male_count = _extract_male_character_count(_legacy_prompt_tags(positive))
+        if (
+            char_captions
+            and _enabled_config(config.get("add_male_caption"), default=True)
+            and male_count > 0
+            and not _contains_male_character([caption["char_caption"] for caption in char_captions])
+        ):
+            for _ in range(min(male_count, model_max_characters - len(char_captions))):
+                char_captions.append(
+                    {"char_caption": MALE_CHARACTER_CAPTION, "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS)}
+                )
+                negative_char_captions.append({"char_caption": "", "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS)})
+                male_caption_added = True
+        return (
+            positive,
+            negative,
+            char_captions,
+            negative_char_captions,
+            {"mode": "explicit", "count": len(char_captions), "male_caption_added": male_caption_added},
         )
 
     def _supports_character_prompts(self, model: str | None) -> bool:

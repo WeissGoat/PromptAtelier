@@ -12,6 +12,8 @@ from pydantic import ValidationError
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.llm import LLMError, translate_tags
 from tags_machine_core.style_lab import RegenSettings, StyleLabService, WorkspaceInfo, WorkspaceStore
+from tags_machine_core.style_lab.recipe import Recipe, RecipeConflictError
+from tags_machine_core.style_lab.tokens import tokenize
 from tags_machine_core.style_lab.metadata import IMAGE_SUFFIXES, read_source_parameters
 from tags_machine_core.web.errors import ApiError
 
@@ -36,10 +38,10 @@ def _workspace(request: Request, workspace_id: str) -> WorkspaceInfo:
         raise ApiError(code="workspace_not_found", message=f"Workspace not found: {workspace_id}", status_code=404) from exc
 
 
-def _pretranslate(request: Request, info: WorkspaceInfo) -> str | None:
-    # 翻译只是增强，起不来不影响打开工作区。
+def _analyze(request: Request, info: WorkspaceInfo) -> str | None:
+    # 翻译和分类只是增强，起不来不影响打开工作区。
     try:
-        return _service(request).start_pretranslate(info)
+        return _service(request).start_analysis(info)
     except Exception:  # noqa: BLE001
         return None
 
@@ -81,7 +83,7 @@ def open_workspace(data: dict[str, Any], request: Request) -> dict[str, Any]:
     stats = None
     if index.scanned_at is None or data.get("rescan"):
         _, stats = store.scan(info)
-    return {**_workspace_payload(store, info), "scan": stats, "pretranslate_job_id": _pretranslate(request, info)}
+    return {**_workspace_payload(store, info), "scan": stats, "analysis_job_id": _analyze(request, info)}
 
 
 @router.get("/workspaces/{workspace_id}")
@@ -94,13 +96,19 @@ def scan_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
     store = _store(request)
     info = _workspace(request, workspace_id)
     _, stats = store.scan(info)
-    return {**_workspace_payload(store, info), "scan": stats, "pretranslate_job_id": _pretranslate(request, info)}
+    return {**_workspace_payload(store, info), "scan": stats, "analysis_job_id": _analyze(request, info)}
 
 
-@router.post("/workspaces/{workspace_id}/pretranslate")
-def pretranslate(workspace_id: str, request: Request) -> dict[str, Any]:
+@router.post("/workspaces/{workspace_id}/analyze")
+def analyze(workspace_id: str, request: Request) -> dict[str, Any]:
     info = _workspace(request, workspace_id)
-    return {"job_id": _service(request).start_pretranslate(info)}
+    return {"job_id": _service(request).start_analysis(info)}
+
+
+@router.get("/workspaces/{workspace_id}/analysis")
+def get_analysis(workspace_id: str, request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    return {"schema": "tags-machine-core.web.style-lab-analysis/v1", **_service(request).analysis(info)}
 
 
 @router.post("/workspaces/{workspace_id}/upload")
@@ -132,7 +140,7 @@ async def upload_images(workspace_id: str, request: Request) -> dict[str, Any]:
         **_workspace_payload(store, info),
         "scan": stats,
         "uploaded": saved,
-        "pretranslate_job_id": _pretranslate(request, info),
+        "analysis_job_id": _analyze(request, info),
     }
 
 
@@ -219,6 +227,157 @@ def get_run(workspace_id: str, run_id: str, request: Request) -> dict[str, Any]:
     except KeyError as exc:
         raise ApiError(code="run_not_found", message=f"Run not found: {run_id}", status_code=404) from exc
     return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": _service(request).reconcile_run(info, run)}
+
+
+def _recipe_summary(recipe: Recipe) -> dict[str, Any]:
+    return {
+        "id": recipe.id,
+        "name": recipe.name,
+        "version": recipe.version,
+        "stage": recipe.stage,
+        "locked": recipe.locked,
+        "source_image_id": recipe.source_image_id,
+        "group_id": recipe.group_id,
+        "updated_at": recipe.updated_at,
+    }
+
+
+def _get_recipe(request: Request, info: WorkspaceInfo, recipe_id: str) -> Recipe:
+    try:
+        return _service(request).recipes(info).get(recipe_id)
+    except KeyError as exc:
+        raise ApiError(code="recipe_not_found", message=f"Recipe not found: {recipe_id}", status_code=404) from exc
+
+
+def _parse_recipe(data: Any) -> Recipe:
+    try:
+        return Recipe.model_validate(data)
+    except ValidationError as exc:
+        raise ApiError(code="invalid_recipe", message=str(exc), status_code=400) from exc
+
+
+@router.get("/workspaces/{workspace_id}/recipes")
+def list_recipes(workspace_id: str, request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    return {"recipes": [_recipe_summary(recipe) for recipe in _service(request).recipes(info).list()]}
+
+
+@router.post("/workspaces/{workspace_id}/recipes")
+def create_recipe(workspace_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    try:
+        recipe = _service(request).create_recipe(
+            info,
+            str(data.get("image_id") or ""),
+            name=str(data.get("name") or "").strip() or None,
+            group_id=str(data.get("group_id") or "").strip() or None,
+        )
+    except KeyError as exc:
+        raise ApiError(code="image_not_found", message=f"Image not found: {data.get('image_id')}", status_code=404) from exc
+    except ValueError as exc:
+        raise ApiError(code="recipe_create_failed", message=str(exc), status_code=400) from exc
+    return {"recipe": recipe.model_dump(mode="json", by_alias=True)}
+
+
+@router.post("/workspaces/{workspace_id}/recipes/preview")
+def preview_recipe(workspace_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    """预览未保存的草稿：返回实际会发给 NovelAI 的提示词、负面和角色提示词。"""
+    info = _workspace(request, workspace_id)
+    recipe = _parse_recipe(data.get("recipe"))
+    try:
+        return {"preview": _service(request).preview_recipe(info, recipe)}
+    except (ValueError, ValidationError, FileNotFoundError) as exc:
+        raise ApiError(code="recipe_preview_failed", message=str(exc), status_code=400) from exc
+
+
+@router.get("/workspaces/{workspace_id}/recipes/{recipe_id}")
+def get_recipe(workspace_id: str, recipe_id: str, request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    recipe = _get_recipe(request, info, recipe_id)
+    return {
+        "recipe": recipe.model_dump(mode="json", by_alias=True),
+        "history": _service(request).recipes(info).history(recipe_id),
+    }
+
+
+@router.put("/workspaces/{workspace_id}/recipes/{recipe_id}")
+def save_recipe(workspace_id: str, recipe_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    recipe = _parse_recipe(data.get("recipe"))
+    if recipe.id != recipe_id:
+        raise ApiError(code="invalid_recipe", message="Recipe id does not match the URL", status_code=400)
+    try:
+        saved = _service(request).recipes(info).save(recipe, base_version=int(data.get("base_version") or 0))
+    except RecipeConflictError as exc:
+        raise ApiError(code="recipe_conflict", message=str(exc), status_code=409) from exc
+    return {"recipe": saved.model_dump(mode="json", by_alias=True)}
+
+
+@router.delete("/workspaces/{workspace_id}/recipes/{recipe_id}")
+def delete_recipe(workspace_id: str, recipe_id: str, request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    try:
+        _service(request).recipes(info).delete(recipe_id)
+    except KeyError as exc:
+        raise ApiError(code="recipe_not_found", message=f"Recipe not found: {recipe_id}", status_code=404) from exc
+    return {"deleted": recipe_id}
+
+
+@router.get("/workspaces/{workspace_id}/recipes/{recipe_id}/versions/{version}")
+def get_recipe_version(workspace_id: str, recipe_id: str, version: int, request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    try:
+        recipe = _service(request).recipes(info).get_version(recipe_id, version)
+    except KeyError as exc:
+        raise ApiError(code="recipe_not_found", message=str(exc), status_code=404) from exc
+    return {"recipe": recipe.model_dump(mode="json", by_alias=True)}
+
+
+@router.post("/workspaces/{workspace_id}/recipes/{recipe_id}/generate")
+def generate_recipe(workspace_id: str, recipe_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    try:
+        settings = RegenSettings.model_validate(data.get("settings") or {})
+        run = _service(request).start_recipe_run(info, recipe_id, settings)
+    except ValidationError as exc:
+        raise ApiError(code="invalid_regen_settings", message=str(exc), status_code=400) from exc
+    except ValueError as exc:
+        raise ApiError(code="recipe_generate_failed", message=str(exc), status_code=400) from exc
+    return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": run}
+
+
+@router.get("/library/node")
+def library_node(ref: str, role: str, request: Request) -> dict[str, Any]:
+    """素材卡片：节点的 tag 按部位分组，下划线换成空格，可直接放进提示词。"""
+    if role not in {"character", "action"}:
+        raise ApiError(code="invalid_role", message="role must be character or action", status_code=400)
+    try:
+        node = request.app.state.node_workspace.read_runtime_node(ref, role=role)
+    except (FileNotFoundError, ValueError) as exc:
+        raise ApiError(code="node_not_found", message=str(exc), status_code=404) from exc
+    sections = []
+    for name, tags in (node.tags or {}).items():
+        cleaned = [_clean_library_tag(tag) for tag in tags if str(tag).strip()]
+        if cleaned:
+            sections.append({"name": name, "tags": list(dict.fromkeys(cleaned))})
+    if not sections:
+        texts = [fragment.text for fragment in node.prompt.positive if fragment.text.strip()]
+        tokens = [token.text for text in texts for token in tokenize(text).tokens]
+        if tokens:
+            sections.append({"name": "prompt", "tags": list(dict.fromkeys(tokens))})
+    return {
+        "ref": ref,
+        "role": role,
+        "name": node.name or Path(ref).name,
+        "sections": sections,
+        "has_preview": request.app.state.node_workspace.preview_image(ref) is not None,
+    }
+
+
+def _clean_library_tag(tag: str) -> str:
+    return " ".join(str(tag).replace("_", " ").split())
 
 
 @router.get("/llm/status")

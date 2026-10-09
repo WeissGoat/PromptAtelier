@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { translateTexts } from "./api";
+import { tokenize } from "./tokens";
 
-/** 和后端 split_prompt_tags 一致的粗拆：逗号、竖线、换行。 */
+/** 提示词按无损分词器切成 token（权重组、括号组保持完整），和后端分析任务用同一套规则。 */
 export function splitPromptTags(prompt: string): string[] {
-  return (prompt ?? "")
-    .split(/[,|\n]/)
-    .map((part) => part.trim())
-    .filter(Boolean);
+  return tokenize(prompt ?? "").tokens.map((token) => token.text);
 }
 
 type Listener = () => void;

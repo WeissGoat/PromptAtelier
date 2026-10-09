@@ -81,7 +81,7 @@ export function WorkspaceBar({
       <span className="sl-bar-spacer" />
       {pretranslate && pretranslate.done < pretranslate.total ? (
         <span className="sl-bar-progress">
-          预翻译 {pretranslate.done}/{pretranslate.total}
+          分析 {pretranslate.done}/{pretranslate.total}
         </span>
       ) : null}
       <button
