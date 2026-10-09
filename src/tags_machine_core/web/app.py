@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from tags_machine_core.clients import sanitize_proxy_env
 from tags_machine_core.contracts import GenerationResult, RenderRequest
@@ -42,6 +43,7 @@ from .services.result_index import ResultIndex
 DEFAULT_LOCAL_CONFIG = Path("configs/local.yaml")
 DEFAULT_EXAMPLE_CONFIG = Path("configs/local.example.yaml")
 CONFIG_ENV_VAR = "TAGS_MACHINE_CONFIG"
+STATIC_DIR_ENV_VAR = "PROMPTATELIER_STATIC_DIR"
 
 
 def resolve_web_config_path(config_path: str | Path | None = None) -> Path:
@@ -63,6 +65,7 @@ def create_app(
     result_index: ResultIndex | None = None,
     generation_executor: GenerationExecutor | None = None,
     config_path: str | Path | None = None,
+    static_dir: str | Path | None = None,
 ) -> FastAPI:
     sanitize_proxy_env()
     resolved_config_path = resolve_web_config_path(config_path)
@@ -135,15 +138,33 @@ def create_app(
     app.include_router(compare.router, prefix="/api", tags=["compare"])
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
 
-    @app.get("/", include_in_schema=False)
-    def root():
-        return {
-            "message": "PromptAtelier Backend API is running.",
-            "frontend_ui": "http://127.0.0.1:53173",
-            "api_docs": "/docs",
-        }
+    resolved_static_dir = _resolve_static_dir(static_dir)
+    if resolved_static_dir is not None:
+        # 服务器部署：前端构建产物与 API 同源托管，必须在所有 API 路由之后挂载。
+        app.mount("/", StaticFiles(directory=resolved_static_dir, html=True), name="frontend")
+    else:
+        @app.get("/", include_in_schema=False)
+        def root():
+            return {
+                "message": "PromptAtelier Backend API is running.",
+                "frontend_ui": "http://127.0.0.1:53173",
+                "api_docs": "/docs",
+            }
 
     return app
+
+
+def _resolve_static_dir(static_dir: str | Path | None) -> Path | None:
+    """解析前端构建目录：显式参数 > 环境变量；都没有时不托管前端。"""
+    value = static_dir or os.environ.get(STATIC_DIR_ENV_VAR)
+    if not value:
+        return None
+    path = Path(value)
+    if not (path / "index.html").is_file():
+        raise RuntimeError(
+            f"Frontend build not found at {path}; run `npm run build` in web/ first"
+        )
+    return path
 
 
 def _default_generation_executor(
