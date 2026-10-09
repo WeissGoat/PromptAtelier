@@ -169,6 +169,32 @@ class SDConfig(BaseModel):
     timeout: int = 120
 
 
+class LLMModelsConfig(BaseModel):
+    # text：主力文本模型；fast：翻译这类短任务先试的快模型（拒答 NSFW 时约 1 秒内失败，再交给 text）；
+    # fallback：text 失败后再试；vision：看图任务。
+    text: str = "deepseek-4.1-flash"
+    fast: str | None = "gemini-3.5-flash-lite"
+    fallback: str | None = "gemini-3.8-flash-high"
+    vision: str | None = "gemini-3.8-flash-high"
+
+
+class LLMConfig(BaseModel):
+    """OpenAI 兼容的 LLM 接口（如自建 CLIProxyAPI）。没有 base_url 或密钥时 LLM 功能整体关闭。
+
+    密钥三选一：api_key 直接写；api_key_env 环境变量；api_key_file 纯文本或 JSON 文件
+    （JSON 时读 api_key_field 字段，可直接指向 Codex 的 auth.json）。
+    """
+
+    base_url: str | None = None
+    api_key: str | None = None
+    api_key_env: str = "TAGS_MACHINE_LLM_API_KEY"
+    api_key_file: Path | None = None
+    api_key_field: str = "OPENAI_API_KEY"
+    models: LLMModelsConfig = Field(default_factory=LLMModelsConfig)
+    timeout: float = 90
+    cache_path: Path = Path("runtime/llm_cache.sqlite")
+
+
 class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
@@ -186,6 +212,7 @@ class AppConfig(BaseModel):
     novelai: NovelAIConfig = Field(default_factory=NovelAIConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     sd: SDConfig = Field(default_factory=SDConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

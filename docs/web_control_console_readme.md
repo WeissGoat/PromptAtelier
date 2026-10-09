@@ -209,6 +209,37 @@ Artist 1 × Character 1 × Action 1 × Behavior 2 × Groups 1 = 2
 
 方案之间不会共享临时编辑状态。刷新页面后方案和当前选中方案会从浏览器 Workspace 缓存恢复；旧版本只有一份 `promptBehavior` 的 Workspace 会自动迁移为 Primary。
 
+## 画风工坊（Style Lab）
+
+画风工坊用来做画风复刻：读入一个作者语料，逐张检查原图能否按原参数重新生成，后续阶段在这里划分画风、导出 artist。完整规格见 [Style Lab 规格](style_lab_spec_v1.md)。
+
+### 打开语料
+
+- 在顶栏粘贴文件夹路径后点 `打开文件夹`。文件夹下有 `origin/` 时只扫描 `origin/`（`artist_parse/YYYYMMDD/<作者>/` 的标准结构），并跟随投稿目录的 junction。
+- 也可以把一组图片直接拖进页面，自动建成一个"图片组"工作区，图片复制到 `runtime/stylelab/workspaces/<id>/uploads/`。
+- 工作区数据写在 `<文件夹>/.stylelab/`，不会写进 `origin/`。重新打开同一文件夹会沿用原来的索引，只重新读取大小或修改时间变了的图片；点顶栏的刷新按钮可手动重扫。
+
+### 浏览和筛选
+
+- 中间按投稿分段显示缩略图，角标标出模型、vibe 数量和特殊情况（局部重绘、图生图、缺 vibe 图、角色参考、无元数据）。
+- 左栏按模型、vibe 组合和标记筛选，可以一键隐藏重绘、图生图和无元数据的图片。窗口宽度小于 1280 时左栏自动收起。
+- 选中图片后按 `←` / `→` 在当前筛选结果里切换。
+
+### 元数据和译文
+
+右栏显示原图的提示词、角色提示词（v4 `char_captions`）、负面和参数。打开 `译文` 后每个 tag 下方显示中文。
+
+译文由 `configs/local.yaml` 的 `llm` 段配置的 OpenAI 兼容接口生成：先试 `models.fast`，被拒（例如 NSFW 内容）再交给 `models.text`。每个 tag 单独缓存在 `runtime/llm_cache.sqlite`。打开工作区后后台会把全部提示词预翻译一遍，顶栏显示进度。没有配置 `llm` 时 `译文` 按钮不可用，其他功能照常。
+
+### 原参重生
+
+用原图的完整参数（包括 v4 角色提示词，vibe 从原图补回）直接出图，不经过 Composer，用来确认本地 NovelAI 链路正常。
+
+- 张数 1–8，逐张串行提交。种子可选原图、随机或指定，多张时依次 +1；尺寸可选原图或自定义；`覆盖参数` 可单独改模型、采样器、调度、步数、CFG、CFG rescale。
+- 每张出完自动和原图对照：参数差异（本次主动改动的参数默认隐藏）、提示词按 tag 显示增删、灰度相似度和 dHash 距离。结论分三档：`链路正常`、`参数一致，画面有差异`、`参数不一致`。
+- 对照支持并排和滑块两种看法。结果保存在 `<文件夹>/.stylelab/runs/<run_id>/`，切换图片后可以回看历史记录。
+- 常见的 NovelAI 错误（401 token 失效、402、429 限流）会直接给出处理办法，原始错误在鼠标悬停提示里。
+
 ## Batch
 
 Batch 页继续使用现有 BatchPlanner 和 BatchExecutor。可以编辑 inline batch 参数，也可以指定 Batch YAML；`Plan Preview` 与真实运行使用同一套规划链路。
@@ -227,6 +258,7 @@ Batch 结果还包含 `run_dir`、`output_dir`、任务状态、`prompt_bundle.j
 
 ```powershell
 uv run python -m unittest tests.test_web_app tests.test_web_jobs tests.test_web_nodes tests.test_web_compose tests.test_web_results tests.test_web_batch tests.test_novelai_artist_dedup -v
+uv run python -m pytest tests/test_style_lab.py tests/test_web_style_lab.py tests/test_llm_client.py -q
 
 cd web
 npm run test

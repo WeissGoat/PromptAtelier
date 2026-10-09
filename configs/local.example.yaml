@@ -69,3 +69,13 @@ comfyui:
 sd:
   base_url: "http://127.0.0.1:7860"
   timeout: 120
+
+# 可选：OpenAI 兼容的 LLM 接口（如自建 CLIProxyAPI），用于 Style Lab 的翻译等功能。不配置时这些功能关闭。
+# 密钥三选一：api_key、环境变量 api_key_env、密钥文件 api_key_file（纯文本，或 JSON 文件里的 api_key_field 字段）。
+# llm:
+#   base_url: "https://your-proxy.example.com/v1"
+#   api_key_env: "TAGS_MACHINE_LLM_API_KEY"
+#   models:
+#     text: "deepseek-4.1-flash"
+#     fallback: "gemini-3.8-flash-high"
+#     vision: "gemini-3.8-flash-high"

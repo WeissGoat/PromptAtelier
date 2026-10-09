@@ -8,6 +8,7 @@
 - `batch_generation_business_test_20260613.md`：批量跑图真实 NovelAI 业务验收记录。
 - `task_tools_readme.md`：Windows SendTo 任务便捷工具的安装、配置和使用说明。
 - `task_tools_business_acceptance_20260718.md`：真实任务目录、Explorer 和 SendTo 持久化验收记录。
+- `style_lab_spec_v1.md`：画风工坊（Style Lab）规格，替代 artist-style-reproduction skill 的画风复刻流程。
 
 当前节点与接口规范：
 

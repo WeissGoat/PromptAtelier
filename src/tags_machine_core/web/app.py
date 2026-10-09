@@ -12,9 +12,11 @@ from tags_machine_core.clients import sanitize_proxy_env
 from tags_machine_core.contracts import GenerationResult, RenderRequest
 from tags_machine_core.config import build_prompt_policy_provider, load_config
 from tags_machine_core.execution import execute_render_request
+from tags_machine_core.llm import LLMClient
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.services.generation_service import GenerationService
 from tags_machine_core.services.json_api import GenerationExecutor
+from tags_machine_core.style_lab import StyleLabService, WorkspaceStore
 
 from .errors import ApiError, api_error_handler
 from .routes import (
@@ -28,6 +30,7 @@ from .routes import (
     node_pools,
     nodes,
     results,
+    style_lab,
 )
 from .services.comfyui_targets import ComfyUITargetService
 from .services.generate_batch import GENERATE_BATCH_JOB, recover_interrupted_batch
@@ -63,6 +66,8 @@ def create_app(
     result_index: ResultIndex | None = None,
     generation_executor: GenerationExecutor | None = None,
     config_path: str | Path | None = None,
+    llm_client: LLMClient | None = None,
+    style_lab_dir: str | Path = Path("runtime") / "stylelab",
 ) -> FastAPI:
     sanitize_proxy_env()
     resolved_config_path = resolve_web_config_path(config_path)
@@ -115,6 +120,14 @@ def create_app(
         generation_executor=generation_executor
         or _default_generation_executor(config, app.state.comfyui_targets),
     )
+    app.state.llm_client = llm_client or LLMClient(config.llm)
+    app.state.style_lab_store = WorkspaceStore(style_lab_dir)
+    app.state.style_lab_service = StyleLabService(
+        store=app.state.style_lab_store,
+        job_manager=app.state.job_manager,
+        generation_api=app.state.generation_api,
+        llm_client=app.state.llm_client,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[],
@@ -134,6 +147,7 @@ def create_app(
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
     app.include_router(compare.router, prefix="/api", tags=["compare"])
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
+    app.include_router(style_lab.router, prefix="/api", tags=["style-lab"])
 
     @app.get("/", include_in_schema=False)
     def root():
