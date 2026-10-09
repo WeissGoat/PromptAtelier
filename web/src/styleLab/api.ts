@@ -105,6 +105,7 @@ export type ParamDiff = {
   left: unknown;
   right: unknown;
   expected: boolean;
+  note?: string;
 };
 
 export type CompareVerdict = "match" | "drift" | "param_diff";

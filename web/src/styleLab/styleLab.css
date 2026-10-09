@@ -996,6 +996,12 @@
   color: var(--sl-muted);
 }
 
+.sl-diff-note {
+  color: var(--sl-muted);
+  display: block;
+  font-size: 11px;
+}
+
 .sl-prompt-diff {
   align-items: center;
   display: flex;

@@ -167,6 +167,11 @@ function CompareView({
         </div>
       )}
 
+      {compare?.verdict === "drift" ? (
+        <p className="sl-hint warn">
+          同参数重生是确定性的。参数一致但画面不同，通常是原图经过后期修改或局部重绘，或者 NovelAI 服务端有过变化；用本项目生成的图做原参重生可以确认链路本身。
+        </p>
+      ) : null}
       {item.error ? (
         <p className="sl-error" title={item.error_detail ?? item.error}>
           {item.error}
@@ -181,7 +186,7 @@ function CompareView({
             {compare.diffs.some((diff) => diff.expected) ? (
               <label className="sl-check">
                 <input checked={showExpected} onChange={(event) => setShowExpected(event.target.checked)} type="checkbox" />
-                显示本次主动改动的参数
+                显示可忽略的差异（主动改动、等价写法）
               </label>
             ) : null}
           </div>
@@ -196,7 +201,10 @@ function CompareView({
             <tbody>
               {visibleDiffs(compare.diffs, showExpected).map((diff) => (
                 <tr className={diff.expected ? "expected" : ""} key={diff.path}>
-                  <td title={diff.path}>{diff.path.replace(/^\$\.(parameters\.)?/, "")}</td>
+                  <td title={diff.note ?? diff.path}>
+                    {diff.path.replace(/^\$\.(parameters\.)?/, "")}
+                    {diff.note ? <span className="sl-diff-note">{diff.note}</span> : null}
+                  </td>
                   {isPromptDiff(diff) ? (
                     <td colSpan={2}>
                       <PromptDiff left={String(diff.left)} right={String(diff.right)} />

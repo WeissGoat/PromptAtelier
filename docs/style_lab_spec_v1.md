@@ -80,7 +80,7 @@ Style Lab 是 PromptAtelier 里的画风复刻工作台，用来替代 `artist-s
 
 - 参数差异：`compare_render_parameters`，同时给出忽略宽高的结果。
 - 图像相似度：两图缩放到同一尺寸后的灰度平均差（0–1，1 为完全相同）和 dHash 汉明距离。
-- 结论分三档：参数一致且相似度 ≥ 0.9 为 `match`，参数一致但相似度低为 `drift`，参数不一致为 `param_diff`。
+- 结论分三档：参数一致且相似度 ≥ 0.98 为 `match`（链路是确定性的，同参数重生应接近逐像素一致），参数一致但相似度低为 `drift`，参数不一致为 `param_diff`。
 
 ## LLM
 

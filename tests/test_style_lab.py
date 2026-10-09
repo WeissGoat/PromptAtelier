@@ -208,6 +208,17 @@ class CompareTest(TestCase):
         self.assertEqual(result["verdict"], "match")
         self.assertTrue(all(diff["expected"] for diff in result["diffs"]))
 
+    def test_web_ui_only_differences_are_benign(self):
+        a = write_nai_png(self.tmp / "a.png", uc="", my_flag=True)
+        b = write_nai_png(self.tmp / "b.png", uc="lowres")
+        result = compare_with_source(a, b)
+        self.assertEqual(result["verdict"], "match")
+        self.assertEqual(result["param_diff_count"], 0)
+        self.assertEqual({d["key"] for d in result["diffs"] if d.get("note")}, {"uc", "my_flag"})
+
+        c = write_nai_png(self.tmp / "c.png", uc="something else")
+        self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
+
     def test_drift_when_params_match_but_pixels_differ(self):
         a = write_nai_png(self.tmp / "a.png", color="white")
         b = write_nai_png(self.tmp / "b.png", color="black")
