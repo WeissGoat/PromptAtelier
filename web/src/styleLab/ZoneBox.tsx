@@ -1,9 +1,12 @@
-import { Lock, Pencil, Type } from "lucide-react";
+import { Lock, Pencil, Type, X } from "lucide-react";
 import { useState } from "react";
 
 import type { RecipeToken } from "./api";
-import { tokensToText, type Zone } from "./recipeModel";
-import { TokenChip } from "./TokenChip";
+import { MATERIAL_DRAG_TYPE, tokensToText, type MaterialDrag, type Zone } from "./recipeModel";
+import { originKind, TokenChip } from "./TokenChip";
+
+/** 主体里素材块的显示：label 返回素材名（不是素材块的来源返回 null），onRemove 一键移出。 */
+export type BlockOptions = { label: (origin: string) => string | null; onRemove: (origin: string) => void };
 
 type ZoneBoxProps = {
   zone: Zone;
@@ -19,6 +22,9 @@ type ZoneBoxProps = {
   onSelect: (id: string, event: React.MouseEvent) => void;
   onDropToken: (id: string, zone: Zone, index: number) => void;
   onTextChange?: (text: string) => void;
+  /** 接受从素材架拖来的整块素材。 */
+  onDropMaterial?: (drag: MaterialDrag, index: number) => void;
+  blocks?: BlockOptions;
 };
 
 /** 配方的一个区：小块可拖动（跨区或区内调序），可以切到文本视图直接编辑。 */
@@ -36,6 +42,8 @@ export function ZoneBox({
   onSelect,
   onDropToken,
   onTextChange,
+  onDropMaterial,
+  blocks,
 }: ZoneBoxProps) {
   const [textMode, setTextMode] = useState(false);
   const [draft, setDraft] = useState("");
@@ -62,13 +70,16 @@ export function ZoneBox({
       }}
       onDragOver={(event) => {
         if (textMode) return;
+        if (event.dataTransfer.types.includes(MATERIAL_DRAG_TYPE) && !onDropMaterial) return;
         event.preventDefault();
         setDropIndex(indexFromEvent(event));
       }}
       onDrop={(event) => {
         event.preventDefault();
+        const material = event.dataTransfer.getData(MATERIAL_DRAG_TYPE);
         const id = event.dataTransfer.getData("text/x-token-id");
-        if (id) onDropToken(id, zone, indexFromEvent(event));
+        if (material && onDropMaterial) onDropMaterial(JSON.parse(material) as MaterialDrag, indexFromEvent(event));
+        else if (id) onDropToken(id, zone, indexFromEvent(event));
         setDropIndex(null);
       }}
     >
@@ -120,27 +131,66 @@ export function ZoneBox({
         </div>
       ) : (
         <div className="sl-zone-chips">
-          {tokens.length === 0 ? <span className="sl-muted">（空，可以把 token 拖到这里）</span> : null}
-          {tokens.map((token, index) => (
-            <span className={`sl-chip-slot ${dropIndex === index ? "drop-before" : ""}`} key={token.id}>
-              <TokenChip
-                draggable
-                hint={hints?.[token.id]}
-                onClick={(event) => onSelect(token.id, event)}
-                onDragStart={(event) => {
-                  event.dataTransfer.setData("text/x-token-id", token.id);
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                selected={selected.has(token.id)}
-                token={token}
-                zh={lookup(token.text)}
-                zone={zone}
-              />
-            </span>
-          ))}
+          {tokens.length === 0 ? (
+            <span className="sl-muted">{onDropMaterial ? "（空，可以把 token 或素材块拖到这里）" : "（空，可以把 token 拖到这里）"}</span>
+          ) : null}
+          {groupTokens(tokens, blocks).map((group) => {
+            const slots = group.items.map(({ token, index }) => (
+              <span className={`sl-chip-slot ${dropIndex === index ? "drop-before" : ""}`} key={token.id}>
+                <TokenChip
+                  draggable
+                  hint={hints?.[token.id]}
+                  onClick={(event) => onSelect(token.id, event)}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData("text/x-token-id", token.id);
+                    event.dataTransfer.effectAllowed = "move";
+                  }}
+                  selected={selected.has(token.id)}
+                  token={token}
+                  zh={lookup(token.text)}
+                  zone={zone}
+                />
+              </span>
+            ));
+            if (!group.origin || !blocks) return slots;
+            return (
+              <span className={`sl-chip-block origin-${originKind(group.origin)}`} key={`block-${group.items[0].token.id}`}>
+                <span className="sl-chip-block-label">
+                  {group.label}
+                  <button
+                    aria-label={`移出 ${group.label}`}
+                    className="sl-icon-btn"
+                    onClick={() => blocks.onRemove(group.origin!)}
+                    title="一键移出这块素材加的 tag（别处也有的保留）"
+                    type="button"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+                {slots}
+              </span>
+            );
+          })}
           {dropIndex === tokens.length && tokens.length ? <span className="sl-drop-end" /> : null}
         </div>
       )}
     </section>
   );
+}
+
+type TokenGroup = { origin: string | null; label: string | null; items: Array<{ token: RecipeToken; index: number }> };
+
+/** 连续来自同一块素材的 token 归成一组显示成素材块；其余 token 各自成组。 */
+function groupTokens(tokens: RecipeToken[], blocks?: BlockOptions): TokenGroup[] {
+  const groups: TokenGroup[] = [];
+  tokens.forEach((token, index) => {
+    const origin = blocks ? token.origins.find((item) => blocks.label(item) !== null) ?? null : null;
+    const last = groups[groups.length - 1];
+    if (origin && last && last.origin === origin) {
+      last.items.push({ token, index });
+      return;
+    }
+    groups.push({ origin, label: origin && blocks ? blocks.label(origin) : null, items: [{ token, index }] });
+  });
+  return groups;
 }

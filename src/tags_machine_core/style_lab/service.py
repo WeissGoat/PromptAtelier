@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import threading
 import time
 from pathlib import Path
@@ -40,6 +42,23 @@ ARTIST_TEST_JOB = "style_lab_artist_test"
 ANALYSIS_JOB = "style_lab_analysis"
 _ANALYSIS_CHUNK = 160
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
+# 上一次同样的请求还在跑或已经全部出完时拦下；失败、取消、部分失败的允许原样重试。
+_DUPLICATE_BLOCKING_STATUSES = {"queued", "running", "succeeded"}
+
+
+class DuplicateRequestError(RuntimeError):
+    """和上一次（同一张图或同一个配方、同一种出图）的请求完全相同。"""
+
+    def __init__(self, previous: dict[str, Any]):
+        super().__init__("和上一次的请求完全相同，出图结果也会一样。")
+        self.previous = previous
+
+
+def request_fingerprint(kind: str, requests: list[dict[str, Any]]) -> str:
+    """发给 NovelAI 的内容（不含 meta 里的来源记录）的指纹。"""
+    body = [{key: value for key, value in request.items() if key != "meta"} for request in requests]
+    text = json.dumps([kind, body], sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:20]
 
 
 class StyleLabService:
@@ -61,7 +80,9 @@ class StyleLabService:
         # 每个任务各跑一个线程；同一账号并发请求 NovelAI 会 429，所以 Style Lab 的出图串行执行。
         self._generate_lock = threading.Lock()
 
-    def start_regenerate(self, info: WorkspaceInfo, image_id: str, settings: RegenSettings) -> dict[str, Any]:
+    def start_regenerate(
+        self, info: WorkspaceInfo, image_id: str, settings: RegenSettings, *, force: bool = False
+    ) -> dict[str, Any]:
         """原参重生：逐张串行出图，每张出完立刻和源图对照并写回 run.json。"""
         record = self.store.find_image(info, image_id)
         if not record.has_metadata:
@@ -76,6 +97,7 @@ class StyleLabService:
             seeds=seeds,
             requests=requests,
             expected=sorted(expected_diff_keys(settings, record)),
+            force=force,
         )
 
     # ---- 配方 ----
@@ -139,7 +161,9 @@ class StyleLabService:
             "vibe_count": len(params.get("reference_image_multiple") or []),
         }
 
-    def start_recipe_run(self, info: WorkspaceInfo, recipe_id: str, settings: RegenSettings) -> dict[str, Any]:
+    def start_recipe_run(
+        self, info: WorkspaceInfo, recipe_id: str, settings: RegenSettings, *, force: bool = False
+    ) -> dict[str, Any]:
         recipe = self.recipes(info).get(recipe_id)
         record = self._recipe_source(info, recipe)
         seeds = plan_seeds(settings, record.seed if record else None)
@@ -157,6 +181,7 @@ class StyleLabService:
             requests=requests,
             expected=[],
             extra={"recipe": {"id": recipe.id, "version": recipe.version, "name": recipe.name}},
+            force=force,
         )
 
     def _recipe_source(self, info: WorkspaceInfo, recipe: Recipe) -> ImageRecord | None:
@@ -208,7 +233,9 @@ class StyleLabService:
 
     # ---- 用导出的 artist 测试 ----
 
-    def start_artist_test(self, info: WorkspaceInfo, recipe_id: str, settings: ArtistTestSettings) -> dict[str, Any]:
+    def start_artist_test(
+        self, info: WorkspaceInfo, recipe_id: str, settings: ArtistTestSettings, *, force: bool = False
+    ) -> dict[str, Any]:
         recipe = self.recipes(info).get(recipe_id)
         exporter = self._exporter()
         if not (exporter.artist_root / settings.artist / "tags.txt").is_file():
@@ -264,6 +291,7 @@ class StyleLabService:
                 "artist": {"folder": settings.artist},
             },
             item_meta=metas,
+            force=force,
         )
 
     def _plan(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -303,6 +331,56 @@ class StyleLabService:
         expected: list[str],
         extra: dict[str, Any] | None = None,
         item_meta: list[dict[str, Any]] | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        fingerprint = request_fingerprint(kind, requests)
+        # 查重、建目录、提交任务都在锁里：连点两次时第二次一定能看到第一次。
+        with self.store.lock:
+            if not force:
+                previous = self._previous_run(info, kind, record, extra)
+                if (
+                    previous
+                    and previous.get("request_hash") == fingerprint
+                    and previous.get("status") in _DUPLICATE_BLOCKING_STATUSES
+                ):
+                    raise DuplicateRequestError(previous)
+            return self._submit_run(
+                info,
+                record,
+                kind=kind,
+                settings=settings,
+                seeds=seeds,
+                requests=requests,
+                expected=expected,
+                extra={**(extra or {}), "request_hash": fingerprint},
+                item_meta=item_meta,
+            )
+
+    def _previous_run(
+        self, info: WorkspaceInfo, kind: str, record: ImageRecord | None, extra: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """同一目标（配方出图、测试按配方；原参重生按原图）上一次同类出图。"""
+        recipe_id = ((extra or {}).get("recipe") or {}).get("id")
+        if recipe_id:
+            runs = self.store.list_runs(info, recipe_id=recipe_id)
+        elif record is not None:
+            runs = self.store.list_runs(info, image_id=record.id)
+        else:
+            return None
+        return next((run for run in runs if run.get("kind") == kind), None)
+
+    def _submit_run(
+        self,
+        info: WorkspaceInfo,
+        record: ImageRecord | None,
+        *,
+        kind: str,
+        settings: RegenSettings | ArtistTestSettings,
+        seeds: list[int],
+        requests: list[dict[str, Any]],
+        expected: list[str],
+        extra: dict[str, Any],
+        item_meta: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
         run_id, run_dir = self.store.new_run_dir(info)
         run: dict[str, Any] = {
@@ -323,7 +401,7 @@ class StyleLabService:
                 {"index": index, "seed": seed, "status": "queued", **(item_meta[index] if item_meta else {})}
                 for index, seed in enumerate(seeds)
             ],
-            **(extra or {}),
+            **extra,
         }
         source_path = Path(record.path) if record else None
 

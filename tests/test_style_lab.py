@@ -219,6 +219,35 @@ class CompareTest(TestCase):
         c = write_nai_png(self.tmp / "c.png", uc="something else")
         self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
 
+    def test_client_extra_keys_are_benign(self):
+        # NAI Smart Studio 之类的客户端在 Comment 里另记一份负面、角色提示词、CFG；API 出图不回写。
+        a = write_nai_png(
+            self.tmp / "a.png",
+            negative_prompt="lowres",
+            char_prompts=["girl"],
+            cfg_scale=5.0,
+            tag_hint_qt=1,
+        )
+        b = write_nai_png(self.tmp / "b.png", tag_hint_qt=None)
+        result = compare_with_source(a, b)
+        self.assertEqual(result["verdict"], "match")
+        self.assertEqual(
+            {d["key"] for d in result["diffs"] if d.get("note")},
+            {"negative_prompt", "char_prompts", "cfg_scale", "tag_hint_qt"},
+        )
+        # 生成图多出来的键、值不同的键仍然算差异。
+        c = write_nai_png(self.tmp / "c.png", tag_hint_qt=None, cfg_rescale=0.5)
+        self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
+
+    def test_v5_source_label_gives_model(self):
+        from tags_machine_core.verification.render_params import normalize_render_parameters
+
+        def model(source):
+            return normalize_render_parameters({"png_text": {"Source": source, "Comment": "{}"}})["model"]
+
+        self.assertEqual(model("NovelAI Diffusion V5 0ADF9AB7"), "nai-diffusion-5-full")
+        self.assertEqual(model("NovelAI Diffusion V4.5 4BDE2A90"), "nai-diffusion-4-5-full")
+
     def test_drift_when_params_match_but_pixels_differ(self):
         a = write_nai_png(self.tmp / "a.png", color="white")
         b = write_nai_png(self.tmp / "b.png", color="black")
@@ -320,6 +349,34 @@ class StyleLabServiceTest(TestCase):
         stored = self.store.get_run(self.info, run["id"])
         self.assertEqual(stored["status"], "partial")
         self.assertEqual(self.store.list_runs(self.info, image_id=self.image_id)[0]["id"], run["id"])
+
+    def test_identical_request_is_blocked_until_forced(self):
+        from tags_machine_core.style_lab.service import DuplicateRequestError
+
+        jobs = _InlineJobManager()
+        service = StyleLabService(store=self.store, job_manager=jobs, generation_api=_FakeGenerationApi())
+        first = service.start_regenerate(self.info, self.image_id, RegenSettings())
+        # 还在排队时连点第二次，也会被拦下。
+        with self.assertRaises(DuplicateRequestError) as caught:
+            service.start_regenerate(self.info, self.image_id, RegenSettings())
+        self.assertEqual(caught.exception.previous["id"], first["id"])
+        jobs.pending(_FakeContext())
+        with self.assertRaises(DuplicateRequestError):
+            service.start_regenerate(self.info, self.image_id, RegenSettings())
+
+        # 换了种子就是不同的请求；确认后带 force 也可以重发。
+        service.start_regenerate(self.info, self.image_id, RegenSettings(seed_mode="fixed", seed=9))
+        forced = service.start_regenerate(self.info, self.image_id, RegenSettings(seed_mode="fixed", seed=9), force=True)
+        self.assertEqual(len(self.store.list_runs(self.info, image_id=self.image_id)), 3)
+
+    def test_failed_identical_request_can_be_retried(self):
+        jobs = _InlineJobManager()
+        service = StyleLabService(
+            store=self.store, job_manager=jobs, generation_api=_FakeGenerationApi(fail_seeds={1234})
+        )
+        service.start_regenerate(self.info, self.image_id, RegenSettings())
+        self.assertEqual(jobs.pending(_FakeContext())["status"], "failed")
+        service.start_regenerate(self.info, self.image_id, RegenSettings())
 
     def test_reconcile_marks_orphaned_runs_interrupted(self):
         jobs = _InlineJobManager()

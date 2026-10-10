@@ -1,4 +1,4 @@
-import { FolderOutput, Grid3x3, LoaderCircle, Play, Search, Square, Rows3, X } from "lucide-react";
+import { FolderOutput, Grid3x3, LoaderCircle, Play, Square, Rows3, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage, nodePreviewUrl } from "../api/client";
@@ -11,7 +11,9 @@ import type {
   LibraryNodeSummary,
   SeedMode,
 } from "./api";
-import { ACTIVE_RUN_STATUSES, runImageUrl, searchLibrary, sourceImageUrl, startArtistTest } from "./api";
+import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl, startArtistTest } from "./api";
+import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
+import { MaterialSearch } from "./MaterialSearch";
 import { formatTime, runStatusLabels } from "./format";
 import { Segmented, SIZE_PRESETS } from "./RegenPanel";
 
@@ -80,6 +82,7 @@ export function ArtistTestPanel({
   const [size, setSize] = useState<[number, number]>([832, 1216]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<DuplicateRequest | null>(null);
 
   const latest = available[available.length - 1]?.folder ?? null;
   const activeArtist = artist && available.some((item) => item.folder === artist) ? artist : latest;
@@ -103,7 +106,7 @@ export function ArtistTestPanel({
     (seedMode !== "fixed" || seed !== null) &&
     (mode === "regression" ? selectedImages.length > 0 : characters.length + actions.length > 0);
 
-  const start = async () => {
+  const start = async (force = false) => {
     if (!activeArtist) return;
     const settings: ArtistTestSettings = {
       kind: mode,
@@ -118,11 +121,14 @@ export function ArtistTestPanel({
     };
     setSubmitting(true);
     setError(null);
+    setDuplicate(null);
     try {
-      const { run } = await startArtistTest(workspaceId, recipeId, settings);
+      const { run } = await startArtistTest(workspaceId, recipeId, settings, force);
       onStarted(run);
     } catch (exc) {
-      setError(errorMessage(exc));
+      const found = duplicateOf(exc);
+      if (found) setDuplicate(found);
+      else setError(errorMessage(exc));
     } finally {
       setSubmitting(false);
     }
@@ -264,6 +270,9 @@ export function ArtistTestPanel({
             ) : null}
           </div>
           {error ? <p className="sl-error">{error}</p> : null}
+          {duplicate ? (
+            <DuplicateNotice duplicate={duplicate} onDismiss={() => setDuplicate(null)} onForce={() => void start(true)} />
+          ) : null}
           <button className="sl-primary" disabled={!ready} onClick={() => void start()} type="button">
             <Play size={15} aria-hidden="true" />
             {submitting ? "提交中…" : `用 ${activeArtist} 生成 · ${cells} 张`}
@@ -293,24 +302,6 @@ function NodePicker({
   selected: LibraryNodeSummary[];
   onChange: (nodes: LibraryNodeSummary[]) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<LibraryNodeSummary[]>([]);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      searchLibrary(role, query, 12)
-        .then((data) => !cancelled && setResults(data.nodes))
-        .catch(() => !cancelled && setResults([]));
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [role, query, open]);
-
   const add = (node: LibraryNodeSummary) => {
     if (selected.length >= MAX_SIDE || selected.some((item) => item.ref === node.ref)) return;
     onChange([...selected, node]);
@@ -335,30 +326,13 @@ function NodePicker({
           </span>
         ))}
       </div>
-      <div className="sl-node-search">
-        <Search size={14} aria-hidden="true" />
-        <input
-          aria-label={`搜索${label}`}
-          disabled={selected.length >= MAX_SIDE}
-          onChange={(event) => setQuery(event.target.value)}
-          onFocus={() => setOpen(true)}
-          placeholder={selected.length >= MAX_SIDE ? "已选满" : "搜索提示词库"}
-          value={query}
-        />
-      </div>
-      {open && selected.length < MAX_SIDE ? (
-        <div className="sl-node-results">
-          {results
-            .filter((node) => !selected.some((item) => item.ref === node.ref))
-            .map((node) => (
-              <button className="sl-node-result" key={node.ref} onClick={() => add(node)} title={node.relative ?? node.ref} type="button">
-                {node.has_preview ? <img alt="" loading="lazy" src={nodePreviewUrl(node.ref, 64)} /> : <span className="sl-node-noimg" />}
-                <span>{node.name}</span>
-              </button>
-            ))}
-          {!results.length ? <span className="sl-muted">没有结果</span> : null}
-        </div>
-      ) : null}
+      <MaterialSearch
+        disabled={selected.length >= MAX_SIDE}
+        isPicked={(ref) => selected.some((item) => item.ref === ref)}
+        onPick={add}
+        placeholder={selected.length >= MAX_SIDE ? "已选满" : `搜索${label}`}
+        role={role}
+      />
     </div>
   );
 }

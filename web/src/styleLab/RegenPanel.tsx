@@ -35,11 +35,13 @@ type RegenPanelProps = {
   settings: RegenSettings;
   submitting: boolean;
   error: string | null;
+  /** 提交按钮上方的提示（例如重复请求的确认）。 */
+  notice?: React.ReactNode;
   onChange: (settings: RegenSettings) => void;
   onSubmit: () => void;
 };
 
-export function RegenPanel({ image, settings, submitting, error, onChange, onSubmit }: RegenPanelProps) {
+export function RegenPanel({ image, settings, submitting, error, notice, onChange, onSubmit }: RegenPanelProps) {
   const [showOverrides, setShowOverrides] = useState(Object.keys(settings.overrides).length > 0);
   const set = (patch: Partial<RegenSettings>) => onChange({ ...settings, ...patch });
   const setOverride = (key: keyof RegenOverrides, value: string | number | undefined) => {
@@ -193,6 +195,7 @@ export function RegenPanel({ image, settings, submitting, error, onChange, onSub
       ) : null}
 
       {error ? <p className="sl-error">{error}</p> : null}
+      {notice}
       <button
         className="sl-primary"
         disabled={submitting || !image.has_metadata}

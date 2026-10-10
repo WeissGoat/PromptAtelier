@@ -217,10 +217,12 @@ export function startRegenerate(
   workspaceId: string,
   imageId: string,
   settings: RegenSettings,
+  force = false,
 ): Promise<{ run: StyleLabRun }> {
   return apiPost(`${base}/workspaces/${encodeURIComponent(workspaceId)}/regenerate`, {
     image_id: imageId,
     settings,
+    force,
   });
 }
 
@@ -300,6 +302,10 @@ export type Analysis = {
 
 export type RecipeToken = { id: string; text: string; sep: string; origins: string[] };
 
+export type MaterialRole = "character" | "action";
+/** 素材架上的一块；excluded 是在卡片里筛掉不要的 tag。 */
+export type RecipeMaterial = { role: MaterialRole; ref: string; name: string; excluded: string[] };
+
 export type Recipe = {
   schema: string;
   id: string;
@@ -316,6 +322,8 @@ export type Recipe = {
   suffix: RecipeToken[];
   dropped: RecipeToken[];
   character: { enabled: boolean; tokens: RecipeToken[]; negative: RecipeToken[]; add_male_caption: boolean };
+  /** 旧版本的配方和浏览器里的草稿备份没有这一项。 */
+  materials?: RecipeMaterial[];
   negative: RecipeToken[];
   model: string | null;
   params: Record<string, unknown>;
@@ -391,20 +399,35 @@ export function generateRecipe(
   workspaceId: string,
   recipeId: string,
   settings: RegenSettings,
+  force = false,
 ): Promise<{ run: StyleLabRun }> {
-  return apiPost(`${ws(workspaceId)}/recipes/${encodeURIComponent(recipeId)}/generate`, { settings });
+  return apiPost(`${ws(workspaceId)}/recipes/${encodeURIComponent(recipeId)}/generate`, { settings, force });
 }
 
-export function searchLibrary(
-  role: "character" | "action",
+export type FacetOption = { value: string; count: number };
+export type MaterialNode = LibraryNodeSummary & {
+  copies: number;
+  copy_paths: string[];
+  facets: Record<string, string[]>;
+};
+export type MaterialSearchResult = {
+  nodes: MaterialNode[];
+  total: number;
+  has_more: boolean;
+  facet_options: Record<string, FacetOption[]>;
+};
+
+/** 去重后的素材搜索：内容相同的副本目录合并；动作可以按 classify.yaml 分面筛选。 */
+export function searchMaterials(
+  role: MaterialRole,
   query: string,
-  limit = 12,
-): Promise<{ nodes: LibraryNodeSummary[]; has_more: boolean }> {
-  const params = new URLSearchParams({ role, limit: String(limit) });
-  if (query.trim()) {
-    params.set("q", query.trim());
-  }
-  return apiGet(`/nodes?${params}`);
+  facets: Record<string, string> = {},
+  options: { offset?: number; limit?: number } = {},
+): Promise<MaterialSearchResult> {
+  const params = new URLSearchParams({ role, offset: String(options.offset ?? 0), limit: String(options.limit ?? 30) });
+  if (query.trim()) params.set("q", query.trim());
+  Object.entries(facets).forEach(([name, value]) => value && params.append("facet", `${name}:${value}`));
+  return apiGet(`${base}/library/search?${params}`);
 }
 
 export function getLibraryNode(ref: string, role: "character" | "action"): Promise<LibraryNode> {
@@ -531,6 +554,7 @@ export function startArtistTest(
   workspaceId: string,
   recipeId: string,
   settings: ArtistTestSettings,
+  force = false,
 ): Promise<{ run: ArtistTestRun }> {
-  return apiPost(`${recipeUrl(workspaceId, recipeId)}/artist-test`, { settings });
+  return apiPost(`${recipeUrl(workspaceId, recipeId)}/artist-test`, { settings, force });
 }

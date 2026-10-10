@@ -27,6 +27,7 @@ import {
   sourceImageUrl,
 } from "./api";
 import { ArtistTestPanel } from "./ArtistTestPanel";
+import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { ExportDialog } from "./ExportDialog";
 import { fileName, formatTime, modelLabel } from "./format";
 import { LibraryPanel } from "./LibraryPanel";
@@ -113,6 +114,7 @@ export function RecipeWorkspace({
   const [exportOpen, setExportOpen] = useState(false);
   const [runSettings, setRunSettings] = useState<RegenSettings>(loadRunSettings);
   const [submitting, setSubmitting] = useState(false);
+  const [duplicate, setDuplicate] = useState<DuplicateRequest | null>(null);
   const [restored, setRestored] = useState(false);
 
   useEffect(() => {
@@ -259,16 +261,19 @@ export function RecipeWorkspace({
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
-  const generate = async () => {
+  const generate = async (force = false) => {
     const current = await save();
     if (!current) return;
     setSubmitting(true);
     setError(null);
+    setDuplicate(null);
     try {
-      const { run } = await generateRecipe(workspaceId, current.id, runSettings);
+      const { run } = await generateRecipe(workspaceId, current.id, runSettings, force);
       setRuns((items) => [run, ...items]);
     } catch (exc) {
-      setError(errorMessage(exc));
+      const found = duplicateOf(exc);
+      if (found) setDuplicate(found);
+      else setError(errorMessage(exc));
     } finally {
       setSubmitting(false);
     }
@@ -452,6 +457,9 @@ export function RecipeWorkspace({
                   ))
                 : null}
             </div>
+            {duplicate ? (
+              <DuplicateNotice duplicate={duplicate} onDismiss={() => setDuplicate(null)} onForce={() => void generate(true)} />
+            ) : null}
             <button
               className="sl-primary"
               disabled={

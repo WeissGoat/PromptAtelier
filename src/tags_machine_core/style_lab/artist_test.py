@@ -122,13 +122,14 @@ def regression_payload(
     settings: ArtistTestSettings, record: ImageRecord, subject: str, seed: int
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"size": "custom", "n_samples": 1}
-    caption = record.char_captions[0] if record.char_captions else None
-    if caption and caption.positive.strip():
-        params["character_prompts"] = {
-            "mode": "explicit",
-            "captions": [{"positive": caption.positive, "negative": caption.negative}],
-            "add_male_caption": True,
-        }
+    # 角色提示词照搬原图（全部条目），不再按计数自动补男角色，和原图一致。
+    captions = [
+        {"positive": caption.positive, "negative": caption.negative}
+        for caption in record.char_captions
+        if caption.positive.strip()
+    ]
+    if captions:
+        params["character_prompts"] = {"mode": "explicit", "captions": captions, "add_male_caption": False}
     return {
         "compose": {"prompt": subject, "negative": ""},
         "render": {

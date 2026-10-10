@@ -286,6 +286,33 @@ gen_json, {"model": ..., "sampler": ..., ...}
 | POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/artist-test` | `{"settings": {"kind", "artist", "image_ids"?, "characters"?, "actions"?, "seed_mode", "seed"?, "width"?, "height"?}}` |
 | GET | `/api/style-lab/workspaces/{id}/runs?recipe_id=` | 某个配方的全部 run（配方出图、回归对照、泛化矩阵） |
 
+## P3 之后的调整
+
+### 原参重生的对照
+
+- 原图元数据里有、NovelAI 出图不回写的键（重生时已原样发送），标为可忽略差异。典型来源是 NAI Smart Studio：它在 Comment 里另记一份 `negative_prompt`、`char_prompts`、`cfg_scale`、`model`、`Description` 等。`tag_hint_*` 是客户端的提示开关，NovelAI 回写为 null，同样忽略。
+- `Source` 是 "NovelAI Diffusion V5 …" 时，对照用的模型名按 V5 解析。
+
+### 重复请求
+
+`request_hash` 是发给 NovelAI 的请求（不含 meta 里的来源记录）的指纹，记在 run 里。和同一目标的上一次同类出图（原参重生按原图，配方出图和导出测试按配方）指纹相同、且上一次是 queued / running / succeeded 时，返回 409 `duplicate_request`，`details` 带上一次的 `run_id`、`status`、`created_at`；请求带 `force: true` 才出图。查重和创建 run 在同一把锁里，连点两次也拦得住。
+
+### 素材库
+
+`GET /api/style-lab/library/search?role=&q=&facet=cast:solo&facet=pose:lying&offset=&limit=` 返回去重后的节点：
+
+- 节点内容（meta.yaml / node.yaml 去掉 `id`、`name`、`description`、`legacy` 及空行，加上 tags.txt）相同的目录合并成一条；代表目录优先取名字不带"快捷方式 / 副本 / copy"后缀的，名字去掉后缀。`copies`、`copy_paths` 是其余副本。
+- 动作带 `classify.yaml` 分面（cast、domain、subtype、pose、environment、clothing、tone、flags、phase）。同一分面多选任一命中，不同分面同时满足；`facet_options` 里每个分面的计数不受它自己的选择影响。
+- 目录用 scandir 遍历，按文件修改时间只重读改过的目录；指纹和分面缓存在 `runtime/stylelab/library_index.json`。动作库七千多个目录，第一次约十几秒，之后约 2 秒；第一次搜索时后台会顺带建好动作索引。
+
+配方新增 `materials`：素材架上的素材块 `{role, ref, name, excluded}`，`excluded` 是筛掉的 tag。主体和角色提示词里的 token 仍用 `character:<ref>` / `action:<ref>` 记来源。`character.add_male_caption` 默认改为 `false`。
+
+回归对照的角色提示词照搬原图的全部条目，不再按计数补男角色。
+
+### 共性分析
+
+图片网格下方，在前端按当前筛选的图计算：提示词 tag 去掉权重后按出现张数分为全部共有、多数（≥ 一半）、少数；记录每个 tag 的权重写法，写法不一致时提示。参数逐项统计分布。每张图和其他图的 tag 平均 Jaccard 重合度作为代表性，重合度高、参数偏离少的排前面，作为推荐基准。
+
 ## 后续（P4）
 
 - 替换角色、消融测试、配方版本 diff、视觉差异诊断。

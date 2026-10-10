@@ -61,7 +61,17 @@ class RecipeCharacter(BaseModel):
     enabled: bool = False
     tokens: list[RecipeToken] = Field(default_factory=list)
     negative: list[RecipeToken] = Field(default_factory=list)
-    add_male_caption: bool = True
+    # 默认不按主体里的 1boy 等自动补男角色：复刻时原图的角色提示词是手写的，自动补的会多出来。
+    add_male_caption: bool = False
+
+
+class RecipeMaterial(BaseModel):
+    """素材架上的一块：选中的角色/动作卡片，excluded 是在卡片里筛掉不要的 tag。"""
+
+    role: Literal["character", "action"]
+    ref: str
+    name: str
+    excluded: list[str] = Field(default_factory=list)
 
 
 class Recipe(BaseModel):
@@ -80,6 +90,7 @@ class Recipe(BaseModel):
     suffix: list[RecipeToken] = Field(default_factory=list)
     dropped: list[RecipeToken] = Field(default_factory=list)
     character: RecipeCharacter = Field(default_factory=RecipeCharacter)
+    materials: list[RecipeMaterial] = Field(default_factory=list)
     negative: list[RecipeToken] = Field(default_factory=list)
     model: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)

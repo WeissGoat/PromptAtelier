@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
@@ -14,9 +15,12 @@ from tags_machine_core.llm import LLMError, translate_tags
 from tags_machine_core.style_lab import RegenSettings, StyleLabService, WorkspaceInfo, WorkspaceStore
 from tags_machine_core.style_lab.artist_test import ArtistTestSettings
 from tags_machine_core.style_lab.export import ExportConflictError, ExportError, ExportRequest
+from tags_machine_core.style_lab.library import LibraryIndex, parse_facet_params
 from tags_machine_core.style_lab.recipe import Recipe, RecipeConflictError
+from tags_machine_core.style_lab.service import DuplicateRequestError
 from tags_machine_core.style_lab.tokens import tokenize
 from tags_machine_core.style_lab.metadata import IMAGE_SUFFIXES, read_source_parameters
+from tags_machine_core.nodes.role_paths import role_roots
 from tags_machine_core.web.errors import ApiError
 
 
@@ -205,7 +209,9 @@ def regenerate(workspace_id: str, data: dict[str, Any], request: Request) -> dic
     except ValidationError as exc:
         raise ApiError(code="invalid_regen_settings", message=str(exc), status_code=400) from exc
     try:
-        run = _service(request).start_regenerate(info, image_id, settings)
+        run = _service(request).start_regenerate(info, image_id, settings, force=bool(data.get("force")))
+    except DuplicateRequestError as exc:
+        raise _duplicate_error(exc) from exc
     except KeyError as exc:
         raise ApiError(code="image_not_found", message=f"Image not found: {image_id}", status_code=404) from exc
     except ValueError as exc:
@@ -347,12 +353,54 @@ def generate_recipe(workspace_id: str, recipe_id: str, data: dict[str, Any], req
     _get_recipe(request, info, recipe_id)
     try:
         settings = RegenSettings.model_validate(data.get("settings") or {})
-        run = _service(request).start_recipe_run(info, recipe_id, settings)
+        run = _service(request).start_recipe_run(info, recipe_id, settings, force=bool(data.get("force")))
+    except DuplicateRequestError as exc:
+        raise _duplicate_error(exc) from exc
     except ValidationError as exc:
         raise ApiError(code="invalid_regen_settings", message=str(exc), status_code=400) from exc
     except ValueError as exc:
         raise ApiError(code="recipe_generate_failed", message=str(exc), status_code=400) from exc
     return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": run}
+
+
+@router.get("/library/search")
+def library_search(
+    role: str,
+    request: Request,
+    q: str = "",
+    facet: list[str] = Query(default=[]),
+    offset: int = 0,
+    limit: int = 30,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """素材搜索：内容相同的副本目录合并成一条；动作附带 classify.yaml 分面和各分面的计数。"""
+    if role not in {"character", "action"}:
+        raise ApiError(code="invalid_role", message="role must be character or action", status_code=400)
+    result = _library(request).search(
+        role,
+        q,
+        parse_facet_params(facet),
+        offset=max(0, offset),
+        limit=max(1, min(limit, 100)),
+        refresh=refresh,
+    )
+    return {"schema": "tags-machine-core.web.style-lab-library/v1", "role": role, **result}
+
+
+def _library(request: Request) -> LibraryIndex:
+    state = request.app.state
+    index = getattr(state, "style_lab_library", None)
+    if index is None:
+        workspace = state.node_workspace
+        index = LibraryIndex(
+            lambda role: role_roots(workspace.design_root, role),
+            lambda path: workspace.previews.preview_for(path) is not None,
+            cache_path=_service(request).store.runtime_dir / "library_index.json",
+        )
+        state.style_lab_library = index
+        # 动作库第一次建索引要十几秒：打开配方页先搜角色时，后台把动作也建好。
+        threading.Thread(target=index.entries, args=("action",), daemon=True, name="style-lab-library-warm").start()
+    return index
 
 
 @router.get("/library/node")
@@ -467,7 +515,24 @@ def artist_test(workspace_id: str, recipe_id: str, data: dict[str, Any], request
     except ValidationError as exc:
         raise ApiError(code="invalid_artist_test", message=str(exc), status_code=400) from exc
     try:
-        run = _service(request).start_artist_test(info, recipe_id, settings)
+        run = _service(request).start_artist_test(info, recipe_id, settings, force=bool(data.get("force")))
+    except DuplicateRequestError as exc:
+        raise _duplicate_error(exc) from exc
     except ValueError as exc:
         raise ApiError(code="artist_test_failed", message=str(exc), status_code=400) from exc
     return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": run}
+
+
+def _duplicate_error(exc: DuplicateRequestError) -> ApiError:
+    """重复请求返回 409，带上上一次的 run，界面可以让用户确认后带 force 重发。"""
+    previous = exc.previous
+    return ApiError(
+        code="duplicate_request",
+        message=str(exc),
+        status_code=409,
+        details={
+            "run_id": previous.get("id"),
+            "status": previous.get("status"),
+            "created_at": previous.get("created_at"),
+        },
+    )

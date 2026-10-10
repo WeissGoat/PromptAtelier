@@ -16,6 +16,8 @@ _SIMILARITY_SIZE = 256
 _RESOLUTION_KEYS = {"width", "height"}
 # NovelAI 网页端独有、API 出图不会回写的字段，对出图没有影响。
 _WEB_ONLY_KEYS = {"my_flag"}
+# 客户端的标签提示开关：请求里带了，NovelAI 回写时一律写成 null。
+_CLIENT_HINT_PREFIX = "tag_hint_"
 
 
 def image_similarity(left: Path, right: Path) -> dict[str, Any]:
@@ -62,6 +64,12 @@ def _benign_note(diff: dict[str, Any], source_v4_negative: str | None) -> str | 
     """等价写法造成的差异：不影响出图，不算链路问题。"""
     if diff["key"] in _WEB_ONLY_KEYS:
         return "NovelAI 网页端独有的字段，API 出图不会回写"
+    # 重生会把原图参数原样发出去；NovelAI 不回写的键（第三方客户端如 NAI Smart Studio 额外记的
+    # negative_prompt、char_prompts、cfg_scale 等副本）不是出图参数。
+    if diff["kind"] == "key" and diff["right"] == "<missing>":
+        return "原图元数据里客户端额外记录的字段，已原样发送，NovelAI 不回写"
+    if diff["key"].startswith(_CLIENT_HINT_PREFIX) and diff["right"] is None:
+        return "客户端的标签提示开关，NovelAI 回写时总是 null"
     # 网页端 V4 出图 uc 为空、负面只在 v4_negative_prompt；API 出图两处都写同一段负面。
     if (
         diff["key"] == "uc"

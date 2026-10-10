@@ -157,6 +157,8 @@ def _model_from_source(source: dict[str, Any]) -> str | None:
     source_text = source.get("Source")
     if not isinstance(source_text, str):
         return None
+    if "V5" in source_text:
+        return "nai-diffusion-5-curated" if "curated" in source_text.lower() else "nai-diffusion-5-full"
     if "V4.5" in source_text:
         return "nai-diffusion-4-5-full"
     if "V4" in source_text:

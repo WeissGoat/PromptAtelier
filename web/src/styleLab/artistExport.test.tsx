@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
   previewExport: vi.fn(),
   exportArtist: vi.fn(),
   startArtistTest: vi.fn(),
-  searchLibrary: vi.fn(),
+  searchMaterials: vi.fn(),
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -86,6 +86,7 @@ const exported: ArtistExport = {
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  api.searchMaterials.mockResolvedValue({ nodes: [], total: 0, has_more: false, facet_options: {} });
 });
 
 afterEach(() => {
@@ -191,6 +192,7 @@ describe("ArtistTestPanel", () => {
       "w",
       "r",
       expect.objectContaining({ kind: "regression", artist: "1_Ink", image_ids: ["a", "e", "d", "c"], seed_mode: "source" }),
+      false,
     );
   });
 

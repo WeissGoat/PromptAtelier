@@ -141,6 +141,35 @@ class WebStyleLabTest(TestCase):
         runs = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/runs?image_id={image_id}").json()["runs"]
         self.assertEqual([r["id"] for r in runs], [run_id])
 
+        # 同样的请求再发一次：409，带上上一次的 run；确认后带 force 才出图。
+        again = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": image_id, "settings": {"count": 1}},
+        )
+        self.assertEqual(again.status_code, 409, again.text)
+        error = again.json()["error"]
+        self.assertEqual(error["code"], "duplicate_request")
+        self.assertEqual(error["details"]["run_id"], run_id)
+        forced = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": image_id, "settings": {"count": 1}, "force": True},
+        )
+        self.assertEqual(forced.status_code, 200, forced.text)
+        self._wait_run(workspace_id, forced.json()["run"]["id"])
+
+    def test_library_search_merges_copies(self):
+        root = self.tmp / "design" / "角色"
+        for folder, node_id in (("vocaloid/miku", "miku"), ("特殊/miku - 快捷方式", "miku - 快捷方式")):
+            node = root / folder
+            node.mkdir(parents=True)
+            (node / "meta.yaml").write_text(f"kind: character\nid: {node_id}\ntags:\n  hair: [aqua_hair]\n", encoding="utf-8")
+        data = self.client.get("/api/style-lab/library/search", params={"role": "character", "q": "miku"}).json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["nodes"][0]["relative"], "vocaloid/miku")
+        self.assertEqual(data["nodes"][0]["copies"], 1)
+        bad = self.client.get("/api/style-lab/library/search", params={"role": "artist"})
+        self.assertEqual(bad.status_code, 400)
+
     def test_regenerate_rejects_bad_settings_and_warns_for_inpaint(self):
         data = self._open()
         workspace_id = data["workspace"]["id"]

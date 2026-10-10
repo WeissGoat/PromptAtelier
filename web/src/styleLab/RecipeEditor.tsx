@@ -3,22 +3,29 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ImageRecord, Recipe, RecipePreview, TagCategory } from "./api";
 import {
+  addTokens,
+  applyToCharacter,
   categoryLabels,
   findZone,
+  MATERIAL_DRAG_TYPE,
+  materialOrigin,
+  materialsOf,
   moveTokens,
   placeToken,
+  removeOrigin,
   restoreSourceSubject,
   retokenize,
   setSubjectText,
   tokenCategory,
   tokenFrequency,
   tokensToText,
+  type MaterialDrag,
   type Zone,
 } from "./recipeModel";
 import { MODELS, SAMPLERS, SCHEDULES } from "./RegenPanel";
 import { SplitView } from "./SplitView";
 import { useTranslations } from "./translations";
-import { ZoneBox } from "./ZoneBox";
+import { ZoneBox, type BlockOptions } from "./ZoneBox";
 
 const KEY_TARGETS: Record<string, { zone: Zone; position: "start" | "end" }> = {
   "1": { zone: "prefix", position: "end" },
@@ -131,6 +138,12 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
     if (findZone(draft, id)) onChange(placeToken(draft, id, zone, index));
   };
 
+  const materials = materialsOf(draft);
+  const blocks: BlockOptions = {
+    label: (origin) => materials.find((item) => materialOrigin(item) === origin)?.name ?? null,
+    onRemove: (origin) => onChange(removeOrigin(draft, origin)),
+  };
+
   const shared = { selected, lookup, hints, onSelect: select, onDropToken: dropToken };
 
   return (
@@ -170,8 +183,10 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
           ) : null
         }
         allowText
+        blocks={blocks}
         hint="只用于测试出图"
         locked={false}
+        onDropMaterial={(drag, index) => onChange(addTokens(draft, drag.tags, drag.origin, index).recipe)}
         onTextChange={(text) => onChange(setSubjectText(draft, text))}
         title="主体"
         tokens={draft.subject}
@@ -221,15 +236,33 @@ function CharacterSection({
   const predicted = preview?.char_captions ?? [];
   const extraPredicted = predicted.slice(draft.character.enabled && editable ? 1 : 0);
   const setCharacter = (patch: Partial<Recipe["character"]>) => onChange({ ...draft, character: { ...draft.character, ...patch } });
+  const [dropping, setDropping] = useState(false);
 
   return (
-    <section className="sl-zone zone-character">
+    <section
+      className={`sl-zone zone-character ${dropping ? "drop-target" : ""}`}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropping(false);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(MATERIAL_DRAG_TYPE)) return;
+        event.preventDefault();
+        setDropping(true);
+      }}
+      onDrop={(event) => {
+        const raw = event.dataTransfer.getData(MATERIAL_DRAG_TYPE);
+        setDropping(false);
+        if (!raw) return;
+        event.preventDefault();
+        onChange(applyToCharacter(draft, JSON.parse(raw) as MaterialDrag));
+      }}
+    >
       <header className="sl-zone-head">
         <span className="sl-zone-title">
           <UserRound size={13} aria-hidden="true" />
           角色提示词
         </span>
-        <span className="sl-muted">单角色，只用于测试出图</span>
+        <span className="sl-muted">单角色，只用于测试出图；可以把素材块拖到这里</span>
         <span className="sl-bar-spacer" />
         <label className="sl-check">
           <input checked={draft.character.enabled} onChange={(event) => setCharacter({ enabled: event.target.checked })} type="checkbox" />

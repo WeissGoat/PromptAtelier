@@ -28,10 +28,12 @@ import {
   startRegenerate,
   uploadImages,
 } from "./api";
+import { CommonalityPanel } from "./CommonalityPanel";
 import { GroupPanel, groupImageIds, groupOfImage } from "./GroupPanel";
 import { emptyFilters, filterImages, FilterPanel, ImageGrid, type ImageFilters } from "./ImageBrowser";
 import { ImageInspector } from "./ImageInspector";
 import { RecipeWorkspace } from "./RecipeWorkspace";
+import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { defaultRegenSettings, RegenPanel } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
 import { translationStore } from "./translations";
@@ -39,6 +41,7 @@ import { WorkspaceBar } from "./WorkspaceBar";
 import "./styleLab.css";
 import "./styleLabRecipe.css";
 import "./styleLabExport.css";
+import "./styleLabMaterials.css";
 
 const STORAGE = {
   workspace: "promptatelier.style-lab.workspace/v1",
@@ -87,6 +90,7 @@ export function StyleLabPage() {
   const [runs, setRuns] = useState<StyleLabRun[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [regenDuplicate, setRegenDuplicate] = useState<DuplicateRequest | null>(null);
   const [analyzing, setAnalyzing] = useState<{ jobId: string; done: number; total: number } | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
@@ -219,6 +223,7 @@ export function StyleLabPage() {
         return next;
       });
       setRegenError(null);
+      setRegenDuplicate(null);
     },
     [workspace],
   );
@@ -321,17 +326,20 @@ export function StyleLabPage() {
     save(STORAGE.regen, next);
   };
 
-  const submitRegenerate = async () => {
+  const submitRegenerate = async (force = false) => {
     if (!workspace || !selectedImage) {
       return;
     }
     setSubmitting(true);
     setRegenError(null);
+    setRegenDuplicate(null);
     try {
-      const { run: created } = await startRegenerate(workspace.id, selectedImage.id, regenSettings);
+      const { run: created } = await startRegenerate(workspace.id, selectedImage.id, regenSettings, force);
       setRuns((current) => [created, ...current.filter((item) => item.id !== created.id)]);
     } catch (exc) {
-      setRegenError(errorMessage(exc));
+      const duplicate = duplicateOf(exc);
+      if (duplicate) setRegenDuplicate(duplicate);
+      else setRegenError(errorMessage(exc));
     } finally {
       setSubmitting(false);
     }
@@ -441,6 +449,13 @@ export function StyleLabPage() {
           />
           <div className="sl-center" ref={gridRef}>
             <ImageGrid images={filtered} onSelect={selectImage} selectedId={selectedId} workspaceId={workspace.id} />
+            <CommonalityPanel
+              images={filtered}
+              onSelect={selectImage}
+              selectedId={selectedId}
+              translateOn={translateOn && Boolean(llm?.available)}
+              workspaceId={workspace.id}
+            />
           </div>
           <aside className="sl-inspector" aria-label="图片详情">
             {selectedImage ? (
@@ -457,6 +472,15 @@ export function StyleLabPage() {
                 </button>
                 <RegenPanel
                   error={regenError}
+                  notice={
+                    regenDuplicate ? (
+                      <DuplicateNotice
+                        duplicate={regenDuplicate}
+                        onDismiss={() => setRegenDuplicate(null)}
+                        onForce={() => void submitRegenerate(true)}
+                      />
+                    ) : null
+                  }
                   image={selectedImage}
                   onChange={updateRegenSettings}
                   onSubmit={() => void submitRegenerate()}
