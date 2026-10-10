@@ -14,7 +14,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT / "web"
-DEFAULT_BACKEND_PORT = 8765
+DEFAULT_BACKEND_PORT = 53211
 DEFAULT_FRONTEND_PORT = 53173
 STATE_PATH = ROOT / "runtime" / "dev_web.json"
 STATE_SCHEMA = "promptatelier.dev-web/v1"

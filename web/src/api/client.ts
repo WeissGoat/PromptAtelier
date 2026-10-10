@@ -1,4 +1,4 @@
-const API_ROOT = import.meta.env.VITE_API_ROOT ?? "http://127.0.0.1:8765/api";
+const API_ROOT = import.meta.env.VITE_API_ROOT ?? "http://127.0.0.1:53211/api";
 
 export function apiUrl(path: string): string {
   return `${API_ROOT}${path}`;
