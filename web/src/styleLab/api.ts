@@ -414,3 +414,123 @@ export function getLibraryNode(ref: string, role: "character" | "action"): Promi
 export function analyzeWorkspace(workspaceId: string): Promise<{ job_id: string | null }> {
   return apiPost(`${ws(workspaceId)}/analyze`, {});
 }
+
+// ---- 导出 artist 与测试 ----
+
+export type ArtistExport = {
+  folder: string;
+  path: string;
+  recipe_id: string;
+  recipe_version: number;
+  recipe_name: string;
+  exported_at: number;
+  files: string[];
+  exists: boolean;
+};
+
+export type ExportDefaults = {
+  author: string | null;
+  artist_root: string;
+  exports: ArtistExport[];
+  candidates: string[];
+};
+
+export type ExportRequest = {
+  name: string;
+  author: string | null;
+  compare_ref?: string | null;
+  include_source?: boolean;
+};
+
+export type TokenDiff = { added: string[]; removed: string[]; same: boolean };
+
+export type ArtistDiff = {
+  prefix: TokenDiff;
+  suffix: TokenDiff;
+  negative: TokenDiff;
+  style: TokenDiff;
+  params: Array<{ key: string; before: unknown; after: unknown }>;
+  flags: { before: string[]; after: string[] } | null;
+};
+
+export type ExportPreview = {
+  folder: string;
+  requested_folder: string;
+  exists: boolean;
+  artist_root: string;
+  tags_txt: string;
+  files: string[];
+  vibe_count: number;
+  roundtrip_ok: boolean;
+  problems: string[];
+  warnings: string[];
+  candidates: string[];
+  compare: { ref: string; diff?: ArtistDiff; error?: string } | null;
+};
+
+export type ArtistTestSettings = {
+  kind: "regression" | "matrix";
+  artist: string;
+  image_ids: string[];
+  characters: string[];
+  actions: string[];
+  seed_mode: SeedMode;
+  seed: number | null;
+  width: number | null;
+  height: number | null;
+};
+
+export type ArtistTestItem = RunItem & {
+  label?: string;
+  source?: { image_id: string; path: string; rel_path: string };
+  subject?: string;
+  removed?: string[];
+  character?: string | null;
+  action?: string | null;
+};
+
+export type ArtistTestRun = Omit<StyleLabRun, "kind" | "settings" | "items"> & {
+  kind: "regression" | "matrix";
+  settings: ArtistTestSettings;
+  artist: { folder: string };
+  items: ArtistTestItem[];
+};
+
+export type AnyRun = StyleLabRun | ArtistTestRun;
+
+export function isArtistTestRun(run: AnyRun): run is ArtistTestRun {
+  return run.kind === "regression" || run.kind === "matrix";
+}
+
+function recipeUrl(workspaceId: string, recipeId: string): string {
+  return `${ws(workspaceId)}/recipes/${encodeURIComponent(recipeId)}`;
+}
+
+export function listRecipeRuns(workspaceId: string, recipeId: string): Promise<{ runs: AnyRun[] }> {
+  return apiGet(`${ws(workspaceId)}/runs?${new URLSearchParams({ recipe_id: recipeId })}`);
+}
+
+export function getExportDefaults(workspaceId: string, recipeId: string): Promise<ExportDefaults> {
+  return apiGet(`${recipeUrl(workspaceId, recipeId)}/exports`);
+}
+
+export function previewExport(workspaceId: string, recipeId: string, request: ExportRequest): Promise<{ preview: ExportPreview }> {
+  return apiPost(`${recipeUrl(workspaceId, recipeId)}/export/preview`, request);
+}
+
+export function exportArtist(
+  workspaceId: string,
+  recipeId: string,
+  request: ExportRequest,
+  expectedFolder: string,
+): Promise<{ export: ArtistExport }> {
+  return apiPost(`${recipeUrl(workspaceId, recipeId)}/export`, { ...request, expected_folder: expectedFolder });
+}
+
+export function startArtistTest(
+  workspaceId: string,
+  recipeId: string,
+  settings: ArtistTestSettings,
+): Promise<{ run: ArtistTestRun }> {
+  return apiPost(`${recipeUrl(workspaceId, recipeId)}/artist-test`, { settings });
+}

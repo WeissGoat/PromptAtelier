@@ -45,6 +45,7 @@ STYLE_PARAM_KEYS = (
     "reference_information_extracted_multiple",
     "uncond_per_vibe",
     "wonky_vibe_correlation",
+    "add_original_image",
 )
 VIBE_IMAGE_KEY = "reference_image_multiple"
 
@@ -101,6 +102,16 @@ def tokens_text(tokens: list[RecipeToken]) -> str:
     return serialize(TokenList(tokens=[Token(text=token.text, sep=token.sep) for token in tokens]))
 
 
+def line_text(tokens: list[RecipeToken]) -> str:
+    """单行文本：tags.txt 一行就是一段，token 之间的换行改成逗号，预览、导出、读回三者一致。"""
+    # 分隔符去掉换行后没有逗号的，serialize 会补 ", "。
+    flat = [
+        Token(text=re.sub(r"\s*[\r\n]+\s*", " ", token.text), sep=re.sub(r"[\r\n]+", "", token.sep))
+        for token in tokens
+    ]
+    return serialize(TokenList(tokens=flat)).strip(" ,")
+
+
 def recipe_from_image(record: ImageRecord, *, name: str | None = None, group_id: str | None = None) -> Recipe:
     """初始状态：原图整段提示词都在主体里（划分阶段），负面、角色提示词和画风参数取自原图。"""
     params, _ = read_source_parameters(Path(record.path))
@@ -132,6 +143,8 @@ def _default_name(record: ImageRecord) -> str:
 def artist_node(recipe: Recipe, *, source_path: str | None = None) -> dict[str, Any]:
     """把配方拼成和导出后读回来完全一样的 legacy artist 节点（tags.txt 第 1 行前缀、第 3 行后缀）。"""
     params = dict(recipe.params)
+    # 旧画风缺省时渲染器按 True 处理；网页端文生图的元数据里没有这一项，按已有画风的写法显式写 false。
+    params.setdefault("add_original_image", False)
     if recipe.model:
         params["model"] = recipe.model
     if recipe.use_source_vibe and source_path:
@@ -142,9 +155,9 @@ def artist_node(recipe: Recipe, *, source_path: str | None = None) -> dict[str, 
     else:
         params.pop("reference_strength_multiple", None)
         params.pop("reference_information_extracted_multiple", None)
-    prefix = tokens_text(recipe.prefix).strip(" ,")
-    suffix = tokens_text(recipe.suffix).strip(" ,")
-    negative = tokens_text(recipe.negative).strip(" ,")
+    prefix = line_text(recipe.prefix)
+    suffix = line_text(recipe.suffix)
+    negative = line_text(recipe.negative)
     ref = f"style_lab/{recipe.id}"
     return {
         "schema": "tags-machine.artist/v1",

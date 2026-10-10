@@ -12,6 +12,8 @@ from pydantic import ValidationError
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.llm import LLMError, translate_tags
 from tags_machine_core.style_lab import RegenSettings, StyleLabService, WorkspaceInfo, WorkspaceStore
+from tags_machine_core.style_lab.artist_test import ArtistTestSettings
+from tags_machine_core.style_lab.export import ExportConflictError, ExportError, ExportRequest
 from tags_machine_core.style_lab.recipe import Recipe, RecipeConflictError
 from tags_machine_core.style_lab.tokens import tokenize
 from tags_machine_core.style_lab.metadata import IMAGE_SUFFIXES, read_source_parameters
@@ -212,10 +214,15 @@ def regenerate(workspace_id: str, data: dict[str, Any], request: Request) -> dic
 
 
 @router.get("/workspaces/{workspace_id}/runs")
-def list_runs(workspace_id: str, request: Request, image_id: str | None = None) -> dict[str, Any]:
+def list_runs(
+    workspace_id: str, request: Request, image_id: str | None = None, recipe_id: str | None = None
+) -> dict[str, Any]:
     info = _workspace(request, workspace_id)
     service = _service(request)
-    runs = [service.reconcile_run(info, run) for run in _store(request).list_runs(info, image_id=image_id)]
+    runs = [
+        service.reconcile_run(info, run)
+        for run in _store(request).list_runs(info, image_id=image_id, recipe_id=recipe_id)
+    ]
     return {"schema": "tags-machine-core.web.style-lab-runs/v1", "runs": runs}
 
 
@@ -406,3 +413,61 @@ def translate(data: dict[str, Any], request: Request) -> dict[str, Any]:
         "available": client.available,
         "translations": translations,
     }
+
+
+def _export_request(data: dict[str, Any]) -> ExportRequest:
+    try:
+        return ExportRequest.model_validate(data)
+    except ValidationError as exc:
+        raise ApiError(code="invalid_export_request", message=str(exc), status_code=400) from exc
+
+
+@router.get("/workspaces/{workspace_id}/recipes/{recipe_id}/exports")
+def recipe_exports(workspace_id: str, recipe_id: str, request: Request) -> dict[str, Any]:
+    """导出对话框的初始值：建议的作者 id、以前的导出、可对比的已有画风。"""
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    try:
+        return _service(request).export_defaults(info, recipe_id)
+    except ExportError as exc:
+        raise ApiError(code="export_unavailable", message=str(exc), status_code=400) from exc
+
+
+@router.post("/workspaces/{workspace_id}/recipes/{recipe_id}/export/preview")
+def preview_export(workspace_id: str, recipe_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    try:
+        return {"preview": _service(request).export_preview(info, recipe_id, _export_request(data))}
+    except ExportError as exc:
+        raise ApiError(code="invalid_export_request", message=str(exc), status_code=400) from exc
+
+
+@router.post("/workspaces/{workspace_id}/recipes/{recipe_id}/export")
+def export_recipe(workspace_id: str, recipe_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    """写入 design/画风/<目录>。expected_folder 是预览时看到的目录名，变了就拒绝，避免写到没看过的地方。"""
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    expected = str(data.get("expected_folder") or "").strip() or None
+    try:
+        entry = _service(request).export_recipe(info, recipe_id, _export_request(data), expected_folder=expected)
+    except ExportConflictError as exc:
+        raise ApiError(code="export_conflict", message=str(exc), status_code=409) from exc
+    except ExportError as exc:
+        raise ApiError(code="export_failed", message=str(exc), status_code=400) from exc
+    return {"export": entry}
+
+
+@router.post("/workspaces/{workspace_id}/recipes/{recipe_id}/artist-test")
+def artist_test(workspace_id: str, recipe_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    try:
+        settings = ArtistTestSettings.model_validate(data.get("settings") or {})
+    except ValidationError as exc:
+        raise ApiError(code="invalid_artist_test", message=str(exc), status_code=400) from exc
+    try:
+        run = _service(request).start_artist_test(info, recipe_id, settings)
+    except ValueError as exc:
+        raise ApiError(code="artist_test_failed", message=str(exc), status_code=400) from exc
+    return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": run}

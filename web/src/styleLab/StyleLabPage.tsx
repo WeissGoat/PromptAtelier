@@ -38,6 +38,7 @@ import { translationStore } from "./translations";
 import { WorkspaceBar } from "./WorkspaceBar";
 import "./styleLab.css";
 import "./styleLabRecipe.css";
+import "./styleLabExport.css";
 
 const STORAGE = {
   workspace: "promptatelier.style-lab.workspace/v1",

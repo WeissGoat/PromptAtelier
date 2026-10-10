@@ -243,7 +243,9 @@ class WorkspaceStore:
                 raise KeyError(run_id)
             return json.loads(path.read_text(encoding="utf-8"))
 
-    def list_runs(self, info: WorkspaceInfo, *, image_id: str | None = None) -> list[dict[str, Any]]:
+    def list_runs(
+        self, info: WorkspaceInfo, *, image_id: str | None = None, recipe_id: str | None = None
+    ) -> list[dict[str, Any]]:
         runs_dir = self.runs_dir(info)
         if not runs_dir.is_dir():
             return []
@@ -254,7 +256,9 @@ class WorkspaceStore:
                     run = json.loads(run_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if image_id and run.get("source", {}).get("image_id") != image_id:
+            if image_id and (run.get("source") or {}).get("image_id") != image_id:
+                continue
+            if recipe_id and (run.get("recipe") or {}).get("id") != recipe_id:
                 continue
             runs.append(run)
         return sorted(runs, key=lambda run: run.get("created_at") or 0, reverse=True)

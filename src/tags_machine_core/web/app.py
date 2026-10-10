@@ -127,6 +127,7 @@ def create_app(
         job_manager=app.state.job_manager,
         generation_api=app.state.generation_api,
         llm_client=app.state.llm_client,
+        artist_root=app.state.node_workspace.artist_repository.artist_root,
     )
     app.add_middleware(
         CORSMiddleware,

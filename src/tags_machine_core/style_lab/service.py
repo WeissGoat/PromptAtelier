@@ -10,8 +10,21 @@ from tags_machine_core.logging_config import get_logger
 
 from tags_machine_core.llm import translate_tags
 
+from .artist_test import (
+    ArtistTestSettings,
+    matrix_cells,
+    matrix_payload,
+    pick_regression_images,
+    plan_seed,
+    regression_payload,
+    shared_random_seed,
+    strip_style,
+    style_norms,
+    subject_norms,
+)
 from .classify import classify_tags
 from .compare import compare_with_source
+from .export import ArtistExporter, ExportError, ExportLog, ExportRequest, suggest_author
 from .grouping import build_groups, workspace_tags
 from .metadata import ImageRecord
 from .recipe import Recipe, RecipeStore, artist_node, character_prompts_param, recipe_from_image, tokens_text
@@ -23,17 +36,27 @@ logger = get_logger(__name__)
 
 REGENERATE_JOB = "style_lab_regenerate"
 RECIPE_JOB = "style_lab_recipe"
+ARTIST_TEST_JOB = "style_lab_artist_test"
 ANALYSIS_JOB = "style_lab_analysis"
 _ANALYSIS_CHUNK = 160
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
 
 
 class StyleLabService:
-    def __init__(self, *, store: WorkspaceStore, job_manager: Any, generation_api: Any, llm_client: Any = None):
+    def __init__(
+        self,
+        *,
+        store: WorkspaceStore,
+        job_manager: Any,
+        generation_api: Any,
+        llm_client: Any = None,
+        artist_root: Path | None = None,
+    ):
         self.store = store
         self.job_manager = job_manager
         self.generation_api = generation_api
         self.llm_client = llm_client
+        self.exporter = ArtistExporter(artist_root) if artist_root else None
         self._analysis_jobs: dict[str, str] = {}
         # 每个任务各跑一个线程；同一账号并发请求 NovelAI 会 429，所以 Style Lab 的出图串行执行。
         self._generate_lock = threading.Lock()
@@ -144,6 +167,128 @@ class StyleLabService:
         except KeyError:
             return None
 
+    # ---- 导出 ----
+
+    def _exporter(self) -> ArtistExporter:
+        if self.exporter is None:
+            raise ExportError("没有配置 design_root，不知道画风目录在哪里。")
+        return self.exporter
+
+    def export_defaults(self, info: WorkspaceInfo, recipe_id: str) -> dict[str, Any]:
+        self.recipes(info).get(recipe_id)
+        exports = self.exports(info, recipe_id)
+        author = suggest_author(info)
+        return {
+            "author": author,
+            "artist_root": str(self._exporter().artist_root),
+            "exports": exports,
+            "candidates": self._exporter().candidates(author, exports),
+        }
+
+    def export_preview(self, info: WorkspaceInfo, recipe_id: str, request: ExportRequest) -> dict[str, Any]:
+        recipe = self.recipes(info).get(recipe_id)
+        return self._exporter().preview(
+            recipe, request, record=self._recipe_source(info, recipe), exports=self.exports(info, recipe_id)
+        )
+
+    def export_recipe(
+        self, info: WorkspaceInfo, recipe_id: str, request: ExportRequest, *, expected_folder: str | None = None
+    ) -> dict[str, Any]:
+        recipe = self.recipes(info).get(recipe_id)
+        entry = self._exporter().export(
+            recipe, request, record=self._recipe_source(info, recipe), info=info, expected_folder=expected_folder
+        )
+        ExportLog(Path(info.data_dir)).add(entry)
+        return {**entry, "exists": True}
+
+    def exports(self, info: WorkspaceInfo, recipe_id: str) -> list[dict[str, Any]]:
+        items = ExportLog(Path(info.data_dir)).for_recipe(recipe_id)
+        root = self.exporter.artist_root if self.exporter else None
+        return [{**item, "exists": bool(root and (root / item["folder"] / "tags.txt").is_file())} for item in items]
+
+    # ---- 用导出的 artist 测试 ----
+
+    def start_artist_test(self, info: WorkspaceInfo, recipe_id: str, settings: ArtistTestSettings) -> dict[str, Any]:
+        recipe = self.recipes(info).get(recipe_id)
+        exporter = self._exporter()
+        if not (exporter.artist_root / settings.artist / "tags.txt").is_file():
+            raise ValueError(f"画风目录不存在：{settings.artist}")
+        record = self._recipe_source(info, recipe)
+        shared = shared_random_seed()
+        requests: list[dict[str, Any]] = []
+        metas: list[dict[str, Any]] = []
+        seeds: list[int] = []
+        if settings.kind == "regression":
+            images = self.store.load_index(info).images
+            candidate_ids = settings.image_ids or self._group_image_ids(recipe, images)
+            picked = pick_regression_images(
+                images,
+                candidate_ids,
+                first_id=recipe.source_image_id,
+                limit=len(settings.image_ids) if settings.image_ids else 4,
+            )
+            if not picked:
+                raise ValueError("没有可用于回归对照的原图（需要有元数据、不是局部重绘或图生图）。")
+            categories = self._cached_categories(images)
+            norms = style_norms(recipe)
+            keep = subject_norms(recipe)
+            for image in picked:
+                subject, removed = strip_style(image.prompt, norms, categories, keep)
+                seed = plan_seed(settings, image.seed, shared)
+                seeds.append(seed)
+                requests.append(self._plan(regression_payload(settings, image, subject, seed)))
+                metas.append(
+                    {
+                        "label": image.post.post_id if image.post and image.post.post_id else Path(image.path).stem,
+                        "source": {"image_id": image.id, "path": image.path, "rel_path": image.rel_path},
+                        "subject": subject,
+                        "removed": removed,
+                    }
+                )
+        else:
+            seed = plan_seed(settings, record.seed if record else None, shared)
+            for character, action in matrix_cells(settings):
+                seeds.append(seed)
+                requests.append(self._plan(matrix_payload(settings, character, action, seed)))
+                metas.append({"character": character, "action": action})
+        return self._start_run(
+            info,
+            record,
+            kind=settings.kind,
+            settings=settings,
+            seeds=seeds,
+            requests=requests,
+            expected=[],
+            extra={
+                "recipe": {"id": recipe.id, "version": recipe.version, "name": recipe.name},
+                "artist": {"folder": settings.artist},
+            },
+            item_meta=metas,
+        )
+
+    def _plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = self.generation_api.compose_render_plan(payload)
+        except Exception as exc:  # noqa: BLE001 - 组合失败直接告诉界面
+            raise ValueError(f"拼提示词失败：{exc}") from exc
+        request = dict(result["render_request"])
+        request["meta"] = {**(request.get("meta") or {}), "source": "style_lab_artist_test"}
+        return request
+
+    def _cached_categories(self, images: list[ImageRecord]) -> dict[str, str]:
+        _, tags = workspace_tags(images)
+        client = self.llm_client if self.llm_client and self.llm_client.available else None
+        return classify_tags(client, tags, fetch=False)
+
+    def _group_image_ids(self, recipe: Recipe, images: list[ImageRecord]) -> list[str] | None:
+        if not recipe.group_id:
+            return None
+        for group in build_groups(images, self._cached_categories(images)):
+            for candidate in (group, *group.get("children", [])):
+                if candidate["id"] == recipe.group_id:
+                    return list(candidate["image_ids"])
+        return None
+
     # ---- 运行 ----
 
     def _start_run(
@@ -152,11 +297,12 @@ class StyleLabService:
         record: ImageRecord | None,
         *,
         kind: str,
-        settings: RegenSettings,
+        settings: RegenSettings | ArtistTestSettings,
         seeds: list[int],
         requests: list[dict[str, Any]],
         expected: list[str],
         extra: dict[str, Any] | None = None,
+        item_meta: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         run_id, run_dir = self.store.new_run_dir(info)
         run: dict[str, Any] = {
@@ -173,7 +319,10 @@ class StyleLabService:
             "settings": settings.model_dump(mode="json"),
             "expected_diff_keys": expected,
             "warnings": _source_warnings(record.flags) if record and kind == "regenerate" else [],
-            "items": [{"index": index, "seed": seed, "status": "queued"} for index, seed in enumerate(seeds)],
+            "items": [
+                {"index": index, "seed": seed, "status": "queued", **(item_meta[index] if item_meta else {})}
+                for index, seed in enumerate(seeds)
+            ],
             **(extra or {}),
         }
         source_path = Path(record.path) if record else None
@@ -192,7 +341,7 @@ class StyleLabService:
                 raise
 
         with self.store.lock:
-            job = self.job_manager.submit(REGENERATE_JOB if kind == "regenerate" else RECIPE_JOB, worker)
+            job = self.job_manager.submit(_JOB_NAMES.get(kind, ARTIST_TEST_JOB), worker)
             run["job_id"] = job.id
             self.store.save_run(info, run)
         return run
@@ -310,8 +459,10 @@ class StyleLabService:
                 image_path = Path(str(images[0]["path"]))
                 item["image_path"] = str(image_path)
                 item["status"] = "succeeded"
-                if source_path is not None:
-                    item["compare"] = compare_with_source(source_path, image_path, expected_keys=expected)
+                # 回归对照每张对照自己的原图；泛化矩阵没有原图可比。
+                item_source = Path(item["source"]["path"]) if item.get("source") else source_path
+                if item_source is not None and run["kind"] != "matrix":
+                    item["compare"] = compare_with_source(item_source, image_path, expected_keys=expected)
                     if run["kind"] != "regenerate":
                         # 配方出图和原图本来就是不同提示词，只看相似度和提示词差异，不下“链路”结论。
                         item["compare"]["verdict"] = "reference"
@@ -336,6 +487,8 @@ class StyleLabService:
         self.store.save_run(info, run)
         return copy.deepcopy(run)
 
+
+_JOB_NAMES = {"regenerate": REGENERATE_JOB, "recipe": RECIPE_JOB}
 
 _KNOWN_ERRORS = (
     ("HTTP 401", "NovelAI token 无效或已过期（HTTP 401），请更新 configs/local.yaml 里的 novelai.access_token。"),

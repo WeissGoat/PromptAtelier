@@ -2,8 +2,32 @@ import { ArrowLeft, FlaskConical, Play, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../api/client";
-import type { ImageRecord, Recipe, RecipePreview, RecipeSummary, RegenSettings, StyleGroup, StyleLabRun, TagCategory } from "./api";
-import { ACTIVE_RUN_STATUSES, cancelJob, generateRecipe, getRecipe, listRuns, previewRecipe, saveRecipe, sourceImageUrl } from "./api";
+import type {
+  ArtistExport,
+  ArtistTestRun,
+  ImageRecord,
+  Recipe,
+  RecipePreview,
+  RecipeSummary,
+  RegenSettings,
+  StyleGroup,
+  StyleLabRun,
+  TagCategory,
+} from "./api";
+import {
+  ACTIVE_RUN_STATUSES,
+  cancelJob,
+  generateRecipe,
+  getExportDefaults,
+  getRecipe,
+  isArtistTestRun,
+  listRecipeRuns,
+  previewRecipe,
+  saveRecipe,
+  sourceImageUrl,
+} from "./api";
+import { ArtistTestPanel } from "./ArtistTestPanel";
+import { ExportDialog } from "./ExportDialog";
 import { fileName, formatTime, modelLabel } from "./format";
 import { LibraryPanel } from "./LibraryPanel";
 import { postFrequency } from "./recipeModel";
@@ -84,6 +108,9 @@ export function RecipeWorkspace({
   const [preview, setPreview] = useState<RecipePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [runs, setRuns] = useState<StyleLabRun[]>([]);
+  const [testRuns, setTestRuns] = useState<ArtistTestRun[]>([]);
+  const [exports, setExports] = useState<ArtistExport[]>([]);
+  const [exportOpen, setExportOpen] = useState(false);
   const [runSettings, setRunSettings] = useState<RegenSettings>(loadRunSettings);
   const [submitting, setSubmitting] = useState(false);
   const [restored, setRestored] = useState(false);
@@ -117,6 +144,12 @@ export function RecipeWorkspace({
     }
     return groups.find((item) => source && item.image_ids.includes(source.id)) ?? null;
   }, [groups, draft?.group_id, source]);
+  // 配方可能挂在某个变体（子分组）上：回归对照只从这个变体里挑图。
+  const groupImageIds = useMemo(() => {
+    if (!group) return null;
+    const child = group.children.find((item) => item.id === draft?.group_id);
+    return (child ?? group).image_ids;
+  }, [group, draft?.group_id]);
   const frequency = useMemo(() => {
     const ids = new Set(group?.image_ids ?? images.map((image) => image.id));
     return postFrequency(images.filter((image) => ids.has(image.id)));
@@ -161,20 +194,29 @@ export function RecipeWorkspace({
   }, [workspaceId, draft]);
 
   const refreshRuns = useCallback(async () => {
-    if (!draft?.source_image_id) return;
     try {
-      const data = await listRuns(workspaceId, draft.source_image_id);
-      setRuns(data.runs.filter((run) => run.kind === "recipe" && run.recipe?.id === recipeId));
+      const data = await listRecipeRuns(workspaceId, recipeId);
+      setRuns(data.runs.filter((run): run is StyleLabRun => run.kind === "recipe"));
+      setTestRuns(data.runs.filter(isArtistTestRun));
     } catch {
       // 下一轮再试。
     }
-  }, [workspaceId, draft?.source_image_id, recipeId]);
+  }, [workspaceId, recipeId]);
+
+  const refreshExports = useCallback(async () => {
+    try {
+      setExports((await getExportDefaults(workspaceId, recipeId)).exports);
+    } catch {
+      setExports([]);
+    }
+  }, [workspaceId, recipeId]);
 
   useEffect(() => {
     void refreshRuns();
-  }, [refreshRuns]);
+    void refreshExports();
+  }, [refreshRuns, refreshExports]);
 
-  const hasActive = runs.some((run) => ACTIVE_RUN_STATUSES.has(run.status));
+  const hasActive = [...runs, ...testRuns].some((run) => ACTIVE_RUN_STATUSES.has(run.status));
   useEffect(() => {
     if (!hasActive) return;
     const timer = setInterval(() => void refreshRuns(), RUN_POLL_MS);
@@ -230,6 +272,10 @@ export function RecipeWorkspace({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const openExport = async () => {
+    if (await save()) setExportOpen(true);
   };
 
   const updateRunSettings = (next: RegenSettings) => {
@@ -429,7 +475,34 @@ export function RecipeWorkspace({
             workspaceId={workspaceId}
           />
         ) : null}
+        {draft.stage === "edit" ? (
+          <ArtistTestPanel
+            dirty={dirty}
+            exports={exports}
+            groupImageIds={groupImageIds}
+            images={images}
+            onCancel={(run) => run.job_id && void cancelJob(run.job_id)}
+            onExport={() => void openExport()}
+            onStarted={(run) => setTestRuns((items) => [run, ...items])}
+            recipeId={recipeId}
+            recipeVersion={saved.version}
+            runs={testRuns}
+            sourceImageId={draft.source_image_id}
+            workspaceId={workspaceId}
+          />
+        ) : null}
       </main>
+      {exportOpen ? (
+        <ExportDialog
+          onClose={() => setExportOpen(false)}
+          onExported={(entry) => {
+            setExportOpen(false);
+            setExports((items) => [...items, entry]);
+          }}
+          recipeId={recipeId}
+          workspaceId={workspaceId}
+        />
+      ) : null}
 
       <LibraryPanel draft={draft} onChange={setDraft} translateOn={translateOn} />
     </div>

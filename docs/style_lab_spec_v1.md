@@ -12,7 +12,7 @@ Style Lab 是 PromptAtelier 里的画风复刻工作台，用来替代 `artist-s
 | --- | --- |
 | P1 | 工作区、图片索引、元数据面板、原参重生与对照、出图设置、LLM 客户端与缓存、翻译接口 |
 | P2 | 无损分词器、自动分组、配方编辑器（划分、锁定、来源记录、角色提示词区）、素材卡片、翻译词典 |
-| P3 | artist 导出器、回归对照、泛化矩阵、`run-prompt` 支持显式角色提示词 |
+| P3 | artist 导出器、回归对照、泛化矩阵（显式角色提示词已在 P2 随渲染器完成） |
 | P4 | 替换角色、消融测试、配方版本历史、视觉差异诊断 |
 
 本文档详细描述 P1；P2 以后的部分只记录已经确定的约束。
@@ -222,7 +222,70 @@ base 提示词不动；`add_male_caption` 开着时，和 auto 模式一样按�
 | POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/generate` | 用已保存的配方出图，设置同原参重生 |
 | GET | `/api/style-lab/library/node?ref=&role=` | 素材卡片：节点 tag 按部位分组，下划线换成空格 |
 
-## 后续（P3+）
+## P3：导出 artist 与测试
 
-- 导出的 `tags.txt` 沿用现有格式：第 1 行前缀，第 2 行 `,`，第 3 行后缀，`gen_json` 不含宽高；导出前预览 diff，同名时建并列版本。
-- 回归对照、泛化矩阵、替换角色、消融测试、配方版本 diff、视觉差异诊断。
+### 导出
+
+配方导出到 `design/画风/<作者 id>_<EnglishStyleName>/`（画风目录取 `NodeWorkspace` 的画风根目录）。作者 id 默认取工作区根目录名（`artist_parse/<日期>/<作者 id>`）；画风名只允许英文字母、数字和单个下划线。
+
+`tags.txt` 沿用旧格式：
+
+```text
+<前缀，空时写 ,>
+,
+<后缀，空时省略>
+type, not_quailty_prompts
+=
+origin_uc, <画风负面>
+gen_json, {"model": ..., "sampler": ..., ...}
+```
+
+- `gen_json` 来自预览用的同一个 artist 节点：画风参数、模型、vibe（`reference_image_multiple` 等原样内嵌，和已有画风一致），不含宽高、种子。
+- `add_original_image` 缺省时写 `false`：旧画风缺省时渲染器按 `true` 处理，网页端文生图的元数据里又没有这一项。
+- token 之间的换行改成逗号：tags.txt 一行就是一段，预览、导出、读回三者一致。
+- 前缀为空时第 1 行也写 `,`，否则读取器丢掉空行后，后缀会被当成前缀。
+
+导出前的检查：
+
+- **读回校验**：在临时目录写一遍 tags.txt，用正式的 `NovelAIArtistRepository` 读回来，前缀、后缀、负面、参数、标记逐项和配方比对。不一致（例如某段以 `type` 开头被当成标记行）就拒绝导出。
+- **对比**：默认和这个配方上一次的导出比；没导出过就挑同作者已有画风里画风 token 最接近的。提示词按 token 增删列出；只换了位置或顺序时单独说明。参数逐项列出，宽高、种子不比，没写和空列表视为相同，vibe 只比张数。
+- **目录**：目标目录已存在时不覆盖，改用并列版本 `_v2`、`_v3`……；导出请求带上预览时看到的目录名，目录在这期间被占用就返回 409，要求重新预览。
+
+写入时先写到画风目录下的临时目录，再整体改名，失败不会留下半个画风。目录里除了 tags.txt 还有：
+
+| 文件 | 内容 |
+| --- | --- |
+| `notes.md` | 来源（工作区、配方及版本、原图、投稿）、参数、测试用主体 |
+| `stylelab_export.json` | 导出标记：配方 id 和版本、工作区、原图、时间 |
+| `source_<原图名>.png` 等 | 勾选“附带原图”时：原图、原图提示词、负面、测试用主体（`source_action_*`）、完整参数 |
+
+每次导出记在 `.stylelab/exports.json`，配方页据此显示已导出的版本，以及配方在导出后是否又改过。
+
+### 用导出的 artist 测试
+
+测试按目录名读取导出的 artist，走和日常出图完全一样的链路（`compose_render_plan`，`render.artist` 是目录名）。导出的 artist 和配方本身拼出的请求逐字段相同（有测试覆盖）。
+
+**回归对照**（`kind: "regression"`）：
+
+- 候选图：配方所属分组（或变体）里有元数据、不是局部重绘/图生图的图，每个投稿一张，配方原图排第一，其余按日期从新到旧；默认取 4 张，最多 12 张。
+- 内容提示词：原图提示词去掉配方里的画风和丢弃的 token，再去掉分类为画师/风格/质量/元信息的 token；配方里手动留在主体的 token 不按分类去掉。
+- 种子、尺寸、角色提示词取各自原图；也可以用共用随机种子或指定种子。
+- 每张和自己的原图对照，界面显示平均相似度。
+
+**泛化矩阵**（`kind: "matrix"`）：提示词库的角色（行，最多 4 个）× 动作（列，最多 4 个），用节点组合；全部格子共用一个种子，默认 832×1216。不和原图对照。
+
+测试 run 的 items 额外记录 `label`、`source`、`subject`、`removed`（回归对照）或 `character`、`action`（泛化矩阵）。
+
+### Web API（P3）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/style-lab/workspaces/{id}/recipes/{rid}/exports` | 建议的作者 id、画风目录、以前的导出、可对比的已有画风 |
+| POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/export/preview` | `{"name", "author"?, "compare_ref"?, "include_source"?}` → 目标目录、tags.txt、读回校验、对比 |
+| POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/export` | 同上，另带 `expected_folder`；目录变了返回 409 |
+| POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/artist-test` | `{"settings": {"kind", "artist", "image_ids"?, "characters"?, "actions"?, "seed_mode", "seed"?, "width"?, "height"?}}` |
+| GET | `/api/style-lab/workspaces/{id}/runs?recipe_id=` | 某个配方的全部 run（配方出图、回归对照、泛化矩阵） |
+
+## 后续（P4）
+
+- 替换角色、消融测试、配方版本 diff、视觉差异诊断。

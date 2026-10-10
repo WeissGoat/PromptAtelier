@@ -11,6 +11,7 @@ from tags_machine_core.contracts import GeneratedImage, GenerationResult
 from tags_machine_core.llm import LLMCache, LLMClient
 from tags_machine_core.web import create_app
 
+from tags_machine_core.style_lab.recipe import character_prompts_param
 from tests.test_style_lab import write_nai_png
 
 
@@ -243,3 +244,111 @@ class WebStyleLabTest(TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["uploaded"], 1)
         self.assertEqual(len(response.json()["images"]), 1)
+
+    def _locked_recipe(self, workspace_id, image_id):
+        base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
+        recipe = self.client.post(base, json={"image_id": image_id, "name": "导出测试"}).json()["recipe"]
+        recipe["prefix"], recipe["subject"], recipe["suffix"] = (
+            recipe["subject"][:1],
+            recipe["subject"][1:-1],
+            recipe["subject"][-1:],
+        )
+        recipe["stage"], recipe["locked"] = "edit", True
+        recipe["character"]["enabled"] = True
+        saved = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        return base, saved.json()["recipe"]
+
+    def test_export_artist_then_regression_and_matrix(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base, recipe = self._locked_recipe(workspace_id, image_id)
+        url = f"{base}/{recipe['id']}"
+
+        defaults = self.client.get(f"{url}/exports").json()
+        self.assertEqual(defaults["author"], "105845157")
+        self.assertEqual(defaults["exports"], [])
+
+        bad = self.client.post(f"{url}/export/preview", json={"name": "带 空格", "author": "105845157"})
+        self.assertEqual(bad.status_code, 400)
+        preview = self.client.post(f"{url}/export/preview", json={"name": "Foo_Style", "author": "105845157"})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview = preview.json()["preview"]
+        self.assertEqual(preview["folder"], "105845157_Foo_Style")
+        self.assertTrue(preview["roundtrip_ok"])
+        self.assertEqual(preview["tags_txt"].splitlines()[:3], ["artist:foo", ",", "sitting"])
+
+        exported = self.client.post(
+            f"{url}/export", json={"name": "Foo_Style", "author": "105845157", "expected_folder": preview["folder"]}
+        )
+        self.assertEqual(exported.status_code, 200, exported.text)
+        folder = exported.json()["export"]["folder"]
+        self.assertTrue((self.tmp / "design" / "画风" / folder / "tags.txt").is_file())
+        listed = self.client.get(f"{url}/exports").json()
+        self.assertEqual([item["folder"] for item in listed["exports"]], [folder])
+        self.assertTrue(listed["exports"][0]["exists"])
+        stale = self.client.post(f"{url}/export", json={"name": "Foo_Style", "author": "105845157", "expected_folder": folder})
+        self.assertEqual(stale.status_code, 409)
+
+        # 导出后按名字读回的 artist，和配方本身拼出的请求完全一样。
+        service = self.app.state.style_lab_service
+        info = self.app.state.style_lab_store.get(workspace_id)
+        recipe_obj = service.recipes(info).get(recipe["id"])
+        from_recipe = service.recipe_render_request(info, recipe_obj, seed=5)
+        from_disk = service._plan(
+            {
+                "compose": {"prompt": "1girl, solo", "negative": ""},
+                "render": {
+                    "backend": "novelai",
+                    "artist": folder,
+                    "width": from_recipe["size"]["width"],
+                    "height": from_recipe["size"]["height"],
+                    "seed": 5,
+                    "params": {
+                        "size": "custom",
+                        "n_samples": 1,
+                        "character_prompts": character_prompts_param(recipe_obj),
+                    },
+                },
+            }
+        )
+        for key in ("prompt", "negative_prompt", "model", "size"):
+            self.assertEqual(from_disk[key], from_recipe[key], key)
+        self.assertEqual(from_disk["params"], from_recipe["params"])
+
+        regression = self.client.post(
+            f"{url}/artist-test", json={"settings": {"kind": "regression", "artist": folder}}
+        )
+        self.assertEqual(regression.status_code, 200, regression.text)
+        run = self._wait_run(workspace_id, regression.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["kind"], "regression")
+        self.assertEqual(len(run["items"]), 1)  # 另一张是局部重绘，不参与
+        item = run["items"][0]
+        self.assertEqual(item["seed"], 1234)
+        self.assertEqual(item["subject"], "1girl, solo")
+        self.assertEqual(item["removed"], ["artist:foo", "sitting"])
+        self.assertEqual(item["compare"]["verdict"], "reference")
+
+        character = self.tmp / "design" / "角色" / "homura"
+        character.mkdir(parents=True)
+        (character / "meta.yaml").write_text(
+            "schema: tags-machine.character/v1\nkind: character\nid: homura\ntags:\n  character:\n    - akemi homura\n",
+            encoding="utf-8",
+        )
+        matrix = self.client.post(
+            f"{url}/artist-test",
+            json={"settings": {"kind": "matrix", "artist": folder, "characters": [str(character)], "seed_mode": "fixed", "seed": 9}},
+        )
+        self.assertEqual(matrix.status_code, 200, matrix.text)
+        run = self._wait_run(workspace_id, matrix.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["items"][0]["character"], str(character))
+        self.assertNotIn("compare", run["items"][0])
+
+        runs = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/runs", params={"recipe_id": recipe["id"]}).json()
+        self.assertEqual(sorted(item["kind"] for item in runs["runs"]), ["matrix", "regression"])
+
+        missing = self.client.post(f"{url}/artist-test", json={"settings": {"kind": "regression", "artist": "nope"}})
+        self.assertEqual(missing.status_code, 400)
