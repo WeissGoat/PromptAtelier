@@ -4,7 +4,7 @@
  */
 import type { ImageRecord } from "./api";
 import { modelLabel } from "./format";
-import { innerTags, tokenize } from "./tokens";
+import { innerTags } from "./tokens";
 
 export type TagStat = {
   tag: string;
@@ -44,16 +44,27 @@ export type Commonality = {
   profiles: ImageProfile[];
 };
 
-const LEADING_WEIGHT = /^\s*(-?\d+(?:\.\d+)?)::/;
+const WEIGHT_MARK = /(-?\d+(?:\.\d+)?)::|::/g;
 
-/** 一段提示词里的 tag -> 权重写法（数字权重取 token 开头的，没写为 "1"）。 */
+/**
+ * 一段提示词里的 tag -> 权重写法（没写为 "1"）。按 NAI 的 "n::…::" 分段：
+ * "2.4::oekaki,:: -2::sketch::" 里 oekaki 是 2.4、sketch 是 -2。
+ */
 export function tagWeights(text: string): Map<string, string> {
+  // 权重段可能跨过分词器切出的 token（"-2::sketch, jaggy lines,::"），所以对整段文本分段。
   const result = new Map<string, string>();
-  for (const token of tokenize(text).tokens) {
-    const weight = LEADING_WEIGHT.exec(token.text)?.[1];
-    const label = weight === undefined ? "1" : String(Number(weight));
-    for (const tag of innerTags(token.text)) {
-      if (!result.has(tag)) result.set(tag, label);
+  let weight = "1";
+  let last = 0;
+  const segments: Array<[string, string]> = [];
+  for (const match of text.matchAll(WEIGHT_MARK)) {
+    segments.push([text.slice(last, match.index), weight]);
+    weight = match[1] === undefined ? "1" : String(Number(match[1]));
+    last = (match.index ?? 0) + match[0].length;
+  }
+  segments.push([text.slice(last), weight]);
+  for (const [segment, segmentWeight] of segments) {
+    for (const tag of innerTags(segment)) {
+      if (!result.has(tag)) result.set(tag, segmentWeight);
     }
   }
   return result;
@@ -79,6 +90,7 @@ function tiers(maps: Array<{ id: string; tags: Map<string, string> }>): TagTiers
   };
 }
 
+// 尺寸是每次出图的设置，不属于画风，不参与比较。
 const PARAMS: Array<{ key: string; label: string; read: (image: ImageRecord) => string }> = [
   { key: "model", label: "模型", read: (image) => modelLabel(image.model) },
   { key: "sampler", label: "采样器", read: (image) => image.sampler ?? "—" },
@@ -86,7 +98,6 @@ const PARAMS: Array<{ key: string; label: string; read: (image: ImageRecord) => 
   { key: "steps", label: "步数", read: (image) => String(image.steps ?? "—") },
   { key: "scale", label: "CFG", read: (image) => String(image.scale ?? "—") },
   { key: "cfg_rescale", label: "CFG rescale", read: (image) => String(image.cfg_rescale ?? "—") },
-  { key: "size", label: "尺寸", read: (image) => (image.width && image.height ? `${image.width}×${image.height}` : "—") },
   { key: "vibe", label: "vibe", read: (image) => (image.vibe.count ? `${image.vibe.count} 张` : "无") },
   { key: "characters", label: "角色提示词", read: (image) => `${image.char_captions.length} 条` },
   { key: "negative", label: "负面", read: (image) => image.negative_prompt.trim() || "（空）" },
@@ -140,4 +151,65 @@ export function analyzeCommonality(images: ImageRecord[]): Commonality {
   // 重合度高、参数和多数一致的排前面：最适合当基准。
   profiles.sort((a, b) => b.overlap - a.overlap || a.deviations.length - b.deviations.length);
   return { count: usable.length, prompt, character, params, profiles };
+}
+
+export type WeightChange = { tag: string; mine: string; theirs: string };
+export type TagDiff = { added: string[]; missing: string[]; weights: WeightChange[] };
+export type ImageDiff = {
+  /** 对比对象的张数：1 是和某一张比，多张是和"多数"比。 */
+  others: number;
+  prompt: TagDiff;
+  character: TagDiff;
+  params: Array<{ label: string; mine: string; theirs: string }>;
+};
+
+function majorityOf(values: string[]): string {
+  const counts = new Map<string, number>();
+  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+}
+
+/**
+ * 一张图和其他图的 tag 差异。和一张比时就是两边各自独有的；和多张比时，
+ * "多出"是超过一半的其他图都没有的，"缺少"是超过一半的其他图都有的。
+ */
+function tagDiff(mine: Map<string, string>, others: Array<Map<string, string>>): TagDiff {
+  const total = others.length;
+  const seen = new Map<string, string[]>();
+  others.forEach((tags) => tags.forEach((weight, tag) => seen.set(tag, [...(seen.get(tag) ?? []), weight])));
+  // 恰好一半的其他图有：既不算多出也不算缺少。
+  const share = (tag: string) => (seen.get(tag)?.length ?? 0) * 2 - total;
+  const added = [...mine.keys()].filter((tag) => share(tag) < 0);
+  const missing = [...seen.entries()]
+    .filter(([tag]) => !mine.has(tag) && share(tag) > 0)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([tag]) => tag);
+  const weights = [...mine.entries()].flatMap(([tag, weight]) => {
+    const theirs = seen.get(tag);
+    if (!theirs || share(tag) < 0) return [];
+    const usual = majorityOf(theirs);
+    return usual === weight ? [] : [{ tag, mine: weight, theirs: usual }];
+  });
+  return { added, missing, weights };
+}
+
+function characterTags(image: ImageRecord): Map<string, string> {
+  return tagWeights(image.char_captions.map((caption) => caption.positive).join(", "));
+}
+
+export function diffAgainst(image: ImageRecord, others: ImageRecord[]): ImageDiff {
+  const pool = others.filter((other) => other.id !== image.id && other.has_metadata);
+  return {
+    others: pool.length,
+    prompt: tagDiff(
+      tagWeights(image.prompt),
+      pool.map((other) => tagWeights(other.prompt)),
+    ),
+    character: tagDiff(characterTags(image), pool.map(characterTags)),
+    params: PARAMS.flatMap(({ label, read }) => {
+      const mine = read(image);
+      const theirs = majorityOf(pool.map(read));
+      return pool.length && mine !== theirs ? [{ label, mine, theirs }] : [];
+    }),
+  };
 }

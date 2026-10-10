@@ -1,9 +1,9 @@
 import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ImageRecord } from "./api";
 import { sourceImageUrl } from "./api";
-import { analyzeCommonality, type ImageProfile, type TagStat, type TagTiers } from "./commonality";
+import { analyzeCommonality, diffAgainst, type ImageProfile, type TagDiff, type TagStat, type TagTiers } from "./commonality";
 import { useTranslations } from "./translations";
 
 const RECOMMEND = 3;
@@ -41,6 +41,8 @@ export function CommonalityPanel({ workspaceId, images, selectedId, translateOn,
   }
 
   const recommended = result.profiles.slice(0, RECOMMEND);
+  const usable = result.profiles.map((profile) => profile.image);
+  const focused = usable.find((image) => image.id === selectedId) ?? null;
   return (
     <section className="sl-common" aria-label="共性分析">
       <header className="sl-common-head">
@@ -55,6 +57,11 @@ export function CommonalityPanel({ workspaceId, images, selectedId, translateOn,
       </header>
       {open ? (
         <div className="sl-common-body">
+          {focused ? (
+            <FocusDiff image={focused} images={usable} lookup={lookup} onSelect={onSelect} workspaceId={workspaceId} />
+          ) : (
+            <p className="sl-hint">在上面选中一张图，这里会列出它和其他图的差异。</p>
+          )}
           <div className="sl-common-block">
             <h3>推荐作为基准</h3>
             <p className="sl-muted">和其他图的提示词重合度最高、参数和多数一致的图，划分出的画风最有代表性。点图片选中它，再在右栏新建配方。</p>
@@ -251,5 +258,131 @@ function TagList({ tags, tone }: { tags: string[]; tone: "missing" | "unique" })
       {tags.slice(0, LIST_LIMIT).join(", ")}
       {tags.length > LIST_LIMIT ? ` 等 ${tags.length} 个` : ""}
     </span>
+  );
+}
+
+/** 选中的图和其他图比：默认和"多数"比，也可以挑一张一对一比。 */
+function FocusDiff({
+  image,
+  images,
+  workspaceId,
+  lookup,
+  onSelect,
+}: {
+  image: ImageRecord;
+  images: ImageRecord[];
+  workspaceId: string;
+  lookup: (text: string) => string | undefined;
+  onSelect: (id: string) => void;
+}) {
+  const [target, setTarget] = useState<string | null>(null);
+  const others = images.filter((item) => item.id !== image.id);
+  const against = others.find((item) => item.id === target) ?? null;
+  useEffect(() => setTarget(null), [image.id]);
+  const diff = useMemo(() => diffAgainst(image, against ? [against] : others), [image, against, others]);
+  const single = Boolean(against);
+  const empty =
+    !diff.params.length &&
+    [diff.prompt, diff.character].every((item) => !item.added.length && !item.missing.length && !item.weights.length);
+
+  return (
+    <div className="sl-common-block sl-common-focus">
+      <h3>选中的图和{single ? "另一张" : `其他 ${others.length} 张的多数`}比</h3>
+      <div className="sl-common-targets">
+        <span className="sl-common-target mine" title="选中的图">
+          <img alt="选中的图" src={sourceImageUrl(workspaceId, image.id, 160)} />
+        </span>
+        <span className="sl-muted">对比</span>
+        <button className={`sl-common-target-all ${single ? "" : "on"}`} onClick={() => setTarget(null)} type="button">
+          多数
+        </button>
+        {others.map((other) => (
+          <button
+            aria-label={`和 ${other.rel_path} 比`}
+            aria-pressed={other.id === target}
+            className={`sl-common-target ${other.id === target ? "on" : ""}`}
+            key={other.id}
+            onClick={() => setTarget(other.id)}
+            onDoubleClick={() => onSelect(other.id)}
+            title={`${other.rel_path}
+单击对比，双击改为选中它`}
+            type="button"
+          >
+            <img alt="" loading="lazy" src={sourceImageUrl(workspaceId, other.id, 120)} />
+          </button>
+        ))}
+      </div>
+      {empty ? <p className="sl-muted">提示词和参数完全一致（不比尺寸）。</p> : null}
+      <DiffRows diff={diff.prompt} lookup={lookup} single={single} title="提示词" />
+      <DiffRows diff={diff.character} lookup={lookup} single={single} title="角色提示词" />
+      {diff.params.length ? (
+        <div className="sl-common-diff-row">
+          <span className="sl-common-tier-label">参数</span>
+          <div className="sl-common-tags">
+            {diff.params.map((item) => (
+              <span className="sl-common-dev" key={item.label} title={`${item.mine} → ${single ? "对比图" : "多数"} ${item.theirs}`}>
+                {item.label} {item.mine} → {item.theirs}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DiffRows({
+  title,
+  diff,
+  single,
+  lookup,
+}: {
+  title: string;
+  diff: TagDiff;
+  single: boolean;
+  lookup: (text: string) => string | undefined;
+}) {
+  const rows: Array<[string, string[], "added" | "missing"]> = [
+    [single ? `${title} · 只有选中的有` : `${title} · 多出（其他图大多没有）`, diff.added, "added"],
+    [single ? `${title} · 只有对比图有` : `${title} · 缺少（其他图大多有）`, diff.missing, "missing"],
+  ];
+  return (
+    <>
+      {rows.map(([label, tags, tone]) =>
+        tags.length ? (
+          <div className="sl-common-diff-row" key={tone}>
+            <span className="sl-common-tier-label">
+              {label} <span className="sl-count">{tags.length}</span>
+            </span>
+            <div className="sl-common-tags">
+              {tags.map((tag) => (
+                <span className={`sl-common-tag diff-${tone}`} key={tag}>
+                  {tone === "added" ? "+ " : "− "}
+                  {tag}
+                  {lookup(tag) ? <span className="sl-chip-zh">{lookup(tag)}</span> : null}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null,
+      )}
+      {diff.weights.length ? (
+        <div className="sl-common-diff-row">
+          <span className="sl-common-tier-label">
+            {title} · 权重不同 <span className="sl-count">{diff.weights.length}</span>
+          </span>
+          <div className="sl-common-tags">
+            {diff.weights.map((item) => (
+              <span className="sl-common-tag mixed" key={item.tag}>
+                {item.tag}
+                <span className="sl-common-weight">
+                  {item.mine} → {item.theirs}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

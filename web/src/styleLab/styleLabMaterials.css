@@ -102,6 +102,11 @@
   padding: 2px 6px 4px;
 }
 
+/* 菜单是纵向 flex 且限高：选项不能被压缩，否则会叠在一起。 */
+.sl-msearch-menu > * {
+  flex: none;
+}
+
 .sl-msearch-item {
   align-items: center;
   background: none;
@@ -606,6 +611,96 @@
   }
 
   .sl-common-tier-label {
+    width: auto;
+  }
+}
+
+/* ---- 共性分析：选中的图 ---- */
+
+.sl-common-focus {
+  background: #fafbfd;
+  border: 1px solid var(--sl-accent-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.sl-common-targets {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.sl-common-target {
+  background: none;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  flex: none;
+  min-height: 0;
+  padding: 0;
+}
+
+.sl-common-target img {
+  border-radius: 4px;
+  display: block;
+  height: 56px;
+  object-fit: cover;
+  width: 42px;
+}
+
+.sl-common-target.mine {
+  border-color: var(--sl-accent);
+}
+
+.sl-common-target.on {
+  border-color: var(--sl-style);
+}
+
+.sl-common-target-all {
+  background: #fff;
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  flex: none;
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.sl-common-target-all.on {
+  background: var(--sl-style-bg);
+  border-color: var(--sl-style);
+  color: var(--sl-style);
+}
+
+.sl-common-diff-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.sl-common-diff-row .sl-common-tier-label {
+  width: 180px;
+}
+
+.sl-common-tag.diff-added {
+  background: var(--sl-style-bg);
+  border-color: #c7c2f2;
+}
+
+.sl-common-tag.diff-missing {
+  background: var(--sl-danger-bg);
+  border-color: #f3b9b3;
+}
+
+@media (max-width: 900px) {
+  .sl-common-diff-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sl-common-diff-row .sl-common-tier-label {
     width: auto;
   }
 }

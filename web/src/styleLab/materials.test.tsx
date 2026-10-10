@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientError } from "../api/client";
 import type { ImageRecord, Recipe, RecipeToken } from "./api";
-import { analyzeCommonality, tagWeights } from "./commonality";
+import { analyzeCommonality, diffAgainst, tagWeights } from "./commonality";
 import { DuplicateNotice, duplicateOf } from "./DuplicateNotice";
 import {
   addMaterial,
@@ -188,8 +188,32 @@ describe("commonality", () => {
     expect(result.profiles[0].image.id).not.toBe("c");
   });
 
+  it("diffs one image against the majority or against one other image, ignoring size", () => {
+    const a = image("a", "0.6::ixy::, 1girl, smile, outdoors", { scale: 6, width: 1216, height: 832 });
+    const b = image("b", "0.9::ixy::, 1girl, smile, night");
+    const c = image("c", "0.9::ixy::, 1girl, cat ears");
+    const majority = diffAgainst(a, [a, b, c]);
+    expect(majority.others).toBe(2);
+    expect(majority.prompt.added).toEqual(["outdoors"]);
+    expect(majority.prompt.missing).toEqual([]);
+    expect(majority.prompt.weights).toEqual([{ tag: "ixy", mine: "0.6", theirs: "0.9" }]);
+    expect(majority.params).toEqual([{ label: "CFG", mine: "6", theirs: "5" }]);
+
+    const pair = diffAgainst(a, [c]);
+    expect(pair.prompt.added).toEqual(["smile", "outdoors"]);
+    expect(pair.prompt.missing).toEqual(["cat ears"]);
+    expect(analyzeCommonality([a, b, c]).params.some((param) => param.label === "尺寸")).toBe(false);
+  });
+
   it("reads leading numeric weights", () => {
     expect(Object.fromEntries(tagWeights("0.6::ixy::, -2::sketch::, smile"))).toEqual({ ixy: "0.6", sketch: "-2", smile: "1" });
+    expect(Object.fromEntries(tagWeights("2.4::oekaki,:: -2::sketch, jaggy lines,::, 0.9::cel rendering,anime coloring::"))).toEqual({
+      oekaki: "2.4",
+      sketch: "-2",
+      "jaggy lines": "-2",
+      "cel rendering": "0.9",
+      "anime coloring": "0.9",
+    });
   });
 });
 
