@@ -32,6 +32,7 @@ import { CommonalityPanel } from "./CommonalityPanel";
 import { GroupPanel, groupImageIds, groupOfImage } from "./GroupPanel";
 import { emptyFilters, filterImages, FilterPanel, ImageGrid, type ImageFilters } from "./ImageBrowser";
 import { ImageInspector } from "./ImageInspector";
+import { ImageViewerProvider } from "./ImageViewer";
 import { RecipeWorkspace } from "./RecipeWorkspace";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { defaultRegenSettings, RegenPanel } from "./RegenPanel";
@@ -42,6 +43,7 @@ import "./styleLab.css";
 import "./styleLabRecipe.css";
 import "./styleLabExport.css";
 import "./styleLabMaterials.css";
+import "./styleLabViewer.css";
 
 const STORAGE = {
   workspace: "promptatelier.style-lab.workspace/v1",
@@ -370,6 +372,7 @@ export function StyleLabPage() {
   };
 
   return (
+    <ImageViewerProvider workspaceId={workspace?.id ?? ""}>
     <main
       className={`sl-page ${dragging ? "dragging" : ""}`}
       onDragLeave={(event) => {
@@ -487,7 +490,7 @@ export function StyleLabPage() {
                   settings={regenSettings}
                   submitting={submitting}
                 />
-                <RunPanel imageId={selectedImage.id} onCancel={(item) => void cancelRun(item)} runs={runs} workspaceId={workspace.id} />
+                <RunPanel image={selectedImage} onCancel={(item) => void cancelRun(item)} runs={runs} workspaceId={workspace.id} />
               </ImageInspector>
             ) : (
               <div className="sl-empty">选一张图片查看元数据，按 ← / → 切换。</div>
@@ -497,5 +500,6 @@ export function StyleLabPage() {
       )}
       {dragging ? <div className="sl-drop-hint">松开即可导入为图片组</div> : null}
     </main>
+    </ImageViewerProvider>
   );
 }

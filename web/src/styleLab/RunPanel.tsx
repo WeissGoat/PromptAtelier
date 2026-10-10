@@ -2,18 +2,19 @@ import { CircleCheck, CircleX, LoaderCircle, Square, TriangleAlert } from "lucid
 import { useEffect, useState } from "react";
 
 import { computeTagDiff } from "../compare/tagDiff";
-import type { CompareVerdict, ParamDiff, RunItem, StyleLabRun } from "./api";
+import type { CompareVerdict, ImageRecord, ParamDiff, RunItem, StyleLabRun } from "./api";
 import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl } from "./api";
 import { formatTime, formatValue, runStatusLabels, verdictLabels } from "./format";
+import { runViewerItem, sourceViewerItem, useImageViewer } from "./ImageViewer";
 
 type RunPanelProps = {
   workspaceId: string;
-  imageId: string;
+  image: ImageRecord;
   runs: StyleLabRun[];
   onCancel: (run: StyleLabRun) => void;
 };
 
-export function RunPanel({ workspaceId, imageId, runs, onCancel }: RunPanelProps) {
+export function RunPanel({ workspaceId, image, runs, onCancel }: RunPanelProps) {
   const [selected, setSelected] = useState<{ runId: string; index: number } | null>(null);
 
   // 切换图片或新提交一次重生时，自动选中最新一次的第一张。
@@ -88,7 +89,7 @@ export function RunPanel({ workspaceId, imageId, runs, onCancel }: RunPanelProps
         ))}
       </div>
 
-      <CompareView imageId={imageId} item={item} run={run} workspaceId={workspaceId} />
+      <CompareView image={image} item={item} run={run} workspaceId={workspaceId} />
     </section>
   );
 }
@@ -114,20 +115,25 @@ function VerdictDot({ verdict }: { verdict: CompareVerdict }) {
 
 function CompareView({
   workspaceId,
-  imageId,
+  image,
   run,
   item,
 }: {
   workspaceId: string;
-  imageId: string;
+  image: ImageRecord;
   run: StyleLabRun;
   item: RunItem;
 }) {
   const [mode, setMode] = useState<"side" | "slider">("side");
   const [split, setSplit] = useState(50);
   const [showExpected, setShowExpected] = useState(false);
+  const viewer = useImageViewer();
   const compare = item.compare;
-  const sourceUrl = sourceImageUrl(workspaceId, imageId, 640);
+  const sourceUrl = sourceImageUrl(workspaceId, image.id, 640);
+  const viewerItems = [
+    sourceViewerItem(image),
+    ...(item.image_path ? [runViewerItem(item.image_path, `重生 · 第 ${item.index + 1} 张`, item.seed)] : []),
+  ];
   const generatedUrl = item.image_path ? runImageUrl(workspaceId, item.image_path, 640) : null;
 
   return (
@@ -148,11 +154,19 @@ function CompareView({
       {mode === "side" || !generatedUrl ? (
         <div className="sl-compare-side">
           <figure>
-            <img alt="原图" src={sourceUrl} />
+            <button className="sl-zoomable" onClick={() => viewer.open(viewerItems, 0)} title="查看大图和文件位置" type="button">
+              <img alt="原图" src={sourceUrl} />
+            </button>
             <figcaption>原图</figcaption>
           </figure>
           <figure>
-            {generatedUrl ? <img alt="重生" src={generatedUrl} /> : <div className="sl-compare-empty">{statusText(item)}</div>}
+            {generatedUrl ? (
+              <button className="sl-zoomable" onClick={() => viewer.open(viewerItems, 1)} title="查看大图和文件位置" type="button">
+                <img alt="重生" src={generatedUrl} />
+              </button>
+            ) : (
+              <div className="sl-compare-empty">{statusText(item)}</div>
+            )}
             <figcaption>重生 · 种子 {item.seed}</figcaption>
           </figure>
         </div>
@@ -186,7 +200,7 @@ function CompareView({
             {compare.diffs.some((diff) => diff.expected) ? (
               <label className="sl-check">
                 <input checked={showExpected} onChange={(event) => setShowExpected(event.target.checked)} type="checkbox" />
-                显示可忽略的差异（主动改动、等价写法）
+                显示可忽略的差异（{compare.diffs.filter((diff) => diff.expected).length} 项：主动改动、等价写法、客户端多记的字段）
               </label>
             ) : null}
           </div>
@@ -199,30 +213,78 @@ function CompareView({
               </tr>
             </thead>
             <tbody>
-              {visibleDiffs(compare.diffs, showExpected).map((diff) => (
-                <tr className={diff.expected ? "expected" : ""} key={diff.path}>
-                  <td title={diff.note ?? diff.path}>
-                    {diff.path.replace(/^\$\.(parameters\.)?/, "")}
-                    {diff.note ? <span className="sl-diff-note">{diff.note}</span> : null}
-                  </td>
-                  {isPromptDiff(diff) ? (
+              {noteGroups(visibleDiffs(compare.diffs, showExpected)).map((entry) =>
+                "group" in entry ? (
+                  <tr className="expected" key={`group-${entry.note}`}>
+                    <td>
+                      {entry.group.length} 项
+                      <span className="sl-diff-note">{entry.note}</span>
+                    </td>
                     <td colSpan={2}>
-                      <PromptDiff left={String(diff.left)} right={String(diff.right)} />
+                      <span className="sl-diff-keys">
+                        {entry.group.map((diff) => (
+                          <span className="sl-diff-key" key={diff.path} title={`原图：${formatValue(diff.left)}
+重生：${missingLabel(diff.right)}`}>
+                            {diffName(diff)}
+                          </span>
+                        ))}
+                      </span>
+                    </td>
+                  </tr>
+                ) : (
+                <tr className={entry.expected ? "expected" : ""} key={entry.path}>
+                  <td title={entry.note ?? entry.path}>
+                    {diffName(entry)}
+                    {entry.note ? <span className="sl-diff-note">{entry.note}</span> : null}
+                  </td>
+                  {isPromptDiff(entry) ? (
+                    <td colSpan={2}>
+                      <PromptDiff left={String(entry.left)} right={String(entry.right)} />
                     </td>
                   ) : (
                     <>
-                      <td>{formatValue(diff.left)}</td>
-                      <td>{formatValue(diff.right)}</td>
+                      <td>{missingLabel(entry.left)}</td>
+                      <td>{missingLabel(entry.right)}</td>
                     </>
                   )}
                 </tr>
-              ))}
+                ),
+              )}
             </tbody>
           </table>
         </div>
       ) : null}
     </div>
   );
+}
+
+const MISSING = "<missing>";
+
+/** 比对结果里 "<missing>" 表示这一边没有这个字段。 */
+function missingLabel(value: unknown): string {
+  return value === MISSING ? "（没有这个字段）" : formatValue(value);
+}
+
+function diffName(diff: ParamDiff): string {
+  return diff.path.replace(/^\$\.(parameters\.)?/, "");
+}
+
+/** 同一原因的可忽略差异超过一项时合并成一行，只列字段名，悬停看两边的值。 */
+type NoteGroup = { note: string; group: ParamDiff[] };
+
+function noteGroups(diffs: ParamDiff[]): Array<ParamDiff | NoteGroup> {
+  const byNote = new Map<string, ParamDiff[]>();
+  diffs.forEach((diff) => {
+    if (diff.expected && diff.note) byNote.set(diff.note, [...(byNote.get(diff.note) ?? []), diff]);
+  });
+  const emitted = new Set<string>();
+  return diffs.flatMap<ParamDiff | NoteGroup>((diff) => {
+    const group = diff.expected && diff.note ? byNote.get(diff.note)! : null;
+    if (!group || group.length < 2) return [diff];
+    if (emitted.has(diff.note!)) return [];
+    emitted.add(diff.note!);
+    return [{ note: diff.note!, group }];
+  });
 }
 
 const PROMPT_PATH_RE = /(^\$\.input$|\.prompt$|\.uc$|\.negative_prompt$|base_caption$|char_caption$)/;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -167,14 +168,8 @@ def get_image_detail(workspace_id: str, image_id: str, request: Request) -> dict
     }
 
 
-@router.get("/workspaces/{workspace_id}/file")
-def read_workspace_file(
-    workspace_id: str,
-    request: Request,
-    image_id: str | None = None,
-    path: str | None = None,
-    size: int = 0,
-) -> FileResponse:
+def _workspace_file(request: Request, workspace_id: str, image_id: str | None, path: str | None) -> Path:
+    """工作区里的原图（按 image_id）或出图结果（按 path）；不在工作区里的路径一律拒绝。"""
     store = _store(request)
     info = _workspace(request, workspace_id)
     if image_id:
@@ -190,6 +185,80 @@ def read_workspace_file(
         raise ApiError(code="missing_file", message="Provide image_id or path", status_code=400)
     if not target.is_file():
         raise ApiError(code="file_not_found", message=f"File not found: {target}", status_code=404)
+    return target
+
+
+def _reveal_in_explorer(target: Path) -> None:
+    # 文件名里常有逗号（提示词当文件名），"explorer /select," 加了引号也会在逗号处截断，
+    # 所以直接调 Shell 接口；已经开着的同一文件夹窗口会被复用。
+    import ctypes
+
+    shell32 = ctypes.windll.shell32
+    ole32 = ctypes.windll.ole32
+    shell32.ILCreateFromPathW.restype = ctypes.c_void_p
+    shell32.ILCreateFromPathW.argtypes = [ctypes.c_wchar_p]
+    shell32.ILFree.argtypes = [ctypes.c_void_p]
+    shell32.SHOpenFolderAndSelectItems.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+    shell32.SHOpenFolderAndSelectItems.restype = ctypes.c_long
+
+    initialized = ole32.CoInitialize(None) in (0, 1)  # S_OK / S_FALSE 都要配对 CoUninitialize
+    try:
+        pidl = shell32.ILCreateFromPathW(str(target))
+        if not pidl:
+            raise OSError(f"Cannot resolve shell item: {target}")
+        try:
+            result = shell32.SHOpenFolderAndSelectItems(pidl, 0, None, 0)
+        finally:
+            shell32.ILFree(pidl)
+        if result != 0:
+            raise OSError(f"SHOpenFolderAndSelectItems failed: {result & 0xFFFFFFFF:#010x}")
+    finally:
+        if initialized:
+            ole32.CoUninitialize()
+
+
+@router.get("/workspaces/{workspace_id}/file-info")
+def workspace_file_info(
+    workspace_id: str,
+    request: Request,
+    image_id: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    target = _workspace_file(request, workspace_id, image_id, path).resolve()
+    stat = target.stat()
+    return {
+        "schema": "tags-machine-core.web.style-lab-file-info/v1",
+        "path": str(target),
+        "size_bytes": stat.st_size,
+        "modified_at": stat.st_mtime,
+    }
+
+
+@router.post("/workspaces/{workspace_id}/reveal")
+def reveal_workspace_file(workspace_id: str, data: dict, request: Request) -> dict[str, Any]:
+    target = _workspace_file(request, workspace_id, data.get("image_id"), data.get("path")).resolve()
+    if sys.platform != "win32":
+        raise ApiError(
+            code="desktop_integration_unsupported",
+            message="Opening a file location is currently supported on Windows only",
+            status_code=501,
+        )
+    try:
+        _reveal_in_explorer(target)
+    except OSError as exc:
+        raise ApiError(code="reveal_failed", message=str(exc), status_code=500) from exc
+    return {"schema": "tags-machine-core.web.style-lab-reveal/v1", "opened": True, "path": str(target)}
+
+
+@router.get("/workspaces/{workspace_id}/file")
+def read_workspace_file(
+    workspace_id: str,
+    request: Request,
+    image_id: str | None = None,
+    path: str | None = None,
+    size: int = 0,
+) -> FileResponse:
+    target = _workspace_file(request, workspace_id, image_id, path)
     if size > 0:
         try:
             thumb = request.app.state.result_index.thumbnail_for(target, size)

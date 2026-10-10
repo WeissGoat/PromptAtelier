@@ -213,6 +213,26 @@ export function runImageUrl(workspaceId: string, path: string, size = 0): string
   return apiUrl(`${base}/workspaces/${encodeURIComponent(workspaceId)}/file?${params}`);
 }
 
+/** 原图按 image_id，出图结果按 path。 */
+export type WorkspaceFileRef = { imageId: string } | { path: string };
+
+export function workspaceFileUrl(workspaceId: string, file: WorkspaceFileRef, size = 0): string {
+  return "imageId" in file ? sourceImageUrl(workspaceId, file.imageId, size) : runImageUrl(workspaceId, file.path, size);
+}
+
+export type WorkspaceFileInfo = { path: string; size_bytes: number; modified_at: number };
+
+export function getFileInfo(workspaceId: string, file: WorkspaceFileRef): Promise<WorkspaceFileInfo> {
+  const params = new URLSearchParams("imageId" in file ? { image_id: file.imageId } : { path: file.path });
+  return apiGet(`${base}/workspaces/${encodeURIComponent(workspaceId)}/file-info?${params}`);
+}
+
+/** 在资源管理器里打开文件所在文件夹并选中它。 */
+export function revealFile(workspaceId: string, file: WorkspaceFileRef): Promise<{ path: string }> {
+  const body = "imageId" in file ? { image_id: file.imageId } : { path: file.path };
+  return apiPost(`${base}/workspaces/${encodeURIComponent(workspaceId)}/reveal`, body);
+}
+
 export function startRegenerate(
   workspaceId: string,
   imageId: string,

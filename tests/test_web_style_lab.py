@@ -3,6 +3,7 @@ import tempfile
 import time
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +11,7 @@ from tags_machine_core.config import LLMConfig
 from tags_machine_core.contracts import GeneratedImage, GenerationResult
 from tags_machine_core.llm import LLMCache, LLMClient
 from tags_machine_core.web import create_app
+from tags_machine_core.web.routes import style_lab as style_lab_routes
 
 from tags_machine_core.style_lab.recipe import character_prompts_param
 from tests.test_style_lab import write_nai_png
@@ -117,6 +119,28 @@ class WebStyleLabTest(TestCase):
         outside = write_nai_png(self.tmp / "elsewhere.png")
         forbidden = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file", params={"path": str(outside)})
         self.assertEqual(forbidden.status_code, 403)
+
+    def test_reveal_opens_workspace_files_only(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image = data["images"][0]
+        revealed = []
+        with (
+            patch.object(style_lab_routes, "_reveal_in_explorer", revealed.append),
+            patch.object(style_lab_routes.sys, "platform", "win32"),
+        ):
+            response = self.client.post(f"/api/style-lab/workspaces/{workspace_id}/reveal", json={"image_id": image["id"]})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(revealed, [Path(image["path"]).resolve()])
+
+            info = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file-info", params={"image_id": image["id"]}).json()
+            self.assertEqual(info["path"], str(Path(image["path"]).resolve()))
+            self.assertEqual(info["size_bytes"], Path(image["path"]).stat().st_size)
+
+            outside = write_nai_png(self.tmp / "elsewhere.png")
+            forbidden = self.client.post(f"/api/style-lab/workspaces/{workspace_id}/reveal", json={"path": str(outside)})
+            self.assertEqual(forbidden.status_code, 403)
+            self.assertEqual(len(revealed), 1)
 
     def test_regenerate_creates_run_and_compares(self):
         data = self._open()

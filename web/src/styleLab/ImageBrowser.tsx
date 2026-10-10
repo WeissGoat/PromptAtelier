@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { ImageFlag, ImageRecord } from "./api";
 import { sourceImageUrl } from "./api";
 import { flagLabels, modelLabel, vibeKey, vibeLabel } from "./format";
+import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 
 export type ImageFilters = {
   query: string;
@@ -167,6 +168,7 @@ type ImageGridProps = {
 
 /** 按投稿分段显示；一个投稿算一个单位，和 skill 的统计口径一致。 */
 export function ImageGrid({ workspaceId, images, selectedId, onSelect }: ImageGridProps) {
+  const viewer = useImageViewer();
   const sections = useMemo(() => {
     const result: Array<{ key: string; title: string; subtitle: string; images: ImageRecord[] }> = [];
     for (const image of images) {
@@ -211,6 +213,8 @@ export function ImageGrid({ workspaceId, images, selectedId, onSelect }: ImageGr
                 data-image-id={image.id}
                 key={image.id}
                 onClick={() => onSelect(image.id)}
+                onDoubleClick={() => viewer.open(images.map((item) => sourceViewerItem(item)), images.indexOf(image))}
+                title="双击查看大图"
                 type="button"
               >
                 <img alt="" decoding="async" loading="lazy" src={sourceImageUrl(workspaceId, image.id, 320)} />

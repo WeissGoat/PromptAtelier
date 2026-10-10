@@ -1,0 +1,142 @@
+/* ---- 图片详情 ---- */
+
+.sl-viewer {
+  background: rgba(10, 12, 16, 0.72);
+  display: flex;
+  inset: 0;
+  padding: 16px;
+  position: fixed;
+  z-index: 60;
+}
+
+.sl-viewer-panel {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sl-viewer-bar,
+.sl-viewer-info {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.sl-viewer-bar {
+  border-bottom: 1px solid var(--sl-border);
+}
+
+.sl-viewer-name {
+  color: var(--sl-muted);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-viewer-stage {
+  background: #1b1d22;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.sl-viewer-scroll {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sl-viewer-scroll img {
+  cursor: zoom-in;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* 原始大小：可以滚动查看细节。 */
+.sl-viewer-scroll.actual {
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: auto;
+}
+
+.sl-viewer-scroll.actual img {
+  cursor: zoom-out;
+  margin: auto;
+  max-height: none;
+  max-width: none;
+}
+
+.sl-viewer-nav {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.85);
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  height: 40px;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+}
+
+.sl-viewer-nav:hover {
+  background: #fff;
+}
+
+.sl-viewer-nav.prev {
+  left: 12px;
+}
+
+.sl-viewer-nav.next {
+  right: 12px;
+}
+
+.sl-viewer-info {
+  border-top: 1px solid var(--sl-border);
+  font-size: 12px;
+  gap: 4px 14px;
+}
+
+.sl-viewer-path {
+  color: var(--sl-muted);
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.sl-ok-text {
+  color: var(--sl-ok);
+}
+
+.sl-error-text {
+  color: var(--sl-danger);
+}
+
+/* 点开看详情的图片 */
+.sl-zoomable {
+  background: none;
+  border: none;
+  cursor: zoom-in;
+  display: block;
+  padding: 0;
+}
+
+.sl-zoomable img {
+  display: block;
+}

@@ -15,6 +15,7 @@ import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl, startArtistTest } fro
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { MaterialSearch } from "./MaterialSearch";
 import { formatTime, runStatusLabels } from "./format";
+import { runViewerItem, useImageViewer, type ViewerItem } from "./ImageViewer";
 import { Segmented, SIZE_PRESETS } from "./RegenPanel";
 
 const MAX_REGRESSION = 12;
@@ -380,12 +381,42 @@ function TestRunCard({ run, workspaceId, onCancel }: { run: ArtistTestRun; works
   );
 }
 
-function Generated({ item, workspaceId, size }: { item: ArtistTestItem; workspaceId: string; size: number }) {
-  if (item.image_path) {
+/** 一次测试里所有图（回归对照含原图）按顺序排成一组，点哪张就从哪张开始看。 */
+function testViewerItems(run: ArtistTestRun): ViewerItem[] {
+  return run.items.flatMap((item) => {
+    const label = item.label ?? [item.character, item.action].filter(Boolean).map((ref) => nodeName(ref)).join(" · ");
+    return [
+      ...(item.source ? [{ file: { imageId: item.source.image_id }, label: `${label} · 原图`, path: item.source.path }] : []),
+      ...(item.image_path ? [runViewerItem(item.image_path, label ? `${label} · 生成` : "生成", item.seed)] : []),
+    ];
+  });
+}
+
+function useOpenTestImage(run: ArtistTestRun) {
+  const viewer = useImageViewer();
+  return (match: (file: ViewerItem["file"]) => boolean) => {
+    const items = testViewerItems(run);
+    viewer.open(items, Math.max(0, items.findIndex((entry) => match(entry.file))));
+  };
+}
+
+function Generated({
+  item,
+  workspaceId,
+  size,
+  onOpen,
+}: {
+  item: ArtistTestItem;
+  workspaceId: string;
+  size: number;
+  onOpen: (path: string) => void;
+}) {
+  const imagePath = item.image_path;
+  if (imagePath) {
     return (
-      <a href={runImageUrl(workspaceId, item.image_path, 0)} rel="noreferrer" target="_blank">
-        <img alt="生成" loading="lazy" src={runImageUrl(workspaceId, item.image_path, size)} />
-      </a>
+      <button className="sl-zoomable" onClick={() => onOpen(imagePath)} title="查看大图和文件位置" type="button">
+        <img alt="生成" loading="lazy" src={runImageUrl(workspaceId, imagePath, size)} />
+      </button>
     );
   }
   return (
@@ -396,19 +427,26 @@ function Generated({ item, workspaceId, size }: { item: ArtistTestItem; workspac
 }
 
 function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: string }) {
+  const open = useOpenTestImage(run);
+  const openGenerated = (path: string) => open((file) => "path" in file && file.path === path);
   return (
     <div className="sl-regression-grid">
       {run.items.map((item) => (
         <figure className="sl-regression-pair" key={item.index}>
           <div className="sl-regression-images">
             {item.source ? (
-              <a href={sourceImageUrl(workspaceId, item.source.image_id, 0)} rel="noreferrer" target="_blank">
+              <button
+                className="sl-zoomable"
+                onClick={() => open((file) => "imageId" in file && file.imageId === item.source!.image_id)}
+                title="查看大图和文件位置"
+                type="button"
+              >
                 <img alt="原图" loading="lazy" src={sourceImageUrl(workspaceId, item.source.image_id, 320)} />
-              </a>
+              </button>
             ) : (
               <div className="sl-test-empty">无原图</div>
             )}
-            <Generated item={item} size={320} workspaceId={workspaceId} />
+            <Generated item={item} onOpen={openGenerated} size={320} workspaceId={workspaceId} />
           </div>
           <figcaption>
             <span>{item.label}</span>
@@ -429,6 +467,8 @@ function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId:
 }
 
 function MatrixGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: string }) {
+  const open = useOpenTestImage(run);
+  const openGenerated = (path: string) => open((file) => "path" in file && file.path === path);
   const rows = run.settings.characters.length ? run.settings.characters : [null];
   const cols = run.settings.actions.length ? run.settings.actions : [null];
   const cell = (character: string | null, action: string | null) =>
@@ -454,7 +494,7 @@ function MatrixGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: str
               </th>
               {cols.map((action) => {
                 const item = cell(character, action);
-                return <td key={action ?? "none"}>{item ? <Generated item={item} size={240} workspaceId={workspaceId} /> : null}</td>;
+                return <td key={action ?? "none"}>{item ? <Generated item={item} onOpen={openGenerated} size={240} workspaceId={workspaceId} /> : null}</td>;
               })}
             </tr>
           ))}

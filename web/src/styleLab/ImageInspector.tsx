@@ -1,9 +1,11 @@
-import { AlertTriangle, Copy, ExternalLink, UserRound } from "lucide-react";
+import { AlertTriangle, Copy, ExternalLink, FolderOpen, UserRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { ImageRecord } from "./api";
-import { sourceImageUrl } from "./api";
+import { errorMessage } from "../api/client";
+import { revealFile, sourceImageUrl } from "./api";
 import { fileName, flagLabels, modelLabel } from "./format";
+import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 import { splitPromptTags, translationStore, useTranslations } from "./translations";
 
 const flagHints: Partial<Record<string, string>> = {
@@ -22,6 +24,7 @@ type ImageInspectorProps = {
 };
 
 export function ImageInspector({ workspaceId, image, translateOn, children }: ImageInspectorProps) {
+  const viewer = useImageViewer();
   const fullUrl = sourceImageUrl(workspaceId, image.id, 0);
   const hints = image.flags.map((flag) => flagHints[flag]).filter(Boolean) as string[];
 
@@ -34,14 +37,23 @@ export function ImageInspector({ workspaceId, image, translateOn, children }: Im
             {[image.post?.date, image.post?.post_id, image.post?.title].filter(Boolean).join(" · ") || image.rel_path}
           </span>
         </div>
+        <button
+          aria-label="打开所在位置"
+          className="sl-icon-btn"
+          onClick={() => void revealFile(workspaceId, { imageId: image.id }).catch((error) => window.alert(errorMessage(error)))}
+          title="在资源管理器中打开所在位置"
+          type="button"
+        >
+          <FolderOpen size={15} />
+        </button>
         <a aria-label="在新标签页打开原图" className="sl-icon-btn" href={fullUrl} rel="noreferrer" target="_blank" title="打开原图">
           <ExternalLink size={15} />
         </a>
       </header>
 
-      <a className="sl-preview" href={fullUrl} rel="noreferrer" target="_blank">
+      <button className="sl-preview sl-zoomable" onClick={() => viewer.open([sourceViewerItem(image)])} title="查看大图和文件位置" type="button">
         <img alt={fileName(image.path)} src={sourceImageUrl(workspaceId, image.id, 640)} />
-      </a>
+      </button>
 
       {hints.length ? (
         <div className="sl-warn">

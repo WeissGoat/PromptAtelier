@@ -290,7 +290,11 @@ gen_json, {"model": ..., "sampler": ..., ...}
 
 ### 原参重生的对照
 
-- 原图元数据里有、NovelAI 出图不回写的键（重生时已原样发送），标为可忽略差异。典型来源是 NAI Smart Studio：它在 Comment 里另记一份 `negative_prompt`、`char_prompts`、`cfg_scale`、`model`、`Description` 等。`tag_hint_*` 是客户端的提示开关，NovelAI 回写为 null，同样忽略。
+- 原图元数据里有、NovelAI 出图不回写的键（重生时已原样发送），标为可忽略差异。典型来源是 NAI Smart Studio：它在 Comment 里另记一份 `negative_prompt`、`char_prompts`、`cfg_scale`、`model`、`Description` 等。`tag_hint_*` 是客户端的提示开关，NovelAI 回写为 null，同样忽略。界面上同一原因的可忽略差异合并成一行。
+
+### 图片详情
+
+`GET /workspaces/{id}/file-info?image_id=|path=` 返回绝对路径、大小、修改时间；`POST /workspaces/{id}/reveal` `{image_id | path}` 在资源管理器里打开所在文件夹并选中文件（仅 Windows，其他平台 501）。两者和 `/file` 一样只接受工作区里的原图和 runs 下的出图。打开用 `SHOpenFolderAndSelectItems`：文件名里常有逗号，`explorer /select,` 会在逗号处截断。
 - `Source` 是 "NovelAI Diffusion V5 …" 时，对照用的模型名按 V5 解析。
 
 ### 重复请求

@@ -30,6 +30,7 @@ import { ArtistTestPanel } from "./ArtistTestPanel";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { ExportDialog } from "./ExportDialog";
 import { fileName, formatTime, modelLabel } from "./format";
+import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 import { LibraryPanel } from "./LibraryPanel";
 import { postFrequency } from "./recipeModel";
 import { RecipeEditor } from "./RecipeEditor";
@@ -102,6 +103,7 @@ export function RecipeWorkspace({
   onOpenRecipe,
   onSaved,
 }: RecipeWorkspaceProps) {
+  const viewer = useImageViewer();
   const [saved, setSaved] = useState<Recipe | null>(null);
   const [draft, setDraft] = useState<Recipe | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -327,9 +329,9 @@ export function RecipeWorkspace({
         </button>
         {source ? (
           <figure className="sl-recipe-source">
-            <a href={sourceImageUrl(workspaceId, source.id, 0)} rel="noreferrer" target="_blank">
+            <button className="sl-zoomable" onClick={() => viewer.open([sourceViewerItem(source)])} title="查看大图和文件位置" type="button">
               <img alt="原图" src={sourceImageUrl(workspaceId, source.id, 480)} />
-            </a>
+            </button>
             <figcaption>
               原图 {fileName(source.path)} · {modelLabel(source.model)}
             </figcaption>
@@ -477,7 +479,7 @@ export function RecipeWorkspace({
         ) : null}
         {source && draft.stage === "edit" ? (
           <RunPanel
-            imageId={source.id}
+            image={source}
             onCancel={(run) => run.job_id && void cancelJob(run.job_id)}
             runs={runs}
             workspaceId={workspaceId}

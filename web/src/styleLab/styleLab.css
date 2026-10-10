@@ -1002,6 +1002,19 @@
   font-size: 11px;
 }
 
+.sl-diff-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.sl-diff-key {
+  background: #f1f3f6;
+  border-radius: 4px;
+  cursor: help;
+  padding: 0 5px;
+}
+
 .sl-prompt-diff {
   align-items: center;
   display: flex;
