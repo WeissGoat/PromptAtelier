@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { apiUrl } from "../api/client";
 import type { BaseTemplate, CompareRound, CompareWorkspaceState } from "./types";
 import {
   COMPARE_WORKSPACE_SCHEMA,
@@ -105,6 +106,9 @@ describe("compare workspace storage", () => {
     expect(round1.variants[1].diff.added).toEqual(["smile"]);
     expect(round1.variants[1].seedOverride).toBe(99999);
     expect(round1.variants[1].resultImage?.path).toBe("output/var-2.png");
+    // 存档里旧端口的图片地址读入时换成当前后端地址。
+    expect(round1.variants[1].resultImage?.url).toBe(apiUrl("/results/image?path=output/var-2.png"));
+    expect(loaded.state.template.sourceImage?.previewUrl).toBe(apiUrl("/results/image?path=output/test.png"));
     // deepCompare should reset to closed on reload
     expect(loaded.state.deepCompare.isOpen).toBe(false);
   });

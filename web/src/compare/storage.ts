@@ -118,6 +118,20 @@ export function saveCompareWorkspaceSnapshot(storage: Storage, state: CompareWor
   }
 }
 
+const STORED_API_URL_RE = /^https?:\/\/[^/]+\/api(?=\/results\/)/;
+
+/** 存档里的图片地址带着当时的后端地址（比如旧端口 8765），换了端口图片就加载不出来；读入时改成当前的后端地址。 */
+export function rebaseStoredApiUrls<T>(value: T): T {
+  if (typeof value === "string") {
+    return (STORED_API_URL_RE.test(value) ? apiUrl(value.replace(STORED_API_URL_RE, "")) : value) as T;
+  }
+  if (Array.isArray(value)) return value.map(rebaseStoredApiUrls) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rebaseStoredApiUrls(item)])) as T;
+  }
+  return value;
+}
+
 export function parseCompareWorkspacePayload(raw: unknown): CompareWorkspaceLoadResult {
   if (!raw) {
     return { status: "empty", state: createDefaultCompareWorkspace() };
@@ -136,8 +150,8 @@ export function parseCompareWorkspacePayload(raw: unknown): CompareWorkspaceLoad
     }
 
     const state: CompareWorkspaceState = {
-      template: parsed.template,
-      rounds: parsed.rounds,
+      template: rebaseStoredApiUrls(parsed.template),
+      rounds: rebaseStoredApiUrls(parsed.rounds),
       deepCompare: {
         isOpen: false,
         leftVariantId: null,
