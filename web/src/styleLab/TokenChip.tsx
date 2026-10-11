@@ -20,21 +20,19 @@ type TokenChipProps = {
   zh?: string;
   hint?: string;
   selected?: boolean;
-  suggested?: Zone | null;
-  review?: boolean;
   draggable?: boolean;
   onClick?: (event: React.MouseEvent) => void;
   onDragStart?: (event: React.DragEvent) => void;
 };
 
-export function TokenChip({ token, zone, zh, hint, selected, suggested, review, draggable, onClick, onDragStart }: TokenChipProps) {
+export function TokenChip({ token, zone, zh, hint, selected, draggable, onClick, onDragStart }: TokenChipProps) {
   const title = [token.text, hint, token.origins.filter((origin) => origin !== "source").join("、")]
     .filter(Boolean)
     .join("\n");
   return (
     <button
       aria-pressed={selected}
-      className={`sl-chip zone-${zone} ${originClass(token)} ${selected ? "selected" : ""} ${suggested ? `suggest-${suggested}` : ""} ${review ? "review" : ""}`}
+      className={`sl-chip zone-${zone} ${originClass(token)} ${selected ? "selected" : ""}`}
       data-token-id={token.id}
       draggable={draggable}
       onClick={onClick}

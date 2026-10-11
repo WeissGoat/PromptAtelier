@@ -3,20 +3,21 @@ import { describe, expect, it } from "vitest";
 import type { ImageRecord, Recipe, RecipeToken } from "./api";
 import {
   addTokens,
-  applyCuts,
-  applySuggestions,
-  commitSplit,
-  cutsOf,
+  commitTextSplit,
+  markRange,
   moveTokens,
   placeToken,
   postFrequency,
   removeOrigin,
   restoreSourceSubject,
   retokenize,
-  splitStateOf,
+  snapRange,
+  suggestTextMarks,
   suggestZones,
+  textSplitOf,
   tokenCategory,
   tokensToText,
+  type TextSplit,
 } from "./recipeModel";
 import { tokenize } from "./tokens";
 
@@ -52,20 +53,94 @@ function recipe(subject: string): Recipe {
 
 const texts = (list: RecipeToken[]) => list.map((token) => token.text);
 
+/** 按原文里的文字标记（取第一次出现的位置）。 */
+function mark(split: TextSplit, piece: string, zone: Parameters<typeof markRange>[3]): TextSplit {
+  const start = split.text.indexOf(piece);
+  return markRange(split, start, start + piece.length, zone);
+}
+
 describe("split stage", () => {
-  it("cuts the stream into prefix, subject and suffix", () => {
+  it("marks prefix and suffix on the text; the rest is subject", () => {
     const base = recipe("shirabi|[[akipeko]], 1girl, sitting, smooth shading, best quality");
-    let state = splitStateOf(base);
-    state = applyCuts(state, 2, 4);
-    expect(cutsOf(state)).toEqual([2, 4]);
-    const committed = commitSplit(base, state);
+    let split = textSplitOf(base, "shirabi|[[akipeko]], 1girl, sitting, smooth shading, best quality");
+    expect(split.marks).toEqual([]);
+    split = mark(split, "shirabi|[[akipeko]]", "prefix");
+    split = mark(split, "smooth shading, best quality", "suffix");
+    const committed = commitTextSplit(base, split);
     expect(texts(committed.prefix)).toEqual(["shirabi", "[[akipeko]]"]);
     expect(texts(committed.subject)).toEqual(["1girl", "sitting"]);
     expect(texts(committed.suffix)).toEqual(["smooth shading", "best quality"]);
     expect(committed.stage).toBe("edit");
     expect(committed.locked).toBe(true);
-    // 竖线分隔符保留在 token 上，前缀拼回去和原文一致。
+    // 竖线分隔符保留在 token 上，前缀拼回去和原文一致；没变的 token 沿用原来的 id。
     expect(tokensToText(committed.prefix)).toBe("shirabi|[[akipeko]]");
+    expect(committed.subject[0].id).toBe(base.subject[2].id);
+  });
+
+  it("cuts natural-language sentences where the text was selected", () => {
+    const prompt = "color trace, 这是一幅日式动漫插画。采用细腻的线稿，少女站在中央。looking back, very aesthetic, masterpiece";
+    const base = recipe(prompt);
+    let split = textSplitOf(base, prompt);
+    split = mark(split, "color trace, 这是一幅日式动漫插画。采用细腻的线稿", "prefix");
+    split = mark(split, "very aesthetic, masterpiece", "suffix");
+    const committed = commitTextSplit(base, split);
+    expect(texts(committed.prefix)).toEqual(["color trace", "这是一幅日式动漫插画。采用细腻的线稿"]);
+    expect(texts(committed.subject)).toEqual(["少女站在中央。looking back"]);
+    expect(texts(committed.suffix)).toEqual(["very aesthetic", "masterpiece"]);
+  });
+
+  it("snaps a drag to whole words and whole weight groups", () => {
+    const group = "1.1::year 2025, year 2026,::";
+    const text = `color trace, ${group}, smile`;
+    // 半个词补全，两头的逗号空格去掉。
+    expect(snapRange(text, 2, 13)).toEqual([0, 11]);
+    // 切到权重组中间：整组带上。
+    const inside = text.indexOf("2025");
+    expect(snapRange(text, inside, inside + 4)).toEqual([13, 13 + group.length]);
+    expect(snapRange(text, 11, 13)).toBeNull();
+  });
+
+  it("re-marks, clears and merges marks", () => {
+    let split: TextSplit = { text: "a, b, c, d", marks: [] };
+    split = mark(split, "a", "prefix");
+    split = mark(split, "b", "prefix");
+    expect(split.marks).toEqual([{ start: 0, end: 4, zone: "prefix" }]);
+    split = mark(split, "b", "subject");
+    expect(split.marks).toEqual([{ start: 0, end: 1, zone: "prefix" }]);
+    split = mark(split, "c, d", "suffix");
+    split = mark(split, "d", "dropped");
+    expect(split.marks).toEqual([
+      { start: 0, end: 1, zone: "prefix" },
+      { start: 6, end: 7, zone: "suffix" },
+      { start: 9, end: 10, zone: "dropped" },
+    ]);
+  });
+
+  it("re-splits an edited recipe without losing style tokens or added materials", () => {
+    const prompt = "shirabi, 1girl, sitting, best quality";
+    const first = commitTextSplit(recipe(prompt), mark(mark(textSplitOf(recipe(prompt), prompt), "shirabi", "prefix"), "best quality", "suffix"));
+    const edited = {
+      ...addTokens(first, ["miku"], "character:F:/miku").recipe,
+      prefix: [...first.prefix, { id: "m1", text: "ink wash", sep: ", ", origins: ["manual"] }],
+    };
+    const split = textSplitOf(edited, prompt);
+    // 原文里找到的标回原位，手打的接在末尾。
+    expect(split.text).toBe("shirabi, 1girl, sitting, best quality, ink wash");
+    expect(split.marks.map((item) => [split.text.slice(item.start, item.end), item.zone])).toEqual([
+      ["shirabi", "prefix"],
+      ["best quality", "suffix"],
+      ["ink wash", "prefix"],
+    ]);
+    // 之前从主体里删掉的原文标成丢弃，不会悄悄回到主体。
+    const trimmed = { ...edited, subject: edited.subject.filter((token) => token.text !== "sitting") };
+    const resplit = textSplitOf(trimmed, prompt);
+    expect(resplit.marks.map((item) => [resplit.text.slice(item.start, item.end), item.zone])).toContainEqual(["sitting", "dropped"]);
+    expect(texts(commitTextSplit(trimmed, resplit).subject)).toEqual(["1girl", "miku"]);
+
+    const again = commitTextSplit(edited, mark(split, "best quality", "subject"));
+    expect(texts(again.prefix)).toEqual(["shirabi", "ink wash"]);
+    expect(texts(again.subject)).toEqual(["1girl", "sitting", "best quality", "miku"]);
+    expect(again.subject[3].origins).toEqual(["character:F:/miku"]);
   });
 
   it("suggests zones from categories and group frequency", () => {
@@ -105,8 +180,11 @@ describe("split stage", () => {
     expect(zoneOf("ink painting")).toBeNull();
     // 最后的质量词后面没有内容了：进后缀。
     expect(zoneOf("best quality")).toBe("suffix");
-    const state = applySuggestions(splitStateOf(base), suggestions);
-    expect(texts(commitSplit(base, state).prefix)).toEqual(["artist:foo"]);
+    const prompt = tokensToText(base.subject);
+    const adopted = suggestTextMarks(textSplitOf(base, prompt), categories, frequency);
+    expect(adopted.unsure).toBe(3);
+    expect(texts(commitTextSplit(base, adopted.split).prefix)).toEqual(["artist:foo"]);
+    expect(texts(commitTextSplit(base, adopted.split).suffix)).toEqual(["best quality"]);
   });
 
   it("classifies tokens like the backend", () => {
@@ -130,7 +208,11 @@ describe("split stage", () => {
 });
 
 describe("edit stage", () => {
-  const edited = () => commitSplit(recipe("shirabi, 1girl, sitting, school uniform, best quality"), applyCuts(splitStateOf(recipe("shirabi, 1girl, sitting, school uniform, best quality")), 1, 4));
+  const edited = () => {
+    const prompt = "shirabi, 1girl, sitting, school uniform, best quality";
+    const split = mark(mark(textSplitOf(recipe(prompt), prompt), "shirabi", "prefix"), "best quality", "suffix");
+    return commitTextSplit(recipe(prompt), split);
+  };
 
   it("moves subject tokens into the style prefix", () => {
     const base = edited();

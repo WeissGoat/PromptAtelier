@@ -98,9 +98,14 @@ export function innerTags(tokenText: string): string[] {
   return tags;
 }
 
+/** 括号组、权重组的范围（[start, end)）：组内的逗号不分词，划分时也不能从中间切开。 */
+export function protectedRanges(text: string): Array<[number, number]> {
+  return [...bracketRanges(text), ...weightRanges(text)];
+}
+
 function protectedMask(text: string): boolean[] {
   const mask = new Array<boolean>(text.length).fill(false);
-  for (const [start, end] of [...bracketRanges(text), ...weightRanges(text)]) {
+  for (const [start, end] of protectedRanges(text)) {
     for (let index = start; index < end; index += 1) {
       mask[index] = true;
     }

@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw, Unlock, UserRound } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw, TextSelect, Unlock, UserRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { ImageRecord, Recipe, RecipePreview, TagCategory } from "./api";
@@ -70,7 +70,7 @@ export function RecipeEditor({
         frequency={frequency}
         onCommit={onChange}
         recipe={draft}
-        translateOn={translateOn}
+        sourcePrompt={source?.prompt ?? null}
       />
     );
   }
@@ -153,12 +153,23 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
       <ZoneBox
         {...shared}
         actions={
-          draft.locked ? (
-            <button className="sl-ghost tiny" onClick={() => onChange({ ...draft, locked: false })} title="解锁后可以编辑画风文字、重新划分" type="button">
-              <Unlock size={13} aria-hidden="true" />
-              解锁
+          <>
+            <button
+              className="sl-ghost tiny"
+              onClick={() => onChange({ ...draft, stage: "split", locked: false })}
+              title="回到原文上拖选，重新标前缀、后缀。主体里加的素材会保留，之前从主体删掉的原文显示为丢弃"
+              type="button"
+            >
+              <TextSelect size={13} aria-hidden="true" />
+              重新划分
             </button>
-          ) : null
+            {draft.locked ? (
+              <button className="sl-ghost tiny" onClick={() => onChange({ ...draft, locked: false })} title="解锁后可以直接编辑画风文字" type="button">
+                <Unlock size={13} aria-hidden="true" />
+                解锁
+              </button>
+            ) : null}
+          </>
         }
         allowText={!draft.locked}
         hint="tags.txt 第 1 行"
@@ -210,11 +221,6 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
       <NegativeSection draft={draft} onChange={onChange} />
       <StyleParams draft={draft} onChange={onChange} source={source} />
       <PreviewBox error={previewError} preview={preview} />
-      {!draft.locked ? (
-        <button className="sl-link-btn" onClick={() => onChange({ ...draft, stage: "split", locked: false })} type="button">
-          回到划分视图重新划分
-        </button>
-      ) : null}
     </div>
   );
 }

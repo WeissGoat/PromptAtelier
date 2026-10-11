@@ -3,7 +3,7 @@
  * 所有函数都返回新对象，不改动传入的配方。
  */
 import type { ImageRecord, Recipe, RecipeMaterial, RecipeToken, TagCategory } from "./api";
-import { DEFAULT_SEP, hasSeparator, innerTags, tokenize } from "./tokens";
+import { DEFAULT_SEP, hasSeparator, innerTags, protectedRanges, tokenize } from "./tokens";
 
 export type Zone = "prefix" | "subject" | "suffix" | "dropped";
 export const ZONES: Zone[] = ["prefix", "subject", "suffix", "dropped"];
@@ -39,74 +39,214 @@ export function normalizeText(text: string): string {
   return weight !== undefined && Number(weight) !== 1 ? `${Number(weight)}::${base}` : base;
 }
 
-// ---- 划分阶段 ----
+// ---- 划分阶段：在原文上拖选标记 ----
 
-export type SplitState = { tokens: RecipeToken[]; zones: Record<string, Zone> };
+/** 标出来的一段原文。没标的都是主体。 */
+export type MarkZone = Exclude<Zone, "subject">;
+export type TextMark = { start: number; end: number; zone: MarkZone };
+export type TextSplit = { text: string; marks: TextMark[] };
+export type TextSegment = { start: number; end: number; zone: Zone };
 
-/** 当前配方摊平成原始顺序的一条 token 流（前缀、主体、后缀、丢弃），并记住各自的区。 */
-export function splitStateOf(recipe: Recipe): SplitState {
-  const zones: Record<string, Zone> = {};
-  const tokens: RecipeToken[] = [];
-  for (const zone of ZONES) {
+const WORD_CHAR = /[A-Za-z0-9_'-]/;
+const EDGE_CHAR = /[\s,，|]/;
+
+function isEdgeOnly(text: string): boolean {
+  return [...text].every((char) => EDGE_CHAR.test(char));
+}
+
+/**
+ * 拖选的范围对齐到能单独成块的边界：去掉两头的空格和逗号，半个英文词补全，
+ * 切到半个括号组、权重组时整组带上。中文句子按选中的字切，不扩。
+ */
+export function snapRange(text: string, start: number, end: number): [number, number] | null {
+  let s = Math.max(0, Math.min(start, end));
+  let e = Math.min(text.length, Math.max(start, end));
+  const trim = () => {
+    while (s < e && EDGE_CHAR.test(text[s])) s += 1;
+    while (e > s && EDGE_CHAR.test(text[e - 1])) e -= 1;
+  };
+  trim();
+  if (s >= e) return null;
+  while (s > 0 && WORD_CHAR.test(text[s - 1]) && WORD_CHAR.test(text[s])) s -= 1;
+  while (e < text.length && WORD_CHAR.test(text[e - 1]) && WORD_CHAR.test(text[e])) e += 1;
+  const groups = protectedRanges(text);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [a, b] of groups) {
+      if (a < e && b > s && (a < s || b > e)) {
+        s = Math.min(s, a);
+        e = Math.max(e, b);
+        changed = true;
+      }
+    }
+  }
+  trim();
+  return s < e ? [s, e] : null;
+}
+
+/** 去掉标记两头的空格和逗号（拆开一段标记后剩下的边）。 */
+function trimMark(text: string, mark: TextMark): TextMark {
+  let { start, end } = mark;
+  while (start < end && EDGE_CHAR.test(text[start])) start += 1;
+  while (end > start && EDGE_CHAR.test(text[end - 1])) end -= 1;
+  return { ...mark, start, end };
+}
+
+/** 把 [start, end) 标成某个区；标成主体就是清掉这段的标记。相邻（只隔逗号空格）的同区标记合并。 */
+export function markRange(split: TextSplit, start: number, end: number, zone: Zone): TextSplit {
+  const pieces: TextMark[] = [];
+  for (const mark of split.marks) {
+    if (mark.end <= start || mark.start >= end) {
+      pieces.push(mark);
+      continue;
+    }
+    if (mark.start < start) pieces.push({ ...mark, end: start });
+    if (mark.end > end) pieces.push({ ...mark, start: end });
+  }
+  if (zone !== "subject") pieces.push({ start, end, zone });
+  const marks: TextMark[] = [];
+  pieces
+    .map((mark) => trimMark(split.text, mark))
+    .filter((mark) => mark.start < mark.end)
+    .sort((a, b) => a.start - b.start)
+    .forEach((mark) => {
+      const last = marks[marks.length - 1];
+      if (last && last.zone === mark.zone && isEdgeOnly(split.text.slice(last.end, mark.start))) {
+        marks[marks.length - 1] = { ...last, end: Math.max(last.end, mark.end) };
+      } else {
+        marks.push(mark);
+      }
+    });
+  return { ...split, marks };
+}
+
+/** 整段原文按区切成连续的几段（没标的是主体），用于显示和写回配方。 */
+export function textSegments(split: TextSplit): TextSegment[] {
+  const segments: TextSegment[] = [];
+  let cursor = 0;
+  for (const mark of split.marks) {
+    if (mark.start > cursor) segments.push({ start: cursor, end: mark.start, zone: "subject" });
+    segments.push({ start: mark.start, end: mark.end, zone: mark.zone });
+    cursor = mark.end;
+  }
+  if (cursor < split.text.length) segments.push({ start: cursor, end: split.text.length, zone: "subject" });
+  return segments;
+}
+
+/** 分词后每个 token 在原文里的位置（分词是无损的，按 leading + sep 累加即可）。 */
+export function tokenSpans(text: string): Array<{ start: number; end: number; text: string }> {
+  const list = tokenize(text);
+  let position = list.leading.length;
+  return list.tokens.map((token, index) => {
+    if (index > 0) position += token.sep.length;
+    const start = position;
+    position += token.text.length;
+    return { start, end: position, text: token.text };
+  });
+}
+
+function isBoundary(text: string, start: number, end: number): boolean {
+  const before = start > 0 && WORD_CHAR.test(text[start - 1]) && WORD_CHAR.test(text[start]);
+  const after = end < text.length && WORD_CHAR.test(text[end - 1]) && WORD_CHAR.test(text[end]);
+  return !before && !after;
+}
+
+/**
+ * 划分的起点：原文用原图的提示词；配方里已经在前缀、后缀、丢弃的 token 在原文里找到位置标上，
+ * 原文里找不到的（解锁后手改过的）接在原文末尾再标上，重新划分不会丢。
+ * 重新划分时，原文里哪个区都找不到的部分（之前从主体里删掉的）标成丢弃，不会悄悄回到主体。
+ */
+export function textSplitOf(recipe: Recipe, sourcePrompt?: string | null): TextSplit {
+  let text = sourcePrompt?.trim() ? sourcePrompt : tokensToText([...recipe.prefix, ...recipe.subject, ...recipe.suffix, ...recipe.dropped]);
+  const claimed: Array<[number, number]> = [];
+  const found: TextMark[] = [];
+  const missing: Array<{ text: string; zone: MarkZone }> = [];
+  const claim = (piece: string): number => {
+    let at = text.indexOf(piece);
+    while (at >= 0 && (claimed.some(([a, b]) => a < at + piece.length && b > at) || !isBoundary(text, at, at + piece.length))) {
+      at = text.indexOf(piece, at + 1);
+    }
+    if (at >= 0) claimed.push([at, at + piece.length]);
+    return at;
+  };
+  for (const zone of ["prefix", "suffix", "dropped"] as MarkZone[]) {
     for (const token of recipe[zone]) {
-      tokens.push(token);
-      zones[token.id] = zone;
+      const at = claim(token.text);
+      if (at < 0) missing.push({ text: token.text, zone });
+      else found.push({ start: at, end: at + token.text.length, zone });
     }
   }
-  return { tokens, zones };
+  recipe.subject.forEach((token) => claim(token.text));
+  const resplit = recipe.stage === "edit" || recipe.prefix.length + recipe.suffix.length + recipe.dropped.length > 0;
+  if (resplit) {
+    let cursor = 0;
+    for (const [a, b] of [...claimed].sort((x, y) => x[0] - y[0])) {
+      if (a > cursor && !isEdgeOnly(text.slice(cursor, a))) found.push({ start: cursor, end: a, zone: "dropped" });
+      cursor = Math.max(cursor, b);
+    }
+    if (cursor < text.length && !isEdgeOnly(text.slice(cursor))) found.push({ start: cursor, end: text.length, zone: "dropped" });
+  }
+  for (const item of missing) {
+    if (text.trim()) text += DEFAULT_SEP;
+    found.push({ start: text.length, end: text.length + item.text.length, zone: item.zone });
+    text += item.text;
+  }
+  return found.reduce<TextSplit>((split, mark) => markRange(split, mark.start, mark.end, mark.zone), { text, marks: [] });
 }
 
-/** 两条分界线：index 之前的是前缀，cutB 之后的是后缀；丢弃的 token 不受影响。 */
-export function applyCuts(state: SplitState, cutA: number, cutB: number): SplitState {
-  const [a, b] = cutA <= cutB ? [cutA, cutB] : [cutB, cutA];
-  const zones = { ...state.zones };
-  state.tokens.forEach((token, index) => {
-    if (zones[token.id] === "dropped") {
-      return;
-    }
-    zones[token.id] = index < a ? "prefix" : index < b ? "subject" : "suffix";
+/** 按类别和同组出现率给原文里的每个 token 建议区，拿不准的保持原样。 */
+export function suggestTextMarks(
+  split: TextSplit,
+  categories: Record<string, TagCategory>,
+  frequency: Map<string, number>,
+): { split: TextSplit; unsure: number } {
+  const spans = tokenSpans(split.text);
+  const suggestions = suggestZones(
+    spans.map((span, index) => ({ id: `t${index}`, text: span.text, sep: "", origins: [] })),
+    categories,
+    frequency,
+  );
+  let next = split;
+  let unsure = 0;
+  spans.forEach((span, index) => {
+    const zone = suggestions[`t${index}`]?.zone;
+    if (zone) next = markRange(next, span.start, span.end, zone);
+    else unsure += 1;
   });
-  return { ...state, zones };
+  return { split: next, unsure };
 }
 
-/** 从当前划分推回两条分界线的位置（前缀末尾、后缀开头），用于在界面上画线。 */
-export function cutsOf(state: SplitState): [number, number] {
-  let cutA = 0;
-  let cutB = state.tokens.length;
-  state.tokens.forEach((token, index) => {
-    const zone = state.zones[token.id];
-    if (zone === "prefix") {
-      cutA = Math.max(cutA, index + 1);
-    }
-  });
-  for (let index = state.tokens.length - 1; index >= 0; index -= 1) {
-    const zone = state.zones[state.tokens[index].id];
-    if (zone === "suffix") {
-      cutB = index;
-    } else if (zone !== "dropped") {
-      break;
+/**
+ * 把标记写回配方（保持原文顺序），进入编辑阶段并锁定画风。文字相同的 token 沿用原来的 id 和来源；
+ * 主体里原图之外的 token（素材、手打的）留在主体末尾。
+ */
+export function commitTextSplit(recipe: Recipe, split: TextSplit): Recipe {
+  const pool = new Map<string, RecipeToken[]>();
+  for (const token of [...recipe.prefix, ...recipe.subject, ...recipe.suffix, ...recipe.dropped]) {
+    const list = pool.get(token.text) ?? [];
+    list.push(token);
+    pool.set(token.text, list);
+  }
+  const zones: Record<Zone, RecipeToken[]> = { prefix: [], subject: [], suffix: [], dropped: [] };
+  const used = new Set<string>();
+  for (const segment of textSegments(split)) {
+    for (const token of tokenize(split.text.slice(segment.start, segment.end)).tokens) {
+      const reuse = pool.get(token.text)?.shift();
+      const next = reuse
+        ? { ...reuse, sep: token.sep }
+        : { id: newTokenId(), text: token.text, sep: token.sep, origins: [SOURCE_ORIGIN] };
+      used.add(next.id);
+      zones[segment.zone].push(next);
     }
   }
-  return [cutA, Math.max(cutA, cutB)];
-}
-
-export function setZones(state: SplitState, ids: string[], zone: Zone): SplitState {
-  const zones = { ...state.zones };
-  ids.forEach((id) => {
-    zones[id] = zone;
-  });
-  return { ...state, zones };
-}
-
-/** 把划分结果写回配方（保持原始顺序），进入编辑阶段并锁定画风。 */
-export function commitSplit(recipe: Recipe, state: SplitState): Recipe {
-  const pick = (zone: Zone) => state.tokens.filter((token) => state.zones[token.id] === zone);
+  const extras = recipe.subject.filter((token) => !used.has(token.id) && token.origins.some((origin) => origin !== SOURCE_ORIGIN));
   return {
     ...recipe,
-    prefix: pick("prefix"),
-    subject: pick("subject"),
-    suffix: pick("suffix"),
-    dropped: pick("dropped"),
+    prefix: zones.prefix,
+    subject: [...zones.subject, ...extras],
+    suffix: zones.suffix,
+    dropped: zones.dropped,
     stage: "edit",
     locked: true,
   };
@@ -220,17 +360,6 @@ export function suggestZones(
     }
   });
   return result;
-}
-
-export function applySuggestions(state: SplitState, suggestions: Record<string, Suggestion>): SplitState {
-  const zones = { ...state.zones };
-  state.tokens.forEach((token) => {
-    const zone = suggestions[token.id]?.zone;
-    if (zone) {
-      zones[token.id] = zone;
-    }
-  });
-  return { ...state, zones };
 }
 
 export const categoryLabels: Record<TagCategory, string> = {

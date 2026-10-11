@@ -207,28 +207,6 @@
   box-shadow: 0 0 0 2px var(--sl-accent);
 }
 
-.sl-chip.suggest-prefix,
-.sl-chip.suggest-suffix,
-.sl-chip.suggest-subject,
-.sl-chip.suggest-dropped {
-  outline: 1.5px dashed;
-  outline-offset: 2px;
-}
-
-.sl-chip.suggest-prefix,
-.sl-chip.suggest-suffix {
-  outline-color: #7f77dd;
-}
-
-.sl-chip.suggest-subject {
-  outline-color: #1d9e75;
-}
-
-.sl-chip.review {
-  outline: 1.5px dashed #ba7517;
-  outline-offset: 2px;
-}
-
 .sl-chip.origin-character {
   border-left: 3px solid #d85a30;
 }
@@ -288,47 +266,115 @@
   color: var(--sl-muted);
 }
 
-.sl-split-stream {
-  align-items: flex-start;
+.sl-mark-bar {
+  align-items: center;
   background: #fff;
   border: 1px solid var(--sl-border);
   border-radius: 8px;
   display: flex;
   flex-wrap: wrap;
-  padding: 18px 10px 12px;
-  row-gap: 18px;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
-.sl-gap {
-  align-self: stretch;
-  background: transparent;
-  border: 0;
-  border-radius: 3px;
-  cursor: col-resize;
-  min-height: 24px;
-  padding: 0;
-  position: relative;
-  width: 9px;
-}
-
-.sl-gap:hover {
-  background: var(--sl-accent-bg);
-}
-
-.sl-gap.active {
-  background: var(--sl-accent);
-  margin: 0 3px;
-  width: 3px;
-}
-
-.sl-gap-label {
-  color: var(--sl-accent);
-  font-size: 11px;
-  left: 50%;
-  position: absolute;
-  top: -16px;
-  transform: translateX(-50%);
+.sl-mark-excerpt {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sl-mark-btn {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 3px 8px;
+}
+
+.sl-mark-btn kbd {
+  color: var(--sl-muted);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.sl-mark-btn.zone-prefix {
+  background: #e4e1fc;
+  border-color: #8f86e0;
+  color: #3c3489;
+}
+
+.sl-mark-btn.zone-suffix {
+  background: #fbe4ef;
+  border-color: #d989b2;
+  color: #8a2a5c;
+}
+
+.sl-mark-text {
+  background: #fff;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  cursor: text;
+  font-size: 14px;
+  line-height: 2;
+  overflow-wrap: anywhere;
+  padding: 12px 14px;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.sl-mark.zone-prefix {
+  background: #e4e1fc;
+  border-radius: 3px;
+  box-shadow: inset 0 -2px #8f86e0;
+  color: #3c3489;
+}
+
+.sl-mark.zone-suffix {
+  background: #fbe4ef;
+  border-radius: 3px;
+  box-shadow: inset 0 -2px #d989b2;
+  color: #8a2a5c;
+}
+
+.sl-mark.zone-dropped {
+  color: var(--sl-muted);
+  text-decoration: line-through;
+}
+
+.sl-mark.pending {
+  background: #ffe9a8;
+  box-shadow: inset 0 -2px #e0a800;
+}
+
+.sl-split-result {
+  display: grid;
+  font-size: 12px;
+  gap: 4px 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+}
+
+.sl-split-result dt {
+  color: var(--sl-style);
+}
+
+.sl-split-result dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sl-legend.suffix {
+  background: #fbe4ef;
+  color: #8a2a5c;
 }
 
 /* ---- 配方工作区 ---- */
