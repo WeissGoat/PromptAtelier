@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { translateTexts } from "./api";
+import { translateTexts, type TranslateProvider } from "./api";
 import { tokenize } from "./tokens";
 
 /** 提示词按无损分词器切成 token（权重组、括号组保持完整），和后端分析任务用同一套规则。 */
@@ -25,6 +25,18 @@ class TranslationStore {
   pending = 0;
   /** retryFailed 之后加一，让已挂载的组件重新登记自己的 tag。 */
   retryGeneration = 0;
+  provider: TranslateProvider = "google";
+
+  /** 换翻译来源：清掉已有译文，已挂载的组件按新来源重新请求。 */
+  setProvider(provider: TranslateProvider): void {
+    if (provider === this.provider) return;
+    this.provider = provider;
+    this.translations.clear();
+    this.failed.clear();
+    this.queued.clear();
+    this.retryGeneration += 1;
+    this.emit();
+  }
 
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
@@ -79,8 +91,11 @@ class TranslationStore {
     }
     this.pending += 1;
     this.emit();
+    const provider = this.provider;
     try {
-      const response = await translateTexts(batch);
+      const response = await translateTexts(batch, provider);
+      // 请求途中换了来源：这批结果作废。
+      if (provider !== this.provider) return;
       for (const tag of batch) {
         const value = response.translations[tag];
         if (value) {

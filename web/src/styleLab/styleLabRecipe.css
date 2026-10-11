@@ -350,6 +350,14 @@
   text-decoration: line-through;
 }
 
+.sl-mark[data-zh]::after {
+  color: var(--sl-muted);
+  content: "\3014" attr(data-zh) "\3015";
+  font-size: 11px;
+  margin-right: 2px;
+  user-select: none;
+}
+
 .sl-mark.pending {
   background: #ffe9a8;
   box-shadow: inset 0 -2px #e0a800;
@@ -378,6 +386,21 @@
 }
 
 /* ---- 配方工作区 ---- */
+
+.sl-recipe-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.sl-recipe-actions > .sl-ghost:first-child {
+  flex: 1;
+}
+
+.sl-ghost.danger:hover:not(:disabled) {
+  background: var(--sl-danger-bg);
+  border-color: var(--sl-danger);
+  color: var(--sl-danger);
+}
 
 .sl-recipe-body {
   display: grid;

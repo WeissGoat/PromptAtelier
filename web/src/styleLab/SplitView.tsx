@@ -9,10 +9,12 @@ import {
   suggestTextMarks,
   textSegments,
   textSplitOf,
+  tokenSpans,
   tokensToText,
   type TextSplit,
   type Zone,
 } from "./recipeModel";
+import { useTranslations } from "./translations";
 
 const KEY_ZONES: Record<string, Zone> = {
   "1": "prefix",
@@ -38,6 +40,7 @@ type SplitViewProps = {
   categories: Record<string, TagCategory>;
   frequency: Map<string, number>;
   analysisReady: boolean;
+  translateOn: boolean;
   onCommit: (recipe: Recipe) => void;
 };
 
@@ -53,7 +56,7 @@ function textOffset(root: HTMLElement, node: Node, offset: number): number {
  * 划分阶段：原图提示词整段按原文显示。在文字上拖选一段，标成前缀或后缀（也可以丢弃），
  * 没标的都是主体。点已标的一段可以改标或清掉。
  */
-export function SplitView({ recipe, sourcePrompt, categories, frequency, analysisReady, onCommit }: SplitViewProps) {
+export function SplitView({ recipe, sourcePrompt, categories, frequency, analysisReady, translateOn, onCommit }: SplitViewProps) {
   const [split, setSplit] = useState<TextSplit>(() => textSplitOf(recipe, sourcePrompt));
   const [pending, setPending] = useState<[number, number] | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -110,17 +113,38 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
 
   const segments = useMemo(() => textSegments(split), [split]);
   const result = useMemo(() => commitTextSplit(recipe, split), [recipe, split]);
-  // 显示用：标记段再按待标的选区切开，选区单独高亮。
+  const spans = useMemo(() => tokenSpans(split.text), [split.text]);
+  const { lookup } = useTranslations(
+    spans.map((span) => span.text),
+    translateOn,
+  );
+  // 译文挂在每个 token 的末尾（CSS 伪元素显示，不算原文，拖选也选不到）。
+  const zhAt = useMemo(() => {
+    const map = new Map<number, string>();
+    spans.forEach((span) => {
+      const zh = lookup(span.text);
+      if (zh) map.set(span.end, zh);
+    });
+    return map;
+  }, [spans, lookup]);
+  // 显示用：标记段按待标的选区和有译文的 token 末尾切开，选区单独高亮。
   const pieces = useMemo(() => {
-    const cuts = pending ? [pending[0], pending[1]] : [];
+    const cuts = [...(pending ? [pending[0], pending[1]] : []), ...zhAt.keys()];
     return segments.flatMap((segment) => {
-      const points = [segment.start, ...cuts.filter((cut) => cut > segment.start && cut < segment.end), segment.end];
+      const inner = [...new Set(cuts.filter((cut) => cut > segment.start && cut < segment.end))].sort((a, b) => a - b);
+      const points = [segment.start, ...inner, segment.end];
       return points.slice(1).map((end, index) => {
         const start = points[index];
-        return { start, end, zone: segment.zone, pending: Boolean(pending && start >= pending[0] && end <= pending[1]) };
+        return {
+          start,
+          end,
+          zone: segment.zone,
+          zh: zhAt.get(end),
+          pending: Boolean(pending && start >= pending[0] && end <= pending[1]),
+        };
       });
     });
-  }, [segments, pending]);
+  }, [segments, pending, zhAt]);
 
   const adopt = () => {
     const suggested = suggestTextMarks(split, categories, frequency);
@@ -192,6 +216,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
           <span
             className={`sl-mark zone-${piece.zone} ${piece.pending ? "pending" : ""}`}
             data-start={piece.start}
+            data-zh={piece.zh}
             key={`${piece.start}-${piece.end}`}
           >
             {split.text.slice(piece.start, piece.end)}

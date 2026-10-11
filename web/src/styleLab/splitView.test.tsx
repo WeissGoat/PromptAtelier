@@ -59,7 +59,7 @@ afterEach(cleanup);
 describe("split view", () => {
   it("marks dragged text as prefix or suffix and keeps the rest as subject", () => {
     const onCommit = vi.fn();
-    render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} onCommit={onCommit} recipe={recipe()} sourcePrompt={PROMPT} />);
+    render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} onCommit={onCommit} recipe={recipe()} sourcePrompt={PROMPT} translateOn={false} />);
 
     // 从半个词开始拖到句号后面：补全成整词，中文按选中的字切。
     const end = PROMPT.indexOf("。") + 1;
@@ -90,7 +90,7 @@ describe("split view", () => {
     const onCommit = vi.fn();
     const base = recipe();
     const marked = { ...base, prefix: base.subject.slice(0, 1), subject: base.subject.slice(1) };
-    render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} onCommit={onCommit} recipe={marked} sourcePrompt={PROMPT} />);
+    render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} onCommit={onCommit} recipe={marked} sourcePrompt={PROMPT} translateOn={false} />);
     expect(screen.getByText("前缀 1")).toBeTruthy();
     dragSelect(4, 4);
     expect(screen.getByText(/已选「color trace」/)).toBeTruthy();

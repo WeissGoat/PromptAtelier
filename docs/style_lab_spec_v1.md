@@ -129,6 +129,8 @@ llm:
 | GET | `/api/style-lab/workspaces/{id}` | 工作区设置 + 图片记录列表 |
 | POST | `/api/style-lab/workspaces/{id}/scan` | 增量重扫 |
 | POST | `/api/style-lab/workspaces/{id}/upload` | 图片组工作区上传图片（multipart `files`） |
+| POST | `/api/style-lab/workspaces/{id}/images/remove` | `{"image_ids": [...]}` 从工作区移除：uploads 里的副本删掉；其余记进工作区的 `excluded`，扫描时跳过，原文件不动 |
+| POST | `/api/style-lab/workspaces/{id}/images/restore` | 清空 `excluded`，移除过的原图重新出现 |
 | POST | `/api/style-lab/workspaces/{id}/analyze` | 后台分析（翻译 + tag 分类），返回 job_id；打开、重扫、上传后自动触发 |
 | GET | `/api/style-lab/workspaces/{id}/analysis` | tag 类别和自动分组（只读缓存，不调用 LLM） |
 | GET | `/api/style-lab/workspaces/{id}/images/{image_id}` | 单张图片完整元数据（含原始参数，vibe 图片数据截断） |
@@ -137,7 +139,7 @@ llm:
 | GET | `/api/style-lab/workspaces/{id}/runs` | run 列表，可按 `image_id` 过滤 |
 | GET | `/api/style-lab/workspaces/{id}/runs/{run_id}` | 单个 run，含每张结果的对照 |
 | GET | `/api/style-lab/llm/status` | LLM 是否已配置、模型名 |
-| POST | `/api/style-lab/translate` | `{"texts": [...]}` -> `{"translations": {...}}` |
+| POST | `/api/style-lab/translate` | `{"texts": [...], "provider": "google" \| "llm"}` -> `{"translations": {...}}`；`google` 走谷歌翻译免费接口（不需要 LLM，中文日文不翻），`llm` 是 AI 翻译（默认） |
 
 ## P2：分词、分组、配方编辑
 
@@ -213,7 +215,7 @@ base 提示词不动；`add_male_caption` 开着时，和 auto 模式一样按�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/style-lab/workspaces/{id}/recipes` | 配方列表 |
-| POST | `/api/style-lab/workspaces/{id}/recipes` | 从图片新建：`{"image_id", "name"?, "group_id"?}` |
+| POST | `/api/style-lab/workspaces/{id}/recipes` | 从图片新建：`{"image_id", "name"?, "group_id"?, "draft"?}`，`draft: true` 只返回不保存（version 0）；或 `{"recipe": {...}}` 保存前端改过的草稿（version 1，id 已存在返回 409） |
 | GET | `/api/style-lab/workspaces/{id}/recipes/{rid}` | 配方 + 历史版本列表 |
 | PUT | `/api/style-lab/workspaces/{id}/recipes/{rid}` | 保存：`{"recipe", "base_version"}`，冲突返回 409 |
 | DELETE | `/api/style-lab/workspaces/{id}/recipes/{rid}` | 删除 |

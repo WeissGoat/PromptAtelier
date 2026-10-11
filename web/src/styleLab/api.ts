@@ -56,6 +56,8 @@ export type WorkspaceInfo = {
   data_dir: string;
   scan_dirs: string[];
   files: string[];
+  /** 从工作区移除的图片（原文件没动），旧工作区没有这一项。 */
+  excluded?: string[];
   created_at: number;
   last_opened_at: number;
 };
@@ -177,6 +179,15 @@ export function rescanWorkspace(id: string): Promise<WorkspacePayload> {
   return apiPost(`${base}/workspaces/${encodeURIComponent(id)}/scan`, {});
 }
 
+/** 从工作区移除图片：拖进来的副本会删掉，文件夹里的原图只是不再显示。 */
+export function removeImages(id: string, imageIds: string[]): Promise<WorkspacePayload & { removed: number }> {
+  return apiPost(`${base}/workspaces/${encodeURIComponent(id)}/images/remove`, { image_ids: imageIds });
+}
+
+export function restoreImages(id: string): Promise<WorkspacePayload> {
+  return apiPost(`${base}/workspaces/${encodeURIComponent(id)}/images/restore`, {});
+}
+
 export async function uploadImages(id: string, files: File[]): Promise<WorkspacePayload> {
   const form = new FormData();
   for (const file of files) {
@@ -263,8 +274,14 @@ export function getLLMStatus(): Promise<LLMStatus> {
   return apiGet(`${base}/llm/status`);
 }
 
-export function translateTexts(texts: string[]): Promise<{ available: boolean; translations: Record<string, string> }> {
-  return apiPost(`${base}/translate`, { texts });
+/** 翻译来源：谷歌翻译（免费、不用配置）或 AI 翻译（configs/local.yaml 的 llm 段，懂 danbooru tag）。 */
+export type TranslateProvider = "google" | "llm";
+
+export function translateTexts(
+  texts: string[],
+  provider: TranslateProvider,
+): Promise<{ available: boolean; translations: Record<string, string> }> {
+  return apiPost(`${base}/translate`, { texts, provider });
 }
 
 export const ACTIVE_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(["queued", "running"]);
@@ -388,12 +405,22 @@ export function listRecipes(workspaceId: string): Promise<{ recipes: RecipeSumma
   return apiGet(`${ws(workspaceId)}/recipes`);
 }
 
+/** 从图片新建配方。draft 时只生成不保存（version 0），用 saveNewRecipe 保存。 */
 export function createRecipe(
   workspaceId: string,
   imageId: string,
-  options: { name?: string; groupId?: string | null } = {},
+  options: { name?: string; groupId?: string | null; draft?: boolean } = {},
 ): Promise<{ recipe: Recipe }> {
-  return apiPost(`${ws(workspaceId)}/recipes`, { image_id: imageId, name: options.name, group_id: options.groupId });
+  return apiPost(`${ws(workspaceId)}/recipes`, {
+    image_id: imageId,
+    name: options.name,
+    group_id: options.groupId,
+    draft: options.draft,
+  });
+}
+
+export function saveNewRecipe(workspaceId: string, recipe: Recipe): Promise<{ recipe: Recipe }> {
+  return apiPost(`${ws(workspaceId)}/recipes`, { recipe });
 }
 
 export function getRecipe(

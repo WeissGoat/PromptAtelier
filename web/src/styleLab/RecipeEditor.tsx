@@ -71,6 +71,7 @@ export function RecipeEditor({
         onCommit={onChange}
         recipe={draft}
         sourcePrompt={source?.prompt ?? null}
+        translateOn={translateOn}
       />
     );
   }

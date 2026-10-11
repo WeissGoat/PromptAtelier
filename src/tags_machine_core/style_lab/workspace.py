@@ -34,6 +34,8 @@ class WorkspaceInfo(BaseModel):
     data_dir: str
     scan_dirs: list[str] = Field(default_factory=list)
     files: list[str] = Field(default_factory=list)
+    # 从工作区移除的图片（绝对路径）：扫描时跳过，原文件不动。
+    excluded: list[str] = Field(default_factory=list)
     created_at: float = Field(default_factory=time.time)
     last_opened_at: float = Field(default_factory=time.time)
 
@@ -126,6 +128,32 @@ class WorkspaceStore:
     def uploads_dir(self, info: WorkspaceInfo) -> Path:
         return Path(info.data_dir) / "uploads"
 
+    def remove_images(self, info: WorkspaceInfo, image_ids: list[str]) -> tuple[WorkspaceInfo, int]:
+        """从工作区移除图片。拖进来的副本（uploads 里的）直接删掉；其余只记进 excluded，原文件不动。"""
+        with self._lock:
+            wanted = set(image_ids)
+            paths = [Path(record.path) for record in self.load_index(info).images if record.id in wanted]
+            uploads = self.uploads_dir(info).resolve()
+            files = list(info.files)
+            excluded = list(info.excluded)
+            for path in paths:
+                if path.resolve().parent == uploads:
+                    path.unlink(missing_ok=True)
+                elif str(path) in files:
+                    files.remove(str(path))
+                elif str(path) not in excluded:
+                    excluded.append(str(path))
+            info = info.model_copy(update={"files": files, "excluded": excluded})
+            self._save_workspace(info)
+            return info, len(paths)
+
+    def restore_images(self, info: WorkspaceInfo) -> WorkspaceInfo:
+        """恢复移除过的图片（只对 excluded 里的有效，删掉的上传副本回不来）。"""
+        with self._lock:
+            info = info.model_copy(update={"excluded": []})
+            self._save_workspace(info)
+            return info
+
     # ---- 索引 ----
 
     def load_index(self, info: WorkspaceInfo) -> WorkspaceIndex:
@@ -199,7 +227,7 @@ class WorkspaceStore:
             return False
 
     def _iter_images(self, info: WorkspaceInfo):
-        seen: set[str] = set()
+        seen: set[str] = set(info.excluded)
         if info.kind == "files":
             candidates = [Path(item) for item in info.files]
             uploads = self.uploads_dir(info)

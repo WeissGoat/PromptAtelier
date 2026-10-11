@@ -230,6 +230,8 @@ class RecipeStore:
 
     def create(self, recipe: Recipe) -> Recipe:
         with self._lock:
+            if self._path(recipe.id).exists():
+                raise RecipeConflictError(f"Recipe {recipe.id} already exists")
             self._write(recipe)
         return recipe
 

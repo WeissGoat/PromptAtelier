@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, errorMessage } from "../api/client";
 import type {
   Analysis,
+  ImageRecord,
   LLMStatus,
+  Recipe,
   RecipeSummary,
   RegenSettings,
   StyleLabRun,
+  TranslateProvider,
   WorkspaceInfo,
   WorkspacePayload,
 } from "./api";
@@ -24,7 +27,9 @@ import {
   listRuns,
   listWorkspaces,
   openFolder,
+  removeImages,
   rescanWorkspace,
+  restoreImages,
   startRegenerate,
   uploadImages,
 } from "./api";
@@ -51,7 +56,9 @@ const STORAGE = {
   translate: "promptatelier.style-lab.translate/v1",
   regen: "promptatelier.style-lab.regen/v1",
   recipe: "promptatelier.style-lab.open-recipe/v1",
+  provider: "promptatelier.style-lab.translate-provider/v1",
 };
+const IMAGE_FILE_RE = /\.(png|webp|jpe?g)$/i;
 const ANALYSIS_REFRESH_TICKS = 3;
 const RUN_POLL_MS = 1500;
 const JOB_POLL_MS = 2000;
@@ -84,6 +91,11 @@ export function StyleLabPage() {
   const [filters, setFilters] = useState<ImageFilters>(emptyFilters);
   const [selection, setSelection] = useState<Record<string, string>>(() => load(STORAGE.selection, {}));
   const [translateOn, setTranslateOn] = useState<boolean>(() => load(STORAGE.translate, true));
+  const [translateProvider, setTranslateProvider] = useState<TranslateProvider>(() => {
+    const provider = load<TranslateProvider>(STORAGE.provider, "google");
+    translationStore.setProvider(provider);
+    return provider;
+  });
   const [llm, setLlm] = useState<LLMStatus | null>(null);
   const [regenSettings, setRegenSettings] = useState<RegenSettings>(() => ({
     ...defaultRegenSettings,
@@ -99,6 +111,8 @@ export function StyleLabPage() {
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [openRecipes, setOpenRecipes] = useState<Record<string, string | null>>(() => load(STORAGE.recipe, {}));
   const [creatingRecipe, setCreatingRecipe] = useState(false);
+  // 刚从图片生成、还没保存的配方：改了才保存，没动过就不留下。
+  const [pendingRecipe, setPendingRecipe] = useState<{ workspaceId: string; recipe: Recipe } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [translating, setTranslating] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -110,7 +124,9 @@ export function StyleLabPage() {
     () => filterImages(groupIds ? images.filter((image) => groupIds.has(image.id)) : images, filters),
     [images, filters, groupIds],
   );
-  const openRecipeId = workspace ? openRecipes[workspace.id] ?? null : null;
+  const unsavedRecipe = workspace && pendingRecipe?.workspaceId === workspace.id ? pendingRecipe.recipe : null;
+  const openRecipeId = unsavedRecipe?.id ?? (workspace ? openRecipes[workspace.id] ?? null : null);
+  const translateActive = translateOn && (translateProvider === "google" || Boolean(llm?.available));
   const selectedId = workspace ? selection[workspace.id] ?? null : null;
   const selectedImage = images.find((image) => image.id === selectedId) ?? null;
 
@@ -186,6 +202,7 @@ export function StyleLabPage() {
   const openRecipe = useCallback(
     (id: string | null) => {
       if (!workspace) return;
+      setPendingRecipe(null);
       setOpenRecipes((current) => {
         const next = { ...current, [workspace.id]: id };
         save(STORAGE.recipe, next);
@@ -202,9 +219,10 @@ export function StyleLabPage() {
     try {
       const { recipe } = await createRecipe(workspace.id, selectedImage.id, {
         groupId: groupOfImage(analysis, selectedImage.id),
+        draft: true,
       });
-      await refreshRecipes();
-      openRecipe(recipe.id);
+      openRecipe(null);
+      setPendingRecipe({ workspaceId: workspace.id, recipe });
     } catch (exc) {
       setRegenError(errorMessage(exc));
     } finally {
@@ -357,43 +375,96 @@ export function StyleLabPage() {
     }
   };
 
-  const onDrop = async (event: React.DragEvent) => {
-    event.preventDefault();
-    setDragging(false);
-    const files = [...event.dataTransfer.files].filter((file) => /\.(png|webp|jpe?g)$/i.test(file.name));
+  /** 导入图片：加进当前图片组，或新建一个图片组。 */
+  const importFiles = async (picked: File[], target: "current" | "new") => {
+    const files = picked.filter((file) => IMAGE_FILE_RE.test(file.name));
     if (!files.length) {
-      setError("拖入的文件里没有 PNG / WebP / JPEG 图片。");
+      setError("选中的文件里没有 PNG / WebP / JPEG 图片。");
       return;
     }
     await run(async () => {
-      const target = workspace?.kind === "files" ? workspace : (await createImageGroup([])).workspace;
-      return uploadImages(target.id, files);
+      const into = target === "current" && workspace?.kind === "files" ? workspace : (await createImageGroup([])).workspace;
+      return uploadImages(into.id, files);
     });
+  };
+
+  // 拖文件进页面时显示投放区。按窗口计数 dragenter / dragleave，拖出窗口或松手后一定会收起。
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes("Files"));
+    const enter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const leave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const over = (event: DragEvent) => {
+      // 落在投放区以外时也别让浏览器直接打开图片。
+      if (hasFiles(event)) event.preventDefault();
+    };
+    const reset = (event: DragEvent) => {
+      if (hasFiles(event)) event.preventDefault();
+      depth = 0;
+      setDragging(false);
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", reset);
+    window.addEventListener("dragend", reset);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", reset);
+      window.removeEventListener("dragend", reset);
+    };
+  }, []);
+
+  const removeImage = async (image: ImageRecord) => {
+    if (!workspace) return;
+    const message =
+      workspace.kind === "files"
+        ? "从图片组移除这张图？拖进来的副本会删掉，你电脑上的原图不受影响。"
+        : "从工作区移除这张图？文件夹里的原图不会删，之后可以点顶部的「恢复移除的」放回来。";
+    if (!window.confirm(message)) return;
+    const index = filtered.findIndex((item) => item.id === image.id);
+    const neighbor = filtered[index + 1] ?? filtered[index - 1] ?? null;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await removeImages(workspace.id, [image.id]);
+      // 移除不重置筛选和分组，选中旁边那张。
+      setPayload(next);
+      if (neighbor) selectImage(neighbor.id);
+      void listWorkspaces().then((data) => setWorkspaces(data.workspaces)).catch(() => undefined);
+    } catch (exc) {
+      setError(errorMessage(exc));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <ImageViewerProvider workspaceId={workspace?.id ?? ""}>
-    <main
-      className={`sl-page ${dragging ? "dragging" : ""}`}
-      onDragLeave={(event) => {
-        if (event.currentTarget === event.target) {
-          setDragging(false);
-        }
-      }}
-      onDragOver={(event) => {
-        if (event.dataTransfer.types.includes("Files")) {
-          event.preventDefault();
-          setDragging(true);
-        }
-      }}
-      onDrop={(event) => void onDrop(event)}
-    >
+    <main className={`sl-page ${dragging ? "dragging" : ""}`}>
       <WorkspaceBar
         busy={busy}
         current={workspace}
         imageCount={images.length}
         llm={llm}
+        onChangeProvider={(provider) => {
+          setTranslateProvider(provider);
+          translationStore.setProvider(provider);
+          save(STORAGE.provider, provider);
+        }}
+        onCreateGroup={(files) => void importFiles(files, "new")}
         onOpenFolder={(path) => void run(() => openFolder(path))}
+        onRestoreImages={() => workspace && void run(() => restoreImages(workspace.id))}
         onRescan={() => workspace && void run(() => rescanWorkspace(workspace.id))}
         onSelectWorkspace={(id) => void run(() => getWorkspace(id))}
         onToggleTranslate={() => {
@@ -402,6 +473,7 @@ export function StyleLabPage() {
         }}
         pretranslate={analyzing && analyzing.total ? analyzing : null}
         translateOn={translateOn}
+        translateProvider={translateProvider}
         translating={translating}
         workspaces={workspaces}
       />
@@ -419,11 +491,20 @@ export function StyleLabPage() {
           groups={analysis?.groups ?? []}
           images={images}
           onBack={() => openRecipe(null)}
+          onCreated={(recipe) => {
+            openRecipe(recipe.id);
+            void refreshRecipes();
+          }}
+          onDeleted={() => {
+            openRecipe(null);
+            void refreshRecipes();
+          }}
           onOpenRecipe={(id) => openRecipe(id)}
           onSaved={() => void refreshRecipes()}
           recipeId={openRecipeId}
           recipes={recipes}
-          translateOn={translateOn && Boolean(llm?.available)}
+          unsaved={unsavedRecipe}
+          translateOn={translateActive}
           workspaceId={workspace.id}
         />
       ) : !workspace ? (
@@ -456,13 +537,18 @@ export function StyleLabPage() {
               images={filtered}
               onSelect={selectImage}
               selectedId={selectedId}
-              translateOn={translateOn && Boolean(llm?.available)}
+              translateOn={translateActive}
               workspaceId={workspace.id}
             />
           </div>
           <aside className="sl-inspector" aria-label="图片详情">
             {selectedImage ? (
-              <ImageInspector image={selectedImage} translateOn={translateOn && Boolean(llm?.available)} workspaceId={workspace.id}>
+              <ImageInspector
+                image={selectedImage}
+                onRemove={() => void removeImage(selectedImage)}
+                translateOn={translateActive}
+                workspaceId={workspace.id}
+              >
                 <button
                   className="sl-primary sl-new-recipe"
                   disabled={creatingRecipe || !selectedImage.has_metadata}
@@ -498,8 +584,37 @@ export function StyleLabPage() {
           </aside>
         </div>
       )}
-      {dragging ? <div className="sl-drop-hint">松开即可导入为图片组</div> : null}
+      {dragging ? (
+        <div className="sl-drop-overlay">
+          {workspace?.kind === "files" ? (
+            <DropTarget label={`加入当前图片组「${workspace.name}」`} onFiles={(files) => void importFiles(files, "current")} />
+          ) : null}
+          <DropTarget label="新建图片组" onFiles={(files) => void importFiles(files, "new")} />
+        </div>
+      ) : null}
     </main>
     </ImageViewerProvider>
+  );
+}
+
+function DropTarget({ label, onFiles }: { label: string; onFiles: (files: File[]) => void }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      className={`sl-drop-target ${over ? "over" : ""}`}
+      onDragLeave={() => setOver(false)}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setOver(true);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setOver(false);
+        onFiles([...event.dataTransfer.files]);
+      }}
+    >
+      <ImagePlus size={28} aria-hidden="true" />
+      <span>{label}</span>
+    </div>
   );
 }

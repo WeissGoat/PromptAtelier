@@ -106,12 +106,22 @@ class StyleLabService:
         return RecipeStore(Path(info.data_dir))
 
     def create_recipe(
-        self, info: WorkspaceInfo, image_id: str, *, name: str | None = None, group_id: str | None = None
+        self,
+        info: WorkspaceInfo,
+        image_id: str,
+        *,
+        name: str | None = None,
+        group_id: str | None = None,
+        draft: bool = False,
     ) -> Recipe:
+        """从图片新建配方。draft=True 只生成不保存（version 0），等用户改了再由前端创建。"""
         record = self.store.find_image(info, image_id)
         if not record.has_metadata:
             raise ValueError(f"Image has no NovelAI metadata: {record.rel_path}")
-        return self.recipes(info).create(recipe_from_image(record, name=name, group_id=group_id))
+        recipe = recipe_from_image(record, name=name, group_id=group_id)
+        if draft:
+            return recipe.model_copy(update={"version": 0})
+        return self.recipes(info).create(recipe)
 
     def recipe_render_request(
         self,

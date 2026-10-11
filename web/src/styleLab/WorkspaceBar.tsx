@@ -1,7 +1,9 @@
-import { FolderOpen, Languages, LoaderCircle, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { FolderOpen, ImagePlus, Languages, LoaderCircle, RefreshCw, Undo2 } from "lucide-react";
+import { useRef, useState } from "react";
 
-import type { LLMStatus, WorkspaceInfo } from "./api";
+import type { LLMStatus, TranslateProvider, WorkspaceInfo } from "./api";
+
+export const IMAGE_ACCEPT = ".png,.webp,.jpg,.jpeg";
 
 type WorkspaceBarProps = {
   workspaces: WorkspaceInfo[];
@@ -10,12 +12,16 @@ type WorkspaceBarProps = {
   busy: boolean;
   llm: LLMStatus | null;
   translateOn: boolean;
+  translateProvider: TranslateProvider;
   translating: boolean;
   pretranslate: { done: number; total: number } | null;
   onOpenFolder: (path: string) => void;
+  onCreateGroup: (files: File[]) => void;
   onSelectWorkspace: (id: string) => void;
   onRescan: () => void;
+  onRestoreImages: () => void;
   onToggleTranslate: () => void;
+  onChangeProvider: (provider: TranslateProvider) => void;
 };
 
 export function WorkspaceBar({
@@ -25,15 +31,23 @@ export function WorkspaceBar({
   busy,
   llm,
   translateOn,
+  translateProvider,
   translating,
   pretranslate,
   onOpenFolder,
+  onCreateGroup,
   onSelectWorkspace,
   onRescan,
+  onRestoreImages,
   onToggleTranslate,
+  onChangeProvider,
 }: WorkspaceBarProps) {
   const [path, setPath] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const llmReady = Boolean(llm?.available);
+  // 谷歌翻译不用配置；AI 翻译要先配好 LLM。
+  const translateReady = translateProvider === "google" || llmReady;
+  const excluded = current?.excluded?.length ?? 0;
 
   return (
     <header className="sl-bar">
@@ -57,6 +71,29 @@ export function WorkspaceBar({
           打开文件夹
         </button>
       </form>
+      <button
+        className="sl-ghost"
+        disabled={busy}
+        onClick={() => fileRef.current?.click()}
+        title="选几张图片建一个新的图片组（也可以把图片拖进页面）"
+        type="button"
+      >
+        <ImagePlus size={15} aria-hidden="true" />
+        新建图片组
+      </button>
+      <input
+        accept={IMAGE_ACCEPT}
+        aria-label="选择图片新建图片组"
+        hidden
+        multiple
+        onChange={(event) => {
+          const files = [...(event.target.files ?? [])];
+          event.target.value = "";
+          if (files.length) onCreateGroup(files);
+        }}
+        ref={fileRef}
+        type="file"
+      />
       <select
         aria-label="最近的工作区"
         className="sl-bar-recent"
@@ -73,6 +110,12 @@ export function WorkspaceBar({
       {current ? (
         <span className="sl-bar-meta" title={current.root}>
           {imageCount} 张
+          {excluded ? (
+            <button className="sl-link-btn" disabled={busy} onClick={onRestoreImages} title="把从工作区移除的图片放回来" type="button">
+              <Undo2 size={13} aria-hidden="true" />
+              恢复移除的 {excluded} 张
+            </button>
+          ) : null}
           <button aria-label="重新扫描" className="sl-icon-btn" disabled={busy} onClick={onRescan} title="重新扫描" type="button">
             {busy ? <LoaderCircle className="sl-spin" size={15} /> : <RefreshCw size={15} />}
           </button>
@@ -84,15 +127,27 @@ export function WorkspaceBar({
           分析 {pretranslate.done}/{pretranslate.total}
         </span>
       ) : null}
+      <select
+        aria-label="翻译来源"
+        className="sl-bar-provider"
+        onChange={(event) => onChangeProvider(event.target.value as TranslateProvider)}
+        title="谷歌翻译免费、不用配置；AI 翻译更懂 danbooru tag（画师名、角色名）"
+        value={translateProvider}
+      >
+        <option value="google">谷歌翻译</option>
+        <option disabled={!llmReady} value="llm">
+          AI 翻译{llmReady ? "" : "（未配置）"}
+        </option>
+      </select>
       <button
-        className={`sl-toggle ${translateOn && llmReady ? "on" : ""}`}
-        disabled={!llmReady}
+        className={`sl-toggle ${translateOn && translateReady ? "on" : ""}`}
+        disabled={!translateReady}
         onClick={onToggleTranslate}
-        title={llmReady ? `翻译：${llm?.models.text ?? ""}` : "没有配置 LLM（configs/local.yaml 的 llm 段）"}
+        title={translateReady ? "显示 tag 的中文" : "没有配置 LLM（configs/local.yaml 的 llm 段）"}
         type="button"
       >
         {translating ? <LoaderCircle className="sl-spin" size={15} /> : <Languages size={15} />}
-        译文{translateOn && llmReady ? "开" : "关"}
+        译文{translateOn && translateReady ? "开" : "关"}
       </button>
     </header>
   );

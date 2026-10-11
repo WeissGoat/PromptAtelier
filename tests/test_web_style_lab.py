@@ -237,6 +237,42 @@ class WebStyleLabTest(TestCase):
         bad = self.client.post("/api/style-lab/translate", json={"texts": "solo"})
         self.assertEqual(bad.status_code, 400)
 
+    def test_translate_with_google(self):
+        sent = []
+
+        class FakeResponse:
+            status_code = 200
+
+            def __init__(self, text):
+                self.text = text
+
+            def json(self):
+                lines = self.text.split("\n")
+                return [[[f"谷:{line}" + ("\n" if i < len(lines) - 1 else ""), line] for i, line in enumerate(lines)]]
+
+        def fake_post(self, url, params=None, data=None, timeout=None):
+            sent.append(data["q"])
+            return FakeResponse(data["q"])
+
+        with patch("requests.Session.post", fake_post):
+            response = self.client.post(
+                "/api/style-lab/translate",
+                json={"texts": ["{{thin lines}}", "silver_hair", "少女站着", "thin lines"], "provider": "google"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            # 同一个 tag 只请求一次；中文不翻。
+            self.assertEqual(sent, ["thin lines\nsilver hair"])
+            self.assertEqual(
+                response.json()["translations"],
+                {"{{thin lines}}": "谷:thin lines", "thin lines": "谷:thin lines", "silver_hair": "谷:silver hair"},
+            )
+            # 第二次全部命中缓存。
+            again = self.client.post("/api/style-lab/translate", json={"texts": ["silver hair"], "provider": "google"})
+            self.assertEqual(again.json()["translations"], {"silver hair": "谷:silver hair"})
+            self.assertEqual(len(sent), 1)
+        bad = self.client.post("/api/style-lab/translate", json={"texts": ["x"], "provider": "bing"})
+        self.assertEqual(bad.status_code, 400)
+
     def test_open_workspace_analyzes_prompts_and_groups(self):
         data = self._open()
         workspace_id = data["workspace"]["id"]
@@ -256,6 +292,24 @@ class WebStyleLabTest(TestCase):
         self.assertEqual(analysis["groups"][0]["name"], "foo")
         self.assertEqual(analysis["groups"][0]["post_count"], 2)
         self.assertEqual(self.session.calls, calls)
+
+    def test_draft_recipe_is_saved_only_when_created(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
+        draft = self.client.post(base, json={"image_id": image_id, "draft": True}).json()["recipe"]
+        self.assertEqual(draft["version"], 0)
+        self.assertEqual(self.client.get(base).json()["recipes"], [])
+        self.assertEqual(self.client.get(f"{base}/{draft['id']}").status_code, 404)
+
+        draft["name"] = "改过的"
+        created = self.client.post(base, json={"recipe": draft})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["recipe"]["version"], 1)
+        self.assertEqual([item["name"] for item in self.client.get(base).json()["recipes"]], ["改过的"])
+        # 同一个草稿不能创建两次（比如两个标签页）。
+        self.assertEqual(self.client.post(base, json={"recipe": draft}).status_code, 409)
 
     def test_recipe_create_preview_save_and_generate(self):
         data = self._open()
@@ -311,6 +365,42 @@ class WebStyleLabTest(TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["uploaded"], 1)
         self.assertEqual(len(response.json()["images"]), 1)
+
+    def test_remove_images_keeps_originals_and_can_restore(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image = data["images"][0]
+        url = f"/api/style-lab/workspaces/{workspace_id}/images"
+        removed = self.client.post(f"{url}/remove", json={"image_ids": [image["id"]]})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.json()["removed"], 1)
+        self.assertEqual(len(removed.json()["images"]), 1)
+        self.assertEqual(removed.json()["workspace"]["excluded"], [image["path"]])
+        # 文件夹里的原图不动；重新扫描也不会回来。
+        self.assertTrue(Path(image["path"]).is_file())
+        rescanned = self.client.post(f"/api/style-lab/workspaces/{workspace_id}/scan", json={}).json()
+        self.assertEqual(len(rescanned["images"]), 1)
+        restored = self.client.post(f"{url}/restore").json()
+        self.assertEqual(len(restored["images"]), 2)
+        self.assertEqual(restored["workspace"]["excluded"], [])
+        self.assertEqual(self.client.post(f"{url}/remove", json={"image_ids": []}).status_code, 400)
+
+    def test_remove_uploaded_image_deletes_the_copy(self):
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "拖入"}).json()
+        workspace_id = created["workspace"]["id"]
+        png = write_nai_png(self.tmp / "upload_src.png").read_bytes()
+        uploaded = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/upload", files=[("files", ("drop.png", png, "image/png"))]
+        ).json()
+        copy = Path(uploaded["images"][0]["path"])
+        self.assertTrue(copy.is_file())
+        removed = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/images/remove", json={"image_ids": [uploaded["images"][0]["id"]]}
+        ).json()
+        self.assertEqual(removed["images"], [])
+        self.assertFalse(copy.exists())
+        self.assertEqual(removed["workspace"]["excluded"], [])
+        self.assertTrue((self.tmp / "upload_src.png").is_file())
 
     def _locked_recipe(self, workspace_id, image_id):
         base = f"/api/style-lab/workspaces/{workspace_id}/recipes"

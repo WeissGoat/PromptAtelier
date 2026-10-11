@@ -1,4 +1,4 @@
-import { ArrowLeft, FlaskConical, Play, Save } from "lucide-react";
+import { ArrowLeft, FlaskConical, Play, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../api/client";
@@ -17,12 +17,14 @@ import type {
 import {
   ACTIVE_RUN_STATUSES,
   cancelJob,
+  deleteRecipe,
   generateRecipe,
   getExportDefaults,
   getRecipe,
   isArtistTestRun,
   listRecipeRuns,
   previewRecipe,
+  saveNewRecipe,
   saveRecipe,
   sourceImageUrl,
 } from "./api";
@@ -85,9 +87,13 @@ type RecipeWorkspaceProps = {
   categories: Record<string, TagCategory>;
   analysisReady: boolean;
   translateOn: boolean;
+  /** 刚从图片生成、还没保存的配方（version 0）：第一次改动时自动保存。 */
+  unsaved: Recipe | null;
   onBack: () => void;
   onOpenRecipe: (id: string) => void;
   onSaved: () => void;
+  onCreated: (recipe: Recipe) => void;
+  onDeleted: () => void;
 };
 
 export function RecipeWorkspace({
@@ -99,9 +105,12 @@ export function RecipeWorkspace({
   categories,
   analysisReady,
   translateOn,
+  unsaved,
   onBack,
   onOpenRecipe,
   onSaved,
+  onCreated,
+  onDeleted,
 }: RecipeWorkspaceProps) {
   const viewer = useImageViewer();
   const [saved, setSaved] = useState<Recipe | null>(null);
@@ -125,6 +134,12 @@ export function RecipeWorkspace({
     setDraft(null);
     setPreview(null);
     setError(null);
+    if (unsaved && unsaved.id === recipeId) {
+      setSaved(unsaved);
+      setDraft(unsaved);
+      setRestored(false);
+      return;
+    }
     getRecipe(workspaceId, recipeId)
       .then((data) => {
         if (cancelled) return;
@@ -139,6 +154,8 @@ export function RecipeWorkspace({
     return () => {
       cancelled = true;
     };
+    // 只在换配方时读取；unsaved 保存后会变成 null，不用重新读。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, recipeId]);
 
   const source = useMemo(() => images.find((image) => image.id === draft?.source_image_id) ?? null, [images, draft?.source_image_id]);
@@ -160,9 +177,10 @@ export function RecipeWorkspace({
   }, [group, images]);
 
   const dirty = Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved));
+  const isNew = saved?.version === 0;
 
   useEffect(() => {
-    if (!draft || !saved) return;
+    if (!draft || !saved || saved.version === 0) return;
     writeDraftBackup(workspaceId, recipeId, dirty ? { baseVersion: saved.version, draft } : null);
   }, [workspaceId, recipeId, draft, saved, dirty]);
 
@@ -215,10 +233,13 @@ export function RecipeWorkspace({
     }
   }, [workspaceId, recipeId]);
 
+  // 还没保存的新配方在后端没有出图记录和导出，不用去读。
+  const persistedId = saved && saved.version > 0 ? saved.id : null;
   useEffect(() => {
+    if (!persistedId) return;
     void refreshRuns();
     void refreshExports();
-  }, [refreshRuns, refreshExports]);
+  }, [persistedId, refreshRuns, refreshExports]);
 
   const hasActive = [...runs, ...testRuns].some((run) => ACTIVE_RUN_STATUSES.has(run.status));
   useEffect(() => {
@@ -232,13 +253,16 @@ export function RecipeWorkspace({
     if (!dirty) return saved;
     setSaving(true);
     setError(null);
+    const creating = saved.version === 0;
     try {
-      const data = await saveRecipe(workspaceId, draft, saved.version);
+      const data = creating ? await saveNewRecipe(workspaceId, draft) : await saveRecipe(workspaceId, draft, saved.version);
       setSaved(data.recipe);
-      setDraft(data.recipe);
+      // 保存途中又改了的保留下来，下次再存。
+      setDraft((current) => (current === draft ? data.recipe : current));
       setRestored(false);
       writeDraftBackup(workspaceId, recipeId, null);
-      onSaved();
+      if (creating) onCreated(data.recipe);
+      else onSaved();
       return data.recipe;
     } catch (exc) {
       setError(
@@ -250,7 +274,24 @@ export function RecipeWorkspace({
     } finally {
       setSaving(false);
     }
-  }, [draft, saved, dirty, workspaceId, recipeId, onSaved]);
+  }, [draft, saved, dirty, workspaceId, recipeId, onSaved, onCreated]);
+
+  // 新配方第一次有改动就保存，之后和普通配方一样手动保存。没动过就不会留下。
+  useEffect(() => {
+    if (isNew && dirty && !saving && !error) void save();
+  }, [isNew, dirty, saving, error, save]);
+
+  const remove = async () => {
+    if (!saved || isNew) return;
+    if (!window.confirm(`删除配方「${saved.name}」？已经导出的 artist 和出图结果不受影响。`)) return;
+    try {
+      await deleteRecipe(workspaceId, saved.id);
+      writeDraftBackup(workspaceId, recipeId, null);
+      onDeleted();
+    } catch (exc) {
+      setError(errorMessage(exc));
+    }
+  };
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -320,13 +361,27 @@ export function RecipeWorkspace({
           value={draft.name}
         />
         <div className="sl-recipe-meta">
-          <span>v{saved.version}</span>
-          <span>{dirty ? "有未保存的修改" : `已保存 ${formatTime(saved.updated_at)}`}</span>
+          {isNew ? (
+            <span>新配方，还没保存；改动后自动保存，不改直接返回就不会留下</span>
+          ) : (
+            <>
+              <span>v{saved.version}</span>
+              <span>{dirty ? "有未保存的修改" : `已保存 ${formatTime(saved.updated_at)}`}</span>
+            </>
+          )}
         </div>
-        <button className="sl-ghost" disabled={!dirty || saving} onClick={() => void save()} title="Ctrl+S" type="button">
-          <Save size={14} aria-hidden="true" />
-          {saving ? "保存中…" : "保存"}
-        </button>
+        <div className="sl-recipe-actions">
+          <button className="sl-ghost" disabled={!dirty || saving} onClick={() => void save()} title="Ctrl+S" type="button">
+            <Save size={14} aria-hidden="true" />
+            {saving ? "保存中…" : "保存"}
+          </button>
+          {!isNew ? (
+            <button className="sl-ghost danger" onClick={() => void remove()} title="删除这个配方" type="button">
+              <Trash2 size={14} aria-hidden="true" />
+              删除
+            </button>
+          ) : null}
+        </div>
         {source ? (
           <figure className="sl-recipe-source">
             <button className="sl-zoomable" onClick={() => viewer.open([sourceViewerItem(source)])} title="查看大图和文件位置" type="button">

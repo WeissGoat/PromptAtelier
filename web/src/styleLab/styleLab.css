@@ -1038,28 +1038,53 @@
   color: var(--sl-ok);
 }
 
-/* ---- 拖入 ---- */
-
-.sl-page.dragging::after {
-  border: 2px dashed var(--sl-accent);
-  border-radius: 10px;
-  content: "";
-  inset: 8px;
-  pointer-events: none;
-  position: absolute;
+.sl-icon-btn.danger:hover {
+  background: var(--sl-danger-bg);
+  color: var(--sl-danger);
 }
 
-.sl-drop-hint {
-  background: var(--sl-accent);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 14px;
-  left: 50%;
-  padding: 8px 16px;
+/* ---- 拖入 ---- */
+
+.sl-drop-overlay {
+  background: rgba(255, 255, 255, 0.82);
+  display: flex;
+  gap: 16px;
+  inset: 0;
+  justify-content: center;
+  padding: 48px;
+  position: fixed;
+  z-index: 50;
+}
+
+.sl-drop-target {
+  align-items: center;
+  background: #fff;
+  border: 2px dashed var(--sl-accent-border);
+  border-radius: 12px;
+  color: var(--sl-accent);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font-size: 16px;
+  gap: 10px;
+  justify-content: center;
+  max-width: 420px;
+}
+
+.sl-drop-target.over {
+  background: var(--sl-accent-bg);
+  border-color: var(--sl-accent);
+}
+
+.sl-drop-target > * {
   pointer-events: none;
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
+}
+
+.sl-bar-provider {
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  min-height: 34px;
+  padding: 0 6px;
 }
 
 .sl-spin {

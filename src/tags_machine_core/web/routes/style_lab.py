@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from tags_machine_core.json_tools import sanitize_json_for_display
 from tags_machine_core.llm import LLMError, translate_tags
+from tags_machine_core.llm.google_translate import google_translate_tags
 from tags_machine_core.style_lab import RegenSettings, StyleLabService, WorkspaceInfo, WorkspaceStore
 from tags_machine_core.style_lab.artist_test import ArtistTestSettings
 from tags_machine_core.style_lab.export import ExportConflictError, ExportError, ExportRequest
@@ -154,6 +155,26 @@ async def upload_images(workspace_id: str, request: Request) -> dict[str, Any]:
         "uploaded": saved,
         "analysis_job_id": _analyze(request, info),
     }
+
+
+@router.post("/workspaces/{workspace_id}/images/remove")
+def remove_images(workspace_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    store = _store(request)
+    info = _workspace(request, workspace_id)
+    image_ids = data.get("image_ids")
+    if not isinstance(image_ids, list) or not image_ids:
+        raise ApiError(code="invalid_image_ids", message="Provide image_ids", status_code=400)
+    info, removed = store.remove_images(info, [str(item) for item in image_ids])
+    _, stats = store.scan(info)
+    return {**_workspace_payload(store, info), "scan": stats, "removed": removed}
+
+
+@router.post("/workspaces/{workspace_id}/images/restore")
+def restore_images(workspace_id: str, request: Request) -> dict[str, Any]:
+    store = _store(request)
+    info = store.restore_images(_workspace(request, workspace_id))
+    _, stats = store.scan(info)
+    return {**_workspace_payload(store, info), "scan": stats, "analysis_job_id": _analyze(request, info)}
 
 
 @router.get("/workspaces/{workspace_id}/images/{image_id}")
@@ -351,13 +372,23 @@ def list_recipes(workspace_id: str, request: Request) -> dict[str, Any]:
 
 @router.post("/workspaces/{workspace_id}/recipes")
 def create_recipe(workspace_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    """从图片新建配方（draft=true 时只返回不保存）；或者给 recipe，保存前端先生成、改过的草稿。"""
     info = _workspace(request, workspace_id)
+    if data.get("recipe") is not None:
+        now = time.time()
+        draft = _parse_recipe(data["recipe"]).model_copy(update={"version": 1, "created_at": now, "updated_at": now})
+        try:
+            created = _service(request).recipes(info).create(draft)
+        except RecipeConflictError as exc:
+            raise ApiError(code="recipe_conflict", message=str(exc), status_code=409) from exc
+        return {"recipe": created.model_dump(mode="json", by_alias=True)}
     try:
         recipe = _service(request).create_recipe(
             info,
             str(data.get("image_id") or ""),
             name=str(data.get("name") or "").strip() or None,
             group_id=str(data.get("group_id") or "").strip() or None,
+            draft=bool(data.get("draft")),
         )
     except KeyError as exc:
         raise ApiError(code="image_not_found", message=f"Image not found: {data.get('image_id')}", status_code=404) from exc
@@ -549,6 +580,16 @@ def translate(data: dict[str, Any], request: Request) -> dict[str, Any]:
             status_code=400,
         )
     client = request.app.state.llm_client
+    provider = str(data.get("provider") or "llm")
+    if provider not in ("llm", "google"):
+        raise ApiError(code="invalid_translate_request", message="provider must be llm or google", status_code=400)
+    if provider == "google":
+        # 谷歌翻译不需要配置 LLM，只借用它的缓存库。
+        return {
+            "schema": "tags-machine-core.web.translations/v1",
+            "available": True,
+            "translations": google_translate_tags(client.cache, texts),
+        }
     try:
         translations = translate_tags(client, texts)
     except LLMError as exc:

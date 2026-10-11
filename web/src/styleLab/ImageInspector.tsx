@@ -1,4 +1,4 @@
-import { AlertTriangle, Copy, ExternalLink, FolderOpen, UserRound } from "lucide-react";
+import { AlertTriangle, Copy, ExternalLink, FolderOpen, Trash2, UserRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { ImageRecord } from "./api";
@@ -21,10 +21,11 @@ type ImageInspectorProps = {
   workspaceId: string;
   image: ImageRecord;
   translateOn: boolean;
+  onRemove?: () => void;
   children?: React.ReactNode;
 };
 
-export function ImageInspector({ workspaceId, image, translateOn, children }: ImageInspectorProps) {
+export function ImageInspector({ workspaceId, image, translateOn, onRemove, children }: ImageInspectorProps) {
   const viewer = useImageViewer();
   const fullUrl = sourceImageUrl(workspaceId, image.id, 0);
   const hints = image.flags.map((flag) => flagHints[flag]).filter(Boolean) as string[];
@@ -50,6 +51,11 @@ export function ImageInspector({ workspaceId, image, translateOn, children }: Im
         <a aria-label="在新标签页打开原图" className="sl-icon-btn" href={fullUrl} rel="noreferrer" target="_blank" title="打开原图">
           <ExternalLink size={15} />
         </a>
+        {onRemove ? (
+          <button aria-label="从工作区移除" className="sl-icon-btn danger" onClick={onRemove} title="从工作区移除这张图" type="button">
+            <Trash2 size={15} />
+          </button>
+        ) : null}
       </header>
 
       <button className="sl-preview sl-zoomable" onClick={() => viewer.open([sourceViewerItem(image)])} title="查看大图和文件位置" type="button">
