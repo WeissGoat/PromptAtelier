@@ -339,6 +339,9 @@ export type Analysis = {
 
 export type RecipeToken = { id: string; text: string; sep: string; origins: string[] };
 
+/** 一条角色提示词（v4 char_caption）；center 是原图里的位置，use_coords 开着时才起作用。 */
+export type RecipeCaption = { tokens: RecipeToken[]; negative: RecipeToken[]; center?: { x: number; y: number } | null };
+
 export type MaterialRole = "character" | "action";
 /** 素材架上的一块；excluded 是在卡片里筛掉不要的 tag。 */
 export type RecipeMaterial = { role: MaterialRole; ref: string; name: string; excluded: string[] };
@@ -358,7 +361,7 @@ export type Recipe = {
   subject: RecipeToken[];
   suffix: RecipeToken[];
   dropped: RecipeToken[];
-  character: { enabled: boolean; tokens: RecipeToken[]; negative: RecipeToken[]; add_male_caption: boolean };
+  character: { enabled: boolean; captions: RecipeCaption[]; use_coords?: boolean; add_male_caption: boolean };
   /** 旧版本的配方和浏览器里的草稿备份没有这一项。 */
   materials?: RecipeMaterial[];
   negative: RecipeToken[];

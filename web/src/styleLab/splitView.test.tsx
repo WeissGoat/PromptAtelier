@@ -23,7 +23,7 @@ function recipe(): Recipe {
     subject: tokenize(PROMPT).tokens.map((token, index) => ({ id: `s${index}`, text: token.text, sep: token.sep, origins: ["source"] })),
     suffix: [],
     dropped: [],
-    character: { enabled: false, tokens: [], negative: [], add_male_caption: true },
+    character: { enabled: false, captions: [], add_male_caption: true },
     negative: [],
     model: null,
     params: {},

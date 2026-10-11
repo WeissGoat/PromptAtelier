@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .metadata import ImageRecord, read_source_parameters
 from .tokens import Token, TokenList, serialize, tokenize
@@ -57,12 +57,34 @@ class RecipeToken(BaseModel):
     origins: list[str] = Field(default_factory=lambda: ["source"])
 
 
-class RecipeCharacter(BaseModel):
-    enabled: bool = False
+class RecipeCaption(BaseModel):
+    """一条角色提示词（v4 char_caption），center 是原图里的位置，没有时按画面中心。"""
+
     tokens: list[RecipeToken] = Field(default_factory=list)
     negative: list[RecipeToken] = Field(default_factory=list)
+    center: dict[str, float] | None = None
+
+
+class RecipeCharacter(BaseModel):
+    enabled: bool = False
+    captions: list[RecipeCaption] = Field(default_factory=list)
+    # 原图是否按位置摆放角色（v4_prompt.use_coords）；关着时位置不起作用。
+    use_coords: bool = False
     # 默认不按主体里的 1boy 等自动补男角色：复刻时原图的角色提示词是手写的，自动补的会多出来。
     add_male_caption: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _single_caption_layout(cls, data: Any) -> Any:
+        # 旧配方只有一条角色提示词，tokens / negative 直接挂在 character 上。
+        if not isinstance(data, dict) or ("tokens" not in data and "negative" not in data):
+            return data
+        data = dict(data)
+        tokens = data.pop("tokens", None) or []
+        negative = data.pop("negative", None) or []
+        if "captions" not in data:
+            data["captions"] = [{"tokens": tokens, "negative": negative}] if tokens or negative else []
+        return data
 
 
 class RecipeMaterial(BaseModel):
@@ -127,7 +149,15 @@ def recipe_from_image(record: ImageRecord, *, name: str | None = None, group_id:
     """初始状态：原图整段提示词都在主体里（划分阶段），负面、角色提示词和画风参数取自原图。"""
     params, _ = read_source_parameters(Path(record.path))
     style_params = {key: params[key] for key in STYLE_PARAM_KEYS if key in params}
-    first_caption = record.char_captions[0] if record.char_captions else None
+    v4_prompt = params.get("v4_prompt")
+    captions = [
+        RecipeCaption(
+            tokens=tokens_from_text(caption.positive),
+            negative=tokens_from_text(caption.negative),
+            center=caption.centers[0] if caption.centers else None,
+        )
+        for caption in record.char_captions
+    ]
     return Recipe(
         name=name or _default_name(record),
         source_image_id=record.id,
@@ -135,9 +165,9 @@ def recipe_from_image(record: ImageRecord, *, name: str | None = None, group_id:
         subject=tokens_from_text(record.prompt),
         negative=tokens_from_text(record.negative_prompt),
         character=RecipeCharacter(
-            enabled=bool(first_caption and first_caption.positive.strip()),
-            tokens=tokens_from_text(first_caption.positive) if first_caption else [],
-            negative=tokens_from_text(first_caption.negative) if first_caption else [],
+            enabled=any(caption.positive.strip() for caption in record.char_captions),
+            captions=captions,
+            use_coords=bool(isinstance(v4_prompt, dict) and v4_prompt.get("use_coords")),
         ),
         model=record.model,
         params=style_params,
@@ -195,12 +225,21 @@ def artist_node(recipe: Recipe, *, source_path: str | None = None) -> dict[str, 
 def character_prompts_param(recipe: Recipe) -> dict[str, Any] | None:
     if not recipe.character.enabled:
         return None
-    positive = tokens_text(recipe.character.tokens).strip(" ,")
-    if not positive:
+    captions = []
+    for caption in recipe.character.captions:
+        positive = tokens_text(caption.tokens).strip(" ,")
+        if not positive:
+            continue
+        item: dict[str, Any] = {"positive": positive, "negative": tokens_text(caption.negative).strip(" ,")}
+        if caption.center:
+            item["center"] = dict(caption.center)
+        captions.append(item)
+    if not captions:
         return None
     return {
         "mode": "explicit",
-        "captions": [{"positive": positive, "negative": tokens_text(recipe.character.negative).strip(" ,")}],
+        "captions": captions,
+        "use_coords": recipe.character.use_coords,
         "add_male_caption": recipe.character.add_male_caption,
     }
 

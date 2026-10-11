@@ -522,10 +522,23 @@ export function removeOriginForText(recipe: Recipe, text: string, origin: string
   return { ...recipe, subject: removeFromList(recipe.subject, origin, text) };
 }
 
+/** 所有角色提示词的 token（不含负面）。 */
+export function characterTokens(recipe: Recipe): RecipeToken[] {
+  return recipe.character.captions.flatMap((caption) => caption.tokens);
+}
+
+/** 旧版本的配方（浏览器里的草稿备份）只有一条角色提示词，tokens / negative 直接挂在 character 上。 */
+export function normalizeRecipe(recipe: Recipe): Recipe {
+  const character = recipe.character as Recipe["character"] & { tokens?: RecipeToken[]; negative?: RecipeToken[] };
+  if (Array.isArray(character.captions)) return recipe;
+  const { tokens = [], negative = [], ...rest } = character;
+  return { ...recipe, character: { ...rest, captions: tokens.length || negative.length ? [{ tokens, negative }] : [] } };
+}
+
 /** 主体里出现过的素材卡片来源（character:<ref> / action:<ref>），按出现顺序。 */
 export function cardOrigins(recipe: Recipe): string[] {
   const seen: string[] = [];
-  for (const token of [...recipe.subject, ...recipe.character.tokens]) {
+  for (const token of [...recipe.subject, ...characterTokens(recipe)]) {
     for (const origin of token.origins) {
       if ((origin.startsWith("character:") || origin.startsWith("action:")) && !seen.includes(origin)) seen.push(origin);
     }
@@ -570,28 +583,27 @@ export function removeMaterial(recipe: Recipe, origin: string): Recipe {
 
 /** 主体和角色提示词里都去掉这块素材的 tag，素材块留在架上。 */
 export function removeMaterialTokens(recipe: Recipe, origin: string): Recipe {
-  return {
-    ...removeOrigin(recipe, origin),
-    character: { ...recipe.character, tokens: removeFromList(recipe.character.tokens, origin) },
-  };
+  return removeFromCharacter(removeOrigin(recipe, origin), origin);
 }
 
 export function characterHasOrigin(recipe: Recipe, origin: string): boolean {
-  return recipe.character.tokens.some((token) => token.origins.includes(origin));
+  return characterTokens(recipe).some((token) => token.origins.includes(origin));
 }
 
 const GENDER_TAG = /^(girl|boy|1girl|1boy|woman|man|other)$/i;
 
-/** 放进角色提示词：角色卡替换整条 #1（没有 girl/boy 时补 girl），动作卡追加到后面。 */
-export function applyToCharacter(recipe: Recipe, drag: MaterialDrag): Recipe {
-  const character = { ...recipe.character, enabled: true };
+/** 放进第 index 条角色提示词（没有就新加一条）：角色卡替换整条（没有 girl/boy 时补 girl），动作卡追加到后面。 */
+export function applyToCharacter(recipe: Recipe, drag: MaterialDrag, index = 0): Recipe {
+  const captions = [...recipe.character.captions];
+  const at = Math.min(index, captions.length);
+  const caption = captions[at] ?? { tokens: [], negative: [] };
   if (drag.role === "character") {
     const tags = drag.tags.some((tag) => GENDER_TAG.test(tag.trim())) ? drag.tags : ["girl", ...drag.tags];
-    character.tokens = addToList([], tags, drag.origin).tokens;
+    captions[at] = { ...caption, tokens: addToList([], tags, drag.origin).tokens };
   } else {
-    character.tokens = addToList(recipe.character.tokens, drag.tags, drag.origin).tokens;
+    captions[at] = { ...caption, tokens: addToList(caption.tokens, drag.tags, drag.origin).tokens };
   }
-  return { ...recipe, character };
+  return { ...recipe, character: { ...recipe.character, enabled: true, captions } };
 }
 
 /** 卡片上点一个 tag：切换筛选；这块素材已经加进主体或角色提示词时同步增删这个 tag。 */
@@ -605,14 +617,16 @@ export function toggleMaterialTag(recipe: Recipe, origin: string, tag: string): 
       : item,
   );
   let subject = recipe.subject;
-  let characterTokens = recipe.character.tokens;
   if (originCount(recipe, origin)) {
     subject = excluding ? removeFromList(subject, origin, tag) : addToList(subject, [tag], origin).tokens;
   }
-  if (characterHasOrigin(recipe, origin)) {
-    characterTokens = excluding ? removeFromList(characterTokens, origin, tag) : addToList(characterTokens, [tag], origin).tokens;
-  }
-  return { ...recipe, materials, subject, character: { ...recipe.character, tokens: characterTokens } };
+  // 只改用到了这块素材的那几条角色提示词。
+  const captions = recipe.character.captions.map((caption) => {
+    if (!caption.tokens.some((token) => token.origins.includes(origin))) return caption;
+    const tokens = excluding ? removeFromList(caption.tokens, origin, tag) : addToList(caption.tokens, [tag], origin).tokens;
+    return { ...caption, tokens };
+  });
+  return { ...recipe, materials, subject, character: { ...recipe.character, captions } };
 }
 
 /** 全选 / 全不选：同 toggleMaterialTag，一次处理整块。 */
@@ -628,5 +642,6 @@ export function setMaterialTags(recipe: Recipe, origin: string, allTags: string[
 
 /** 只从角色提示词里去掉这块素材的 tag。 */
 export function removeFromCharacter(recipe: Recipe, origin: string): Recipe {
-  return { ...recipe, character: { ...recipe.character, tokens: removeFromList(recipe.character.tokens, origin) } };
+  const captions = recipe.character.captions.map((caption) => ({ ...caption, tokens: removeFromList(caption.tokens, origin) }));
+  return { ...recipe, character: { ...recipe.character, captions } };
 }

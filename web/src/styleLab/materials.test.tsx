@@ -41,7 +41,7 @@ function recipe(subject: string[] = ["1girl", "smile"]): Recipe {
     subject: subject.map((text) => token(text)),
     suffix: [],
     dropped: [],
-    character: { enabled: false, tokens: [], negative: [], add_male_caption: false },
+    character: { enabled: false, captions: [], add_male_caption: false },
     materials: [],
     negative: [],
     model: null,
@@ -114,15 +114,25 @@ describe("material blocks", () => {
 
   it("puts a character block into the character prompt and removes everything with the block", () => {
     let draft = addMaterial(recipe(), miku);
+    const texts = (index: number) => draft.character.captions[index].tokens.map((item) => item.text);
     draft = applyToCharacter(draft, { origin, role: "character", tags: ["aqua hair"] });
     expect(draft.character.enabled).toBe(true);
-    expect(draft.character.tokens.map((item) => item.text)).toEqual(["girl", "aqua hair"]);
+    expect(texts(0)).toEqual(["girl", "aqua hair"]);
     draft = applyToCharacter(draft, { origin: "action:x", role: "action", tags: ["sitting"] });
-    expect(draft.character.tokens.map((item) => item.text)).toEqual(["girl", "aqua hair", "sitting"]);
+    expect(texts(0)).toEqual(["girl", "aqua hair", "sitting"]);
+    // 放到第 2 条（还没有就新加）；筛掉 tag 时只改用到这块素材的那几条。
+    draft = applyToCharacter(draft, { origin: "character:boy", role: "character", tags: ["boy", "tall"] }, 1);
+    expect(texts(1)).toEqual(["boy", "tall"]);
+    draft = toggleMaterialTag(draft, origin, "aqua hair");
+    expect(texts(0)).toEqual(["girl", "sitting"]);
+    expect(texts(1)).toEqual(["boy", "tall"]);
+    draft = toggleMaterialTag(draft, origin, "aqua hair");
+    expect(texts(0)).toEqual(["girl", "sitting", "aqua hair"]);
     draft = addTokens(draft, ["aqua hair", "smile"], origin).recipe;
     draft = removeMaterial(draft, origin);
     expect(draft.materials).toEqual([]);
-    expect(draft.character.tokens.map((item) => item.text)).toEqual(["sitting"]);
+    expect(texts(0)).toEqual(["sitting"]);
+    expect(texts(1)).toEqual(["boy", "tall"]);
     // 主体原有的 smile 保留，只去掉素材加的。
     expect(draft.subject.map((item) => item.text)).toEqual(["1girl", "smile"]);
   });

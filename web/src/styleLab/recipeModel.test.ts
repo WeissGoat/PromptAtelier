@@ -41,7 +41,7 @@ function recipe(subject: string): Recipe {
     subject: tokens(subject),
     suffix: [],
     dropped: [],
-    character: { enabled: false, tokens: [], negative: [], add_male_caption: true },
+    character: { enabled: false, captions: [], add_male_caption: true },
     negative: [],
     model: null,
     params: {},

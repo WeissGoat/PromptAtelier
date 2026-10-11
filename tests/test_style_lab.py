@@ -557,3 +557,55 @@ class RecipeTest(TestCase):
         self.assertEqual(store.get_version(recipe.id, 1).name, "测试")
         self.assertEqual([item["version"] for item in store.history(recipe.id)], [1])
         self.assertEqual([item.id for item in store.list()], [recipe.id])
+
+    def test_recipe_keeps_every_character_caption_with_positions(self):
+        from tags_machine_core.style_lab.recipe import Recipe, character_prompts_param, recipe_from_image, tokens_text
+
+        path = write_nai_png(
+            self.tmp / "multi" / "1.png",
+            v4_prompt={
+                "caption": {
+                    "base_caption": "1girl, 1boy, hetero",
+                    "char_captions": [
+                        {"char_caption": "girl, minami kotori", "centers": [{"x": 0.5, "y": 0.5}]},
+                        {"char_caption": "boy, tall", "centers": [{"x": 0.3, "y": 0.5}]},
+                    ],
+                },
+                "use_coords": True,
+                "use_order": True,
+            },
+            v4_negative_prompt={
+                "caption": {
+                    "base_caption": "lowres",
+                    "char_captions": [{"char_caption": "", "centers": []}, {"char_caption": "face", "centers": []}],
+                }
+            },
+        )
+        recipe = recipe_from_image(build_image_record(path, base=self.tmp))
+        character = recipe.character
+        self.assertTrue(character.enabled)
+        self.assertTrue(character.use_coords)
+        self.assertEqual([tokens_text(c.tokens) for c in character.captions], ["girl, minami kotori", "boy, tall"])
+        self.assertEqual(tokens_text(character.captions[1].negative), "face")
+        self.assertEqual(character.captions[1].center, {"x": 0.3, "y": 0.5})
+        param = character_prompts_param(recipe)
+        self.assertEqual(
+            param["captions"],
+            [
+                {"positive": "girl, minami kotori", "negative": "", "center": {"x": 0.5, "y": 0.5}},
+                {"positive": "boy, tall", "negative": "face", "center": {"x": 0.3, "y": 0.5}},
+            ],
+        )
+        self.assertTrue(param["use_coords"])
+
+        # 旧配方只有一条，tokens / negative 直接挂在 character 上。
+        old = json.loads(recipe.model_dump_json(by_alias=True))
+        old["character"] = {
+            "enabled": True,
+            "tokens": [{"text": "girl", "sep": "", "origins": ["source"]}],
+            "negative": [],
+            "add_male_caption": False,
+        }
+        migrated = Recipe.model_validate(old).character
+        self.assertEqual([tokens_text(c.tokens) for c in migrated.captions], ["girl"])
+        self.assertNotIn("tokens", migrated.model_dump())

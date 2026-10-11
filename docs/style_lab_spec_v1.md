@@ -48,7 +48,7 @@ Style Lab 是 PromptAtelier 里的画风复刻工作台，用来替代 `artist-s
 | `path` / `rel_path` | 绝对路径 / 相对工作区来源的路径 |
 | `post` | 从投稿目录名 `YYYY-MM-DD_<post_id>_<title>` 解析出的日期、投稿号、标题；解析不到为 `null` |
 | `prompt` / `negative_prompt` | v4 `base_caption` 优先，回退到 `prompt` / `uc` |
-| `char_captions` | v4 角色提示词（正向 + 负向），单角色阶段也完整保留 |
+| `char_captions` | v4 角色提示词（正向 + 负向 + 位置），全部条目 |
 | `model` | 归一化后的模型名，来自 `Source` 文本块 |
 | `seed` `steps` `scale` `sampler` `cfg_rescale` `noise_schedule` | 主要参数 |
 | `width` / `height` | 原图画布尺寸 |
@@ -179,7 +179,7 @@ llm:
 | `stage` | `split`（划分中）/ `edit`（已锁定画风，编辑主体） |
 | `locked` | 锁定时画风区不能改文字、不能回到划分；主动移入移出 token 始终允许 |
 | `prefix` / `suffix` | 画风，导出到 tags.txt 第 1、3 行 |
-| `subject` / `character` | 只用于测试出图；`character` 是单角色的正向、负向提示词 |
+| `subject` / `character` | 只用于测试出图；`character.captions` 是各条角色提示词的正向、负向和位置（`center`），`character.use_coords` 对应原图的 `v4_prompt.use_coords`。旧配方的单条 `character.tokens` / `negative` 读入时自动转成 `captions` |
 | `dropped` | 不进提示词的 token |
 | `negative` | 画风负面，导出为 `origin_uc` |
 | `model` / `params` | 画风参数（导出到 `gen_json`，不含宽高、种子、张数） |
@@ -203,10 +203,10 @@ llm:
 角色提示词用渲染器新增的显式模式：
 
 ```json
-{"character_prompts": {"mode": "explicit", "captions": [{"positive": "...", "negative": "..."}], "add_male_caption": true}}
+{"character_prompts": {"mode": "explicit", "captions": [{"positive": "...", "negative": "...", "center": {"x": 0.3, "y": 0.5}}], "use_coords": false, "add_male_caption": true}}
 ```
 
-base 提示词不动；`add_male_caption` 开着时，和 auto 模式一样按主体里的 `1boy` 等计数补男角色提示词。之前考虑过用 `::character A: ...::` 块语法，但块后面的画风后缀会被一起吞进角色提示词，所以改为显式模式。
+`center` 可省略（按画面中心）；`use_coords` 为 true 时 `v4_prompt.use_coords` 打开，模型按位置摆放（V4.5 / V5）。base 提示词不动；`add_male_caption` 开着时，和 auto 模式一样按主体里的 `1boy` 等计数补男角色提示词。之前考虑过用 `::character A: ...::` 块语法，但块后面的画风后缀会被一起吞进角色提示词，所以改为显式模式。
 
 配方出图的 run 记为 `kind: "recipe"`，带配方 id 和版本；和原图对照只看相似度和提示词差异，结论记为 `reference`。
 

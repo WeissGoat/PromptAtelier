@@ -1,11 +1,12 @@
-import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw, TextSelect, Unlock, UserRound } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ChevronDown, ChevronRight, Plus, RotateCcw, TextSelect, Unlock, UserRound, X } from "lucide-react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 
-import type { ImageRecord, Recipe, RecipePreview, TagCategory } from "./api";
+import type { ImageRecord, Recipe, RecipeCaption, RecipePreview, TagCategory } from "./api";
 import {
   addTokens,
   applyToCharacter,
   categoryLabels,
+  characterTokens,
   findZone,
   MATERIAL_DRAG_TYPE,
   materialOrigin,
@@ -93,7 +94,7 @@ export function RecipeEditor({
 function EditView({ draft, source, categories, frequency, translateOn, preview, previewError, onChange }: RecipeEditorProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const allTexts = useMemo(
-    () => [...draft.prefix, ...draft.subject, ...draft.suffix, ...draft.dropped, ...draft.character.tokens].map((token) => token.text),
+    () => [...draft.prefix, ...draft.subject, ...draft.suffix, ...draft.dropped, ...characterTokens(draft)].map((token) => token.text),
     [draft],
   );
   const { lookup } = useTranslations(allTexts, translateOn);
@@ -240,38 +241,64 @@ function CharacterSection({
   onChange: (recipe: Recipe) => void;
 }) {
   const sourceCaptions = source?.char_captions ?? [];
-  const editable = tokensToText(draft.character.tokens);
+  const { captions } = draft.character;
   const predicted = preview?.char_captions ?? [];
-  const extraPredicted = predicted.slice(draft.character.enabled && editable ? 1 : 0);
+  const sent = draft.character.enabled ? captions.filter((caption) => tokensToText(caption.tokens).trim()).length : 0;
+  const extraPredicted = predicted.slice(sent);
   const setCharacter = (patch: Partial<Recipe["character"]>) => onChange({ ...draft, character: { ...draft.character, ...patch } });
-  const [dropping, setDropping] = useState(false);
+  const setCaption = (index: number, patch: Partial<RecipeCaption>) =>
+    setCharacter({ captions: captions.map((caption, at) => (at === index ? { ...caption, ...patch } : caption)) });
+  const useSource = () =>
+    setCharacter({
+      enabled: true,
+      captions: sourceCaptions.map((caption) => ({
+        tokens: retokenize([], caption.positive),
+        negative: retokenize([], caption.negative),
+        center: caption.centers?.[0] ?? null,
+      })),
+    });
+  const sameAsSource =
+    sourceCaptions.length === captions.length &&
+    sourceCaptions.every(
+      (caption, index) =>
+        tokensToText(captions[index].tokens) === tokensToText(retokenize([], caption.positive)) &&
+        tokensToText(captions[index].negative) === tokensToText(retokenize([], caption.negative)),
+    );
+  // 拖到某一条上放进那一条，拖到区域其他地方新加一条。
+  const [dropping, setDropping] = useState<number | "new" | null>(null);
+  const dropHandlers = (target: number | "new") => ({
+    onDragOver: (event: DragEvent) => {
+      if (!event.dataTransfer.types.includes(MATERIAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDropping(target);
+    },
+    onDrop: (event: DragEvent) => {
+      const raw = event.dataTransfer.getData(MATERIAL_DRAG_TYPE);
+      setDropping(null);
+      if (!raw) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const drag = JSON.parse(raw) as MaterialDrag;
+      onChange(applyToCharacter(withDragMaterial(draft, drag), drag, target === "new" ? captions.length : target));
+    },
+  });
 
   return (
     <section
-      className={`sl-zone zone-character ${dropping ? "drop-target" : ""}`}
+      className={`sl-zone zone-character ${dropping === "new" ? "drop-target" : ""}`}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropping(false);
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropping(null);
       }}
-      onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes(MATERIAL_DRAG_TYPE)) return;
-        event.preventDefault();
-        setDropping(true);
-      }}
-      onDrop={(event) => {
-        const raw = event.dataTransfer.getData(MATERIAL_DRAG_TYPE);
-        setDropping(false);
-        if (!raw) return;
-        event.preventDefault();
-        const drag = JSON.parse(raw) as MaterialDrag;
-        onChange(applyToCharacter(withDragMaterial(draft, drag), drag));
-      }}
+      {...dropHandlers("new")}
     >
       <header className="sl-zone-head">
         <span className="sl-zone-title">
           <UserRound size={13} aria-hidden="true" />
           角色提示词
+          <span className="sl-count">{captions.length}</span>
         </span>
-        <span className="sl-muted">单角色，只用于测试出图；可以把素材块拖到这里</span>
+        <span className="sl-muted">只用于测试出图；素材块拖到某一条上替换那一条，拖到空白处新加一条</span>
         <span className="sl-bar-spacer" />
         <label className="sl-check">
           <input checked={draft.character.enabled} onChange={(event) => setCharacter({ enabled: event.target.checked })} type="checkbox" />
@@ -287,19 +314,13 @@ function CharacterSection({
               #{index + 1} {caption.positive}
             </span>
           ))}
-          <button
-            className="sl-ghost tiny"
-            onClick={() =>
-              setCharacter({
-                enabled: true,
-                tokens: retokenize([], sourceCaptions[0].positive),
-                negative: retokenize([], sourceCaptions[0].negative),
-              })
-            }
-            type="button"
-          >
-            用原图 #1
-          </button>
+          {sameAsSource ? (
+            <span className="sl-muted">（和原图一致）</span>
+          ) : (
+            <button className="sl-ghost tiny" onClick={useSource} type="button">
+              用原图的 {sourceCaptions.length} 条
+            </button>
+          )}
         </div>
       ) : (
         <p className="sl-muted">原图没有角色提示词。</p>
@@ -307,34 +328,80 @@ function CharacterSection({
 
       {draft.character.enabled ? (
         <>
-          <label className="sl-field">
-            <span>#1 正向</span>
-            <TokenText
-              onCommit={(text) => setCharacter({ tokens: retokenize(draft.character.tokens, text) })}
-              placeholder="girl, silver hair, red eyes"
-              rows={2}
-              value={editable}
-            />
-          </label>
-          {draft.character.tokens.length && lookup(draft.character.tokens[0].text) !== undefined ? (
-            <p className="sl-muted sl-char-zh">{draft.character.tokens.map((token) => lookup(token.text) ?? token.text).join("，")}</p>
-          ) : null}
-          <label className="sl-field">
-            <span>#1 负面</span>
-            <TokenText
-              onCommit={(text) => setCharacter({ negative: retokenize(draft.character.negative, text) })}
-              rows={1}
-              value={tokensToText(draft.character.negative)}
-            />
-          </label>
-          <label className="sl-check">
-            <input
-              checked={draft.character.add_male_caption}
-              onChange={(event) => setCharacter({ add_male_caption: event.target.checked })}
-              type="checkbox"
-            />
-            主体里有 1boy 等男性计数时自动补男角色提示词
-          </label>
+          {captions.map((caption, index) => (
+            <div
+              className={`sl-char-caption ${dropping === index ? "drop-target" : ""}`}
+              key={index}
+              {...dropHandlers(index)}
+            >
+              <div className="sl-char-caption-head">
+                <span>#{index + 1}</span>
+                {caption.center ? (
+                  <span className="sl-muted" title="原图里的位置；勾选“按位置摆放”时才起作用">
+                    位置 {caption.center.x.toFixed(1)}, {caption.center.y.toFixed(1)}
+                  </span>
+                ) : null}
+                <span className="sl-bar-spacer" />
+                <button
+                  aria-label={`删除角色提示词 #${index + 1}`}
+                  className="sl-icon-btn danger"
+                  onClick={() => setCharacter({ captions: captions.filter((_, at) => at !== index) })}
+                  title="删除这一条"
+                  type="button"
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              </div>
+              <label className="sl-field">
+                <span>正向</span>
+                <TokenText
+                  label={`角色提示词 #${index + 1} 正向`}
+                  onCommit={(text) => setCaption(index, { tokens: retokenize(caption.tokens, text) })}
+                  placeholder="girl, silver hair, red eyes"
+                  rows={2}
+                  value={tokensToText(caption.tokens)}
+                />
+              </label>
+              {caption.tokens.length && lookup(caption.tokens[0].text) !== undefined ? (
+                <p className="sl-muted sl-char-zh">{caption.tokens.map((token) => lookup(token.text) ?? token.text).join("，")}</p>
+              ) : null}
+              <label className="sl-field">
+                <span>负面</span>
+                <TokenText
+                  label={`角色提示词 #${index + 1} 负面`}
+                  onCommit={(text) => setCaption(index, { negative: retokenize(caption.negative, text) })}
+                  rows={1}
+                  value={tokensToText(caption.negative)}
+                />
+              </label>
+            </div>
+          ))}
+          <div className="sl-char-options">
+            <button
+              className="sl-ghost tiny"
+              onClick={() => setCharacter({ captions: [...captions, { tokens: [], negative: [] }] })}
+              type="button"
+            >
+              <Plus size={13} aria-hidden="true" />
+              加一条
+            </button>
+            <label className="sl-check">
+              <input
+                checked={Boolean(draft.character.use_coords)}
+                onChange={(event) => setCharacter({ use_coords: event.target.checked })}
+                type="checkbox"
+              />
+              按位置摆放（原图的 use_coords）
+            </label>
+            <label className="sl-check">
+              <input
+                checked={draft.character.add_male_caption}
+                onChange={(event) => setCharacter({ add_male_caption: event.target.checked })}
+                type="checkbox"
+              />
+              主体里有 1boy 等男性计数时自动补男角色提示词
+            </label>
+          </div>
         </>
       ) : null}
 
@@ -351,9 +418,10 @@ function CharacterSection({
               <AlertTriangle size={13} aria-hidden="true" /> 渲染器按主体里的男性计数自动加了 {extraPredicted.length} 条男角色提示词。
             </p>
           ) : null}
-          {sourceCaptions.length && !draft.character.enabled ? (
+          {sourceCaptions.length && predicted.length !== sourceCaptions.length && !preview.character_prompts?.male_caption_added ? (
             <p className="sl-hint warn">
-              <AlertTriangle size={13} aria-hidden="true" /> 原图有角色提示词但当前没启用，和原图对照时会有差异。
+              <AlertTriangle size={13} aria-hidden="true" /> 原图有 {sourceCaptions.length} 条角色提示词，现在发送 {predicted.length}{" "}
+              条，和原图对照时会有差异。
             </p>
           ) : null}
         </div>

@@ -34,7 +34,7 @@ import { ExportDialog } from "./ExportDialog";
 import { fileName, formatTime, modelLabel } from "./format";
 import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 import { LibraryPanel } from "./LibraryPanel";
-import { postFrequency } from "./recipeModel";
+import { normalizeRecipe, postFrequency } from "./recipeModel";
 import { RecipeEditor } from "./RecipeEditor";
 import { defaultRegenSettings, Segmented, SIZE_PRESETS } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
@@ -52,7 +52,9 @@ function draftKey(workspaceId: string, recipeId: string): string {
 function readDraftBackup(workspaceId: string, recipeId: string): DraftBackup | null {
   try {
     const raw = window.localStorage.getItem(draftKey(workspaceId, recipeId));
-    return raw ? (JSON.parse(raw) as DraftBackup) : null;
+    if (!raw) return null;
+    const backup = JSON.parse(raw) as DraftBackup;
+    return { ...backup, draft: normalizeRecipe(backup.draft) };
   } catch {
     return null;
   }

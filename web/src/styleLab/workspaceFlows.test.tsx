@@ -44,7 +44,7 @@ function draftRecipe(): Recipe {
     subject: [{ id: "s0", text: "1girl", sep: "", origins: ["source"] }],
     suffix: [],
     dropped: [],
-    character: { enabled: false, tokens: [], negative: [], add_male_caption: false },
+    character: { enabled: false, captions: [], add_male_caption: false },
     negative: [],
     model: null,
     params: {},
