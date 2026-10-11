@@ -20,6 +20,7 @@ import {
   tokenFrequency,
   tokensToText,
   type MaterialDrag,
+  withDragMaterial,
   type Zone,
 } from "./recipeModel";
 import { MODELS, SAMPLERS, SCHEDULES } from "./RegenPanel";
@@ -186,7 +187,7 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
         blocks={blocks}
         hint="只用于测试出图"
         locked={false}
-        onDropMaterial={(drag, index) => onChange(addTokens(draft, drag.tags, drag.origin, index).recipe)}
+        onDropMaterial={(drag, index) => onChange(addTokens(withDragMaterial(draft, drag), drag.tags, drag.origin, index).recipe)}
         onTextChange={(text) => onChange(setSubjectText(draft, text))}
         title="主体"
         tokens={draft.subject}
@@ -254,7 +255,8 @@ function CharacterSection({
         setDropping(false);
         if (!raw) return;
         event.preventDefault();
-        onChange(applyToCharacter(draft, JSON.parse(raw) as MaterialDrag));
+        const drag = JSON.parse(raw) as MaterialDrag;
+        onChange(applyToCharacter(withDragMaterial(draft, drag), drag));
       }}
     >
       <header className="sl-zone-head">

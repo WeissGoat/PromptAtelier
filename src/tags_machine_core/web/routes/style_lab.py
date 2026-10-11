@@ -19,6 +19,7 @@ from tags_machine_core.style_lab.export import ExportConflictError, ExportError,
 from tags_machine_core.style_lab.library import LibraryIndex, parse_facet_params
 from tags_machine_core.style_lab.recipe import Recipe, RecipeConflictError
 from tags_machine_core.style_lab.service import DuplicateRequestError
+from tags_machine_core.style_lab.shelf import SHELF_SCHEMA, MaterialShelf, ShelfStore
 from tags_machine_core.style_lab.tokens import tokenize
 from tags_machine_core.style_lab.metadata import IMAGE_SUFFIXES, read_source_parameters
 from tags_machine_core.nodes.role_paths import role_roots
@@ -88,14 +89,18 @@ def open_workspace(data: dict[str, Any], request: Request) -> dict[str, Any]:
         raise ApiError(code="workspace_source_not_found", message=str(exc), status_code=404) from exc
     index = store.load_index(info)
     stats = None
-    if index.scanned_at is None or data.get("rescan"):
+    if index.scanned_at is None or data.get("rescan") or store.needs_rescan(info):
         _, stats = store.scan(info)
     return {**_workspace_payload(store, info), "scan": stats, "analysis_job_id": _analyze(request, info)}
 
 
 @router.get("/workspaces/{workspace_id}")
 def get_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
-    return _workspace_payload(_store(request), _workspace(request, workspace_id))
+    store = _store(request)
+    info = _workspace(request, workspace_id)
+    if store.needs_rescan(info):
+        store.scan(info)
+    return _workspace_payload(store, info)
 
 
 @router.post("/workspaces/{workspace_id}/scan")
@@ -470,6 +475,29 @@ def _library(request: Request) -> LibraryIndex:
         # 动作库第一次建索引要十几秒：打开配方页先搜角色时，后台把动作也建好。
         threading.Thread(target=index.entries, args=("action",), daemon=True, name="style-lab-library-warm").start()
     return index
+
+
+def _shelf(request: Request) -> ShelfStore:
+    state = request.app.state
+    store = getattr(state, "style_lab_shelf", None)
+    if store is None:
+        store = ShelfStore(_service(request).store.runtime_dir / "material_shelf.json")
+        state.style_lab_shelf = store
+    return store
+
+
+@router.get("/shelf")
+def get_shelf(request: Request) -> dict[str, Any]:
+    return {"schema": SHELF_SCHEMA, **_shelf(request).load().model_dump(mode="json")}
+
+
+@router.put("/shelf")
+def put_shelf(data: dict[str, Any], request: Request) -> dict[str, Any]:
+    try:
+        shelf = MaterialShelf.model_validate(data)
+    except ValidationError as exc:
+        raise ApiError(code="invalid_shelf", message=str(exc), status_code=400) from exc
+    return {"schema": SHELF_SCHEMA, **_shelf(request).save(shelf).model_dump(mode="json")}
 
 
 @router.get("/library/node")

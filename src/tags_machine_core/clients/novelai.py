@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from dataclasses import dataclass
 from typing import Any
@@ -122,6 +123,28 @@ VALID_NOVELAI_MODELS = {
 }
 
 DEFAULT_NOVELAI_MODEL = "nai-diffusion-4-5-full"
+
+
+# PNG 的 Source 形如 "NovelAI Diffusion V5 DB276663"：V4 起不再写 Curated / Full，只能靠末尾的模型哈希区分。
+# 这些哈希是实测得来的（2026-10-11 用对应模型出图后读回 Source）。
+NOVELAI_SOURCE_HASH_MODELS = {
+    "0ADF9AB7": "nai-diffusion-5-full",
+    "DB276663": "nai-diffusion-5-curated",
+    "4BDE2A90": "nai-diffusion-4-5-full",
+    "C02D4F98": "nai-diffusion-4-5-curated",
+    "37442FCA": "nai-diffusion-4-full",
+}
+_SOURCE_HASH_RE = re.compile(r"\b([0-9A-Fa-f]{8})\s*$")
+
+
+def source_label_hash(label: str | None) -> str | None:
+    match = _SOURCE_HASH_RE.search(str(label or "").strip())
+    return match.group(1).upper() if match else None
+
+
+def model_from_source_label(label: str | None) -> str | None:
+    """按 Source 末尾的模型哈希认出模型；哈希没登记时返回 None。"""
+    return NOVELAI_SOURCE_HASH_MODELS.get(source_label_hash(label) or "")
 
 
 def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELAI_MODEL) -> str:

@@ -408,7 +408,12 @@ export function cardOrigins(recipe: Recipe): string[] {
 
 /** 拖动素材块时 dataTransfer 里的类型；内容是 MaterialDrag 的 JSON。 */
 export const MATERIAL_DRAG_TYPE = "application/x-sl-material";
-export type MaterialDrag = { origin: string; role: RecipeMaterial["role"]; tags: string[] };
+export type MaterialDrag = { origin: string; role: RecipeMaterial["role"]; tags: string[]; material?: RecipeMaterial };
+
+/** 素材块用进配方之前，先记进配方的 materials（已经有就不动），之后在素材架上筛 tag 才会同步。 */
+export function withDragMaterial(recipe: Recipe, drag: MaterialDrag): Recipe {
+  return drag.material ? addMaterial(recipe, drag.material) : recipe;
+}
 
 export function materialOrigin(material: Pick<RecipeMaterial, "role" | "ref">): string {
   return `${material.role}:${material.ref}`;

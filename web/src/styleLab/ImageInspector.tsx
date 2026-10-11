@@ -14,6 +14,7 @@ const flagHints: Partial<Record<string, string>> = {
   img2img: "图生图：元数据里没有底图，原参重生只能近似。",
   vibe_missing: "用了 vibe 但没有内嵌参考图，重生时缺少 vibe。",
   director_ref: "用了角色参考（director reference）。",
+  model_unverified: "原图 Source 里的模型哈希还没登记，无法分辨 Curated / Full，暂按 Full 处理。如果不对，在重生设置里手动选模型。",
 };
 
 type ImageInspectorProps = {

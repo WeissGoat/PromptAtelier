@@ -16,13 +16,26 @@ type MaterialSearchProps = {
   disabled?: boolean;
   isPicked?: (ref: string) => boolean;
   onPick: (node: MaterialNode) => void;
+  /** 传了就由外面保存分类筛选（素材架用它跨配方保留），否则组件自己记。 */
+  facets?: Record<string, string>;
+  onFacetsChange?: (facets: Record<string, string>) => void;
 };
 
 /** 下拉式的素材搜索：输入或选了分类才展开结果；内容相同的副本目录已在后端合并。 */
-export function MaterialSearch({ role, placeholder, disabled, isPicked, onPick }: MaterialSearchProps) {
+export function MaterialSearch({
+  role,
+  placeholder,
+  disabled,
+  isPicked,
+  onPick,
+  facets: savedFacets,
+  onFacetsChange,
+}: MaterialSearchProps) {
   const [query, setQuery] = useState("");
-  const [facets, setFacets] = useState<Record<string, string>>({});
-  const [moreFacets, setMoreFacets] = useState(false);
+  const [localFacets, setLocalFacets] = useState<Record<string, string>>({});
+  const facets = savedFacets ?? localFacets;
+  const setFacets = (next: Record<string, string>) => (savedFacets ? onFacetsChange?.(next) : setLocalFacets(next));
+  const [moreFacets, setMoreFacets] = useState(() => MORE_FACETS.some((field) => facets[field]));
   const [open, setOpen] = useState(false);
   const [nodes, setNodes] = useState<MaterialNode[]>([]);
   const [options, setOptions] = useState<Record<string, FacetOption[]>>({});
@@ -35,10 +48,10 @@ export function MaterialSearch({ role, placeholder, disabled, isPicked, onPick }
   const boxRef = useRef<HTMLDivElement>(null);
   const showFacets = role === "action";
 
-  // 换了角色/动作页签：清掉上一页的筛选。
+  // 换了角色/动作页签：清掉上一页的搜索词；外面保存的分类筛选按页签各自保留。
   useEffect(() => {
     setQuery("");
-    setFacets({});
+    setLocalFacets({});
     setNodes([]);
     setOptions({});
   }, [role]);
@@ -103,12 +116,10 @@ export function MaterialSearch({ role, placeholder, disabled, isPicked, onPick }
   };
 
   const setFacet = (field: string, value: string) => {
-    setFacets((current) => {
-      const next = { ...current };
-      if (value) next[field] = value;
-      else delete next[field];
-      return next;
-    });
+    const next = { ...facets };
+    if (value) next[field] = value;
+    else delete next[field];
+    setFacets(next);
     setOpen(true);
   };
 

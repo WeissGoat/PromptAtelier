@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from tags_machine_core.logging_config import get_logger
 
-from .metadata import IMAGE_SUFFIXES, ImageRecord, build_image_record
+from .metadata import IMAGE_SUFFIXES, RECORD_VERSION, ImageRecord, build_image_record
 
 
 logger = get_logger(__name__)
@@ -155,7 +155,12 @@ class WorkspaceStore:
                     stats["failed"] += 1
                     continue
                 old = previous.get(str(path))
-                if old and old.size_bytes == stat.st_size and old.mtime_ns == stat.st_mtime_ns:
+                if (
+                    old
+                    and old.size_bytes == stat.st_size
+                    and old.mtime_ns == stat.st_mtime_ns
+                    and old.record_version == RECORD_VERSION
+                ):
                     records.append(old)
                     stats["reused"] += 1
                     continue
@@ -172,6 +177,10 @@ class WorkspaceStore:
             _atomic_write(data_dir / "index.json", index.model_dump_json(by_alias=True))
             self._index_cache.pop(info.id, None)
             return index, stats
+
+    def needs_rescan(self, info: WorkspaceInfo) -> bool:
+        """索引里有按旧解析规则读出的记录。"""
+        return any(record.record_version != RECORD_VERSION for record in self.load_index(info).images)
 
     def find_image(self, info: WorkspaceInfo, image_id: str) -> ImageRecord:
         for record in self.load_index(info).images:

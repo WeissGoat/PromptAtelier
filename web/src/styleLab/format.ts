@@ -7,6 +7,7 @@ export const flagLabels: Record<ImageFlag, string> = {
   add_original: "叠加原图",
   vibe_missing: "缺 vibe 图",
   director_ref: "角色参考",
+  model_unverified: "模型待确认",
 };
 
 /** nai-diffusion-4-5-full → V4.5 Full */

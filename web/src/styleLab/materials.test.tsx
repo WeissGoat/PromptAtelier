@@ -15,10 +15,11 @@ import {
   toggleMaterialTag,
 } from "./recipeModel";
 
-const api = vi.hoisted(() => ({ searchMaterials: vi.fn(), getLibraryNode: vi.fn() }));
+const api = vi.hoisted(() => ({ searchMaterials: vi.fn(), getLibraryNode: vi.fn(), getShelf: vi.fn(), saveShelf: vi.fn() }));
 vi.mock("./api", async (importOriginal) => ({ ...(await importOriginal<typeof import("./api")>()), ...api }));
 
 import { LibraryPanel } from "./LibraryPanel";
+import { resetShelfForTests } from "./materialShelf";
 
 function token(text: string, origins = ["source"]): RecipeToken {
   return { id: `t-${text}`, text, sep: "", origins };
@@ -85,6 +86,9 @@ const origin = materialOrigin(miku);
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  resetShelfForTests();
+  api.getShelf.mockResolvedValue({ materials: [], facets: {} });
+  api.saveShelf.mockImplementation((shelf) => Promise.resolve(shelf));
 });
 
 afterEach(() => cleanup());
@@ -125,7 +129,7 @@ describe("material blocks", () => {
 });
 
 describe("LibraryPanel", () => {
-  it("picks from the dropdown into a persistent block, then adds the filtered tags", async () => {
+  it("picks onto the global shelf, filters there, and records the block in the recipe only when used", async () => {
     api.searchMaterials.mockResolvedValue({
       nodes: [{ role: "character", name: "miku", ref: "F:/角色/miku", relative: "vocaloid/miku", has_preview: false, copies: 2, copy_paths: ["a", "b"], facets: {} }],
       total: 1,
@@ -134,25 +138,43 @@ describe("LibraryPanel", () => {
     });
     api.getLibraryNode.mockResolvedValue({ ref: "F:/角色/miku", role: "character", name: "miku", has_preview: false, sections: [{ name: "hair", tags: ["aqua hair", "twintails"] }] });
     const onChange = vi.fn();
-    const view = render(<LibraryPanel draft={recipe()} onChange={onChange} translateOn={false} />);
+    render(<LibraryPanel draft={recipe()} onChange={onChange} translateOn={false} />);
+    await waitFor(() => expect(api.getShelf).toHaveBeenCalled());
 
     fireEvent.focus(screen.getByRole("combobox"));
     const option = await screen.findByRole("option", { name: /miku/ });
     expect(screen.getByText(/合并 3 份/)).toBeTruthy();
     fireEvent.click(option);
     expect(screen.queryByRole("listbox")).toBeNull();
-    const picked = onChange.mock.calls[0][0] as Recipe;
-    expect(picked.materials).toEqual([{ role: "character", ref: "F:/角色/miku", name: "miku", excluded: [] }]);
+    const miku = { role: "character", ref: "F:/角色/miku", name: "miku", excluded: [] };
+    await waitFor(() => expect(api.saveShelf).toHaveBeenLastCalledWith({ materials: [miku], facets: {} }));
 
-    view.rerender(<LibraryPanel draft={picked} onChange={onChange} translateOn={false} />);
+    // 还没用进配方：筛 tag 只存到素材架，配方不变。
     fireEvent.click(await screen.findByRole("button", { name: /twintails/ }));
-    const filtered = onChange.mock.calls[1][0] as Recipe;
-    expect(filtered.materials![0].excluded).toEqual(["twintails"]);
+    await waitFor(() =>
+      expect(api.saveShelf).toHaveBeenLastCalledWith({ materials: [{ ...miku, excluded: ["twintails"] }], facets: {} }),
+    );
+    expect(onChange).not.toHaveBeenCalled();
 
-    view.rerender(<LibraryPanel draft={filtered} onChange={onChange} translateOn={false} />);
     fireEvent.click(screen.getByRole("button", { name: /加入主体/ }));
-    const added = onChange.mock.calls[2][0] as Recipe;
+    const added = onChange.mock.calls[0][0] as Recipe;
+    expect(added.materials).toEqual([{ ...miku, excluded: ["twintails"] }]);
     expect(added.subject.map((item) => item.text)).toEqual(["1girl", "smile", "aqua hair"]);
+  });
+
+  it("keeps the shelf and the action filters when another recipe opens", async () => {
+    api.getShelf.mockResolvedValue({
+      materials: [{ role: "action", ref: "F:/动作/sit", name: "sit", excluded: ["chair"] }],
+      facets: { action: { cast: "solo" } },
+    });
+    api.searchMaterials.mockResolvedValue({ nodes: [], total: 0, has_more: false, facet_options: {} });
+    api.getLibraryNode.mockResolvedValue({ ref: "F:/动作/sit", role: "action", name: "sit", has_preview: false, sections: [{ name: "pose", tags: ["sitting", "chair"] }] });
+    render(<LibraryPanel draft={{ ...recipe(), id: "other" }} onChange={vi.fn()} translateOn={false} />);
+    fireEvent.click(screen.getByRole("tab", { name: /动作/ }));
+    expect(await screen.findByText("sit")).toBeTruthy();
+    expect((await screen.findByRole("button", { name: /chair/ })).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => expect(api.searchMaterials).toHaveBeenLastCalledWith("action", "", { cast: "solo" }, { limit: 30 }));
+    expect((screen.getByLabelText("按人数筛选") as HTMLSelectElement).value).toBe("solo");
   });
 
   it("filters actions by facet", async () => {

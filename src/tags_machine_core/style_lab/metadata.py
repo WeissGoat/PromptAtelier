@@ -7,11 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from tags_machine_core.clients.novelai import normalize_novelai_model
+from tags_machine_core.clients.novelai import model_from_source_label, normalize_novelai_model, source_label_hash
 from tags_machine_core.verification.image_params import read_image_parameters, read_png_dimensions
 
 
 IMAGE_SUFFIXES = {".png", ".webp", ".jpg", ".jpeg"}
+# 解析规则变了就加一：旧记录即使文件没变也会重新读取。2：按 Source 的模型哈希认 Curated / Full。
+RECORD_VERSION = 2
 _POST_DIR_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d+)_?(.*)$")
 
 
@@ -61,6 +63,7 @@ class ImageRecord(BaseModel):
     noise_schedule: str | None = None
     vibe: VibeInfo = Field(default_factory=VibeInfo)
     flags: list[str] = Field(default_factory=list)
+    record_version: int = 0
 
 
 def image_id_for(rel_path: str) -> str:
@@ -107,6 +110,7 @@ def build_image_record(path: Path, *, base: Path) -> ImageRecord:
         size_bytes=stat.st_size,
         mtime_ns=stat.st_mtime_ns,
         post=parse_post_dir(path.parent.name) if path.parent != base else None,
+        record_version=RECORD_VERSION,
     )
     _fill_dimensions(record, path, params)
     if not params:
@@ -116,8 +120,10 @@ def build_image_record(path: Path, *, base: Path) -> ImageRecord:
     record.has_metadata = True
     source_label = png_text.get("Source")
     record.source_label = str(source_label) if source_label else None
+    # Source 是 NovelAI 自己写的；Comment 里的 model 可能是第三方客户端另记的，排在后面。
+    hashed_model = model_from_source_label(record.source_label)
     raw_model = params.get("model") or source_label
-    record.model = normalize_novelai_model(str(raw_model)) if raw_model else None
+    record.model = hashed_model or (normalize_novelai_model(str(raw_model)) if raw_model else None)
     record.request_type = _optional_str(params.get("request_type"))
     record.prompt, record.char_captions = _captions(params, "v4_prompt", params.get("prompt"))
     record.negative_prompt, negative_chars = _captions(
@@ -136,6 +142,8 @@ def build_image_record(path: Path, *, base: Path) -> ImageRecord:
     record.noise_schedule = _optional_str(params.get("noise_schedule"))
     record.vibe = _vibe(params)
     record.flags.extend(_flags(params, record))
+    if not hashed_model and not params.get("model") and source_label_hash(record.source_label):
+        record.flags.append("model_unverified")
     return record
 
 

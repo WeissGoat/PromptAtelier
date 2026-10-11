@@ -20,7 +20,7 @@ export type VibeInfo = {
   information_extracted: number[];
 };
 
-export type ImageFlag = "no_metadata" | "inpaint" | "img2img" | "add_original" | "vibe_missing" | "director_ref";
+export type ImageFlag = "no_metadata" | "inpaint" | "img2img" | "add_original" | "vibe_missing" | "director_ref" | "model_unverified";
 
 export type ImageRecord = {
   id: string;
@@ -436,6 +436,20 @@ export type MaterialSearchResult = {
   has_more: boolean;
   facet_options: Record<string, FacetOption[]>;
 };
+
+/** 全局素材架：选过的素材块和各自的筛选、搜索的分类筛选，不跟配方走。 */
+export type MaterialShelf = {
+  materials: RecipeMaterial[];
+  facets: Partial<Record<MaterialRole, Record<string, string>>>;
+};
+
+export function getShelf(): Promise<MaterialShelf> {
+  return apiGet(`${base}/shelf`);
+}
+
+export function saveShelf(shelf: MaterialShelf): Promise<MaterialShelf> {
+  return apiPut(`${base}/shelf`, shelf);
+}
 
 /** 去重后的素材搜索：内容相同的副本目录合并；动作可以按 classify.yaml 分面筛选。 */
 export function searchMaterials(

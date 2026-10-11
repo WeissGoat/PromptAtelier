@@ -296,6 +296,8 @@ gen_json, {"model": ..., "sampler": ..., ...}
 
 `GET /workspaces/{id}/file-info?image_id=|path=` 返回绝对路径、大小、修改时间；`POST /workspaces/{id}/reveal` `{image_id | path}` 在资源管理器里打开所在文件夹并选中文件（仅 Windows，其他平台 501）。两者和 `/file` 一样只接受工作区里的原图和 runs 下的出图。打开用 `SHOpenFolderAndSelectItems`：文件名里常有逗号，`explorer /select,` 会在逗号处截断。
 - `Source` 是 "NovelAI Diffusion V5 …" 时，对照用的模型名按 V5 解析。
+- V4 起 `Source` 不写 Curated / Full，只在末尾带模型哈希，原图模型按哈希认（`clients/novelai.py` 的 `NOVELAI_SOURCE_HASH_MODELS`，2026-10-11 实测）：`0ADF9AB7` V5 Full、`DB276663` V5 Curated、`4BDE2A90` V4.5 Full、`C02D4F98` V4.5 Curated、`37442FCA` V4 Full。Source 比第三方客户端在 Comment 里另记的 `model` 优先。没登记的哈希按 Full 处理，图片标 `model_unverified`（界面显示"模型待确认"），可以在重生设置里手动选模型。
+- 图片记录带 `record_version`；解析规则变了版本加一，打开工作区时旧版本记录即使文件没变也会重新读取。
 
 ### 重复请求
 
@@ -309,7 +311,7 @@ gen_json, {"model": ..., "sampler": ..., ...}
 - 动作带 `classify.yaml` 分面（cast、domain、subtype、pose、environment、clothing、tone、flags、phase）。同一分面多选任一命中，不同分面同时满足；`facet_options` 里每个分面的计数不受它自己的选择影响。
 - 目录用 scandir 遍历，按文件修改时间只重读改过的目录；指纹和分面缓存在 `runtime/stylelab/library_index.json`。动作库七千多个目录，第一次约十几秒，之后约 2 秒；第一次搜索时后台会顺带建好动作索引。
 
-配方新增 `materials`：素材架上的素材块 `{role, ref, name, excluded}`，`excluded` 是筛掉的 tag。主体和角色提示词里的 token 仍用 `character:<ref>` / `action:<ref>` 记来源。`character.add_male_caption` 默认改为 `false`。
+配方新增 `materials`：这个配方用到的素材块 `{role, ref, name, excluded}`，`excluded` 是筛掉的 tag。素材架本身是全局的：`GET / PUT /api/style-lab/shelf`，存在 `runtime/stylelab/material_shelf.json`，内容是 `materials`（同样的素材块，按 role + ref 去重）和 `facets`（角色 / 动作各自的分类筛选）。素材块用进配方时才复制进配方的 `materials`；配方在用的块，在素材架上筛 tag 会同步增删配方里的 tag。主体和角色提示词里的 token 仍用 `character:<ref>` / `action:<ref>` 记来源。`character.add_male_caption` 默认改为 `false`。
 
 回归对照的角色提示词照搬原图的全部条目，不再按计数补男角色。
 

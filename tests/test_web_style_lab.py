@@ -120,6 +120,20 @@ class WebStyleLabTest(TestCase):
         forbidden = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file", params={"path": str(outside)})
         self.assertEqual(forbidden.status_code, 403)
 
+    def test_material_shelf_round_trips_and_dedups(self):
+        self.assertEqual(self.client.get("/api/style-lab/shelf").json()["materials"], [])
+        miku = {"role": "character", "ref": "chars/miku", "name": "Miku", "excluded": ["twintails"]}
+        saved = self.client.put(
+            "/api/style-lab/shelf",
+            json={"materials": [miku, {**miku, "excluded": []}], "facets": {"action": {"cast": "solo"}}},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        shelf = self.client.get("/api/style-lab/shelf").json()
+        self.assertEqual(shelf["materials"], [{**miku, "excluded": []}])
+        self.assertEqual(shelf["facets"], {"action": {"cast": "solo"}})
+        bad = self.client.put("/api/style-lab/shelf", json={"materials": [{"role": "pose", "ref": "x", "name": "x"}]})
+        self.assertEqual(bad.status_code, 400)
+
     def test_reveal_opens_workspace_files_only(self):
         data = self._open()
         workspace_id = data["workspace"]["id"]

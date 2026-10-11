@@ -22,7 +22,9 @@ from tags_machine_core.style_lab import (
 )
 
 
-def write_nai_png(path: Path, *, color="white", size=(64, 96), **params) -> Path:
+def write_nai_png(
+    path: Path, *, color="white", size=(64, 96), source="NovelAI Diffusion V4.5 4BDE2A90", **params
+) -> Path:
     comment = {
         "prompt": "artist:foo, 1girl, solo, sitting",
         "uc": "lowres",
@@ -52,7 +54,7 @@ def write_nai_png(path: Path, *, color="white", size=(64, 96), **params) -> Path
     comment.update(params)
     info = PngInfo()
     info.add_text("Comment", json.dumps(comment))
-    info.add_text("Source", "NovelAI Diffusion V4.5 4BDE2A90")
+    info.add_text("Source", source)
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, color).save(path, format="PNG", pnginfo=info)
     return path
@@ -80,6 +82,21 @@ class MetadataTest(TestCase):
         self.assertEqual(record.post.post_id, "139775078")
         self.assertEqual(record.post.date, "2026-01-11")
         self.assertEqual(record.flags, [])
+
+    def test_record_tells_curated_from_full_by_source_hash(self):
+        def record(name, source, **params):
+            return build_image_record(write_nai_png(self.tmp / name, source=source, **params), base=self.tmp)
+
+        curated = record("a.png", "NovelAI Diffusion V5 DB276663")
+        self.assertEqual(curated.model, "nai-diffusion-5-curated")
+        self.assertNotIn("model_unverified", curated.flags)
+        self.assertEqual(record("b.png", "NovelAI Diffusion V4.5 C02D4F98").model, "nai-diffusion-4-5-curated")
+        # Source 比第三方客户端在 Comment 里另记的 model 可靠。
+        self.assertEqual(record("c.png", "NovelAI Diffusion V5 DB276663", model="nai-diffusion-5-full").model, "nai-diffusion-5-curated")
+
+        unknown = record("d.png", "NovelAI Diffusion V5 26E45D15")
+        self.assertEqual(unknown.model, "nai-diffusion-5-full")
+        self.assertIn("model_unverified", unknown.flags)
 
     def test_flags_vibe_missing_inpaint_and_no_metadata(self):
         vibe_missing = write_nai_png(self.tmp / "a.png", reference_strength_multiple=[0.6])
@@ -133,6 +150,16 @@ class WorkspaceStoreTest(TestCase):
 
         _, stats = self.store.scan(info)
         self.assertEqual((stats["read"], stats["reused"]), (0, 2))
+        self.assertFalse(self.store.needs_rescan(info))
+
+        # 解析规则升级后，文件没变的旧记录也要重新读。
+        index = self.store.load_index(info)
+        index.images[0].record_version = 0
+        (Path(info.data_dir) / "index.json").write_text(index.model_dump_json(by_alias=True), encoding="utf-8")
+        self.store._index_cache.pop(info.id, None)
+        self.assertTrue(self.store.needs_rescan(info))
+        _, stats = self.store.scan(info)
+        self.assertEqual((stats["read"], stats["reused"]), (1, 1))
 
         # 重开同一个文件夹得到同一个工作区。
         self.assertEqual(self.store.open_folder(author).id, info.id)
@@ -247,6 +274,8 @@ class CompareTest(TestCase):
 
         self.assertEqual(model("NovelAI Diffusion V5 0ADF9AB7"), "nai-diffusion-5-full")
         self.assertEqual(model("NovelAI Diffusion V4.5 4BDE2A90"), "nai-diffusion-4-5-full")
+        self.assertEqual(model("NovelAI Diffusion V5 DB276663"), "nai-diffusion-5-curated")
+        self.assertEqual(model("NovelAI Diffusion V4.5 C02D4F98"), "nai-diffusion-4-5-curated")
 
     def test_drift_when_params_match_but_pixels_differ(self):
         a = write_nai_png(self.tmp / "a.png", color="white")
