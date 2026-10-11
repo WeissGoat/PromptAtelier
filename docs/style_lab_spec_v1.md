@@ -296,7 +296,7 @@ gen_json, {"model": ..., "sampler": ..., ...}
 
 `GET /workspaces/{id}/file-info?image_id=|path=` 返回绝对路径、大小、修改时间；`POST /workspaces/{id}/reveal` `{image_id | path}` 在资源管理器里打开所在文件夹并选中文件（仅 Windows，其他平台 501）。两者和 `/file` 一样只接受工作区里的原图和 runs 下的出图。打开用 `SHOpenFolderAndSelectItems`：文件名里常有逗号，`explorer /select,` 会在逗号处截断。
 - `Source` 是 "NovelAI Diffusion V5 …" 时，对照用的模型名按 V5 解析。
-- V4 起 `Source` 不写 Curated / Full，只在末尾带模型哈希，原图模型按哈希认（`clients/novelai.py` 的 `NOVELAI_SOURCE_HASH_MODELS`，2026-10-11 实测）：`0ADF9AB7` V5 Full、`DB276663` V5 Curated、`4BDE2A90` V4.5 Full、`C02D4F98` V4.5 Curated、`37442FCA` V4 Full。Source 比第三方客户端在 Comment 里另记的 `model` 优先。没登记的哈希按 Full 处理，图片标 `model_unverified`（界面显示"模型待确认"），可以在重生设置里手动选模型。
+- V4 起 `Source` 不写 Curated / Full，只写代际加模型哈希（如 `NovelAI Diffusion V5 DB276663`）。原图模型照 novelai.net 前端的规则认（`clients/novelai.py` 的 `NOVELAI_SOURCE_HASH_MODELS`，2026-10-11 从官网 `_app` 包核对）：按代际查哈希表，表里含各模型的历代哈希，例如 V5 Full `657484A5` / `0ADF9AB7`、V5 Curated `DB276663`、V5 Full Medium `93F4BD30` / `70AB5786`。哈希没登记时和官网一样兜底：V5 当 Curated，V4.5 当 V4.5 Curated，其余 V4 当 V4 Curated Preview；图片同时标 `model_unverified`（界面显示"模型待确认"），可以在重生设置里手动选模型。Source 比第三方客户端在 Comment 里另记的 `model` 优先。V4 Curated 的模型 id 是 `nai-diffusion-4-curated-preview`。
 - 图片记录带 `record_version`；解析规则变了版本加一，打开工作区时旧版本记录即使文件没变也会重新读取。
 
 ### 重复请求

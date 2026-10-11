@@ -111,10 +111,11 @@ class FixedIntervalRetry(Retry):
 VALID_NOVELAI_MODELS = {
     "nai-diffusion-5-full",
     "nai-diffusion-5-curated",
+    "nai-diffusion-5-full-medium",
     "nai-diffusion-4-5-full",
     "nai-diffusion-4-5-curated",
     "nai-diffusion-4-full",
-    "nai-diffusion-4-curated",
+    "nai-diffusion-4-curated-preview",
     "nai-diffusion-3",
     "nai-diffusion-furry-3",
     "safe-diffusion",
@@ -127,12 +128,44 @@ DEFAULT_NOVELAI_MODEL = "nai-diffusion-4-5-full"
 
 # PNG 的 Source 形如 "NovelAI Diffusion V5 DB276663"：V4 起不再写 Curated / Full，只能靠末尾的模型哈希区分。
 # 这些哈希是实测得来的（2026-10-11 用对应模型出图后读回 Source）。
+# 照抄 novelai.net 前端按 Source 认模型的表（_app 包里的 Source -> model 函数，2026-10-11 核对）。
+# V4 起 Source 只写 "NovelAI Diffusion V5 DB276663" 这样的代际 + 模型哈希，不写 Curated / Full。
 NOVELAI_SOURCE_HASH_MODELS = {
-    "0ADF9AB7": "nai-diffusion-5-full",
-    "DB276663": "nai-diffusion-5-curated",
-    "4BDE2A90": "nai-diffusion-4-5-full",
-    "C02D4F98": "nai-diffusion-4-5-curated",
-    "37442FCA": "nai-diffusion-4-full",
+    "V5": {
+        "657484A5": "nai-diffusion-5-full",
+        "0ADF9AB7": "nai-diffusion-5-full",
+        "DB276663": "nai-diffusion-5-curated",
+        "93F4BD30": "nai-diffusion-5-full-medium",
+        "70AB5786": "nai-diffusion-5-full-medium",
+    },
+    "V4.5": {
+        "4BDE2A90": "nai-diffusion-4-5-full",
+        "1229B44F": "nai-diffusion-4-5-full",
+        "B9F340FD": "nai-diffusion-4-5-full",
+        "F3D95188": "nai-diffusion-4-5-full",
+        "C02D4F98": "nai-diffusion-4-5-curated",
+        "5AB81C7C": "nai-diffusion-4-5-curated",
+        "B5A2A797": "nai-diffusion-4-5-curated",
+    },
+    "V4": {
+        "37442FCA": "nai-diffusion-4-full",
+        "4F49EC75": "nai-diffusion-4-full",
+        "CA4B7203": "nai-diffusion-4-full",
+        "79F47848": "nai-diffusion-4-full",
+        "F6302A9D": "nai-diffusion-4-full",
+        "7ABFFA2A": "nai-diffusion-4-curated-preview",
+        "C1CCBA86": "nai-diffusion-4-curated-preview",
+        "770A9E12": "nai-diffusion-4-curated-preview",
+        # 官网把写成 V4 的这两个哈希也认作 V4.5 Curated。
+        "5AB81C7C": "nai-diffusion-4-5-curated",
+        "B5A2A797": "nai-diffusion-4-5-curated",
+    },
+}
+# 哈希没登记时官网的兜底：V5 当 Curated，V4.5 当 V4.5 Curated，其余 V4 当 V4 Curated Preview。
+_SOURCE_GENERATION_FALLBACK = {
+    "V5": "nai-diffusion-5-curated",
+    "V4.5": "nai-diffusion-4-5-curated",
+    "V4": "nai-diffusion-4-curated-preview",
 }
 _SOURCE_HASH_RE = re.compile(r"\b([0-9A-Fa-f]{8})\s*$")
 
@@ -142,9 +175,26 @@ def source_label_hash(label: str | None) -> str | None:
     return match.group(1).upper() if match else None
 
 
-def model_from_source_label(label: str | None) -> str | None:
-    """按 Source 末尾的模型哈希认出模型；哈希没登记时返回 None。"""
-    return NOVELAI_SOURCE_HASH_MODELS.get(source_label_hash(label) or "")
+def _source_generation(label: str) -> str | None:
+    if "NovelAI Diffusion V5" in label:
+        return "V5"
+    if "NovelAI Diffusion V4.5" in label or "DiffusionModelMetaName.NAIv4next" in label:
+        return "V4.5"
+    if "NovelAI Diffusion V4" in label:
+        return "V4"
+    return None
+
+
+def model_from_source_label(label: str | None, *, fallback: bool = True) -> str | None:
+    """按 Source 认出模型，规则同 novelai.net。哈希没登记时按官网兜底；fallback=False 时返回 None。"""
+    text = str(label or "").strip()
+    generation = _source_generation(text)
+    if not generation:
+        return None
+    model = NOVELAI_SOURCE_HASH_MODELS[generation].get(source_label_hash(text) or "")
+    if model or not fallback:
+        return model
+    return _SOURCE_GENERATION_FALLBACK[generation]
 
 
 def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELAI_MODEL) -> str:
@@ -173,6 +223,8 @@ def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELA
         return "nai-diffusion-furry-3"
 
     if "v5" in lower or ("diffusion" in lower and "5" in lower and "4" not in lower):
+        if "medium" in lower:
+            return "nai-diffusion-5-full-medium"
         if "curated" in lower:
             return "nai-diffusion-5-curated"
         return "nai-diffusion-5-full"
@@ -184,7 +236,7 @@ def normalize_novelai_model(raw_model: str | None, default: str = DEFAULT_NOVELA
 
     if "v4" in lower or "diffusion 4" in lower or "diffusion-4" in lower or "4-full" in lower or "4-curated" in lower:
         if "curated" in lower:
-            return "nai-diffusion-4-curated"
+            return "nai-diffusion-4-curated-preview"
         return "nai-diffusion-4-full"
 
     if "v3" in lower or "diffusion 3" in lower or "diffusion-3" in lower:

@@ -94,9 +94,17 @@ class MetadataTest(TestCase):
         # Source 比第三方客户端在 Comment 里另记的 model 可靠。
         self.assertEqual(record("c.png", "NovelAI Diffusion V5 DB276663", model="nai-diffusion-5-full").model, "nai-diffusion-5-curated")
 
+        # 旧版本的哈希、Full Medium 也按官网的表认。
+        self.assertEqual(record("e.png", "NovelAI Diffusion V5 657484A5").model, "nai-diffusion-5-full")
+        self.assertEqual(record("f.png", "NovelAI Diffusion V5 93F4BD30").model, "nai-diffusion-5-full-medium")
+        self.assertEqual(record("g.png", "NovelAI Diffusion V4 7ABFFA2A").model, "nai-diffusion-4-curated-preview")
+
+        # 没登记的哈希按官网兜底：V5 当 Curated，并提醒核对。
         unknown = record("d.png", "NovelAI Diffusion V5 26E45D15")
-        self.assertEqual(unknown.model, "nai-diffusion-5-full")
+        self.assertEqual(unknown.model, "nai-diffusion-5-curated")
         self.assertIn("model_unverified", unknown.flags)
+        self.assertEqual(record("h.png", "NovelAI Diffusion V4.5 00000000").model, "nai-diffusion-4-5-curated")
+        self.assertEqual(record("i.png", "NovelAI Diffusion V4 00000000").model, "nai-diffusion-4-curated-preview")
 
     def test_flags_vibe_missing_inpaint_and_no_metadata(self):
         vibe_missing = write_nai_png(self.tmp / "a.png", reference_strength_multiple=[0.6])
@@ -276,6 +284,8 @@ class CompareTest(TestCase):
         self.assertEqual(model("NovelAI Diffusion V4.5 4BDE2A90"), "nai-diffusion-4-5-full")
         self.assertEqual(model("NovelAI Diffusion V5 DB276663"), "nai-diffusion-5-curated")
         self.assertEqual(model("NovelAI Diffusion V4.5 C02D4F98"), "nai-diffusion-4-5-curated")
+        self.assertEqual(model("NovelAI Diffusion V4 5AB81C7C"), "nai-diffusion-4-5-curated")
+        self.assertEqual(model("NovelAI Diffusion V5 26E45D15"), "nai-diffusion-5-curated")
 
     def test_drift_when_params_match_but_pixels_differ(self):
         a = write_nai_png(self.tmp / "a.png", color="white")

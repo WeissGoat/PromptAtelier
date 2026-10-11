@@ -7,13 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from tags_machine_core.clients.novelai import model_from_source_label, normalize_novelai_model, source_label_hash
+from tags_machine_core.clients.novelai import model_from_source_label, normalize_novelai_model
 from tags_machine_core.verification.image_params import read_image_parameters, read_png_dimensions
 
 
 IMAGE_SUFFIXES = {".png", ".webp", ".jpg", ".jpeg"}
 # 解析规则变了就加一：旧记录即使文件没变也会重新读取。2：按 Source 的模型哈希认 Curated / Full。
-RECORD_VERSION = 2
+RECORD_VERSION = 3
 _POST_DIR_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d+)_?(.*)$")
 
 
@@ -142,7 +142,8 @@ def build_image_record(path: Path, *, base: Path) -> ImageRecord:
     record.noise_schedule = _optional_str(params.get("noise_schedule"))
     record.vibe = _vibe(params)
     record.flags.extend(_flags(params, record))
-    if not hashed_model and not params.get("model") and source_label_hash(record.source_label):
+    # 哈希没登记：模型是按官网兜底规则猜的，提醒核对。
+    if hashed_model and not model_from_source_label(record.source_label, fallback=False):
         record.flags.append("model_unverified")
     return record
 

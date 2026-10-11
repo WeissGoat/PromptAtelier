@@ -17,9 +17,10 @@ export const MODELS = [
   "nai-diffusion-4-5-full",
   "nai-diffusion-4-5-curated",
   "nai-diffusion-4-full",
-  "nai-diffusion-4-curated",
+  "nai-diffusion-4-curated-preview",
   "nai-diffusion-5-full",
   "nai-diffusion-5-curated",
+  "nai-diffusion-5-full-medium",
   "nai-diffusion-3",
 ];
 export const SAMPLERS = ["k_euler", "k_euler_ancestral", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_2m_sde", "k_dpmpp_sde"];

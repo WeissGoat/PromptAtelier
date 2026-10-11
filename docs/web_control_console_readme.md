@@ -242,7 +242,7 @@ Artist 1 × Character 1 × Action 1 × Behavior 2 × Groups 1 = 2
 
 用原图的完整参数（包括 v4 角色提示词，vibe 从原图补回）直接出图，不经过 Composer，用来确认本地 NovelAI 链路正常。
 
-- 模型按原图 `Source` 末尾的模型哈希识别（V4 起 Source 不写 Curated / Full）。已登记 V5、V4.5 的 Curated / Full 和 V4 Full；没登记的哈希按 Full 处理，图片上标 `模型待确认`，不对就在 `覆盖参数` 里选模型。
+- 模型按原图 `Source` 末尾的模型哈希识别（V4 起 Source 不写 Curated / Full）。哈希表和 NovelAI 官网一致（含 V5 Full Medium、V4 Curated Preview 和各模型的旧版本）；没登记的哈希按官网的规则当 Curated 处理，图片上标 `模型待确认`，不对就在 `覆盖参数` 里选模型。
 - 张数 1–8，逐张串行提交。种子可选原图、随机或指定，多张时依次 +1；尺寸可选原图或自定义；`覆盖参数` 可单独改模型、采样器、调度、步数、CFG、CFG rescale。
 - 每张出完自动和原图对照：参数差异（本次主动改动的参数默认隐藏）、提示词按 tag 显示增删、灰度相似度和 dHash 距离。结论分三档：`链路正常`、`参数一致，画面有差异`、`参数不一致`。
 - 对照支持并排和滑块两种看法。结果保存在 `<文件夹>/.stylelab/runs/<run_id>/`，切换图片后可以回看历史记录。
