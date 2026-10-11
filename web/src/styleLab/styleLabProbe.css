@@ -1,0 +1,180 @@
+/* ---- 画风探针：替换角色、消融测试 ---- */
+
+.sl-zone.zone-probe {
+  gap: 10px;
+}
+
+.sl-probe-picks,
+.sl-probe-tokens {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sl-probe-pick {
+  align-items: center;
+  border: 1px solid var(--sl-border);
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  padding: 2px 10px 2px 6px;
+}
+
+.sl-probe-pick.on {
+  background: var(--sl-accent-bg);
+  border-color: var(--sl-accent-border);
+}
+
+.sl-probe-token {
+  align-items: baseline;
+  background: #f3f4f7;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-probe-token .sl-muted {
+  font-size: 10px;
+}
+
+.sl-probe-token.on {
+  background: var(--sl-danger-bg);
+  border-color: var(--sl-danger);
+  color: var(--sl-danger);
+  text-decoration: line-through;
+}
+
+.sl-probe-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.sl-probe-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+}
+
+.sl-probe-cell img {
+  border-radius: 4px;
+  display: block;
+  width: 100%;
+}
+
+.sl-probe-cell.baseline img {
+  outline: 2px solid var(--sl-accent-border);
+}
+
+.sl-probe-cell figcaption {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 2px;
+}
+
+.sl-probe-cell figcaption strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-probe-delta {
+  font-size: 11px;
+}
+
+.sl-probe-delta.up {
+  color: var(--sl-ok);
+}
+
+.sl-probe-delta.down {
+  color: var(--sl-danger);
+}
+
+/* ---- 配方版本 ---- */
+
+.sl-history h3 {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.sl-history-row {
+  align-items: baseline;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 2px 8px;
+  padding: 3px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.sl-history-row:hover {
+  background: #eef0f4;
+}
+
+.sl-history-version {
+  font-weight: 600;
+}
+
+.sl-history-marks {
+  color: var(--sl-muted);
+  flex-basis: 100%;
+  font-size: 11px;
+}
+
+.sl-history-dialog {
+  width: min(760px, 100%);
+}
+
+.sl-history-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sl-history-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sl-history-label {
+  color: var(--sl-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sl-history-fields {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.sl-history-fields th,
+.sl-history-fields td {
+  border-bottom: 1px solid var(--sl-border);
+  overflow-wrap: anywhere;
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}

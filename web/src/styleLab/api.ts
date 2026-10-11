@@ -583,7 +583,7 @@ export type ArtistTestRun = Omit<StyleLabRun, "kind" | "settings" | "items"> & {
   items: ArtistTestItem[];
 };
 
-export type AnyRun = StyleLabRun | ArtistTestRun;
+export type AnyRun = StyleLabRun | ArtistTestRun | ProbeRun;
 
 export function isArtistTestRun(run: AnyRun): run is ArtistTestRun {
   return run.kind === "regression" || run.kind === "matrix";
@@ -621,4 +621,50 @@ export function startArtistTest(
   force = false,
 ): Promise<{ run: ArtistTestRun }> {
   return apiPost(`${recipeUrl(workspaceId, recipeId)}/artist-test`, { settings, force });
+}
+
+// ---- 替换角色、消融测试 ----
+
+export type SwapCharacter = { ref: string; name: string; tags: string[] };
+export type AblationUnit = { label: string; token_ids: string[] };
+
+export type ProbeSettings = {
+  kind: "swap" | "ablation";
+  characters: SwapCharacter[];
+  replace_clothing: boolean;
+  caption_index: number | null;
+  units: AblationUnit[];
+  include_baseline: boolean;
+  seed_mode: SeedMode;
+  seed: number | null;
+};
+
+export type ProbeItem = RunItem & {
+  label: string;
+  role: "baseline" | "variant";
+  character?: string;
+  target?: string;
+  removed?: string[];
+  added?: string[];
+  token_ids?: string[];
+  /** 和同一次的基准图（完整配方、同一个种子）比。 */
+  baseline_compare?: { similarity: number | null; dhash_distance: number | null; error?: string };
+};
+
+export type ProbeRun = Omit<StyleLabRun, "kind" | "settings" | "items"> & {
+  kind: "swap" | "ablation";
+  settings: ProbeSettings;
+  items: ProbeItem[];
+};
+
+export function isProbeRun(run: AnyRun): run is ProbeRun {
+  return run.kind === "swap" || run.kind === "ablation";
+}
+
+export function startProbe(workspaceId: string, recipeId: string, settings: ProbeSettings, force = false): Promise<{ run: ProbeRun }> {
+  return apiPost(`${recipeUrl(workspaceId, recipeId)}/probe`, { settings, force });
+}
+
+export function getRecipeVersion(workspaceId: string, recipeId: string, version: number): Promise<{ recipe: Recipe }> {
+  return apiGet(`${recipeUrl(workspaceId, recipeId)}/versions/${version}`);
 }

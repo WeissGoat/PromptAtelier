@@ -13,7 +13,7 @@ Style Lab 是 PromptAtelier 里的画风复刻工作台，用来替代 `artist-s
 | P1 | 工作区、图片索引、元数据面板、原参重生与对照、出图设置、LLM 客户端与缓存、翻译接口 |
 | P2 | 无损分词器、自动分组、配方编辑器（划分、锁定、来源记录、角色提示词区）、素材卡片、翻译词典 |
 | P3 | artist 导出器、回归对照、泛化矩阵（显式角色提示词已在 P2 随渲染器完成） |
-| P4 | 替换角色、消融测试、配方版本历史、视觉差异诊断 |
+| P4 | 替换角色、消融测试、配方版本历史（已完成）；视觉差异诊断（未做） |
 
 本文档详细描述 P1；P2 以后的部分只记录已经确定的约束。
 
@@ -285,6 +285,7 @@ gen_json, {"model": ..., "sampler": ..., ...}
 | GET | `/api/style-lab/workspaces/{id}/recipes/{rid}/exports` | 建议的作者 id、画风目录、以前的导出、可对比的已有画风 |
 | POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/export/preview` | `{"name", "author"?, "compare_ref"?, "include_source"?}` → 目标目录、tags.txt、读回校验、对比 |
 | POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/export` | 同上，另带 `expected_folder`；目录变了返回 409 |
+| POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/probe` | P4 画风探针：`{"settings": {"kind": "swap" \| "ablation", "characters"?, "replace_clothing"?, "caption_index"?, "units"?, "include_baseline"?, "seed_mode", "seed"?}, "force"?}` |
 | POST | `/api/style-lab/workspaces/{id}/recipes/{rid}/artist-test` | `{"settings": {"kind", "artist", "image_ids"?, "characters"?, "actions"?, "seed_mode", "seed"?, "width"?, "height"?}}` |
 | GET | `/api/style-lab/workspaces/{id}/runs?recipe_id=` | 某个配方的全部 run（配方出图、回归对照、泛化矩阵） |
 
@@ -323,6 +324,28 @@ gen_json, {"model": ..., "sampler": ..., ...}
 
 选中的图和对比对象比：对比对象是其余全部图时，"多出"是超过一半的其他图没有的，"缺少"是超过一半的其他图有的，恰好一半的两边都不算；权重和参数和多数比。对比对象是某一张图时就是两边各自独有的 tag 和不同的权重、参数。
 
-## 后续（P4）
+## P4：画风探针与版本历史
 
-- 替换角色、消融测试、配方版本 diff、视觉差异诊断。
+### 画风探针
+
+`style_lab/probe.py`。在保存好的配方上生成几个变体，用同一个种子出图（`seed_mode` 同出图设置，默认原图种子），run 的 `kind` 是 `swap` 或 `ablation`，每张图带 `label`、`role`（`baseline` / `variant`）和改了什么。
+
+- 基准图：完整配方。`ablation` 总是带；`swap` 由 `include_baseline` 决定。变体出完后和同一次的基准图算 `baseline_compare`（`similarity`、`dhash_distance`），和原图的对照照旧写在 `compare`。
+- 替换角色：`characters` 是 `[{ref, name, tags}]`（最多 4 个），tags 由前端按素材块的筛选给出。
+  - 启用了角色提示词时默认换进 #1（`caption_index` 可指定）。这一条里去掉角色卡加进来的 token 和类别为 character、appearance（`replace_clothing` 时加 clothing）的 token，性别词保留，新角色插在第一个被去掉的位置；没有性别词时补 `girl`。主体里只去掉角色名和角色卡的 token。
+  - 没启用时换进主体：去掉同样的 token，新角色插在原来的位置；没有可去的就放在开头的人数 tag 后面。
+  - 每张记录 `target`、`removed`、`added`。
+- 消融：`units` 是 `[{label, token_ids}]`（最多 12 组），token 必须在画风前缀或后缀里，否则 400（配方改过了）。每组去掉后出一张，记录 `token_ids`、`removed`。
+- 查重同其他出图：同一配方上一次同类探针的请求完全相同时 409。
+
+### 版本历史
+
+保存时旧版本写进 `recipes/<id>.history/v<N>.json`（P2 起就有）。前端：
+
+- 左栏列出版本，标上每个版本出过的图（run 里的 `recipe.version`）和导出（导出记录的 `recipe_version`）。
+- 版本对比按区域列出 token 的增删（按文本计数，不看来源和分隔符；只有顺序或分隔符变了时列在设置里），以及模型、参数、角色提示词开关、素材、备注等设置的变化。
+- 恢复：旧版本的内容换上当前的 id、版本号和时间放进编辑区，保存后成为新版本。
+
+### 还没做
+
+- 视觉差异诊断。

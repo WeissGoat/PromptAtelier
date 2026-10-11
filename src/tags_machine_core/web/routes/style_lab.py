@@ -16,6 +16,7 @@ from tags_machine_core.llm import LLMError, translate_tags
 from tags_machine_core.llm.google_translate import google_translate_tags
 from tags_machine_core.style_lab import RegenSettings, StyleLabService, WorkspaceInfo, WorkspaceStore
 from tags_machine_core.style_lab.artist_test import ArtistTestSettings
+from tags_machine_core.style_lab.probe import ProbeSettings
 from tags_machine_core.style_lab.export import ExportConflictError, ExportError, ExportRequest
 from tags_machine_core.style_lab.library import LibraryIndex, parse_facet_params
 from tags_machine_core.style_lab.recipe import Recipe, RecipeConflictError
@@ -658,6 +659,24 @@ def artist_test(workspace_id: str, recipe_id: str, data: dict[str, Any], request
         raise _duplicate_error(exc) from exc
     except ValueError as exc:
         raise ApiError(code="artist_test_failed", message=str(exc), status_code=400) from exc
+    return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": run}
+
+
+@router.post("/workspaces/{workspace_id}/recipes/{recipe_id}/probe")
+def recipe_probe(workspace_id: str, recipe_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    """替换角色、消融测试：用保存好的配方的几个变体、同一个种子出图。"""
+    info = _workspace(request, workspace_id)
+    _get_recipe(request, info, recipe_id)
+    try:
+        settings = ProbeSettings.model_validate(data.get("settings") or {})
+    except ValidationError as exc:
+        raise ApiError(code="invalid_probe", message=str(exc), status_code=400) from exc
+    try:
+        run = _service(request).start_probe(info, recipe_id, settings, force=bool(data.get("force")))
+    except DuplicateRequestError as exc:
+        raise _duplicate_error(exc) from exc
+    except ValueError as exc:
+        raise ApiError(code="probe_failed", message=str(exc), status_code=400) from exc
     return {"schema": "tags-machine-core.web.style-lab-run/v1", "run": run}
 
 

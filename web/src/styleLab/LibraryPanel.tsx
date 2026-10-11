@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage, nodePreviewUrl } from "../api/client";
 import type { LibraryNode, MaterialRole, Recipe, RecipeMaterial } from "./api";
-import { getLibraryNode } from "./api";
+import { loadNode } from "./libraryNodes";
 import { updateShelf, useMaterialShelf } from "./materialShelf";
 import { MaterialSearch } from "./MaterialSearch";
 import {
@@ -48,20 +48,6 @@ function putOnShelf(material: RecipeMaterial) {
 function takeOffShelf(material: RecipeMaterial) {
   updateShelf((shelf) => ({ ...shelf, materials: shelf.materials.filter((item) => !sameMaterial(item, material)) }));
 }
-const nodeCache = new Map<string, Promise<LibraryNode>>();
-
-function loadNode(ref: string, role: MaterialRole): Promise<LibraryNode> {
-  const key = `${role}:${ref}`;
-  if (!nodeCache.has(key)) {
-    const promise = getLibraryNode(ref, role).catch((error) => {
-      nodeCache.delete(key);
-      throw error;
-    });
-    nodeCache.set(key, promise);
-  }
-  return nodeCache.get(key)!;
-}
-
 export function originName(origin: string): string {
   const ref = origin.slice(origin.indexOf(":") + 1);
   return ref.split(/[\\/]/).pop() ?? ref;

@@ -25,10 +25,11 @@ from .artist_test import (
     subject_norms,
 )
 from .classify import classify_tags
-from .compare import compare_with_source
+from .compare import compare_with_source, image_similarity
 from .export import ArtistExporter, ExportError, ExportLog, ExportRequest, suggest_author
 from .grouping import build_groups, workspace_tags
 from .metadata import ImageRecord
+from .probe import ProbeSettings, probe_seed, probe_variants
 from .recipe import Recipe, RecipeStore, artist_node, character_prompts_param, recipe_from_image, tokens_text
 from .regenerate import RegenSettings, build_regen_request, expected_diff_keys, plan_seeds
 from .workspace import RUN_SCHEMA, WorkspaceInfo, WorkspaceStore
@@ -39,6 +40,7 @@ logger = get_logger(__name__)
 REGENERATE_JOB = "style_lab_regenerate"
 RECIPE_JOB = "style_lab_recipe"
 ARTIST_TEST_JOB = "style_lab_artist_test"
+PROBE_JOB = "style_lab_probe"
 ANALYSIS_JOB = "style_lab_analysis"
 _ANALYSIS_CHUNK = 160
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
@@ -194,6 +196,29 @@ class StyleLabService:
             force=force,
         )
 
+    def start_probe(
+        self, info: WorkspaceInfo, recipe_id: str, settings: ProbeSettings, *, force: bool = False
+    ) -> dict[str, Any]:
+        """替换角色 / 消融测试：配方的几个变体用同一个种子出图，和完整配方（基准图）比。"""
+        recipe = self.recipes(info).get(recipe_id)
+        record = self._recipe_source(info, recipe)
+        categories = self._cached_categories(self.store.load_index(info).images) if settings.kind == "swap" else {}
+        variants = probe_variants(recipe, settings, categories)
+        seed = probe_seed(settings, record.seed if record else None)
+        requests = [self.recipe_render_request(info, variant, seed=seed) for variant, _ in variants]
+        return self._start_run(
+            info,
+            record,
+            kind=settings.kind,
+            settings=settings,
+            seeds=[seed] * len(variants),
+            requests=requests,
+            expected=[],
+            extra={"recipe": {"id": recipe.id, "version": recipe.version, "name": recipe.name}},
+            item_meta=[meta for _, meta in variants],
+            force=force,
+        )
+
     def _recipe_source(self, info: WorkspaceInfo, recipe: Recipe) -> ImageRecord | None:
         if not recipe.source_image_id:
             return None
@@ -335,7 +360,7 @@ class StyleLabService:
         record: ImageRecord | None,
         *,
         kind: str,
-        settings: RegenSettings | ArtistTestSettings,
+        settings: RegenSettings | ArtistTestSettings | ProbeSettings,
         seeds: list[int],
         requests: list[dict[str, Any]],
         expected: list[str],
@@ -385,7 +410,7 @@ class StyleLabService:
         record: ImageRecord | None,
         *,
         kind: str,
-        settings: RegenSettings | ArtistTestSettings,
+        settings: RegenSettings | ArtistTestSettings | ProbeSettings,
         seeds: list[int],
         requests: list[dict[str, Any]],
         expected: list[str],
@@ -554,6 +579,16 @@ class StyleLabService:
                     if run["kind"] != "regenerate":
                         # 配方出图和原图本来就是不同提示词，只看相似度和提示词差异，不下“链路”结论。
                         item["compare"]["verdict"] = "reference"
+                # 探针的变体和同一次的基准图（完整配方、同一个种子）比。
+                baseline = next(
+                    (entry for entry in run["items"] if entry.get("role") == "baseline" and entry.get("image_path")),
+                    None,
+                )
+                if baseline is not None and baseline is not item:
+                    try:
+                        item["baseline_compare"] = image_similarity(Path(baseline["image_path"]), image_path)
+                    except Exception as exc:  # noqa: BLE001 - 比不了不影响出图结果
+                        item["baseline_compare"] = {"similarity": None, "dhash_distance": None, "error": str(exc)}
             except Exception as exc:  # 单张失败不影响后面的张数
                 logger.warning("Style Lab regenerate item failed: %s", exc)
                 item["status"] = "failed"
@@ -576,7 +611,7 @@ class StyleLabService:
         return copy.deepcopy(run)
 
 
-_JOB_NAMES = {"regenerate": REGENERATE_JOB, "recipe": RECIPE_JOB}
+_JOB_NAMES = {"regenerate": REGENERATE_JOB, "recipe": RECIPE_JOB, "swap": PROBE_JOB, "ablation": PROBE_JOB}
 
 _KNOWN_ERRORS = (
     ("HTTP 401", "NovelAI token 无效或已过期（HTTP 401），请更新 configs/local.yaml 里的 novelai.access_token。"),

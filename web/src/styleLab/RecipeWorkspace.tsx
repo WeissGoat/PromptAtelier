@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { errorMessage } from "../api/client";
 import type {
   ArtistExport,
+  AnyRun,
   ArtistTestRun,
   ImageRecord,
+  ProbeRun,
   Recipe,
   RecipePreview,
   RecipeSummary,
@@ -22,6 +24,7 @@ import {
   getExportDefaults,
   getRecipe,
   isArtistTestRun,
+  isProbeRun,
   listRecipeRuns,
   previewRecipe,
   saveNewRecipe,
@@ -34,7 +37,9 @@ import { ExportDialog } from "./ExportDialog";
 import { fileName, formatTime, modelLabel } from "./format";
 import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 import { LibraryPanel } from "./LibraryPanel";
-import { normalizeRecipe, postFrequency } from "./recipeModel";
+import { ProbePanel } from "./ProbePanel";
+import { RecipeHistory, type HistoryEntry } from "./RecipeHistory";
+import { moveTokens, normalizeRecipe, postFrequency } from "./recipeModel";
 import { RecipeEditor } from "./RecipeEditor";
 import { defaultRegenSettings, Segmented, SIZE_PRESETS } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
@@ -123,6 +128,8 @@ export function RecipeWorkspace({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [runs, setRuns] = useState<StyleLabRun[]>([]);
   const [testRuns, setTestRuns] = useState<ArtistTestRun[]>([]);
+  const [probeRuns, setProbeRuns] = useState<ProbeRun[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [exports, setExports] = useState<ArtistExport[]>([]);
   const [exportOpen, setExportOpen] = useState(false);
   const [runSettings, setRunSettings] = useState<RegenSettings>(loadRunSettings);
@@ -136,6 +143,7 @@ export function RecipeWorkspace({
     setDraft(null);
     setPreview(null);
     setError(null);
+    setHistory([]);
     if (unsaved && unsaved.id === recipeId) {
       setSaved(unsaved);
       setDraft(unsaved);
@@ -148,6 +156,7 @@ export function RecipeWorkspace({
         const backup = readDraftBackup(workspaceId, recipeId);
         const usable = backup && backup.baseVersion === data.recipe.version && JSON.stringify(backup.draft) !== JSON.stringify(data.recipe);
         setSaved(data.recipe);
+        setHistory(data.history);
         setDraft(usable ? backup.draft : data.recipe);
         setRestored(Boolean(usable));
         if (backup && !usable) writeDraftBackup(workspaceId, recipeId, null);
@@ -222,6 +231,7 @@ export function RecipeWorkspace({
       const data = await listRecipeRuns(workspaceId, recipeId);
       setRuns(data.runs.filter((run): run is StyleLabRun => run.kind === "recipe"));
       setTestRuns(data.runs.filter(isArtistTestRun));
+      setProbeRuns(data.runs.filter(isProbeRun));
     } catch {
       // 下一轮再试。
     }
@@ -243,7 +253,8 @@ export function RecipeWorkspace({
     void refreshExports();
   }, [persistedId, refreshRuns, refreshExports]);
 
-  const hasActive = [...runs, ...testRuns].some((run) => ACTIVE_RUN_STATUSES.has(run.status));
+  const allRuns: AnyRun[] = useMemo(() => [...runs, ...testRuns, ...probeRuns], [runs, testRuns, probeRuns]);
+  const hasActive = allRuns.some((run) => ACTIVE_RUN_STATUSES.has(run.status));
   useEffect(() => {
     if (!hasActive) return;
     const timer = setInterval(() => void refreshRuns(), RUN_POLL_MS);
@@ -259,6 +270,7 @@ export function RecipeWorkspace({
     try {
       const data = creating ? await saveNewRecipe(workspaceId, draft) : await saveRecipe(workspaceId, draft, saved.version);
       setSaved(data.recipe);
+      if (!creating) setHistory((items) => [{ version: saved.version, updated_at: saved.updated_at }, ...items]);
       // 保存途中又改了的保留下来，下次再存。
       setDraft((current) => (current === draft ? data.recipe : current));
       setRestored(false);
@@ -409,6 +421,18 @@ export function RecipeWorkspace({
             </div>
           </section>
         ) : null}
+        <RecipeHistory
+          dirty={dirty}
+          exports={exports}
+          history={history}
+          onRestore={(recipe) => {
+            setDraft(recipe);
+            setRestored(false);
+          }}
+          runs={allRuns}
+          saved={saved}
+          workspaceId={workspaceId}
+        />
         <section className="sl-recipe-group">
           <h3>配方</h3>
           {recipes.map((item) => (
@@ -539,6 +563,19 @@ export function RecipeWorkspace({
             image={source}
             onCancel={(run) => run.job_id && void cancelJob(run.job_id)}
             runs={runs}
+            workspaceId={workspaceId}
+          />
+        ) : null}
+        {draft.stage === "edit" ? (
+          <ProbePanel
+            dirty={dirty}
+            draft={draft}
+            onCancel={(run) => run.job_id && void cancelJob(run.job_id)}
+            onDropTokens={(ids) => setDraft((current) => (current ? moveTokens(current, ids, "dropped") : current))}
+            onSave={save}
+            onStarted={(run) => setProbeRuns((items) => [run, ...items])}
+            runs={probeRuns}
+            source={source}
             workspaceId={workspaceId}
           />
         ) : null}

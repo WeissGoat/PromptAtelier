@@ -416,6 +416,45 @@ class WebStyleLabTest(TestCase):
         self.assertEqual(saved.status_code, 200, saved.text)
         return base, saved.json()["recipe"]
 
+    def test_probe_swap_and_ablation_share_one_seed_and_compare_to_baseline(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base, recipe = self._locked_recipe(workspace_id, image_id)
+        url = f"{base}/{recipe['id']}/probe"
+
+        unit = {"label": "artist:foo", "token_ids": [recipe["prefix"][0]["id"]]}
+        response = self.client.post(url, json={"settings": {"kind": "ablation", "units": [unit]}})
+        self.assertEqual(response.status_code, 200, response.text)
+        run = self._wait_run(workspace_id, response.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["kind"], "ablation")
+        self.assertEqual([item["role"] for item in run["items"]], ["baseline", "variant"])
+        self.assertEqual({item["seed"] for item in run["items"]}, {1234})
+        self.assertEqual(run["items"][1]["removed"], ["artist:foo"])
+        self.assertIn("similarity", run["items"][1]["baseline_compare"])
+        self.assertNotIn("baseline_compare", run["items"][0])
+        self.assertEqual(run["recipe"]["version"], recipe["version"])
+
+        # 同样的请求再来一次会被拦下。
+        again = self.client.post(url, json={"settings": {"kind": "ablation", "units": [unit]}})
+        self.assertEqual(again.status_code, 409)
+        stale = self.client.post(url, json={"settings": {"kind": "ablation", "units": [{"label": "x", "token_ids": ["nope"]}]}})
+        self.assertEqual(stale.status_code, 400)
+        self.assertEqual(self.client.post(url, json={"settings": {"kind": "swap"}}).status_code, 400)
+
+        miku = {"ref": "chars/miku", "name": "Miku", "tags": ["hatsune miku", "aqua hair"]}
+        response = self.client.post(
+            url, json={"settings": {"kind": "swap", "characters": [miku], "include_baseline": False, "seed_mode": "fixed", "seed": 7}}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        run = self._wait_run(workspace_id, response.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        item = run["items"][0]
+        self.assertEqual((item["label"], item["target"], item["seed"]), ("Miku", "角色提示词 #1", 7))
+        self.assertEqual(item["added"], ["hatsune miku", "aqua hair"])
+        self.assertEqual(item["compare"]["verdict"], "reference")
+
     def test_export_artist_then_regression_and_matrix(self):
         data = self._open()
         workspace_id = data["workspace"]["id"]

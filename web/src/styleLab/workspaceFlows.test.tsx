@@ -100,7 +100,7 @@ describe("new recipe", () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
     expect(api.saveNewRecipe).toHaveBeenCalledTimes(1);
     expect(api.saveNewRecipe.mock.calls[0][1].name).toBe("我的配方");
-    expect(await screen.findByText("v1")).toBeTruthy();
+    expect(await screen.findByText("v1", { selector: ".sl-recipe-meta span" })).toBeTruthy();
     expect(api.saveRecipe).not.toHaveBeenCalled();
   });
 });

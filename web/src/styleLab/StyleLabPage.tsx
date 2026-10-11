@@ -47,6 +47,7 @@ import { WorkspaceBar } from "./WorkspaceBar";
 import "./styleLab.css";
 import "./styleLabRecipe.css";
 import "./styleLabExport.css";
+import "./styleLabProbe.css";
 import "./styleLabMaterials.css";
 import "./styleLabViewer.css";
 

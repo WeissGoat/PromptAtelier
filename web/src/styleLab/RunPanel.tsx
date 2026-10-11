@@ -95,7 +95,7 @@ export function RunPanel({ workspaceId, image, runs, onCancel }: RunPanelProps) 
 }
 
 function describeSettings(run: StyleLabRun): string {
-  const parts = [`${run.settings.count} 张`];
+  const parts = run.recipe ? [`配方 v${run.recipe.version}`, `${run.settings.count} 张`] : [`${run.settings.count} 张`];
   parts.push(
     run.settings.seed_mode === "source" ? "原图种子" : run.settings.seed_mode === "random" ? "随机种子" : `种子 ${run.settings.seed}`,
   );
