@@ -34,7 +34,7 @@ import {
   uploadImages,
 } from "./api";
 import { CommonalityPanel } from "./CommonalityPanel";
-import { GroupPanel, groupImageIds, groupOfImage } from "./GroupPanel";
+import { GroupPanel, groupImageIds, groupOfImage, monthBuckets, postBuckets, type GroupMode } from "./GroupPanel";
 import { emptyFilters, filterImages, FilterPanel, ImageGrid, type ImageFilters } from "./ImageBrowser";
 import { ImageInspector } from "./ImageInspector";
 import { ImageViewerProvider } from "./ImageViewer";
@@ -58,6 +58,7 @@ const STORAGE = {
   regen: "promptatelier.style-lab.regen/v1",
   recipe: "promptatelier.style-lab.open-recipe/v1",
   provider: "promptatelier.style-lab.translate-provider/v1",
+  groupMode: "promptatelier.style-lab.group-mode/v1",
 };
 const IMAGE_FILE_RE = /\.(png|webp|jpe?g)$/i;
 const ANALYSIS_REFRESH_TICKS = 3;
@@ -110,6 +111,7 @@ export function StyleLabPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [groupMode, setGroupMode] = useState<GroupMode>(() => load<GroupMode>(STORAGE.groupMode, "style"));
   const [openRecipes, setOpenRecipes] = useState<Record<string, string | null>>(() => load(STORAGE.recipe, {}));
   const [creatingRecipe, setCreatingRecipe] = useState(false);
   // 刚从图片生成、还没保存的配方：改了才保存，没动过就不留下。
@@ -120,7 +122,12 @@ export function StyleLabPage() {
 
   const workspace = payload?.workspace ?? null;
   const images = payload?.images ?? [];
-  const groupIds = useMemo(() => groupImageIds(analysis, selectedGroup), [analysis, selectedGroup]);
+  const posts = useMemo(() => postBuckets(images), [images]);
+  const months = useMemo(() => monthBuckets(images), [images]);
+  const groupIds = useMemo(
+    () => groupImageIds(analysis, selectedGroup, groupMode === "post" ? posts : groupMode === "month" ? months : []),
+    [analysis, selectedGroup, groupMode, posts, months],
+  );
   const filtered = useMemo(
     () => filterImages(groupIds ? images.filter((image) => groupIds.has(image.id)) : images, filters),
     [images, filters, groupIds],
@@ -523,8 +530,16 @@ export function StyleLabPage() {
                 analysis={analysis}
                 analyzing={analyzing && analyzing.total ? analyzing : null}
                 llmAvailable={Boolean(llm?.available)}
+                mode={groupMode}
+                monthBuckets={months}
+                onChangeMode={(mode) => {
+                  setGroupMode(mode);
+                  setSelectedGroup(null);
+                  save(STORAGE.groupMode, mode);
+                }}
                 onOpenRecipe={(id) => openRecipe(id)}
                 onSelectGroup={setSelectedGroup}
+                postBuckets={posts}
                 recipes={recipes}
                 selectedGroup={selectedGroup}
               />

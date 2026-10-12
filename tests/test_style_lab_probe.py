@@ -74,6 +74,32 @@ class SwapTest(TestCase):
         self.assertEqual(meta["target"], "角色提示词 #2")
 
 
+    def test_swap_follows_the_character_into_the_subject(self):
+        # 角色在主体，角色提示词里只写了动作：换主体，动作照留。
+        recipe = make_recipe("1girl, akemi homura, black hair, sitting", ["girl, sitting, school uniform"])
+        variant, meta = swap_character(recipe, MIKU, CATEGORIES, ProbeSettings(kind="swap", characters=[MIKU]))
+        self.assertEqual(meta["target"], "主体")
+        self.assertEqual(tokens_text(variant.subject), "1girl, hatsune miku, aqua hair, sitting")
+        # 只有一条角色提示词时它写的就是这个角色：服装一起换掉，动作留着。
+        self.assertEqual(tokens_text(variant.character.captions[0].tokens), "girl, sitting")
+        self.assertEqual(meta["removed"], ["akemi homura", "black hair", "school uniform"])
+
+    def test_swap_without_names_goes_where_the_looks_are(self):
+        recipe = make_recipe("1girl, 1boy, sitting", ["boy, sitting", "girl, black hair"])
+        variant, meta = swap_character(recipe, MIKU, CATEGORIES, ProbeSettings(kind="swap", characters=[MIKU]))
+        self.assertEqual(meta["target"], "角色提示词 #2")
+        self.assertEqual(tokens_text(variant.character.captions[1].tokens), "girl, hatsune miku, aqua hair")
+
+    def test_swap_into_the_subject_on_request(self):
+        recipe = make_recipe("1girl, sitting", ["girl, akemi homura", "boy, tall"])
+        settings = ProbeSettings(kind="swap", characters=[MIKU], target="subject")
+        variant, meta = swap_character(recipe, MIKU, CATEGORIES, settings)
+        self.assertEqual(meta["target"], "主体")
+        self.assertEqual(tokens_text(variant.subject), "1girl, hatsune miku, aqua hair, sitting")
+        # 两条以上的角色提示词不知道是谁的，不动。
+        self.assertEqual([tokens_text(c.tokens) for c in variant.character.captions], ["girl, akemi homura", "boy, tall"])
+
+
 class AblationTest(TestCase):
     def test_ablate_removes_only_the_chosen_style_tokens(self):
         recipe = make_recipe("1girl")

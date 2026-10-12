@@ -632,6 +632,8 @@ export type ProbeSettings = {
   kind: "swap" | "ablation";
   characters: SwapCharacter[];
   replace_clothing: boolean;
+  /** auto：原角色在哪（主体或某条角色提示词）就换哪；caption 换进第 caption_index 条。 */
+  target: "auto" | "subject" | "caption";
   caption_index: number | null;
   units: AblationUnit[];
   include_baseline: boolean;

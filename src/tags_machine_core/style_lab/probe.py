@@ -1,6 +1,7 @@
 """配方探针：在保存好的配方上只改一处，用同一个种子出图，看画风对这处改动的反应。
 
-- 替换角色：去掉原图角色的名字和外貌（可选连服装一起），换成素材库里的角色，看画风换了人还稳不稳；
+- 替换角色：原角色在哪（主体或某条角色提示词）就在哪去掉它的名字和外貌（可选连服装一起），换成素材库里的角色，
+  动作等其他 tag 照留，看画风换了人还稳不稳；
 - 消融测试：画风前缀、后缀里每次去掉一个（或一组）token，和完整配方比，看哪些 token 真的在起作用。
 
 两种都可以带一张“完整配方”的基准图，其余每张和基准图算相似度。
@@ -45,7 +46,8 @@ class ProbeSettings(BaseModel):
     kind: Literal["swap", "ablation"]
     characters: list[SwapCharacter] = Field(default_factory=list, max_length=MAX_SWAP_CHARACTERS)
     replace_clothing: bool = True
-    # 换进第几条角色提示词；None 表示启用了角色提示词时换第 1 条，没启用时换进主体。
+    # 换进哪里：auto 是原角色在哪就换哪（看角色名，没有角色名时看外貌 tag）；caption 换进第 caption_index 条角色提示词。
+    target: Literal["auto", "subject", "caption"] = "auto"
     caption_index: int | None = Field(default=None, ge=0)
     units: list[AblationUnit] = Field(default_factory=list, max_length=MAX_ABLATION_UNITS)
     include_baseline: bool = True
@@ -117,26 +119,52 @@ def _strip_identity(
     return kept, removed, first
 
 
+def _is_name(token: RecipeToken, categories: dict[str, str]) -> bool:
+    return not _GENDER_RE.match(token.text.strip()) and (
+        _is_card_token(token) or token_category(token.text, categories) == "character"
+    )
+
+
+def _looks_count(tokens: list[RecipeToken], categories: dict[str, str]) -> int:
+    return sum(1 for token in tokens if token_category(token.text, categories) == "appearance")
+
+
+def swap_target(recipe: Recipe, settings: ProbeSettings, categories: dict[str, str]) -> int | None:
+    """换进哪条角色提示词；None 是主体。没启用角色提示词时总是主体。"""
+    captions = recipe.character.captions if recipe.character.enabled else []
+    if settings.target == "subject" or not captions:
+        return None
+    if settings.target == "caption" or settings.caption_index is not None:
+        index = settings.caption_index or 0
+        return index if index < len(captions) else None
+    # 原角色在哪就换哪：先找角色名（角色提示词优先，主体里常常也会再写一遍），没有角色名时看外貌 tag 多的那处。
+    for index, caption in enumerate(captions):
+        if any(_is_name(token, categories) for token in caption.tokens):
+            return index
+    if any(_is_name(token, categories) for token in recipe.subject):
+        return None
+    looks = [_looks_count(caption.tokens, categories) for caption in captions]
+    best = max(range(len(captions)), key=lambda index: looks[index])
+    return best if looks[best] > _looks_count(recipe.subject, categories) else None
+
+
 def swap_character(
     recipe: Recipe, character: SwapCharacter, categories: dict[str, str], settings: ProbeSettings
 ) -> tuple[Recipe, dict[str, Any]]:
     origin = f"character:{character.ref}"
     tags = list(dict.fromkeys(tag.strip() for tag in character.tags if tag.strip()))
     captions = recipe.character.captions
-    caption_index = settings.caption_index
-    if caption_index is None and recipe.character.enabled and any(caption.tokens for caption in captions):
-        caption_index = 0
-    into_caption = caption_index is not None and recipe.character.enabled and caption_index < len(captions)
+    caption_index = swap_target(recipe, settings, categories)
 
     identity = set(IDENTITY_CATEGORIES)
     if settings.replace_clothing:
         identity.add(CLOTHING_CATEGORY)
     # 换进角色提示词时，主体里只去掉角色名（外貌、服装多半属于别的角色或画面）；换进主体时外貌、服装一起换。
+    into_caption = caption_index is not None
     subject, removed, insert_at = _strip_identity(recipe.subject, {"character"} if into_caption else identity, categories)
 
     new_captions = list(captions)
-    if into_caption:
-        assert caption_index is not None
+    if caption_index is not None:
         # 角色提示词里也可能有动作卡加进来的 tag：只换角色本身，其余照留。
         old = captions[caption_index]
         tokens, caption_removed, at = _strip_identity(old.tokens, identity, categories)
@@ -156,6 +184,11 @@ def swap_character(
                 insert_at += 1
         subject[insert_at:insert_at] = [_token(tag, origin) for tag in tags]
         target = "主体"
+        if recipe.character.enabled and len(captions) == 1:
+            # 角色在主体、只有一条角色提示词（多半写的是动作）：它里面的外貌、服装也是这个角色的，一起去掉。
+            tokens, caption_removed, _ = _strip_identity(captions[0].tokens, identity, categories)
+            removed.extend(caption_removed)
+            new_captions[0] = captions[0].model_copy(update={"tokens": tokens})
 
     variant = recipe.model_copy(
         update={"subject": subject, "character": recipe.character.model_copy(update={"captions": new_captions})}

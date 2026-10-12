@@ -85,6 +85,23 @@ function stageLabel(recipe: Recipe): string {
   return recipe.stage === "split" ? "划分中" : recipe.locked ? "已锁定画风" : "编辑（画风未锁定）";
 }
 
+/** 画风（导出成 artist 的部分）有没有变：变了保存才是新版本，和后端 style_signature 一致。 */
+export function styleChanged(before: Recipe, after: Recipe): boolean {
+  const signature = (recipe: Recipe) =>
+    JSON.stringify([
+      tokensToText(recipe.prefix),
+      tokensToText(recipe.suffix),
+      tokensToText(recipe.negative),
+      recipe.model ?? null,
+      Object.keys(recipe.params)
+        .sort()
+        .map((key) => [key, recipe.params[key]]),
+      recipe.use_source_vibe,
+      [...recipe.flags].sort(),
+    ]);
+  return signature(before) !== signature(after);
+}
+
 /** 把旧版本的内容放进当前配方（id、版本号、创建时间不变），保存后成为新版本。 */
 export function restoreVersion(current: Recipe, old: Recipe): Recipe {
   return { ...old, id: current.id, version: current.version, created_at: current.created_at, updated_at: current.updated_at };

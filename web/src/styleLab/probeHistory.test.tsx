@@ -15,7 +15,7 @@ vi.mock("./api", async (importOriginal) => ({ ...(await importOriginal<typeof im
 import { resetShelfForTests } from "./materialShelf";
 import { ablationUnits, orderedProbeItems, ProbePanel } from "./ProbePanel";
 import { RecipeHistory } from "./RecipeHistory";
-import { recipeDiff, restoreVersion } from "./recipeVersions";
+import { recipeDiff, restoreVersion, styleChanged } from "./recipeVersions";
 
 function token(text: string, id = `t-${text}`): RecipeToken {
   return { id, text, sep: "", origins: ["source"] };
@@ -78,6 +78,21 @@ describe("recipe versions", () => {
     const restored = restoreVersion(after, { ...before, version: 1, created_at: 0, updated_at: 0 });
     expect([restored.version, restored.created_at, restored.updated_at]).toEqual([3, 1, 3]);
     expect(restored.prefix).toEqual(before.prefix);
+  });
+
+  it("only counts style changes as a new version", () => {
+    const before = recipe({ params: { steps: 28, sampler: "k_euler" } });
+    const testOnly = recipe({
+      name: "改名",
+      subject: [token("sitting")],
+      character: { enabled: true, captions: [{ tokens: [token("girl")], negative: [] }], add_male_caption: false },
+      notes: "x",
+      params: { sampler: "k_euler", steps: 28 },
+    });
+    expect(styleChanged(before, testOnly)).toBe(false);
+    expect(styleChanged(before, recipe({ params: { steps: 23, sampler: "k_euler" } }))).toBe(true);
+    expect(styleChanged(before, recipe({ params: before.params, prefix: [token("artist:foo")] }))).toBe(true);
+    expect(styleChanged(before, recipe({ params: before.params, model: "nai-diffusion-5" }))).toBe(true);
   });
 
   it("shows what a save changed and restores an older version into the draft", async () => {
@@ -175,6 +190,8 @@ describe("probe panel", () => {
     expect(settings).toMatchObject({
       kind: "swap",
       characters: [{ ref: "F:/角色/miku", name: "miku", tags: ["aqua hair"] }],
+      target: "auto",
+      caption_index: null,
       include_baseline: false,
       seed_mode: "random",
     });

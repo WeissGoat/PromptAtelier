@@ -1,14 +1,31 @@
 import { FlaskConical, LoaderCircle } from "lucide-react";
 
-import type { Analysis, RecipeSummary } from "./api";
+import type { Analysis, ImageRecord, RecipeSummary } from "./api";
 import { modelLabel, vibeLabel } from "./format";
+
+/** 分组方式：画风（自动分析出的画风家族），或者按投稿、按月份（作者投稿文件夹才有）。 */
+export type GroupMode = "style" | "post" | "month";
+
+/** 按投稿或月份分出的一组图；id 带上方式前缀（post: / month:），和画风分组的 id 区分开。 */
+export type ImageBucket = { id: string; name: string; sub: string; imageIds: string[]; posts: number };
+
+const GROUP_MODES: Array<[GroupMode, string]> = [
+  ["style", "画风"],
+  ["post", "投稿"],
+  ["month", "月份"],
+];
 
 type GroupPanelProps = {
   analysis: Analysis | null;
   llmAvailable: boolean;
   analyzing: { done: number; total: number } | null;
+  mode: GroupMode;
+  /** 投稿 / 月份分组；空数组表示不是投稿文件夹，不显示切换。 */
+  postBuckets: ImageBucket[];
+  monthBuckets: ImageBucket[];
   selectedGroup: string | null;
   recipes: RecipeSummary[];
+  onChangeMode: (mode: GroupMode) => void;
   onSelectGroup: (id: string | null) => void;
   onOpenRecipe: (id: string) => void;
 };
@@ -24,9 +41,24 @@ function dateRange(from: string | null, to: string | null): string {
   return from === to ? from : `${from} → ${to}`;
 }
 
-/** 左栏：自动分组（画风家族 → 稳定变体 / vibe / 模型，按投稿计数）和配方列表。 */
-export function GroupPanel({ analysis, llmAvailable, analyzing, selectedGroup, recipes, onSelectGroup, onOpenRecipe }: GroupPanelProps) {
+/** 左栏：分组（画风家族 → 稳定变体 / vibe / 模型，按投稿计数；或按投稿、按月份）和配方列表。 */
+export function GroupPanel({
+  analysis,
+  llmAvailable,
+  analyzing,
+  mode,
+  postBuckets,
+  monthBuckets,
+  selectedGroup,
+  recipes,
+  onChangeMode,
+  onSelectGroup,
+  onOpenRecipe,
+}: GroupPanelProps) {
   const groups = analysis?.groups ?? [];
+  const hasPosts = postBuckets.length > 0;
+  const shown: GroupMode = hasPosts ? mode : "style";
+  const buckets = shown === "post" ? postBuckets : monthBuckets;
   return (
     <section className="sl-groups">
       <div className="sl-groups-head">
@@ -41,11 +73,48 @@ export function GroupPanel({ analysis, llmAvailable, analyzing, selectedGroup, r
           </span>
         ) : null}
       </div>
-      {!llmAvailable ? <p className="sl-hint">没有配置 LLM，只能按规则识别画师（artist: 前缀）。</p> : null}
+      {hasPosts ? (
+        <div className="sl-segmented small sl-group-modes" role="radiogroup" aria-label="分组方式">
+          {GROUP_MODES.map(([key, label]) => (
+            <button
+              aria-checked={shown === key}
+              className={shown === key ? "on" : ""}
+              key={key}
+              onClick={() => onChangeMode(key)}
+              role="radio"
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {shown === "style" && !llmAvailable ? <p className="sl-hint">没有配置 LLM，只能按规则识别画师（artist: 前缀）。</p> : null}
       <button className={`sl-group-row ${selectedGroup === null ? "on" : ""}`} onClick={() => onSelectGroup(null)} type="button">
         <span>全部图片</span>
       </button>
-      {groups.map((group) => (
+      {shown !== "style" ? (
+        <div className="sl-bucket-list">
+          {buckets.map((bucket) => (
+            <button
+              className={`sl-group-row bucket ${selectedGroup === bucket.id ? "on" : ""}`}
+              key={bucket.id}
+              onClick={() => onSelectGroup(bucket.id)}
+              title={[bucket.name, bucket.sub].filter(Boolean).join("\n")}
+              type="button"
+            >
+              <span className="sl-bucket-text">
+                <span className="sl-group-name">{bucket.name}</span>
+                {bucket.sub ? <span className="sl-group-dates">{bucket.sub}</span> : null}
+              </span>
+              <span className="sl-count" title={`${bucket.imageIds.length} 张`}>
+                {bucket.imageIds.length}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {(shown === "style" ? groups : []).map((group) => (
         <div className="sl-group" key={group.id}>
           <button
             className={`sl-group-row main ${selectedGroup === group.id ? "on" : ""}`}
@@ -95,9 +164,54 @@ export function GroupPanel({ analysis, llmAvailable, analyzing, selectedGroup, r
   );
 }
 
-/** 选中的分组（或子分组）包含的图片 id；null 表示不按分组筛选。 */
-export function groupImageIds(analysis: Analysis | null, groupId: string | null): Set<string> | null {
-  if (!analysis || !groupId) return null;
+/** 按投稿分组，顺序和图片网格一致；没有投稿信息（散图、拖进来的图片组）时返回空数组。 */
+export function postBuckets(images: ImageRecord[]): ImageBucket[] {
+  if (!images.some((image) => image.post)) return [];
+  const buckets = new Map<string, ImageBucket>();
+  for (const image of images) {
+    const key = image.post?.dir_name ?? "";
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        id: `post:${key}`,
+        name: image.post ? image.post.title || image.post.dir_name : "散图",
+        sub: [image.post?.date, image.post?.post_id].filter(Boolean).join(" · "),
+        imageIds: [],
+        posts: 1,
+      };
+      buckets.set(key, bucket);
+    }
+    bucket.imageIds.push(image.id);
+  }
+  return [...buckets.values()];
+}
+
+/** 按投稿日期的月份分组，从早到晚；没有日期的放最后。 */
+export function monthBuckets(images: ImageRecord[]): ImageBucket[] {
+  if (!images.some((image) => image.post)) return [];
+  const buckets = new Map<string, ImageBucket & { dirs: Set<string> }>();
+  for (const image of images) {
+    const key = /^\d{4}-\d{2}/.test(image.post?.date ?? "") ? image.post!.date!.slice(0, 7) : "";
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      const [year, month] = key.split("-");
+      bucket = { id: `month:${key}`, name: key ? `${year} 年 ${Number(month)} 月` : "没有日期", sub: "", imageIds: [], posts: 0, dirs: new Set() };
+      buckets.set(key, bucket);
+    }
+    bucket.imageIds.push(image.id);
+    bucket.dirs.add(image.post?.dir_name ?? image.rel_path);
+  }
+  return [...buckets.entries()]
+    .sort(([a], [b]) => (a && b ? a.localeCompare(b) : a ? -1 : b ? 1 : 0))
+    .map(([, { dirs, ...bucket }]) => ({ ...bucket, posts: dirs.size, sub: `${dirs.size} 个投稿` }));
+}
+
+/** 选中的分组（画风分组、子分组、投稿或月份）包含的图片 id；null 表示不按分组筛选。 */
+export function groupImageIds(analysis: Analysis | null, groupId: string | null, buckets: ImageBucket[] = []): Set<string> | null {
+  if (!groupId) return null;
+  const bucket = buckets.find((item) => item.id === groupId);
+  if (bucket) return new Set(bucket.imageIds);
+  if (!analysis) return null;
   for (const group of analysis.groups) {
     if (group.id === groupId) return new Set(group.image_ids);
     const child = group.children.find((item) => item.id === groupId);

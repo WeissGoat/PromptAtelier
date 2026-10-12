@@ -550,12 +550,24 @@ class RecipeTest(TestCase):
 
         store = RecipeStore(self.tmp / ".stylelab")
         recipe = store.create(recipe_from_image(self.record, name="测试"))
-        saved = store.save(recipe.model_copy(update={"name": "改名"}), base_version=1)
+        # 只改名字、主体、角色提示词：原地保存，不算新版本。
+        renamed = store.save(recipe.model_copy(update={"name": "改名", "subject": recipe.subject[1:]}), base_version=1)
+        self.assertEqual((renamed.version, renamed.name), (1, "改名"))
+        self.assertEqual(store.history(recipe.id), [])
+        # 另一个页面拿着改名前的副本再存：版本号一样，但已经被存过了。
+        with self.assertRaises(RecipeConflictError):
+            stale = recipe.model_validate_json(recipe.model_dump_json(by_alias=True))
+            store.save(stale.model_copy(update={"notes": "x"}), base_version=1)
+
+        styled = renamed.model_copy(update={"prefix": renamed.subject[:1], "subject": renamed.subject[1:]})
+        saved = store.save(styled, base_version=1)
         self.assertEqual((saved.version, saved.name), (2, "改名"))
         with self.assertRaises(RecipeConflictError):
-            store.save(recipe, base_version=1)
-        self.assertEqual(store.get_version(recipe.id, 1).name, "测试")
+            store.save(styled, base_version=1)
+        self.assertEqual(store.get_version(recipe.id, 1).name, "改名")
         self.assertEqual([item["version"] for item in store.history(recipe.id)], [1])
+        params = store.save(saved.model_copy(update={"params": {**saved.params, "steps": 99}}), base_version=2)
+        self.assertEqual(params.version, 3)
         self.assertEqual([item.id for item in store.list()], [recipe.id])
 
     def test_recipe_keeps_every_character_caption_with_positions(self):

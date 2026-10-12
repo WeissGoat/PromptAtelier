@@ -35,7 +35,8 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
   const [seed, setSeed] = useState<number | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [replaceClothing, setReplaceClothing] = useState(true);
-  const [captionIndex, setCaptionIndex] = useState<number | null>(null);
+  // "auto"、"subject" 或角色提示词的序号。
+  const [swapTarget, setSwapTarget] = useState("auto");
   const [swapBaseline, setSwapBaseline] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [together, setTogether] = useState(false);
@@ -82,7 +83,8 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
         kind: mode,
         characters: [],
         replace_clothing: replaceClothing,
-        caption_index: captionIndex,
+        target: swapTarget === "auto" || swapTarget === "subject" ? swapTarget : "caption",
+        caption_index: swapTarget === "auto" || swapTarget === "subject" ? null : Number(swapTarget),
         units: [],
         include_baseline: mode === "ablation" || swapBaseline,
         seed_mode: seedMode,
@@ -167,10 +169,12 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
             <span className="sl-form-label">换进</span>
             <select
               aria-label="换进哪里"
-              onChange={(event) => setCaptionIndex(event.target.value === "" ? null : Number(event.target.value))}
-              value={captionIndex ?? ""}
+              onChange={(event) => setSwapTarget(event.target.value)}
+              title="自动：原角色写在哪（主体或某条角色提示词）就换哪，那里的动作等其他 tag 照留"
+              value={captionsOn ? swapTarget : "subject"}
             >
-              <option value="">{captionsOn ? "自动（角色提示词 #1）" : "自动（主体）"}</option>
+              {captionsOn ? <option value="auto">自动（原角色在哪就换哪）</option> : null}
+              <option value="subject">主体</option>
               {captionsOn
                 ? draft.character.captions.map((_, index) => (
                     <option key={index} value={index}>
@@ -179,7 +183,7 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
                   ))
                 : null}
             </select>
-            <label className="sl-check" title="换进主体时，原图的服装也一起去掉（换进角色提示词时整条替换）">
+            <label className="sl-check" title="原角色的服装 tag 也一起去掉，换成新角色的">
               <input checked={replaceClothing} onChange={(event) => setReplaceClothing(event.target.checked)} type="checkbox" />
               连服装一起换
             </label>

@@ -186,7 +186,7 @@ function VersionDialog({
             className="sl-primary"
             disabled={!target || version === saved.version}
             onClick={() => target && onRestore(target)}
-            title="把这一版的内容放进编辑区，保存后成为新版本，历史不会丢"
+            title="把这一版的内容放进编辑区，保存后历史不会丢"
             type="button"
           >
             <RotateCcw size={15} aria-hidden="true" />

@@ -2,7 +2,8 @@
 
 - prefix / suffix 是画风（导出到 tags.txt 第 1、3 行），subject 和 character 只用于测试出图；
 - 每个 token 记录来源（原图、角色卡、动作卡、手打），素材卡片按来源整体移除；
-- 保存时版本号加一，旧版本留在 history 目录，便于回看和对比。
+- 画风（前缀、后缀、负面、模型、参数、vibe、flags）变了，保存时版本号加一，旧版本留在 history 目录，便于回看和对比；
+  只改主体、角色提示词、素材、备注等测试用的内容时原地保存，版本号不变。
 """
 
 from __future__ import annotations
@@ -125,6 +126,19 @@ class Recipe(BaseModel):
 
 class RecipeConflictError(RuntimeError):
     pass
+
+
+def style_signature(recipe: Recipe) -> dict[str, Any]:
+    """画风：导出成 artist 的部分。保存时只有它变了才算新版本。"""
+    return {
+        "prefix": tokens_text(recipe.prefix),
+        "suffix": tokens_text(recipe.suffix),
+        "negative": tokens_text(recipe.negative),
+        "model": recipe.model,
+        "params": recipe.params,
+        "use_source_vibe": recipe.use_source_vibe,
+        "flags": sorted(recipe.flags),
+    }
 
 
 def tokens_from_text(text: str, origin: str = "source") -> list[RecipeToken]:
@@ -275,11 +289,20 @@ class RecipeStore:
         return recipe
 
     def save(self, recipe: Recipe, *, base_version: int) -> Recipe:
-        """保存新版本：base_version 必须等于当前版本，防止两个页面互相覆盖。"""
+        """保存：画风变了才是新版本，否则原地覆盖。base_version 必须等于当前版本，防止两个页面互相覆盖。"""
         with self._lock:
             current = self.get(recipe.id)
             if current.version != base_version:
                 raise RecipeConflictError(f"Recipe {recipe.id} is at version {current.version}, not {base_version}")
+            # 原地保存不加版本号，另一个页面可能已经在同一版本上存过：带了 updated_at 的再比一次时间。
+            if "updated_at" in recipe.model_fields_set and abs(recipe.updated_at - current.updated_at) > 1e-3:
+                raise RecipeConflictError(f"Recipe {recipe.id} was saved elsewhere after this copy was loaded")
+            if style_signature(recipe) == style_signature(current):
+                saved = recipe.model_copy(
+                    update={"version": current.version, "updated_at": time.time(), "created_at": current.created_at}
+                )
+                self._write(saved)
+                return saved
             history = self.root / f"{recipe.id}.history"
             history.mkdir(parents=True, exist_ok=True)
             (history / f"v{current.version}.json").write_text(

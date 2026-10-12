@@ -116,6 +116,34 @@
   padding-left: 9px;
 }
 
+.sl-group-modes {
+  align-self: flex-start;
+  margin: 2px 0 4px;
+}
+
+/* 投稿多的时候单独滚动，下面的配方列表不被挤走。 */
+.sl-bucket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.sl-group-row.bucket {
+  align-items: flex-start;
+}
+
+.sl-bucket-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sl-bucket-text .sl-group-dates {
+  padding-left: 0;
+}
+
 .sl-recipe-link {
   align-items: center;
   background: transparent;

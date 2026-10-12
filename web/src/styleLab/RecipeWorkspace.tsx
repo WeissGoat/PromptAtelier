@@ -41,6 +41,7 @@ import { ProbePanel } from "./ProbePanel";
 import { RecipeHistory, type HistoryEntry } from "./RecipeHistory";
 import { moveTokens, normalizeRecipe, postFrequency } from "./recipeModel";
 import { RecipeEditor } from "./RecipeEditor";
+import { styleChanged } from "./recipeVersions";
 import { defaultRegenSettings, Segmented, SIZE_PRESETS } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
 
@@ -270,7 +271,10 @@ export function RecipeWorkspace({
     try {
       const data = creating ? await saveNewRecipe(workspaceId, draft) : await saveRecipe(workspaceId, draft, saved.version);
       setSaved(data.recipe);
-      if (!creating) setHistory((items) => [{ version: saved.version, updated_at: saved.updated_at }, ...items]);
+      // 只改了主体、角色提示词等测试内容时原地保存，版本号不变。
+      if (!creating && data.recipe.version !== saved.version) {
+        setHistory((items) => [{ version: saved.version, updated_at: saved.updated_at }, ...items]);
+      }
       // 保存途中又改了的保留下来，下次再存。
       setDraft((current) => (current === draft ? data.recipe : current));
       setRestored(false);
@@ -380,7 +384,13 @@ export function RecipeWorkspace({
           ) : (
             <>
               <span>v{saved.version}</span>
-              <span>{dirty ? "有未保存的修改" : `已保存 ${formatTime(saved.updated_at)}`}</span>
+              <span title="画风前缀、后缀、负面、模型、参数变了，保存才是新版本；只改主体、角色提示词、素材等原地保存">
+                {dirty
+                  ? styleChanged(saved, draft)
+                    ? `有未保存的修改，保存为 v${saved.version + 1}`
+                    : "有未保存的修改（画风没变，保存后仍是这一版）"
+                  : `已保存 ${formatTime(saved.updated_at)}`}
+              </span>
             </>
           )}
         </div>
