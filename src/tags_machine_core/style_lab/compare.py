@@ -9,6 +9,8 @@ from PIL import Image, ImageChops, ImageStat
 from tags_machine_core.verification.image_params import read_image_parameters
 from tags_machine_core.verification.render_params import compare_render_parameters
 
+from .metadata import resolve_actual_prompts
+
 
 # 链路确定性：同参数重生应接近逐像素一致，"大体像"不算正常。
 MATCH_SIMILARITY = 0.98
@@ -81,6 +83,16 @@ def _benign_note(diff: dict[str, Any], source_v4_negative: str | None) -> str | 
     return None
 
 
+def _with_actual_prompts(meta: dict[str, Any]) -> dict[str, Any]:
+    """read_image_parameters 的结果里，参数（PNG 的 Comment 和解析出的 parameters）换成原图实际用的提示词。"""
+    png_text = meta.get("png_text")
+    if isinstance(png_text, dict) and isinstance(png_text.get("Comment"), dict):
+        meta = {**meta, "png_text": {**png_text, "Comment": resolve_actual_prompts(png_text["Comment"])}}
+    if isinstance(meta.get("parameters"), dict):
+        meta = {**meta, "parameters": resolve_actual_prompts(meta["parameters"])}
+    return meta
+
+
 def compare_with_source(
     source: Path,
     generated: Path,
@@ -90,6 +102,8 @@ def compare_with_source(
     """对照源图和生成图。expected_keys 是本次设置主动改动的参数（如随机种子），不算作链路差异。"""
     expected = set(expected_keys)
     source_params = read_image_parameters(source)
+    # 原图用了随机选择（||a|b||）时，重生发的是原图选中的那份：拿它来比，而不是带 || 的模板。
+    source_params = _with_actual_prompts(source_params)
     diffs = [item.as_dict() for item in compare_render_parameters(source_params, read_image_parameters(generated))]
     source_v4_negative = _v4_negative(source_params.get("parameters") or {})
     for diff in diffs:

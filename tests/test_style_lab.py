@@ -184,6 +184,30 @@ class WorkspaceStoreTest(TestCase):
         self.assertTrue(self.store.is_allowed_file(info, run_dir / "out.png"))
 
 
+# 提示词用了随机选择（||a|b||）的原图：v4_prompt 是模板，actual_prompts 是这张图实际挑中的。
+RANDOM_PICK = {
+    "prompt": "1girl, solo",
+    "v4_prompt": {
+        "caption": {
+            "base_caption": "1girl, solo",
+            "char_captions": [{"char_caption": "girl, ||yoisaki kanade|asahina mafuyu||", "centers": [{"x": 0.6, "y": 0.2}]}],
+        },
+        "use_coords": True,
+        "use_order": True,
+    },
+    "actual_prompts": {
+        "prompt": {
+            "base_caption": "1girl, solo",
+            "char_captions": [{"char_caption": "girl, yoisaki kanade", "centers": [{"x": 0.6, "y": 0.2}]}],
+        },
+        "negative_prompt": {
+            "base_caption": "lowres",
+            "char_captions": [{"char_caption": "bad hands", "centers": [{"x": 0.6, "y": 0.2}]}],
+        },
+    },
+}
+
+
 class RegenerateTest(TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -229,6 +253,18 @@ class RegenerateTest(TestCase):
         self.assertEqual((request["params"]["width"], request["params"]["height"]), (32, 48))
 
 
+    def test_random_choices_regenerate_with_the_source_pick(self):
+        # 角色提示词用了随机选择：原图挑中的是 kanade，重生必须发 kanade，不能让 NovelAI 重新挑。
+        record = build_image_record(write_nai_png(self.tmp / "r.png", **RANDOM_PICK), base=self.tmp)
+        request = build_regen_request(record, RegenSettings(), 1)
+        caption = request["params"]["v4_prompt"]["caption"]
+        self.assertEqual(caption["char_captions"][0]["char_caption"], "girl, yoisaki kanade")
+        self.assertEqual(caption["char_captions"][0]["centers"], [{"x": 0.6, "y": 0.2}])
+        self.assertEqual(request["prompt"], "1girl, solo")
+        self.assertNotIn("actual_prompts", request["params"])
+        self.assertTrue(request["params"]["v4_prompt"]["use_coords"])
+
+
 class CompareTest(TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -263,6 +299,23 @@ class CompareTest(TestCase):
 
         c = write_nai_png(self.tmp / "c.png", uc="something else")
         self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
+
+    def test_random_choices_compare_against_the_source_pick(self):
+        source = write_nai_png(self.tmp / "src.png", **RANDOM_PICK)
+        resolved = {key: value for key, value in RANDOM_PICK.items() if key != "actual_prompts"}
+        resolved["v4_prompt"] = {**RANDOM_PICK["v4_prompt"], "caption": RANDOM_PICK["actual_prompts"]["prompt"]}
+        resolved["v4_negative_prompt"] = {"caption": RANDOM_PICK["actual_prompts"]["negative_prompt"]}
+        same_pick = write_nai_png(self.tmp / "same.png", **resolved)
+        result = compare_with_source(source, same_pick)
+        self.assertEqual([diff["path"] for diff in result["diffs"] if not diff["expected"]], [])
+        self.assertEqual(result["verdict"], "match")
+
+        other = {**resolved, "v4_prompt": {**resolved["v4_prompt"], "caption": {
+            "base_caption": "1girl, solo",
+            "char_captions": [{"char_caption": "girl, asahina mafuyu", "centers": [{"x": 0.6, "y": 0.2}]}],
+        }}}
+        result = compare_with_source(source, write_nai_png(self.tmp / "other.png", **other))
+        self.assertEqual(result["verdict"], "param_diff")
 
     def test_client_extra_keys_are_benign(self):
         # NAI Smart Studio 之类的客户端在 Comment 里另记一份负面、角色提示词、CFG；API 出图不回写。

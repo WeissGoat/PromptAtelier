@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from tags_machine_core.clients.novelai import normalize_novelai_model
 
-from .metadata import ImageRecord, read_source_parameters
+from .metadata import ImageRecord, read_source_parameters, resolve_actual_prompts
 
 
 MAX_REGEN_COUNT = 8
@@ -61,7 +61,13 @@ def build_regen_request(record: ImageRecord, settings: RegenSettings, seed: int)
     params, _ = read_source_parameters(Path(record.path))
     if not params:
         raise ValueError(f"Image has no NovelAI metadata: {record.rel_path}")
-    params = dict(params)
+    prompt, negative = record.prompt, record.negative_prompt
+    actual = params.get("actual_prompts")
+    # 提示词里有随机选择（||a|b||）：按原图选中的那项发，不让 NovelAI 重新挑。
+    params = resolve_actual_prompts(dict(params))
+    if isinstance(actual, dict):
+        prompt = str((actual.get("prompt") or {}).get("base_caption") or prompt)
+        negative = str((actual.get("negative_prompt") or {}).get("base_caption") or negative)
     # 原图尺寸按元数据里生成时的尺寸：放大过的图文件尺寸会超出 NovelAI 的上限。
     width = settings.width if settings.size_mode == "custom" else (params.get("width") or record.width or 1024)
     height = settings.height if settings.size_mode == "custom" else (params.get("height") or record.height or 1024)
@@ -72,8 +78,8 @@ def build_regen_request(record: ImageRecord, settings: RegenSettings, seed: int)
     params.update({"seed": seed, "width": int(width), "height": int(height), "n_samples": 1})
     return {
         "backend": "novelai",
-        "prompt": record.prompt,
-        "negative_prompt": record.negative_prompt,
+        "prompt": prompt,
+        "negative_prompt": negative,
         "model": model,
         "seed": seed,
         "size": {"width": int(width), "height": int(height)},

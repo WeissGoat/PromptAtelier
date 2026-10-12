@@ -95,6 +95,28 @@ def parse_post_dir(name: str) -> PostInfo:
     )
 
 
+def resolve_actual_prompts(params: dict[str, Any]) -> dict[str, Any]:
+    """把提示词换成原图实际用的那份。
+
+    提示词里用了随机选择（``||a|b|c||``）时，NovelAI 每次出图随机挑一项，选中的结果记在 ``actual_prompts``。
+    重生和对照都要按原图选中的那份，否则每次挑到的角色都可能不一样。没有 ``actual_prompts`` 时原样返回。
+    """
+    actual = params.get("actual_prompts")
+    if not isinstance(actual, dict):
+        return params
+    resolved = {key: value for key, value in params.items() if key != "actual_prompts"}
+    for v4_key, actual_key, flat_key in (("v4_prompt", "prompt", "prompt"), ("v4_negative_prompt", "negative_prompt", "uc")):
+        caption = actual.get(actual_key)
+        if not isinstance(caption, dict) or "base_caption" not in caption:
+            continue
+        block = dict(resolved.get(v4_key) or {})
+        block["caption"] = caption
+        resolved[v4_key] = block
+        if flat_key in resolved:
+            resolved[flat_key] = caption["base_caption"]
+    return resolved
+
+
 def read_source_parameters(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """返回 (NovelAI 参数, PNG 文本块)；读不到时返回两个空字典。"""
     if path.suffix.lower() != ".png":
