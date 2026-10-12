@@ -29,8 +29,12 @@ export type ImageRecord = {
   size_bytes: number;
   mtime_ns: number;
   post: PostInfo | null;
+  /** 文件的像素尺寸；放大过的图比生成时大。 */
   width: number | null;
   height: number | null;
+  /** 元数据里生成时的尺寸，重生和配方出图用它。 */
+  gen_width?: number | null;
+  gen_height?: number | null;
   has_metadata: boolean;
   source_label: string | null;
   model: string | null;

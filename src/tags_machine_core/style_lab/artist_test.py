@@ -135,8 +135,8 @@ def regression_payload(
         "render": {
             "backend": "novelai",
             "artist": settings.artist,
-            "width": settings.width or record.width or 1024,
-            "height": settings.height or record.height or 1024,
+            "width": settings.width or record.generation_size()[0] or 1024,
+            "height": settings.height or record.generation_size()[1] or 1024,
             "seed": seed,
             "params": params,
         },

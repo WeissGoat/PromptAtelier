@@ -13,7 +13,7 @@ from tags_machine_core.verification.image_params import read_image_parameters, r
 
 IMAGE_SUFFIXES = {".png", ".webp", ".jpg", ".jpeg"}
 # 解析规则变了就加一：旧记录即使文件没变也会重新读取。2：按 Source 的模型哈希认 Curated / Full。
-RECORD_VERSION = 3
+RECORD_VERSION = 4
 _POST_DIR_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d+)_?(.*)$")
 
 
@@ -46,8 +46,12 @@ class ImageRecord(BaseModel):
     size_bytes: int
     mtime_ns: int
     post: PostInfo | None = None
+    # 文件的像素尺寸；放大过的图会比生成时大。
     width: int | None = None
     height: int | None = None
+    # 元数据里生成时的尺寸：重生、配方出图用这个，放大过的图按文件尺寸会超出 NovelAI 的上限。
+    gen_width: int | None = None
+    gen_height: int | None = None
     has_metadata: bool = False
     source_label: str | None = None
     model: str | None = None
@@ -64,6 +68,11 @@ class ImageRecord(BaseModel):
     vibe: VibeInfo = Field(default_factory=VibeInfo)
     flags: list[str] = Field(default_factory=list)
     record_version: int = 0
+
+    def generation_size(self) -> tuple[int | None, int | None]:
+        if self.gen_width and self.gen_height:
+            return self.gen_width, self.gen_height
+        return self.width, self.height
 
 
 def image_id_for(rel_path: str) -> str:
@@ -156,6 +165,8 @@ def _relative(path: Path, base: Path) -> str:
 
 
 def _fill_dimensions(record: ImageRecord, path: Path, params: dict[str, Any]) -> None:
+    record.gen_width = _optional_int(params.get("width"))
+    record.gen_height = _optional_int(params.get("height"))
     if path.suffix.lower() == ".png":
         try:
             dims = read_png_dimensions(path)

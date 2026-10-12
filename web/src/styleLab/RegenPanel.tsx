@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Play } from "lucide-react";
 import { useState } from "react";
 
 import type { ImageRecord, RegenOverrides, RegenSettings } from "./api";
+import { generationSize } from "./format";
 
 export const defaultRegenSettings: RegenSettings = {
   count: 1,
@@ -109,7 +110,7 @@ export function RegenPanel({ image, settings, submitting, error, notice, onChang
         <Segmented
           onChange={(value) => set({ size_mode: value as RegenSettings["size_mode"] })}
           options={[
-            ["source", image.width && image.height ? `原图 ${image.width}×${image.height}` : "原图"],
+            ["source", generationSize(image) ? `原图 ${generationSize(image)}` : "原图"],
             ["custom", "自定义"],
           ]}
           value={settings.size_mode}

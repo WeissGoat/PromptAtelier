@@ -196,7 +196,14 @@ function CopyButton({ text }: { text: string }) {
 function ParamsTable({ image }: { image: ImageRecord }) {
   const rows: Array<[string, string]> = [
     ["模型", `${modelLabel(image.model)}${image.model ? ` (${image.model})` : ""}`],
-    ["尺寸", image.width && image.height ? `${image.width} × ${image.height}` : "—"],
+    [
+      "尺寸",
+      image.width && image.height
+        ? image.gen_width && image.gen_height && (image.gen_width !== image.width || image.gen_height !== image.height)
+          ? `${image.gen_width} × ${image.gen_height}（文件 ${image.width} × ${image.height}，放大过）`
+          : `${image.width} × ${image.height}`
+        : "—",
+    ],
     ["种子", image.seed?.toString() ?? "—"],
     ["采样", [image.sampler, image.noise_schedule].filter(Boolean).join(" · ") || "—"],
     ["步数 / CFG", `${image.steps ?? "—"} / ${image.scale ?? "—"}`],

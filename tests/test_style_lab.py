@@ -219,6 +219,16 @@ class RegenerateTest(TestCase):
         self.assertEqual(expected_diff_keys(RegenSettings(), self.record), set())
 
 
+    def test_upscaled_source_regenerates_at_the_generation_size(self):
+        # 文件放大过两倍（64x96），元数据里生成时是 32x48：按文件尺寸会超出 NovelAI 的上限。
+        record = build_image_record(write_nai_png(self.tmp / "up.png", width=32, height=48), base=self.tmp)
+        self.assertEqual((record.width, record.height, record.gen_width, record.gen_height), (64, 96, 32, 48))
+        self.assertEqual(record.generation_size(), (32, 48))
+        request = build_regen_request(record, RegenSettings(), 1)
+        self.assertEqual(request["size"], {"width": 32, "height": 48})
+        self.assertEqual((request["params"]["width"], request["params"]["height"]), (32, 48))
+
+
 class CompareTest(TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()

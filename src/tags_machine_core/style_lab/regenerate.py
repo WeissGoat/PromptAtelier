@@ -62,8 +62,9 @@ def build_regen_request(record: ImageRecord, settings: RegenSettings, seed: int)
     if not params:
         raise ValueError(f"Image has no NovelAI metadata: {record.rel_path}")
     params = dict(params)
-    width = settings.width if settings.size_mode == "custom" else (record.width or params.get("width") or 1024)
-    height = settings.height if settings.size_mode == "custom" else (record.height or params.get("height") or 1024)
+    # 原图尺寸按元数据里生成时的尺寸：放大过的图文件尺寸会超出 NovelAI 的上限。
+    width = settings.width if settings.size_mode == "custom" else (params.get("width") or record.width or 1024)
+    height = settings.height if settings.size_mode == "custom" else (params.get("height") or record.height or 1024)
     for key in ("steps", "scale", "cfg_rescale", "sampler", "noise_schedule"):
         if key in settings.overrides:
             params[key] = settings.overrides[key]

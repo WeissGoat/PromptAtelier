@@ -34,7 +34,7 @@ import {
 import { ArtistTestPanel } from "./ArtistTestPanel";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { ExportDialog } from "./ExportDialog";
-import { fileName, formatTime, modelLabel } from "./format";
+import { fileName, formatTime, generationSize, modelLabel } from "./format";
 import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 import { LibraryPanel } from "./LibraryPanel";
 import { ProbePanel } from "./ProbePanel";
@@ -532,7 +532,7 @@ export function RecipeWorkspace({
               <Segmented
                 onChange={(value) => updateRunSettings({ ...runSettings, size_mode: value as RegenSettings["size_mode"] })}
                 options={[
-                  ["source", source?.width ? `原图 ${source.width}×${source.height}` : "原图"],
+                  ["source", source && generationSize(source) ? `原图 ${generationSize(source)}` : "原图"],
                   ["custom", "自定义"],
                 ]}
                 value={runSettings.size_mode}

@@ -32,6 +32,13 @@ export function vibeLabel(key: string): string {
   return key ? `vibe ${key.split("+").map((hash) => hash.slice(0, 4)).join("+")}` : "无 vibe";
 }
 
+/** 生成时的尺寸（放大过的图文件比它大）；没有元数据时用文件尺寸。 */
+export function generationSize(image: ImageRecord): string | null {
+  const width = image.gen_width || image.width;
+  const height = image.gen_height || image.height;
+  return width && height ? `${width}×${height}` : null;
+}
+
 export function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }

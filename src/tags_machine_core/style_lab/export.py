@@ -403,7 +403,8 @@ def build_notes(
         lines.append(f"- 原图：`{record.rel_path}`")
         if record.post:
             lines.append(f"- 投稿：`{record.post.post_id}` {record.post.date or ''} {record.post.title or ''}".rstrip())
-        lines.append(f"- 原图种子：`{record.seed}`，尺寸 {record.width} × {record.height}")
+        width, height = record.generation_size()
+        lines.append(f"- 原图种子：`{record.seed}`，尺寸 {width} × {height}")
     lines += [
         "",
         "参数：",

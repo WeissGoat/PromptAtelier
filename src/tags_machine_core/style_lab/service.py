@@ -136,6 +136,7 @@ class StyleLabService:
     ) -> dict[str, Any]:
         """配方 -> 和导出后的 artist 完全一致的出图请求（走正式的 compose -> render 链路，不联网）。"""
         record = self._recipe_source(info, recipe)
+        source_width, source_height = record.generation_size() if record else (None, None)
         params: dict[str, Any] = {"size": "custom", "n_samples": 1}
         character = character_prompts_param(recipe)
         if character:
@@ -145,8 +146,8 @@ class StyleLabService:
             "render": {
                 "backend": "novelai",
                 "artist": artist_node(recipe, source_path=record.path if record else None),
-                "width": width or (record.width if record else None) or 1024,
-                "height": height or (record.height if record else None) or 1024,
+                "width": width or source_width or 1024,
+                "height": height or source_height or 1024,
                 "seed": seed,
                 "params": params,
             },
