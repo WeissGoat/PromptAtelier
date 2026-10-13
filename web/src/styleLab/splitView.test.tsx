@@ -61,29 +61,42 @@ describe("split view", () => {
     const onCommit = vi.fn();
     render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} onCommit={onCommit} recipe={recipe()} sourcePrompt={PROMPT} translateOn={false} />);
 
-    // 从半个词开始拖到句号后面：补全成整词，中文按选中的字切。
+    // 按字符拖选：选中的一段整体成块。
     const end = PROMPT.indexOf("。") + 1;
-    dragSelect(3, end);
+    dragSelect(0, end);
     expect(screen.getByText(/已选「color trace, production art, 1girl, 这是一幅插画。」/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /标为前缀/ }));
 
-    // 1girl 拖选出来按 2 清掉标记，回主体。
+    // 1girl 拖选出来按 2 清掉标记，回主体：前缀剩下前后两块。
     const girl = PROMPT.indexOf("1girl");
     dragSelect(girl, girl + 5);
     fireEvent.keyDown(window, { key: "2" });
 
+    // 勾上按 tag 拆开：后缀每个 tag 一块。
+    fireEvent.click(screen.getByRole("checkbox", { name: /按 tag 拆开/ }));
     const tail = PROMPT.indexOf("very");
     dragSelect(tail, PROMPT.length);
     fireEvent.keyDown(window, { key: "3" });
 
-    expect(screen.getByText("前缀 3")).toBeTruthy();
+    expect(screen.getByText("前缀 2")).toBeTruthy();
     expect(screen.getByText("后缀 2")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /锁定画风/ }));
     const committed = onCommit.mock.calls[0][0] as Recipe;
-    expect(committed.prefix.map((token) => token.text)).toEqual(["color trace", "production art", "这是一幅插画。"]);
+    expect(committed.prefix.map((token) => token.text)).toEqual(["color trace, production art", "这是一幅插画。"]);
     expect(committed.subject.map((token) => token.text)).toEqual(["1girl", "少女站着"]);
     expect(committed.suffix.map((token) => token.text)).toEqual(["very aesthetic", "masterpiece"]);
     expect(committed.locked).toBe(true);
+  });
+
+  it("shades tokens by how often the workspace uses them", () => {
+    const heat = { frequency: new Map([["color trace", 1], ["masterpiece", 0.5]]), posts: 4 };
+    render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} heat={heat} onCommit={vi.fn()} recipe={recipe()} sourcePrompt={PROMPT} translateOn={false} />);
+    const piece = screen.getByText("color trace");
+    expect(piece.style.getPropertyValue("--heat")).toBe("1.000");
+    expect(piece.title).toContain("100%");
+    expect(screen.getByText("masterpiece").style.getPropertyValue("--heat")).toBe("0.500");
+    fireEvent.click(screen.getByRole("button", { name: /热力图/ }));
+    expect(screen.getByTestId("split-text").className).not.toContain("heat");
   });
 
   it("selects a whole mark on click so it can be changed", () => {

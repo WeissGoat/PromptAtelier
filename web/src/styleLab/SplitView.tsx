@@ -1,14 +1,16 @@
-import { Eraser, Lock, Sparkles } from "lucide-react";
+import { Eraser, Flame, Lock, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Recipe, TagCategory } from "./api";
 import {
   commitTextSplit,
   markRange,
+  markTokens,
   snapRange,
   suggestTextMarks,
   textSegments,
   textSplitOf,
+  tokenFrequency,
   tokenSpans,
   tokensToText,
   type TextSplit,
@@ -39,6 +41,8 @@ type SplitViewProps = {
   sourcePrompt: string | null;
   categories: Record<string, TagCategory>;
   frequency: Map<string, number>;
+  /** 热力图：tag 在整个工作区的投稿里出现的比例，posts 是投稿数。 */
+  heat?: { frequency: Map<string, number>; posts: number };
   analysisReady: boolean;
   translateOn: boolean;
   onCommit: (recipe: Recipe) => void;
@@ -56,10 +60,14 @@ function textOffset(root: HTMLElement, node: Node, offset: number): number {
  * 划分阶段：原图提示词整段按原文显示。在文字上拖选一段，标成前缀或后缀（也可以丢弃），
  * 没标的都是主体。点已标的一段可以改标或清掉。
  */
-export function SplitView({ recipe, sourcePrompt, categories, frequency, analysisReady, translateOn, onCommit }: SplitViewProps) {
+export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, analysisReady, translateOn, onCommit }: SplitViewProps) {
   const [split, setSplit] = useState<TextSplit>(() => textSplitOf(recipe, sourcePrompt));
   const [pending, setPending] = useState<[number, number] | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // 默认选中的一段整体成块；勾上时按 tag 拆开，每个 tag 各成一块。
+  const [perTag, setPerTag] = useState(false);
+  const [showHeat, setShowHeat] = useState(true);
+  const markSelection = perTag ? markTokens : markRange;
   const textRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,7 +79,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
 
   const apply = (zone: Zone) => {
     if (!pending) return;
-    setSplit((current) => markRange(current, pending[0], pending[1], zone));
+    setSplit((current) => markSelection(current, pending[0], pending[1], zone));
     setPending(null);
   };
 
@@ -86,12 +94,12 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
       const zone = KEY_ZONES[event.key];
       if (!zone || !pending || event.ctrlKey || event.metaKey || event.altKey) return;
       event.preventDefault();
-      setSplit((current) => markRange(current, pending[0], pending[1], zone));
+      setSplit((current) => markSelection(current, pending[0], pending[1], zone));
       setPending(null);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pending]);
+  }, [pending, markSelection]);
 
   const onMouseUp = () => {
     const root = textRef.current;
@@ -127,9 +135,18 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
     });
     return map;
   }, [spans, lookup]);
-  // 显示用：标记段按待标的选区和有译文的 token 末尾切开，选区单独高亮。
+  // 热力图：每个 token 在工作区投稿里的出现率。
+  const heatSpans = useMemo(
+    () => (heat && showHeat ? spans.map((span) => ({ ...span, value: tokenFrequency(span.text, heat.frequency) })) : []),
+    [spans, heat, showHeat],
+  );
+  // 显示用：标记段按待标的选区、有译文的 token 末尾和（热力图时）每个 token 的边界切开，选区单独高亮。
   const pieces = useMemo(() => {
-    const cuts = [...(pending ? [pending[0], pending[1]] : []), ...zhAt.keys()];
+    const cuts = [
+      ...(pending ? [pending[0], pending[1]] : []),
+      ...zhAt.keys(),
+      ...heatSpans.flatMap((span) => [span.start, span.end]),
+    ];
     return segments.flatMap((segment) => {
       const inner = [...new Set(cuts.filter((cut) => cut > segment.start && cut < segment.end))].sort((a, b) => a - b);
       const points = [segment.start, ...inner, segment.end];
@@ -140,11 +157,12 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
           end,
           zone: segment.zone,
           zh: zhAt.get(end),
+          heat: heatSpans.find((span) => span.start <= start && end <= span.end)?.value ?? null,
           pending: Boolean(pending && start >= pending[0] && end <= pending[1]),
         };
       });
     });
-  }, [segments, pending, zhAt]);
+  }, [segments, pending, zhAt, heatSpans]);
 
   const adopt = () => {
     const suggested = suggestTextMarks(split, categories, frequency);
@@ -165,6 +183,18 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
           <span className="sl-legend dropped">丢弃 {result.dropped.length}</span>
         </div>
         <span className="sl-bar-spacer" />
+        {heat ? (
+          <button
+            aria-pressed={showHeat}
+            className={`sl-ghost ${showHeat ? "on" : ""}`}
+            onClick={() => setShowHeat(!showHeat)}
+            title={`底色越深，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越多`}
+            type="button"
+          >
+            <Flame size={14} aria-hidden="true" />
+            热力图
+          </button>
+        ) : null}
         <button
           className="sl-ghost"
           disabled={!analysisReady}
@@ -207,17 +237,24 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, analysi
           </>
         ) : (
           <span className="sl-muted">
-            在下面的提示词上拖选一段，标成前缀或后缀；没标的都是主体。点已标的一段可以改。{note ? `（${note}）` : ""}
+            在下面的提示词上按字符拖选一段，标成前缀或后缀，标出的一段整体是一块，里面不再分词；没标的都是主体。点已标的一段可以改。
+            {note ? `（${note}）` : ""}
           </span>
         )}
+        <label className="sl-check sl-mark-pertag" title="勾上后，选中的一段按 tag 拆开，每个 tag 各成一块">
+          <input checked={perTag} onChange={(event) => setPerTag(event.target.checked)} type="checkbox" />
+          按 tag 拆开
+        </label>
       </div>
-      <div className="sl-mark-text" data-testid="split-text" onMouseUp={onMouseUp} ref={textRef}>
+      <div className={`sl-mark-text ${heatSpans.length ? "heat" : ""}`} data-testid="split-text" onMouseUp={onMouseUp} ref={textRef}>
         {pieces.map((piece) => (
           <span
             className={`sl-mark zone-${piece.zone} ${piece.pending ? "pending" : ""}`}
             data-start={piece.start}
             data-zh={piece.zh}
             key={`${piece.start}-${piece.end}`}
+            style={piece.heat ? ({ "--heat": piece.heat.toFixed(3) } as React.CSSProperties) : undefined}
+            title={piece.heat !== null && heat ? `工作区 ${Math.round(piece.heat * 100)}% 的投稿有（共 ${heat.posts} 个）` : undefined}
           >
             {split.text.slice(piece.start, piece.end)}
           </span>

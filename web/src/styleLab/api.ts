@@ -179,6 +179,10 @@ export function getWorkspace(id: string): Promise<WorkspacePayload> {
   return apiGet(`${base}/workspaces/${encodeURIComponent(id)}`);
 }
 
+export function renameWorkspace(id: string, name: string): Promise<{ workspace: WorkspaceInfo }> {
+  return apiPut(`${base}/workspaces/${encodeURIComponent(id)}/name`, { name });
+}
+
 export function rescanWorkspace(id: string): Promise<WorkspacePayload> {
   return apiPost(`${base}/workspaces/${encodeURIComponent(id)}/scan`, {});
 }

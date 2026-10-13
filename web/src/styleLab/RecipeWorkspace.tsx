@@ -188,6 +188,12 @@ export function RecipeWorkspace({
     return postFrequency(images.filter((image) => ids.has(image.id)));
   }, [group, images]);
 
+  // 划分时的热力图看整个工作区（不只是所属分组）。
+  const heat = useMemo(
+    () => ({ frequency: postFrequency(images), posts: new Set(images.map((image) => image.post?.dir_name ?? image.id)).size }),
+    [images],
+  );
+
   const dirty = Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved));
   const isNew = saved?.version === 0;
 
@@ -486,6 +492,7 @@ export function RecipeWorkspace({
           categories={categories}
           draft={draft}
           frequency={frequency}
+          heat={heat}
           onChange={setDraft}
           preview={preview}
           previewError={previewError}

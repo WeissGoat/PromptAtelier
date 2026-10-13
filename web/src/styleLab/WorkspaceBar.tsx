@@ -1,4 +1,4 @@
-import { FolderOpen, ImagePlus, Languages, LoaderCircle, RefreshCw, Undo2 } from "lucide-react";
+import { Check, FolderOpen, ImagePlus, Languages, LoaderCircle, Pencil, RefreshCw, Undo2, X } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type { LLMStatus, TranslateProvider, WorkspaceInfo } from "./api";
@@ -18,6 +18,7 @@ type WorkspaceBarProps = {
   onOpenFolder: (path: string) => void;
   onCreateGroup: (files: File[]) => void;
   onSelectWorkspace: (id: string) => void;
+  onRename: (name: string) => Promise<boolean>;
   onRescan: () => void;
   onRestoreImages: () => void;
   onToggleTranslate: () => void;
@@ -37,12 +38,15 @@ export function WorkspaceBar({
   onOpenFolder,
   onCreateGroup,
   onSelectWorkspace,
+  onRename,
   onRescan,
   onRestoreImages,
   onToggleTranslate,
   onChangeProvider,
 }: WorkspaceBarProps) {
   const [path, setPath] = useState("");
+  // 正在改名时是输入框里的名字，否则 null。
+  const [renaming, setRenaming] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const llmReady = Boolean(llm?.available);
   // 谷歌翻译不用配置；AI 翻译要先配好 LLM。
@@ -94,19 +98,60 @@ export function WorkspaceBar({
         ref={fileRef}
         type="file"
       />
-      <select
-        aria-label="最近的工作区"
-        className="sl-bar-recent"
-        onChange={(event) => event.target.value && onSelectWorkspace(event.target.value)}
-        value={current?.id ?? ""}
-      >
-        <option value="">最近的工作区…</option>
-        {workspaces.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name}
-          </option>
-        ))}
-      </select>
+      {current && renaming !== null ? (
+        <form
+          className="sl-bar-rename"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!renaming.trim() || renaming.trim() === current.name) {
+              setRenaming(null);
+              return;
+            }
+            void onRename(renaming.trim()).then((ok) => ok && setRenaming(null));
+          }}
+        >
+          <input
+            aria-label="工作区名称"
+            autoFocus
+            maxLength={80}
+            onChange={(event) => setRenaming(event.target.value)}
+            onKeyDown={(event) => event.key === "Escape" && setRenaming(null)}
+            value={renaming}
+          />
+          <button aria-label="保存名称" className="sl-icon-btn" disabled={busy || !renaming.trim()} title="保存（Enter）" type="submit">
+            <Check size={15} />
+          </button>
+          <button aria-label="取消改名" className="sl-icon-btn" onClick={() => setRenaming(null)} title="取消（Esc）" type="button">
+            <X size={15} />
+          </button>
+        </form>
+      ) : (
+        <select
+          aria-label="最近的工作区"
+          className="sl-bar-recent"
+          onChange={(event) => event.target.value && onSelectWorkspace(event.target.value)}
+          value={current?.id ?? ""}
+        >
+          <option value="">最近的工作区…</option>
+          {workspaces.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {current && renaming === null ? (
+        <button
+          aria-label="改名"
+          className="sl-icon-btn"
+          disabled={busy}
+          onClick={() => setRenaming(current.name)}
+          title={current.kind === "files" ? "给这个图片组改名" : "给这个工作区改名（文件夹本身不改）"}
+          type="button"
+        >
+          <Pencil size={14} />
+        </button>
+      ) : null}
       {current ? (
         <span className="sl-bar-meta" title={current.root}>
           {imageCount} 张

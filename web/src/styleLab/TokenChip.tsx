@@ -1,5 +1,6 @@
 import type { RecipeToken } from "./api";
 import type { Zone } from "./recipeModel";
+import { hasSeparator } from "./tokens";
 
 export function originKind(origin: string): "character" | "action" | "manual" | "source" {
   if (origin.startsWith("character:")) return "character";
@@ -26,13 +27,13 @@ type TokenChipProps = {
 };
 
 export function TokenChip({ token, zone, zh, hint, selected, draggable, onClick, onDragStart }: TokenChipProps) {
-  const title = [token.text, hint, token.origins.filter((origin) => origin !== "source").join("、")]
+  const title = [token.text, hasSeparator(token.text) ? "划分时整段标出的一块，里面不再分词" : null, hint, token.origins.filter((origin) => origin !== "source").join("、")]
     .filter(Boolean)
     .join("\n");
   return (
     <button
       aria-pressed={selected}
-      className={`sl-chip zone-${zone} ${originClass(token)} ${selected ? "selected" : ""}`}
+      className={`sl-chip zone-${zone} ${originClass(token)} ${hasSeparator(token.text) ? "group" : ""} ${selected ? "selected" : ""}`}
       data-token-id={token.id}
       draggable={draggable}
       onClick={onClick}

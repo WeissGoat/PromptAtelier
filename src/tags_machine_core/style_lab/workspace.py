@@ -118,6 +118,12 @@ class WorkspaceStore:
                     return stored
         raise KeyError(workspace_id)
 
+    def rename(self, info: WorkspaceInfo, name: str) -> WorkspaceInfo:
+        with self._lock:
+            info = info.model_copy(update={"name": name})
+            self._save_workspace(info)
+            return info
+
     def add_files(self, workspace_id: str, files: list[Path]) -> WorkspaceInfo:
         info = self.get(workspace_id)
         merged = list(dict.fromkeys([*info.files, *(str(path.resolve()) for path in files)]))

@@ -28,6 +28,7 @@ import {
   listWorkspaces,
   openFolder,
   removeImages,
+  renameWorkspace,
   rescanWorkspace,
   restoreImages,
   startRegenerate,
@@ -472,6 +473,19 @@ export function StyleLabPage() {
         }}
         onCreateGroup={(files) => void importFiles(files, "new")}
         onOpenFolder={(path) => void run(() => openFolder(path))}
+        onRename={async (name) => {
+          if (!workspace) return false;
+          setError(null);
+          try {
+            const { workspace: renamed } = await renameWorkspace(workspace.id, name);
+            setPayload((current) => (current && current.workspace.id === renamed.id ? { ...current, workspace: renamed } : current));
+            setWorkspaces((items) => items.map((item) => (item.id === renamed.id ? renamed : item)));
+            return true;
+          } catch (exc) {
+            setError(errorMessage(exc));
+            return false;
+          }
+        }}
         onRestoreImages={() => workspace && void run(() => restoreImages(workspace.id))}
         onRescan={() => workspace && void run(() => rescanWorkspace(workspace.id))}
         onSelectWorkspace={(id) => void run(() => getWorkspace(id))}

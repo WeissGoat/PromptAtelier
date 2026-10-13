@@ -45,6 +45,8 @@ type RecipeEditorProps = {
   source: ImageRecord | null;
   categories: Record<string, TagCategory>;
   frequency: Map<string, number>;
+  /** 划分时的热力图：tag 在整个工作区投稿里的出现率。 */
+  heat?: { frequency: Map<string, number>; posts: number };
   analysisReady: boolean;
   translateOn: boolean;
   preview: RecipePreview | null;
@@ -57,6 +59,7 @@ export function RecipeEditor({
   source,
   categories,
   frequency,
+  heat,
   analysisReady,
   translateOn,
   preview,
@@ -69,6 +72,7 @@ export function RecipeEditor({
         analysisReady={analysisReady}
         categories={categories}
         frequency={frequency}
+        heat={heat}
         onCommit={onChange}
         recipe={draft}
         sourcePrompt={source?.prompt ?? null}

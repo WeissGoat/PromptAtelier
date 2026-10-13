@@ -5,6 +5,7 @@ import {
   addTokens,
   commitTextSplit,
   markRange,
+  markTokens,
   moveTokens,
   placeToken,
   postFrequency,
@@ -67,14 +68,35 @@ describe("split stage", () => {
     split = mark(split, "shirabi|[[akipeko]]", "prefix");
     split = mark(split, "smooth shading, best quality", "suffix");
     const committed = commitTextSplit(base, split);
-    expect(texts(committed.prefix)).toEqual(["shirabi", "[[akipeko]]"]);
+    // 标出的一段整体是一块，里面不再分词；没标的主体照常分词。
+    expect(texts(committed.prefix)).toEqual(["shirabi|[[akipeko]]"]);
     expect(texts(committed.subject)).toEqual(["1girl", "sitting"]);
-    expect(texts(committed.suffix)).toEqual(["smooth shading", "best quality"]);
+    expect(texts(committed.suffix)).toEqual(["smooth shading, best quality"]);
     expect(committed.stage).toBe("edit");
     expect(committed.locked).toBe(true);
-    // 竖线分隔符保留在 token 上，前缀拼回去和原文一致；没变的 token 沿用原来的 id。
-    expect(tokensToText(committed.prefix)).toBe("shirabi|[[akipeko]]");
+    // 没变的 token 沿用原来的 id。
     expect(committed.subject[0].id).toBe(base.subject[2].id);
+
+    // 按 tag 拆开标：每个 tag 各成一块，原文的竖线分隔符保留，拼回去和原文一致。
+    const start = split.text.indexOf("shirabi");
+    const perTag = commitTextSplit(base, markTokens(split, start, start + "shirabi|[[akipeko]]".length, "prefix"));
+    expect(texts(perTag.prefix)).toEqual(["shirabi", "[[akipeko]]"]);
+    expect(tokensToText(perTag.prefix)).toBe("shirabi|[[akipeko]]");
+  });
+
+  it("splits by characters where the tokenizer cannot, and finds the pieces again", () => {
+    const prompt = "1boy,1girl-1::,Chibi character,Too precise hair::\nmosaic censorship";
+    const base = recipe(prompt);
+    const split = mark(textSplitOf(base, prompt), "-1::,Chibi character,Too precise hair::", "dropped");
+    const committed = commitTextSplit(base, split);
+    expect(texts(committed.subject)).toEqual(["1boy", "1girl", "mosaic censorship"]);
+    expect(texts(committed.dropped)).toEqual(["-1::,Chibi character,Too precise hair::"]);
+    // 重新划分：紧贴在 1girl 后面的那块也能在原文里找回原位。
+    const again = textSplitOf(committed, prompt);
+    expect(again.text).toBe(prompt);
+    expect(again.marks.map((item) => [again.text.slice(item.start, item.end), item.zone])).toEqual([
+      ["-1::,Chibi character,Too precise hair::", "dropped"],
+    ]);
   });
 
   it("cuts natural-language sentences where the text was selected", () => {
@@ -84,27 +106,28 @@ describe("split stage", () => {
     split = mark(split, "color trace, 这是一幅日式动漫插画。采用细腻的线稿", "prefix");
     split = mark(split, "very aesthetic, masterpiece", "suffix");
     const committed = commitTextSplit(base, split);
-    expect(texts(committed.prefix)).toEqual(["color trace", "这是一幅日式动漫插画。采用细腻的线稿"]);
+    expect(texts(committed.prefix)).toEqual(["color trace, 这是一幅日式动漫插画。采用细腻的线稿"]);
     expect(texts(committed.subject)).toEqual(["少女站在中央。looking back"]);
-    expect(texts(committed.suffix)).toEqual(["very aesthetic", "masterpiece"]);
+    expect(texts(committed.suffix)).toEqual(["very aesthetic, masterpiece"]);
   });
 
-  it("snaps a drag to whole words and whole weight groups", () => {
+  it("takes a drag by characters, only trimming spaces and commas at the ends", () => {
     const group = "1.1::year 2025, year 2026,::";
     const text = `color trace, ${group}, smile`;
-    // 半个词补全，两头的逗号空格去掉。
-    expect(snapRange(text, 2, 13)).toEqual([0, 11]);
-    // 切到权重组中间：整组带上。
+    expect(snapRange(text, 2, 13)).toEqual([2, 11]);
     const inside = text.indexOf("2025");
-    expect(snapRange(text, inside, inside + 4)).toEqual([13, 13 + group.length]);
+    expect(snapRange(text, inside, inside + 4)).toEqual([inside, inside + 4]);
     expect(snapRange(text, 11, 13)).toBeNull();
   });
 
-  it("re-marks, clears and merges marks", () => {
+  it("re-marks and clears marks; each mark stays its own block", () => {
     let split: TextSplit = { text: "a, b, c, d", marks: [] };
     split = mark(split, "a", "prefix");
     split = mark(split, "b", "prefix");
-    expect(split.marks).toEqual([{ start: 0, end: 4, zone: "prefix" }]);
+    expect(split.marks).toEqual([
+      { start: 0, end: 1, zone: "prefix" },
+      { start: 3, end: 4, zone: "prefix" },
+    ]);
     split = mark(split, "b", "subject");
     expect(split.marks).toEqual([{ start: 0, end: 1, zone: "prefix" }]);
     split = mark(split, "c, d", "suffix");

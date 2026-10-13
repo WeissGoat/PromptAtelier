@@ -81,6 +81,20 @@
   padding: 0 8px;
 }
 
+.sl-bar-rename {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.sl-bar-rename input {
+  border: 1px solid var(--sl-accent-border);
+  border-radius: 6px;
+  min-height: 34px;
+  padding: 0 8px;
+  width: 220px;
+}
+
 .sl-bar-meta {
   align-items: center;
   color: var(--sl-muted);

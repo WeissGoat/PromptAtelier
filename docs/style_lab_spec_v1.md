@@ -126,6 +126,7 @@ llm:
 | --- | --- | --- |
 | GET | `/api/style-lab/workspaces` | 已登记的工作区 |
 | POST | `/api/style-lab/workspaces` | 打开或创建：`{"root": "<文件夹>"}` 或 `{"files": [...], "name": "..."}` |
+| PUT | `/api/style-lab/workspaces/{id}/name` | 改工作区名称：`{"name"}`，空白合并，1~80 字 |
 | GET | `/api/style-lab/workspaces/{id}` | 工作区设置 + 图片记录列表 |
 | POST | `/api/style-lab/workspaces/{id}/scan` | 增量重扫 |
 | POST | `/api/style-lab/workspaces/{id}/upload` | 图片组工作区上传图片（multipart `files`） |
@@ -189,6 +190,13 @@ llm:
 | `flags` | 默认带 `not_quailty_prompts`，避免 legacy 画风自动追加项目质量词 |
 
 每个 token 记录来源：`source`、`character:<ref>`、`action:<ref>`、`manual`。素材卡片按来源整体加入或移除；同一 tag 已在主体里时只多记一个来源，不重复添加。带数字权重的 token（如 `0.0::loli::`）不和无权重的同名 tag 合并。
+
+### 划分
+
+- 在原文上按字符标记范围，只去掉两头的空格和逗号。每段标记各自成块，相邻的不合并。
+- 锁定时，前缀、后缀、丢弃里每段标记写成一个 token（文本就是标出的原文，不再分词）；同一区的两段之间只隔着分隔符时沿用原文的分隔符。没标的主体照常分词。`按 tag 拆开` 时选区里的每个 token 各标一段。
+- 重新划分时，token 先在原文的词边界上找位置，找不到再认任意位置（按字符切出的块可能紧贴着别的字）。
+- 热力图用整个工作区的投稿级出现率（一个投稿算一次），和划分建议用的同组出现率不同。
 
 ### 划分建议
 

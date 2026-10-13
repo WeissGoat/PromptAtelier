@@ -366,6 +366,16 @@ class WebStyleLabTest(TestCase):
         self.assertEqual(response.json()["uploaded"], 1)
         self.assertEqual(len(response.json()["images"]), 1)
 
+    def test_rename_workspace(self):
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "图片组 1"}).json()
+        url = f"/api/style-lab/workspaces/{created['workspace']['id']}/name"
+        renamed = self.client.put(url, json={"name": "  奏  测试 "})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["workspace"]["name"], "奏 测试")
+        listed = self.client.get("/api/style-lab/workspaces").json()["workspaces"]
+        self.assertEqual([item["name"] for item in listed], ["奏 测试"])
+        self.assertEqual(self.client.put(url, json={"name": " "}).status_code, 400)
+
     def test_remove_images_keeps_originals_and_can_restore(self):
         data = self._open()
         workspace_id = data["workspace"]["id"]

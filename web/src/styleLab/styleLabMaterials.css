@@ -704,3 +704,11 @@
     width: auto;
   }
 }
+
+/* 划分时整段标出的一块（里面有逗号等分隔符）：虚线框和淡底色表示一组。 */
+.sl-chip.group {
+  background-image: linear-gradient(rgba(60, 52, 137, 0.06), rgba(60, 52, 137, 0.06));
+  border-style: dashed;
+  max-width: 100%;
+  white-space: normal;
+}

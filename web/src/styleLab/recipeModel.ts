@@ -3,7 +3,7 @@
  * 所有函数都返回新对象，不改动传入的配方。
  */
 import type { ImageRecord, Recipe, RecipeMaterial, RecipeToken, TagCategory } from "./api";
-import { DEFAULT_SEP, hasSeparator, innerTags, protectedRanges, tokenize } from "./tokens";
+import { DEFAULT_SEP, hasSeparator, innerTags, tokenize } from "./tokens";
 
 export type Zone = "prefix" | "subject" | "suffix" | "dropped";
 export const ZONES: Zone[] = ["prefix", "subject", "suffix", "dropped"];
@@ -41,7 +41,7 @@ export function normalizeText(text: string): string {
 
 // ---- 划分阶段：在原文上拖选标记 ----
 
-/** 标出来的一段原文。没标的都是主体。 */
+/** 标出来的一段原文，锁定后整段是一个 token（内部不再分词）。没标的都是主体，照常分词。 */
 export type MarkZone = Exclude<Zone, "subject">;
 export type TextMark = { start: number; end: number; zone: MarkZone };
 export type TextSplit = { text: string; marks: TextMark[] };
@@ -55,33 +55,14 @@ function isEdgeOnly(text: string): boolean {
 }
 
 /**
- * 拖选的范围对齐到能单独成块的边界：去掉两头的空格和逗号，半个英文词补全，
- * 切到半个括号组、权重组时整组带上。中文句子按选中的字切，不扩。
+ * 拖选的范围按字符算，只去掉两头的空格和逗号，不按分词补全：
+ * "1girl-1::,Chibi character::" 这种分词切不准的地方可以从中间切开。
  */
 export function snapRange(text: string, start: number, end: number): [number, number] | null {
   let s = Math.max(0, Math.min(start, end));
   let e = Math.min(text.length, Math.max(start, end));
-  const trim = () => {
-    while (s < e && EDGE_CHAR.test(text[s])) s += 1;
-    while (e > s && EDGE_CHAR.test(text[e - 1])) e -= 1;
-  };
-  trim();
-  if (s >= e) return null;
-  while (s > 0 && WORD_CHAR.test(text[s - 1]) && WORD_CHAR.test(text[s])) s -= 1;
-  while (e < text.length && WORD_CHAR.test(text[e - 1]) && WORD_CHAR.test(text[e])) e += 1;
-  const groups = protectedRanges(text);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [a, b] of groups) {
-      if (a < e && b > s && (a < s || b > e)) {
-        s = Math.min(s, a);
-        e = Math.max(e, b);
-        changed = true;
-      }
-    }
-  }
-  trim();
+  while (s < e && EDGE_CHAR.test(text[s])) s += 1;
+  while (e > s && EDGE_CHAR.test(text[e - 1])) e -= 1;
   return s < e ? [s, e] : null;
 }
 
@@ -93,7 +74,7 @@ function trimMark(text: string, mark: TextMark): TextMark {
   return { ...mark, start, end };
 }
 
-/** 把 [start, end) 标成某个区；标成主体就是清掉这段的标记。相邻（只隔逗号空格）的同区标记合并。 */
+/** 把 [start, end) 标成某个区；标成主体就是清掉这段的标记。每段标记各自成块，相邻的不合并。 */
 export function markRange(split: TextSplit, start: number, end: number, zone: Zone): TextSplit {
   const pieces: TextMark[] = [];
   for (const mark of split.marks) {
@@ -105,20 +86,21 @@ export function markRange(split: TextSplit, start: number, end: number, zone: Zo
     if (mark.end > end) pieces.push({ ...mark, start: end });
   }
   if (zone !== "subject") pieces.push({ start, end, zone });
-  const marks: TextMark[] = [];
-  pieces
+  const marks = pieces
     .map((mark) => trimMark(split.text, mark))
     .filter((mark) => mark.start < mark.end)
-    .sort((a, b) => a.start - b.start)
-    .forEach((mark) => {
-      const last = marks[marks.length - 1];
-      if (last && last.zone === mark.zone && isEdgeOnly(split.text.slice(last.end, mark.start))) {
-        marks[marks.length - 1] = { ...last, end: Math.max(last.end, mark.end) };
-      } else {
-        marks.push(mark);
-      }
-    });
+    .sort((a, b) => a.start - b.start);
   return { ...split, marks };
+}
+
+/** 按 tag 拆开标：选中的范围里每个 token 各标一段（各自成块）。 */
+export function markTokens(split: TextSplit, start: number, end: number, zone: Zone): TextSplit {
+  let next = markRange(split, start, end, "subject");
+  if (zone === "subject") return next;
+  for (const span of tokenSpans(split.text.slice(start, end))) {
+    next = markRange(next, start + span.start, start + span.end, zone);
+  }
+  return next;
 }
 
 /** 整段原文按区切成连续的几段（没标的是主体），用于显示和写回配方。 */
@@ -162,11 +144,18 @@ export function textSplitOf(recipe: Recipe, sourcePrompt?: string | null): TextS
   const claimed: Array<[number, number]> = [];
   const found: TextMark[] = [];
   const missing: Array<{ text: string; zone: MarkZone }> = [];
-  const claim = (piece: string): number => {
+  const free = (at: number, length: number) => !claimed.some(([a, b]) => a < at + length && b > at);
+  // 先找词边界上的（"girl" 不认 "1girl" 里的），找不到再认任意位置：按字符划分的块可能紧贴着别的字。
+  const find = (piece: string, boundary: boolean): number => {
     let at = text.indexOf(piece);
-    while (at >= 0 && (claimed.some(([a, b]) => a < at + piece.length && b > at) || !isBoundary(text, at, at + piece.length))) {
+    while (at >= 0 && (!free(at, piece.length) || (boundary && !isBoundary(text, at, at + piece.length)))) {
       at = text.indexOf(piece, at + 1);
     }
+    return at;
+  };
+  const claim = (piece: string): number => {
+    let at = find(piece, true);
+    if (at < 0) at = find(piece, false);
     if (at >= 0) claimed.push([at, at + piece.length]);
     return at;
   };
@@ -218,8 +207,8 @@ export function suggestTextMarks(
 }
 
 /**
- * 把标记写回配方（保持原文顺序），进入编辑阶段并锁定画风。文字相同的 token 沿用原来的 id 和来源；
- * 主体里原图之外的 token（素材、手打的）留在主体末尾。
+ * 把标记写回配方（保持原文顺序），进入编辑阶段并锁定画风。标出来的一段整段是一个 token，没标的主体照常分词。
+ * 文字相同的 token 沿用原来的 id 和来源；主体里原图之外的 token（素材、手打的）留在主体末尾。
  */
 export function commitTextSplit(recipe: Recipe, split: TextSplit): Recipe {
   const pool = new Map<string, RecipeToken[]>();
@@ -230,8 +219,18 @@ export function commitTextSplit(recipe: Recipe, split: TextSplit): Recipe {
   }
   const zones: Record<Zone, RecipeToken[]> = { prefix: [], subject: [], suffix: [], dropped: [] };
   const used = new Set<string>();
+  // 每个区上一块在原文里的结尾：同区的两块之间只隔着分隔符时（如 "a|b" 分开标），沿用原文的分隔符。
+  const lastEnd: Partial<Record<Zone, number>> = {};
   for (const segment of textSegments(split)) {
-    for (const token of tokenize(split.text.slice(segment.start, segment.end)).tokens) {
+    const piece = split.text.slice(segment.start, segment.end);
+    let pieces = segment.zone === "subject" ? tokenize(piece).tokens : [];
+    if (segment.zone !== "subject") {
+      const before = lastEnd[segment.zone];
+      const gap = before === undefined ? "" : split.text.slice(before, segment.start);
+      pieces = [{ text: piece, sep: gap && isEdgeOnly(gap) ? gap : "" }];
+      lastEnd[segment.zone] = segment.end;
+    }
+    for (const token of pieces) {
       const reuse = pool.get(token.text)?.shift();
       const next = reuse
         ? { ...reuse, sep: token.sep }

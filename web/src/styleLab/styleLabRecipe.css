@@ -386,9 +386,33 @@
   user-select: none;
 }
 
+/* 热力图：底色是 tag 在工作区投稿里的出现率；区改用下划线和字色表示。 */
+.sl-mark-text.heat .sl-mark {
+  background: rgba(234, 88, 12, calc(var(--heat, 0) * 0.55));
+  border-radius: 3px;
+}
+
+.sl-mark-text.heat .sl-mark.zone-prefix {
+  box-shadow: inset 0 -3px #6f63d8;
+}
+
+.sl-mark-text.heat .sl-mark.zone-suffix {
+  box-shadow: inset 0 -3px #c95f95;
+}
+
 .sl-mark.pending {
   background: #ffe9a8;
   box-shadow: inset 0 -2px #e0a800;
+}
+
+.sl-mark-text.heat .sl-mark.pending {
+  background: #ffe9a8;
+  box-shadow: inset 0 -2px #e0a800;
+}
+
+.sl-mark-pertag {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .sl-split-result {

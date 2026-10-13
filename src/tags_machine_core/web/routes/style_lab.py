@@ -105,6 +105,17 @@ def get_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
     return _workspace_payload(store, info)
 
 
+@router.put("/workspaces/{workspace_id}/name")
+def rename_workspace(workspace_id: str, data: dict[str, Any], request: Request) -> dict[str, Any]:
+    name = " ".join(str(data.get("name") or "").split())
+    if not name:
+        raise ApiError(code="invalid_workspace_name", message="Name must not be empty", status_code=400)
+    if len(name) > 80:
+        raise ApiError(code="invalid_workspace_name", message="Name is too long (max 80)", status_code=400)
+    info = _store(request).rename(_workspace(request, workspace_id), name)
+    return {"workspace": info.model_dump(mode="json", by_alias=True)}
+
+
 @router.post("/workspaces/{workspace_id}/scan")
 def scan_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
     store = _store(request)
