@@ -1,4 +1,4 @@
-import { GripVertical, ImageOff, Plus, Trash2, UserRound, X } from "lucide-react";
+import { Check, Copy, GripVertical, ImageOff, Plus, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage, nodePreviewUrl } from "../api/client";
@@ -31,6 +31,18 @@ const ROLE_LABELS: Record<MaterialRole, string> = { character: "角色", action:
 const NO_FACETS: Record<string, string> = {};
 /** 换配方时停在上次的页签。 */
 let lastTab: MaterialRole = "character";
+
+/** 在素材块里拖选后复制：复制选到的 tag 本身（不带译文），用逗号分隔；没选到 tag 时按浏览器默认复制。 */
+function copySelectedTags(event: React.ClipboardEvent<HTMLElement>) {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return;
+  const tags = [...event.currentTarget.querySelectorAll<HTMLElement>("[data-tag]")]
+    .filter((element) => selection.containsNode(element, true))
+    .map((element) => element.dataset.tag!);
+  if (!tags.length) return;
+  event.preventDefault();
+  event.clipboardData.setData("text/plain", tags.join(", "));
+}
 
 function sameMaterial(a: RecipeMaterial, b: RecipeMaterial): boolean {
   return a.role === b.role && a.ref === b.ref;
@@ -220,21 +232,33 @@ function MaterialBlock({
     putOnShelf({ ...material, excluded });
     if (inRecipe) onChange(toggleMaterialTag(draft, origin, tag, allTags));
   };
+  const [copied, setCopied] = useState(false);
+  const copyIncluded = async () => {
+    try {
+      await navigator.clipboard.writeText(included.join(", "));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 剪贴板不可用（非安全上下文）时就不提示。
+    }
+  };
   const setAll = (include: boolean) => {
     putOnShelf({ ...material, excluded: include ? [] : allTags });
     if (inRecipe) onChange(setMaterialTags(draft, origin, allTags, include));
   };
 
   return (
-    <article
-      className={`sl-mblock origin-${material.role}`}
-      draggable={!disabled && Boolean(detail)}
-      onDragStart={(event) => {
-        event.dataTransfer.setData(MATERIAL_DRAG_TYPE, JSON.stringify(drag));
-        event.dataTransfer.effectAllowed = "copy";
-      }}
-    >
-      <header className="sl-mblock-head">
+    <article className={`sl-mblock origin-${material.role}`} onCopy={copySelectedTags}>
+      {/* 只有标题栏能拖，下面的 tag 可以拖选复制。 */}
+      <header
+        className="sl-mblock-head"
+        draggable={!disabled && Boolean(detail)}
+        onDragStart={(event) => {
+          event.dataTransfer.setData(MATERIAL_DRAG_TYPE, JSON.stringify(drag));
+          event.dataTransfer.effectAllowed = "copy";
+        }}
+        title="拖动标题栏把整块放进主体或角色提示词"
+      >
         <GripVertical className="sl-mblock-grip" size={14} aria-hidden="true" />
         <span className="sl-mblock-thumb">
           {detail?.has_preview && !previewFailed ? (
@@ -272,19 +296,32 @@ function MaterialBlock({
           {section.tags.map((tag) => {
             const off = material.excluded.includes(tag);
             const zh = lookup(tag);
+            const toggle = () => {
+              // 拖选文字（准备复制）时松开鼠标不算点击。
+              if (filterLocked || window.getSelection()?.toString()) return;
+              toggleTag(tag);
+            };
             return (
-              <button
+              <span
+                aria-disabled={filterLocked || undefined}
                 aria-pressed={!off}
                 className={`sl-card-tag ${off ? "off" : "on"}`}
-                disabled={filterLocked}
+                data-tag={tag}
                 key={tag}
-                onClick={() => toggleTag(tag)}
-                title={off ? "点击选回来" : "点击筛掉（已加入时同步去掉）"}
-                type="button"
+                onClick={toggle}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggle();
+                  }
+                }}
+                role="button"
+                tabIndex={filterLocked ? -1 : 0}
+                title={off ? "点击选回来；可以拖选复制" : "点击筛掉（已加入时同步去掉）；可以拖选复制"}
               >
                 {tag}
                 {zh ? <span className="sl-chip-zh">{zh}</span> : null}
-              </button>
+              </span>
             );
           })}
         </div>
@@ -330,6 +367,16 @@ function MaterialBlock({
             </button>
           )}
           <span className="sl-bar-spacer" />
+          <button
+            className="sl-link-btn"
+            disabled={!included.length}
+            onClick={() => void copyIncluded()}
+            title="复制选中的 tag（逗号分隔）"
+            type="button"
+          >
+            {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+            {copied ? "已复制" : "复制"}
+          </button>
           <button className="sl-link-btn" disabled={filterLocked} onClick={() => setAll(true)} type="button">
             全选
           </button>

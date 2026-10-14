@@ -23,18 +23,20 @@ type TokenChipProps = {
   zh?: string;
   hint?: string;
   selected?: boolean;
+  /** 右上角留出删除按钮的位置（按钮在外面，按钮里不能套按钮）。 */
+  removable?: boolean;
   draggable?: boolean;
   onClick?: (event: React.MouseEvent) => void;
   onDoubleClick?: (event: React.MouseEvent) => void;
   onDragStart?: (event: React.DragEvent) => void;
 };
 
-export function TokenChip({ token, zone, zh, hint, selected, draggable, onClick, onDoubleClick, onDragStart }: TokenChipProps) {
+export function TokenChip({ token, zone, zh, hint, selected, removable, draggable, onClick, onDoubleClick, onDragStart }: TokenChipProps) {
   const title = [token.text, hint, token.origins.filter((origin) => origin !== "source").join("、")].filter(Boolean).join("\n");
   return (
     <button
       aria-pressed={selected}
-      className={`sl-chip zone-${zone} ${originClass(token)} ${selected ? "selected" : ""}`}
+      className={`sl-chip zone-${zone} ${originClass(token)} ${selected ? "selected" : ""} ${removable ? "removable" : ""}`}
       data-token-id={token.id}
       draggable={draggable}
       onClick={onClick}

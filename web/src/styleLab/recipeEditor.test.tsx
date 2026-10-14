@@ -72,6 +72,15 @@ describe("recipe blocks", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
+  it("deletes a block with its × button; locked style blocks have none", () => {
+    const onChange = renderEditor();
+    fireEvent.click(screen.getByRole("button", { name: "删除 1girl, sitting" }));
+    expect((onChange.mock.calls[0][0] as Recipe).subject).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "删除 girl, akemi homura" }));
+    expect((onChange.mock.calls[1][0] as Recipe).character.captions[0].tokens).toEqual([]);
+    expect(screen.queryByRole("button", { name: "删除 artist:foo, flat color" })).toBeNull();
+  });
+
   it("uses the same blocks in character captions", () => {
     const onChange = renderEditor();
     fireEvent.doubleClick(screen.getByText("girl, akemi homura"));

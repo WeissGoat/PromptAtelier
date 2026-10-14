@@ -177,6 +177,22 @@ describe("LibraryPanel", () => {
     const added = onChange.mock.calls[0][0] as Recipe;
     expect(added.materials).toEqual([{ ...miku, excluded: ["twintails"] }]);
     expect(added.subject.map((item) => item.text)).toEqual(["1girl", "smile", "aqua hair"]);
+
+    // 只有标题栏能拖，tag 区可以拖选复制：复制出来的是 tag 本身，逗号分隔，拖选松手不算点击。
+    const card = screen.getByRole("button", { name: /aqua hair/ }).closest("article")!;
+    expect(card.getAttribute("draggable")).toBeNull();
+    expect(card.querySelector("header")!.getAttribute("draggable")).toBe("true");
+    const range = document.createRange();
+    range.selectNodeContents(card.querySelector(".sl-card-section")!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    const setData = vi.fn();
+    fireEvent.copy(card, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "aqua hair, twintails");
+    const saves = api.saveShelf.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: /aqua hair/ }));
+    expect(api.saveShelf.mock.calls.length).toBe(saves);
+    window.getSelection()!.removeAllRanges();
   });
 
   it("keeps the shelf and the action filters when another recipe opens", async () => {

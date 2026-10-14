@@ -233,7 +233,7 @@
   border-left-color: #378add;
 }
 
-.sl-mblock[draggable="true"] .sl-mblock-head {
+.sl-mblock-head[draggable="true"] {
   cursor: grab;
 }
 
@@ -304,6 +304,15 @@
   border-style: dashed;
   color: #9ca3af;
   text-decoration: line-through;
+}
+
+.sl-card-tag[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.sl-card-tag .sl-chip-zh {
+  user-select: none;
 }
 
 .sl-card-tag.off .sl-chip-zh {

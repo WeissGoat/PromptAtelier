@@ -281,7 +281,7 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
         zone="suffix"
       />
       {draft.dropped.length ? (
-        <ZoneBox {...shared} editable={false} hint="不进提示词" locked={false} title="丢弃" tokens={draft.dropped} zone="dropped" />
+        <ZoneBox {...shared} editable={false} hint="不进提示词" locked={false} removable title="丢弃" tokens={draft.dropped} zone="dropped" />
       ) : null}
       <NegativeSection draft={draft} onChange={onChange} />
       <StyleParams draft={draft} onChange={onChange} source={source} />

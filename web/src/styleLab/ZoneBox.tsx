@@ -24,6 +24,8 @@ type ZoneBoxProps = {
   onDropToken: (id: string, zone: Zone, index: number) => void;
   onEdit?: (id: string, text: string) => void;
   onAdd?: (text: string) => void;
+  /** 删除一块；不给时跟 editable 一样（锁定的画风区没有删除按钮）。 */
+  removable?: boolean;
   /** 接受从素材架拖来的整块素材。 */
   onDropMaterial?: (drag: MaterialDrag, index: number) => void;
   blocks?: BlockOptions;
@@ -45,6 +47,7 @@ export function ZoneBox({
   onDropToken,
   onEdit,
   onAdd,
+  removable = editable,
   onDropMaterial,
   blocks,
 }: ZoneBoxProps) {
@@ -108,6 +111,7 @@ export function ZoneBox({
         onAddDone={() => setAdding(false)}
         onEdit={onEdit}
         onSelect={onSelect}
+        removable={removable}
         selected={selected}
         tokens={tokens}
         zone={zone}
@@ -125,6 +129,8 @@ type BlockChipsProps = {
   hints?: Record<string, string>;
   blocks?: BlockOptions;
   editable: boolean;
+  /** 每块右上角带 × 删除（通过 onEdit 改成空文字）；默认跟 editable 一样。 */
+  removable?: boolean;
   draggable?: boolean;
   dropIndex?: number | null;
   adding: boolean;
@@ -145,6 +151,7 @@ export function BlockChips({
   hints,
   blocks,
   editable,
+  removable = editable,
   draggable,
   dropIndex,
   adding,
@@ -186,12 +193,24 @@ export function BlockChips({
                       }
                     : undefined
                 }
+                removable={removable && Boolean(onEdit)}
                 selected={selected.has(token.id)}
                 token={token}
                 zh={lookup(token.text)}
                 zone={zone}
               />
             )}
+            {removable && onEdit && editing !== token.id ? (
+              <button
+                aria-label={`删除 ${token.text}`}
+                className="sl-chip-remove"
+                onClick={() => onEdit(token.id, "")}
+                title="删除这一块"
+                type="button"
+              >
+                <X size={11} />
+              </button>
+            ) : null}
           </span>
         ));
         if (!group.origin || !blocks) return slots;
