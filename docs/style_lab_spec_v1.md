@@ -126,6 +126,7 @@ llm:
 | --- | --- | --- |
 | GET | `/api/style-lab/workspaces` | 已登记的工作区 |
 | POST | `/api/style-lab/workspaces` | 打开或创建：`{"root": "<文件夹>"}` 或 `{"files": [...], "name": "..."}` |
+| DELETE | `/api/style-lab/workspaces/{id}` | 删除工作区：图片组数据移到 `runtime/stylelab/trash/`，文件夹工作区只从列表去掉；有未完成的出图时 409 |
 | PUT | `/api/style-lab/workspaces/{id}/name` | 改工作区名称：`{"name"}`，空白合并，1~80 字 |
 | GET | `/api/style-lab/workspaces/{id}` | 工作区设置 + 图片记录列表 |
 | POST | `/api/style-lab/workspaces/{id}/scan` | 增量重扫 |

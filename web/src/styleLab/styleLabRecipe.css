@@ -391,11 +391,28 @@
   box-shadow: inset 0 -2px #e0a800;
 }
 
-/* 热力图：每个 tag 上沿一条橙色细条，越深越常见；区的底色和下划线不变。 */
+/* 热力图：每个 tag 上沿一条色条，从蓝（少见）经绿、黄到红（几乎每个投稿都有）；区的底色和下划线不变。 */
 .sl-mark-text.heat .sl-mark.hot {
+  --heat-color: hsl(calc(225 - var(--heat, 0) * 225) 85% 48%);
   -webkit-box-decoration-break: clone;
-  background-image: linear-gradient(to bottom, rgba(234, 88, 12, calc(0.15 + var(--heat, 0) * 0.85)) 0 4px, transparent 4px);
+  background-image: linear-gradient(to bottom, var(--heat-color) 0 5px, transparent 5px);
   box-decoration-break: clone;
+}
+
+.sl-heat-legend {
+  align-items: center;
+  color: var(--sl-muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+}
+
+.sl-heat-legend i {
+  background: linear-gradient(to right, hsl(225 85% 48%), hsl(150 85% 40%), hsl(55 90% 48%), hsl(0 85% 48%));
+  border-radius: 3px;
+  display: inline-block;
+  height: 6px;
+  width: 64px;
 }
 
 .sl-mark-pertag {

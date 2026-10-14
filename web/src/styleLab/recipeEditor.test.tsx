@@ -98,6 +98,24 @@ describe("recipe blocks", () => {
     expect(withBlock.character.captions[0].tokens.map((token) => token.text)).toEqual(["girl, akemi homura", "sitting, looking back"]);
   });
 
+  it("drags a subject block into a character caption", () => {
+    const onChange = renderEditor();
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      types: ["text/x-token-id"],
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? "",
+      effectAllowed: "move",
+    };
+    fireEvent.dragStart(screen.getByText("1girl, sitting"), { dataTransfer });
+    const target = screen.getByText("girl, akemi homura");
+    fireEvent.dragOver(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+    const next = onChange.mock.calls[0][0] as Recipe;
+    expect(next.subject).toEqual([]);
+    expect(next.character.captions[0].tokens.map((token) => token.text)).toEqual(["1girl, sitting", "girl, akemi homura"]);
+  });
+
   it("adds a block and splits a selected block by tag", () => {
     const onChange = renderEditor();
     fireEvent.click(screen.getByRole("button", { name: "主体加一块" }));

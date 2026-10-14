@@ -183,12 +183,19 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
           <span className="sl-legend dropped">丢弃 {result.dropped.length}</span>
         </div>
         <span className="sl-bar-spacer" />
+        {heat && showHeat ? (
+          <span className="sl-heat-legend" title={`工作区 ${heat.posts} 个投稿里的出现率`}>
+            少见
+            <i aria-hidden="true" />
+            常见
+          </span>
+        ) : null}
         {heat ? (
           <button
             aria-pressed={showHeat}
             className={`sl-ghost ${showHeat ? "on" : ""}`}
             onClick={() => setShowHeat(!showHeat)}
-            title={`tag 上沿的橙色条越深，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越多`}
+            title={`tag 上沿的色条从蓝到红，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越来越多`}
             type="button"
           >
             <Flame size={14} aria-hidden="true" />

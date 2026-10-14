@@ -183,6 +183,11 @@ export function renameWorkspace(id: string, name: string): Promise<{ workspace: 
   return apiPut(`${base}/workspaces/${encodeURIComponent(id)}/name`, { name });
 }
 
+/** 图片组的数据移到 runtime 的 trash/（trash 是移去的位置）；文件夹工作区只从列表去掉。 */
+export function deleteWorkspace(id: string): Promise<{ removed: string; kind: WorkspaceInfo["kind"]; trash: string | null }> {
+  return apiDelete(`${base}/workspaces/${encodeURIComponent(id)}`);
+}
+
 export function rescanWorkspace(id: string): Promise<WorkspacePayload> {
   return apiPost(`${base}/workspaces/${encodeURIComponent(id)}/scan`, {});
 }

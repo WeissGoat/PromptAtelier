@@ -18,7 +18,15 @@ const group: WorkspaceInfo = {
 
 const noop = () => undefined;
 
-function Bar({ onRename, renameRequest }: { onRename: (name: string) => Promise<boolean>; renameRequest?: number }) {
+function Bar({
+  onRename,
+  renameRequest,
+  onDelete = noop,
+}: {
+  onRename: (name: string) => Promise<boolean>;
+  renameRequest?: number;
+  onDelete?: () => void;
+}) {
   return (
     <WorkspaceBar
       busy={false}
@@ -27,6 +35,7 @@ function Bar({ onRename, renameRequest }: { onRename: (name: string) => Promise<
       llm={null}
       onChangeProvider={noop}
       onCreateGroup={noop}
+      onDelete={onDelete}
       onOpenFolder={noop}
       onRename={onRename}
       onRescan={noop}
@@ -83,6 +92,18 @@ describe("workspace bar", () => {
     expect(screen.queryByRole("textbox", { name: "工作区名称" })).toBeNull();
     rerender(<Bar onRename={onRename} renameRequest={1} />);
     expect((screen.getByRole("textbox", { name: "工作区名称" }) as HTMLInputElement).value).toBe(group.name);
+  });
+
+  it("deletes the current workspace only after confirming", () => {
+    const onDelete = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<Bar onDelete={onDelete} onRename={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "删除工作区" }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(confirm.mock.calls[0][0]).toContain("trash");
+    fireEvent.click(screen.getByRole("button", { name: "删除工作区" }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
   });
 
   it("keeps the input open when renaming fails", async () => {

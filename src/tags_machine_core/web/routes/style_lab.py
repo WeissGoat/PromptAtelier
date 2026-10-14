@@ -116,6 +116,17 @@ def rename_workspace(workspace_id: str, data: dict[str, Any], request: Request) 
     return {"workspace": info.model_dump(mode="json", by_alias=True)}
 
 
+@router.delete("/workspaces/{workspace_id}")
+def delete_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
+    """从列表删掉工作区：图片组的数据移到 runtime 的 trash/，文件夹工作区只从列表去掉（.stylelab 保留）。"""
+    store = _store(request)
+    info = _workspace(request, workspace_id)
+    if store.has_active_runs(info):
+        raise ApiError(code="workspace_busy", message="这个工作区还有没跑完的出图，先停止或等它跑完", status_code=409)
+    trash = store.remove(info)
+    return {"removed": info.id, "kind": info.kind, "trash": str(trash) if trash else None}
+
+
 @router.post("/workspaces/{workspace_id}/scan")
 def scan_workspace(workspace_id: str, request: Request) -> dict[str, Any]:
     store = _store(request)

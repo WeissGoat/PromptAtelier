@@ -1,4 +1,4 @@
-import { Check, FolderOpen, ImagePlus, Languages, LoaderCircle, Pencil, RefreshCw, Undo2, X } from "lucide-react";
+import { Check, FolderOpen, ImagePlus, Languages, LoaderCircle, Pencil, RefreshCw, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { LLMStatus, TranslateProvider, WorkspaceInfo } from "./api";
@@ -40,6 +40,8 @@ type WorkspaceBarProps = {
   onCreateGroup: (files: File[]) => void;
   onSelectWorkspace: (id: string) => void;
   onRename: (name: string) => Promise<boolean>;
+  /** 删除当前工作区（确认后调用）。 */
+  onDelete: () => void;
   onRescan: () => void;
   onRestoreImages: () => void;
   onToggleTranslate: () => void;
@@ -62,6 +64,7 @@ export function WorkspaceBar({
   onCreateGroup,
   onSelectWorkspace,
   onRename,
+  onDelete,
   onRescan,
   onRestoreImages,
   onToggleTranslate,
@@ -182,6 +185,28 @@ export function WorkspaceBar({
           type="button"
         >
           <Pencil size={14} />
+        </button>
+      ) : null}
+      {current && renaming === null ? (
+        <button
+          aria-label="删除工作区"
+          className="sl-icon-btn danger"
+          disabled={busy}
+          onClick={() => {
+            const message =
+              current.kind === "files"
+                ? `删除图片组「${current.name}」？
+
+拖进来的图片副本、配方和出图会一起移到 runtime/stylelab/trash/（需要时还能找回），你电脑上的原图不受影响。`
+                : `从列表移除「${current.name}」？
+
+只是不再显示在列表里，文件夹和其中的 .stylelab（配方、出图）都不动，重新打开这个文件夹就回来。`;
+            if (window.confirm(message)) onDelete();
+          }}
+          title={current.kind === "files" ? "删除这个图片组" : "从列表移除（文件夹不动）"}
+          type="button"
+        >
+          <Trash2 size={14} />
         </button>
       ) : null}
       {current ? (

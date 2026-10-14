@@ -10,6 +10,7 @@ import {
   markRange,
   markTokens,
   mergeTokens,
+  moveBlock,
   moveTokens,
   placeToken,
   postFrequency,
@@ -311,6 +312,27 @@ describe("edit stage", () => {
     const withCaption = { ...base, character: { ...base.character, captions: [{ tokens: tokens("girl, sitting"), negative: [] }] } };
     const merge = mergeTokens(withCaption, withCaption.character.captions[0].tokens.map((token) => token.id));
     expect(texts(merge.character.captions[0].tokens)).toEqual(["girl, sitting"]);
+  });
+
+  it("drags blocks between zones and character captions", () => {
+    const base = perTag();
+    const sitting = base.subject.find((token) => token.text === "sitting")!;
+    // 主体里的动作拖进第 1 条角色提示词（还没有就新加一条，并开启角色提示词）。
+    const moved = moveBlock(base, sitting.id, { caption: 0 });
+    expect(texts(moved.subject)).toEqual(["1girl", "school uniform"]);
+    expect(texts(moved.character.captions[0].tokens)).toEqual(["sitting"]);
+    expect(moved.character.enabled).toBe(true);
+    // 放到已有块的前面；再拖回主体指定位置。
+    const uniform = base.subject.find((token) => token.text === "school uniform")!;
+    const front = moveBlock(moved, uniform.id, { caption: 0 }, 0);
+    expect(texts(front.character.captions[0].tokens)).toEqual(["school uniform", "sitting"]);
+    const back = moveBlock(front, sitting.id, "subject", 0);
+    expect(texts(back.subject)).toEqual(["sitting", "1girl"]);
+    expect(texts(back.character.captions[0].tokens)).toEqual(["school uniform"]);
+    // 按键挪动也能把角色提示词里的块挪回区里。
+    const keyed = moveTokens(front, [uniform.id], "suffix");
+    expect(texts(keyed.suffix)).toEqual(["best quality", "school uniform"]);
+    expect(texts(keyed.character.captions[0].tokens)).toEqual(["sitting"]);
   });
 
   it("keeps ids and origins when a negative prompt is edited as text", () => {

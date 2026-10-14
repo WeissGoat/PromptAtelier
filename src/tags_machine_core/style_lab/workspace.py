@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -123,6 +124,37 @@ class WorkspaceStore:
             info = info.model_copy(update={"name": name})
             self._save_workspace(info)
             return info
+
+    def remove(self, info: WorkspaceInfo) -> Path | None:
+        """从工作区列表删掉。
+
+        图片组的数据（拖进来的副本、配方、出图）只属于这个工作区，整个移到 runtime 下的 trash/，不直接删，
+        需要时还能找回；文件夹工作区只从列表去掉，文件夹和其中的 .stylelab 都不动，重新打开就回来。
+        返回移到 trash 的位置（文件夹工作区为 None）。
+        """
+        with self._lock:
+            registry = [item for item in self._read_registry() if item.id != info.id]
+            self.runtime_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write(
+                self.registry_path,
+                json.dumps(
+                    {"workspaces": [item.model_dump(mode="json", by_alias=True) for item in registry]},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+            self._index_cache.pop(info.id, None)
+            data_dir = Path(info.data_dir)
+            workspaces_dir = (self.runtime_dir / "workspaces").resolve()
+            if info.kind != "files" or not data_dir.is_dir() or data_dir.resolve().parent != workspaces_dir:
+                return None
+            trash = self.runtime_dir / "trash" / f"{info.id}_{time.strftime('%Y%m%d_%H%M%S')}"
+            trash.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(data_dir), str(trash))
+            return trash
+
+    def has_active_runs(self, info: WorkspaceInfo) -> bool:
+        return any(run.get("status") in {"queued", "running", "cancelling"} for run in self.list_runs(info))
 
     def add_files(self, workspace_id: str, files: list[Path]) -> WorkspaceInfo:
         info = self.get(workspace_id)

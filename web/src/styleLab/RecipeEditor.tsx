@@ -12,13 +12,12 @@ import {
   editInList,
   editToken,
   findToken,
-  findZone,
   MATERIAL_DRAG_TYPE,
   materialOrigin,
   materialsOf,
   mergeTokens,
+  moveBlock,
   moveTokens,
-  placeToken,
   removeOrigin,
   restoreSourceSubject,
   retokenize,
@@ -154,9 +153,8 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
     });
   };
 
-  const dropToken = (id: string, zone: Zone, index: number) => {
-    if (findZone(draft, id)) onChange(placeToken(draft, id, zone, index));
-  };
+  // 区里的块和角色提示词里的块都能拖进来。
+  const dropToken = (id: string, zone: Zone, index: number) => onChange(moveBlock(draft, id, zone, index));
 
   const materials = materialsOf(draft);
   const blocks: BlockOptions = {
@@ -204,7 +202,7 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
       ) : (
         <p className="sl-hint">
           每块是一整组提示词，不分词。双击一块改文字（清空即删除）；点选后按 1 / S 划进前缀，2 回主体，3 / Shift+S 进后缀，X
-          丢弃，也可以直接拖动。紫色区是画风，导出时写进 artist。
+          丢弃，也可以直接拖动（区和角色提示词之间都能拖）。紫色区是画风，导出时写进 artist。
         </p>
       )}
       <ZoneBox
@@ -290,6 +288,17 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
   );
 }
 
+const TOKEN_DRAG_TYPE = "text/x-token-id";
+
+/** 落点在哪一块的前后：落在块的右半边算放到它后面；不在块上放到末尾。 */
+function chipIndex(event: DragEvent, tokens: Recipe["subject"]): number {
+  const chip = (event.target as HTMLElement).closest("[data-token-id]") as HTMLElement | null;
+  const index = chip ? tokens.findIndex((token) => token.id === chip.dataset.tokenId) : -1;
+  if (!chip || index < 0) return tokens.length;
+  const rect = chip.getBoundingClientRect();
+  return event.clientX > rect.left + rect.width / 2 ? index + 1 : index;
+}
+
 function CharacterSection({
   draft,
   source,
@@ -334,21 +343,29 @@ function CharacterSection({
     );
   // 拖到某一条上放进那一条，拖到区域其他地方新加一条。
   const [dropping, setDropping] = useState<number | "new" | null>(null);
+  // 素材块和配方里的块（比如主体里的动作）都能拖进来：拖到某一条上放进那一条（落在哪块前后就放哪），拖到空白处新加一条。
   const dropHandlers = (target: number | "new") => ({
     onDragOver: (event: DragEvent) => {
-      if (!event.dataTransfer.types.includes(MATERIAL_DRAG_TYPE)) return;
+      const types = event.dataTransfer.types;
+      if (!types.includes(MATERIAL_DRAG_TYPE) && !types.includes(TOKEN_DRAG_TYPE)) return;
       event.preventDefault();
       event.stopPropagation();
       setDropping(target);
     },
     onDrop: (event: DragEvent) => {
       const raw = event.dataTransfer.getData(MATERIAL_DRAG_TYPE);
+      const tokenId = event.dataTransfer.getData(TOKEN_DRAG_TYPE);
       setDropping(null);
-      if (!raw) return;
+      if (!raw && !tokenId) return;
       event.preventDefault();
       event.stopPropagation();
+      const index = target === "new" ? captions.length : target;
+      if (tokenId) {
+        onChange(moveBlock(draft, tokenId, { caption: index }, target === "new" ? undefined : chipIndex(event, captions[index].tokens)));
+        return;
+      }
       const drag = JSON.parse(raw) as MaterialDrag;
-      onChange(applyToCharacter(withDragMaterial(draft, drag), drag, target === "new" ? captions.length : target));
+      onChange(applyToCharacter(withDragMaterial(draft, drag), drag, index));
     },
   });
 
@@ -366,7 +383,7 @@ function CharacterSection({
           角色提示词
           <span className="sl-count">{captions.length}</span>
         </span>
-        <span className="sl-muted">只用于测试出图；素材块拖到某一条上替换那一条，拖到空白处新加一条</span>
+        <span className="sl-muted">只用于测试出图；素材块或主体里的块拖到某一条上放进那一条，拖到空白处新加一条</span>
         <span className="sl-bar-spacer" />
         <label className="sl-check">
           <input checked={draft.character.enabled} onChange={(event) => setCharacter({ enabled: event.target.checked })} type="checkbox" />
@@ -438,6 +455,7 @@ function CharacterSection({
                 onAdd={(text) => setCaption(index, { tokens: [...caption.tokens, ...textBlock(text)] })}
                 onAddDone={() => setAdding(null)}
                 onEdit={(id, text) => setCaption(index, { tokens: editInList(caption.tokens, id, text) })}
+                draggable
                 onSelect={onSelect}
                 selected={selected}
                 tokens={caption.tokens}

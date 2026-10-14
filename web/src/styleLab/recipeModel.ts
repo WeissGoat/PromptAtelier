@@ -387,20 +387,59 @@ export function findZone(recipe: Recipe, id: string): Zone | null {
   return ZONES.find((zone) => recipe[zone].some((token) => token.id === id)) ?? null;
 }
 
-/** 把一批 token 挪到某个区的开头或末尾（保持它们原来的相对顺序）。 */
+/** 把一批块挪到某个区的开头或末尾（保持它们原来的相对顺序）；角色提示词里的块也能挪出来。 */
 export function moveTokens(recipe: Recipe, ids: string[], zone: Zone, position: "start" | "end" = "end"): Recipe {
   const idSet = new Set(ids);
   const moving: RecipeToken[] = [];
-  const next = { ...recipe } as Recipe;
-  for (const current of ZONES) {
+  const take = (list: RecipeToken[]) => {
     const kept: RecipeToken[] = [];
-    for (const token of recipe[current]) {
-      (idSet.has(token.id) ? moving : kept).push(token);
-    }
-    next[current] = kept;
-  }
+    for (const token of list) (idSet.has(token.id) ? moving : kept).push(token);
+    return kept;
+  };
+  const next = { ...recipe } as Recipe;
+  for (const current of ZONES) next[current] = take(recipe[current]);
+  const captions = recipe.character.captions.map((caption) => ({ ...caption, tokens: take(caption.tokens) }));
+  next.character = { ...recipe.character, captions };
   next[zone] = position === "start" ? [...moving, ...next[zone]] : [...next[zone], ...moving];
   return next;
+}
+
+/** 块放在哪：配方的一个区，或第几条角色提示词（等于条数时新加一条）。 */
+export type BlockPlace = Zone | { caption: number };
+
+function blocksAt(recipe: Recipe, place: BlockPlace): RecipeToken[] {
+  return typeof place === "string" ? recipe[place] : recipe.character.captions[place.caption]?.tokens ?? [];
+}
+
+function withBlocks(recipe: Recipe, place: BlockPlace, list: RecipeToken[]): Recipe {
+  if (typeof place === "string") return { ...recipe, [place]: list };
+  const captions = [...recipe.character.captions];
+  const at = Math.min(place.caption, captions.length);
+  captions[at] = { ...(captions[at] ?? { negative: [] }), tokens: list };
+  return { ...recipe, character: { ...recipe.character, enabled: true, captions } };
+}
+
+function placeOf(recipe: Recipe, id: string): BlockPlace | null {
+  const zone = findZone(recipe, id);
+  if (zone) return zone;
+  const caption = recipe.character.captions.findIndex((item) => item.tokens.some((token) => token.id === id));
+  return caption >= 0 ? { caption } : null;
+}
+
+/** 拖动一块：区和角色提示词之间都能拖（比如把主体里的动作拖进角色提示词），index 默认末尾。 */
+export function moveBlock(recipe: Recipe, id: string, to: BlockPlace, index?: number): Recipe {
+  const from = placeOf(recipe, id);
+  if (!from) return recipe;
+  const source = blocksAt(recipe, from);
+  const fromIndex = source.findIndex((token) => token.id === id);
+  const token = source[fromIndex];
+  const next = withBlocks(recipe, from, source.filter((item) => item.id !== id));
+  const target = [...blocksAt(next, to)];
+  const same = typeof from === "string" ? from === to : typeof to !== "string" && to.caption === from.caption;
+  let at = index ?? target.length;
+  if (same && fromIndex < at) at -= 1;
+  target.splice(Math.max(0, Math.min(at, target.length)), 0, token);
+  return withBlocks(next, to, target);
 }
 
 /** 拖动：把 id 放到 zone 的 index 位置。 */

@@ -19,6 +19,7 @@ import {
   analyzeWorkspace,
   cancelJob,
   createImageGroup,
+  deleteWorkspace,
   createRecipe,
   getAnalysis,
   getLLMStatus,
@@ -491,6 +492,27 @@ export function StyleLabPage() {
           } catch (exc) {
             setError(errorMessage(exc));
             return false;
+          }
+        }}
+        onDelete={async () => {
+          if (!workspace) return;
+          setBusy(true);
+          setError(null);
+          try {
+            const result = await deleteWorkspace(workspace.id);
+            setPayload(null);
+            setSelectedGroup(null);
+            save(STORAGE.workspace, null);
+            setWorkspaces((items) => items.filter((item) => item.id !== result.removed));
+            setNotice(
+              result.trash
+                ? `已删除「${workspace.name}」，数据移到了 ${result.trash}。`
+                : `已从列表移除「${workspace.name}」，文件夹里的数据都在，重新打开就回来。`,
+            );
+          } catch (exc) {
+            setError(errorMessage(exc));
+          } finally {
+            setBusy(false);
           }
         }}
         onRestoreImages={() => workspace && void run(() => restoreImages(workspace.id))}

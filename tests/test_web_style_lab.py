@@ -380,6 +380,23 @@ class WebStyleLabTest(TestCase):
         self.assertEqual([item["name"] for item in listed], ["奏 测试"])
         self.assertEqual(self.client.put(url, json={"name": " "}).status_code, 400)
 
+    def test_delete_workspace(self):
+        # 图片组：整个数据目录移到 trash，列表里没有了。
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "要删的组"}).json()["workspace"]
+        deleted = self.client.delete(f"/api/style-lab/workspaces/{created['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(Path(created["data_dir"]).exists())
+        self.assertTrue((Path(deleted.json()["trash"]) / "workspace.json").is_file())
+        self.assertEqual(self.client.get(f"/api/style-lab/workspaces/{created['id']}").status_code, 404)
+
+        # 文件夹工作区：只从列表去掉，.stylelab 留着，重新打开就回来。
+        folder = self._open()["workspace"]
+        deleted = self.client.delete(f"/api/style-lab/workspaces/{folder['id']}")
+        self.assertEqual(deleted.json()["trash"], None)
+        self.assertTrue(Path(folder["data_dir"]).is_dir())
+        self.assertEqual(self.client.get("/api/style-lab/workspaces").json()["workspaces"], [])
+        self.assertEqual(self._open()["workspace"]["id"], folder["id"])
+
     def test_remove_images_keeps_originals_and_can_restore(self):
         data = self._open()
         workspace_id = data["workspace"]["id"]
