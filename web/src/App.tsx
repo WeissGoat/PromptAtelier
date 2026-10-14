@@ -4,6 +4,7 @@ import { Layout, type PageKey } from "./components/Layout";
 import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
 import { HistoryPage } from "./pages/HistoryPage";
+import { StyleLabErrorBoundary } from "./styleLab/StyleLabErrorBoundary";
 import { StyleLabPage } from "./styleLab/StyleLabPage";
 import { CustomWorkspaceProvider } from "./workspace/CustomWorkspaceProvider";
 import "./styles.css";
@@ -55,7 +56,11 @@ export function App() {
     custom: <CustomStudio />,
     results: <HistoryPage />,
     compare: <CompareStudio />,
-    "style-lab": <StyleLabPage />,
+    "style-lab": (
+      <StyleLabErrorBoundary>
+        <StyleLabPage />
+      </StyleLabErrorBoundary>
+    ),
   }[page];
 
   return (

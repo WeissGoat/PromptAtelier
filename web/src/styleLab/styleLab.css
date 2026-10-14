@@ -1110,3 +1110,36 @@
     transform: rotate(360deg);
   }
 }
+
+/* 出错时的兜底页面。 */
+.sl-crash {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.sl-crash h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.sl-crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sl-crash-detail {
+  background: #fff4f2;
+  border: 1px solid #f3c1b8;
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}

@@ -94,15 +94,28 @@ export function RunPanel({ workspaceId, image, runs, onCancel }: RunPanelProps) 
   );
 }
 
-function describeSettings(run: StyleLabRun): string {
-  const parts = run.recipe ? [`配方 v${run.recipe.version}`, `${run.settings.count} 张`] : [`${run.settings.count} 张`];
-  parts.push(
-    run.settings.seed_mode === "source" ? "原图种子" : run.settings.seed_mode === "random" ? "随机种子" : `种子 ${run.settings.seed}`,
-  );
-  if (run.settings.size_mode === "custom") {
-    parts.push(`${run.settings.width}×${run.settings.height}`);
+/**
+ * 一次出图的设置摘要。探针（替换角色、消融）、画师测试的记录也会出现在原图的记录里，
+ * 它们的 settings 不是重生的格式（没有 count、overrides），每一项都要容错。
+ */
+export function describeSettings(run: StyleLabRun): string {
+  const settings = (run.settings ?? {}) as Partial<StyleLabRun["settings"]> & {
+    kind?: string;
+    characters?: unknown[];
+    units?: unknown[];
+  };
+  const parts: string[] = [];
+  if (run.recipe) parts.push(`配方 v${run.recipe.version}`);
+  if (settings.kind === "swap") parts.push(`替换角色 ${settings.characters?.length ?? 0} 个`);
+  else if (settings.kind === "ablation") parts.push(`消融 ${settings.units?.length ?? 0} 组`);
+  parts.push(`${settings.count ?? run.items?.length ?? 0} 张`);
+  if (settings.seed_mode) {
+    parts.push(settings.seed_mode === "source" ? "原图种子" : settings.seed_mode === "random" ? "随机种子" : `种子 ${settings.seed}`);
   }
-  const overrides = Object.keys(run.settings.overrides);
+  if (settings.size_mode === "custom") {
+    parts.push(`${settings.width}×${settings.height}`);
+  }
+  const overrides = Object.keys(settings.overrides ?? {});
   if (overrides.length) {
     parts.push(`覆盖 ${overrides.join("/")}`);
   }
