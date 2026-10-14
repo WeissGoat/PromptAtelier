@@ -218,7 +218,7 @@ function MaterialBlock({
       ? material.excluded.filter((value) => value !== tag)
       : [...material.excluded, tag];
     putOnShelf({ ...material, excluded });
-    if (inRecipe) onChange(toggleMaterialTag(draft, origin, tag));
+    if (inRecipe) onChange(toggleMaterialTag(draft, origin, tag, allTags));
   };
   const setAll = (include: boolean) => {
     putOnShelf({ ...material, excluded: include ? [] : allTags });
@@ -247,7 +247,7 @@ function MaterialBlock({
           <strong title={material.ref}>{material.name}</strong>
           <span className="sl-muted">
             {detail ? `选了 ${included.length} / ${allTags.length}` : error ? "读取失败" : "读取中…"}
-            {inSubject ? <span className="sl-pill ok">主体 {inSubject}</span> : null}
+            {inSubject ? <span className="sl-pill ok">在主体</span> : null}
             {inCharacter ? <span className="sl-pill ok">角色提示词</span> : null}
           </span>
         </span>

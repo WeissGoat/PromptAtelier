@@ -44,7 +44,7 @@ import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./Duplicate
 import { defaultRegenSettings, RegenPanel } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
 import { translationStore } from "./translations";
-import { WorkspaceBar } from "./WorkspaceBar";
+import { suggestGroupName, WorkspaceBar } from "./WorkspaceBar";
 import "./styleLab.css";
 import "./styleLabRecipe.css";
 import "./styleLabExport.css";
@@ -112,6 +112,7 @@ export function StyleLabPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [renameRequest, setRenameRequest] = useState(0);
   const [groupMode, setGroupMode] = useState<GroupMode>(() => load<GroupMode>(STORAGE.groupMode, "style"));
   const [openRecipes, setOpenRecipes] = useState<Record<string, string | null>>(() => load(STORAGE.recipe, {}));
   const [creatingRecipe, setCreatingRecipe] = useState(false);
@@ -391,10 +392,16 @@ export function StyleLabPage() {
       setError("选中的文件里没有 PNG / WebP / JPEG 图片。");
       return;
     }
+    const fresh = !(target === "current" && workspace?.kind === "files");
+    let created = false;
     await run(async () => {
-      const into = target === "current" && workspace?.kind === "files" ? workspace : (await createImageGroup([])).workspace;
-      return uploadImages(into.id, files);
+      const into = fresh || !workspace ? (await createImageGroup([], suggestGroupName(files))).workspace : workspace;
+      const result = await uploadImages(into.id, files);
+      created = fresh;
+      return result;
     });
+    // 新建的图片组：名字框直接打开，先给一个按文件名起的名字，可以马上改。
+    if (created) setRenameRequest((count) => count + 1);
   };
 
   // 拖文件进页面时显示投放区。按窗口计数 dragenter / dragleave，拖出窗口或松手后一定会收起。
@@ -487,6 +494,7 @@ export function StyleLabPage() {
           }
         }}
         onRestoreImages={() => workspace && void run(() => restoreImages(workspace.id))}
+        renameRequest={renameRequest}
         onRescan={() => workspace && void run(() => rescanWorkspace(workspace.id))}
         onSelectWorkspace={(id) => void run(() => getWorkspace(id))}
         onToggleTranslate={() => {

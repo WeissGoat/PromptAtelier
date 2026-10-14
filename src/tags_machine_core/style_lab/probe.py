@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .classify import token_category
 from .recipe import Recipe, RecipeToken
+from .tokens import tokenize
 
 
 MAX_SWAP_CHARACTERS = 4
@@ -96,6 +97,20 @@ def _token(text: str, origin: str) -> RecipeToken:
     return RecipeToken(text=text, origins=[origin])
 
 
+def _split_blocks(tokens: list[RecipeToken]) -> list[RecipeToken]:
+    """配方里一块可能是一整组 tag；换角色要按 tag 判断去留，先拆开（拼回去文字不变）。"""
+    result: list[RecipeToken] = []
+    for token in tokens:
+        parts = tokenize(token.text).tokens
+        if len(parts) <= 1:
+            result.append(token)
+            continue
+        for index, part in enumerate(parts):
+            sep = token.sep if index == 0 else part.sep
+            result.append(RecipeToken(text=part.text, sep=sep, origins=list(token.origins)))
+    return result
+
+
 def _is_card_token(token: RecipeToken) -> bool:
     return any(origin.startswith("character:") for origin in token.origins)
 
@@ -153,6 +168,19 @@ def swap_character(
 ) -> tuple[Recipe, dict[str, Any]]:
     origin = f"character:{character.ref}"
     tags = list(dict.fromkeys(tag.strip() for tag in character.tags if tag.strip()))
+    recipe = recipe.model_copy(
+        update={
+            "subject": _split_blocks(recipe.subject),
+            "character": recipe.character.model_copy(
+                update={
+                    "captions": [
+                        caption.model_copy(update={"tokens": _split_blocks(caption.tokens)})
+                        for caption in recipe.character.captions
+                    ]
+                }
+            ),
+        }
+    )
     captions = recipe.character.captions
     caption_index = swap_target(recipe, settings, categories)
 

@@ -50,6 +50,13 @@ def _fake_executor(request, options):
     return GenerationResult(backend="novelai", images=[GeneratedImage(path=out, filename=out.name)])
 
 
+
+def _tag_tokens(blocks):
+    """新建配方的主体是整段一块；测试按 tag 划分，先拆开。"""
+    from tags_machine_core.style_lab.recipe import tokens_from_text
+
+    return [token.model_dump() for block in blocks for token in tokens_from_text(block["text"])]
+
 class WebStyleLabTest(TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -320,11 +327,8 @@ class WebStyleLabTest(TestCase):
         self.assertEqual(recipe["stage"], "split")
 
         # 划分：artist:foo 作前缀，最后一个 token 作后缀，开启角色提示词。
-        recipe["prefix"], recipe["subject"], recipe["suffix"] = (
-            recipe["subject"][:1],
-            recipe["subject"][1:-1],
-            recipe["subject"][-1:],
-        )
+        tokens = _tag_tokens(recipe["subject"])
+        recipe["prefix"], recipe["subject"], recipe["suffix"] = tokens[:1], tokens[1:-1], tokens[-1:]
         recipe["stage"], recipe["locked"] = "edit", True
         preview = self.client.post(f"{base}/preview", json={"recipe": recipe})
         self.assertEqual(preview.status_code, 200, preview.text)
@@ -415,11 +419,8 @@ class WebStyleLabTest(TestCase):
     def _locked_recipe(self, workspace_id, image_id):
         base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
         recipe = self.client.post(base, json={"image_id": image_id, "name": "导出测试"}).json()["recipe"]
-        recipe["prefix"], recipe["subject"], recipe["suffix"] = (
-            recipe["subject"][:1],
-            recipe["subject"][1:-1],
-            recipe["subject"][-1:],
-        )
+        tokens = _tag_tokens(recipe["subject"])
+        recipe["prefix"], recipe["subject"], recipe["suffix"] = tokens[:1], tokens[1:-1], tokens[-1:]
         recipe["stage"], recipe["locked"] = "edit", True
         recipe["character"]["enabled"] = True
         saved = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})

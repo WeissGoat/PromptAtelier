@@ -583,8 +583,8 @@ class RecipeTest(TestCase):
 
         recipe = recipe_from_image(self.record)
         self.assertEqual(recipe.stage, "split")
-        self.assertEqual([t.text for t in recipe.subject], ["shirabi", "[[akipeko]]", "1girl", "sitting", "smooth shading"])
-        self.assertEqual(tokens_text(recipe.subject), "shirabi|[[akipeko]], 1girl, sitting, smooth shading")
+        # 划分前整段原文是主体里的一块，不分词。
+        self.assertEqual([t.text for t in recipe.subject], ["shirabi|[[akipeko]], 1girl, sitting, smooth shading"])
         self.assertEqual(tokens_text(recipe.negative), "lowres, bad hands")
         self.assertEqual(recipe.params["steps"], 28)
         self.assertNotIn("width", recipe.params)
@@ -595,8 +595,11 @@ class RecipeTest(TestCase):
     def test_artist_node_matches_tags_txt_shape(self):
         from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
 
+        from tags_machine_core.style_lab.recipe import tokens_from_text
+
         recipe = recipe_from_image(self.record)
-        recipe.prefix, recipe.subject, recipe.suffix = recipe.subject[:2], recipe.subject[2:4], recipe.subject[4:]
+        tokens = tokens_from_text(recipe.subject[0].text)
+        recipe.prefix, recipe.subject, recipe.suffix = tokens[:2], tokens[2:4], tokens[4:]
         node = artist_node(recipe, source_path=self.record.path)["renderers"]["novelai"]
         self.assertEqual(node["prompt_prefix"], ["shirabi|[[akipeko]]"])
         self.assertEqual(node["prompt_suffix"], ["smooth shading"])
@@ -609,10 +612,11 @@ class RecipeTest(TestCase):
         self.assertNotIn("reference_strength_multiple", node["params"])
 
     def test_store_versions_and_conflicts(self):
-        from tags_machine_core.style_lab.recipe import RecipeConflictError, RecipeStore, recipe_from_image
+        from tags_machine_core.style_lab.recipe import RecipeConflictError, RecipeStore, recipe_from_image, tokens_from_text
 
         store = RecipeStore(self.tmp / ".stylelab")
-        recipe = store.create(recipe_from_image(self.record, name="测试"))
+        base = recipe_from_image(self.record, name="测试")
+        recipe = store.create(base.model_copy(update={"subject": tokens_from_text(base.subject[0].text)}))
         # 只改名字、主体、角色提示词：原地保存，不算新版本。
         renamed = store.save(recipe.model_copy(update={"name": "改名", "subject": recipe.subject[1:]}), base_version=1)
         self.assertEqual((renamed.version, renamed.name), (1, "改名"))

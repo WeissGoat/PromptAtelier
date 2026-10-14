@@ -145,6 +145,12 @@ def tokens_from_text(text: str, origin: str = "source") -> list[RecipeToken]:
     return [RecipeToken(text=token.text, sep=token.sep, origins=[origin]) for token in tokenize(text).tokens]
 
 
+def block_from_text(text: str, origin: str = "source") -> list[RecipeToken]:
+    """整段文字作为一块（不分词）；空文字没有块。"""
+    text = (text or "").strip()
+    return [RecipeToken(text=text, origins=[origin])] if text else []
+
+
 def tokens_text(tokens: list[RecipeToken]) -> str:
     return serialize(TokenList(tokens=[Token(text=token.text, sep=token.sep) for token in tokens]))
 
@@ -166,8 +172,8 @@ def recipe_from_image(record: ImageRecord, *, name: str | None = None, group_id:
     v4_prompt = params.get("v4_prompt")
     captions = [
         RecipeCaption(
-            tokens=tokens_from_text(caption.positive),
-            negative=tokens_from_text(caption.negative),
+            tokens=block_from_text(caption.positive),
+            negative=block_from_text(caption.negative),
             center=caption.centers[0] if caption.centers else None,
         )
         for caption in record.char_captions
@@ -176,7 +182,7 @@ def recipe_from_image(record: ImageRecord, *, name: str | None = None, group_id:
         name=name or _default_name(record),
         source_image_id=record.id,
         group_id=group_id,
-        subject=tokens_from_text(record.prompt),
+        subject=block_from_text(record.prompt),
         negative=tokens_from_text(record.negative_prompt),
         character=RecipeCharacter(
             enabled=any(caption.positive.strip() for caption in record.char_captions),

@@ -386,28 +386,16 @@
   user-select: none;
 }
 
-/* 热力图：底色是 tag 在工作区投稿里的出现率；区改用下划线和字色表示。 */
-.sl-mark-text.heat .sl-mark {
-  background: rgba(234, 88, 12, calc(var(--heat, 0) * 0.55));
-  border-radius: 3px;
-}
-
-.sl-mark-text.heat .sl-mark.zone-prefix {
-  box-shadow: inset 0 -3px #6f63d8;
-}
-
-.sl-mark-text.heat .sl-mark.zone-suffix {
-  box-shadow: inset 0 -3px #c95f95;
-}
-
 .sl-mark.pending {
   background: #ffe9a8;
   box-shadow: inset 0 -2px #e0a800;
 }
 
-.sl-mark-text.heat .sl-mark.pending {
-  background: #ffe9a8;
-  box-shadow: inset 0 -2px #e0a800;
+/* 热力图：每个 tag 上沿一条橙色细条，越深越常见；区的底色和下划线不变。 */
+.sl-mark-text.heat .sl-mark.hot {
+  -webkit-box-decoration-break: clone;
+  background-image: linear-gradient(to bottom, rgba(234, 88, 12, calc(0.15 + var(--heat, 0) * 0.85)) 0 4px, transparent 4px);
+  box-decoration-break: clone;
 }
 
 .sl-mark-pertag {
@@ -630,16 +618,43 @@
   width: 100%;
 }
 
-.sl-zone-text-actions {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 6px;
+/* 双击就地编辑一块：占满一行。 */
+.sl-chip-slot.editing,
+.sl-zone-chips > .sl-block-editor {
+  flex: 1 1 100%;
 }
 
-.sl-zone-text-actions .sl-muted {
-  flex: 1;
+.sl-block-editor {
+  border: 1px solid var(--sl-accent-border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 7px;
+  resize: vertical;
+  width: 100%;
+}
+
+.sl-edit-tools {
+  align-items: center;
+  background: #fff8e1;
+  border: 1px solid #f0d78c;
+  border-radius: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px 10px;
+  padding: 5px 8px;
+}
+
+.sl-chip.zone-character {
+  background: #fdf0e8;
+  border-color: #eab08f;
+  color: #712b13;
+}
+
+.sl-chip.zone-character .sl-chip-zh {
+  color: #993c1d;
 }
 
 .sl-field {
@@ -666,10 +681,6 @@
   border-radius: 5px;
   font-size: 12px;
   padding: 2px 7px;
-}
-
-.sl-char-zh {
-  margin-top: -4px;
 }
 
 .sl-char-caption {

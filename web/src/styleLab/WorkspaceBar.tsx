@@ -1,9 +1,30 @@
 import { Check, FolderOpen, ImagePlus, Languages, LoaderCircle, Pencil, RefreshCw, Undo2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { LLMStatus, TranslateProvider, WorkspaceInfo } from "./api";
 
 export const IMAGE_ACCEPT = ".png,.webp,.jpg,.jpeg";
+
+/**
+ * 新图片组的默认名字：文件名有共同开头（如 pixiv 投稿号 149600469_p0、_p1）就用它，否则用第一张的文件名，
+ * 后面带张数和日期。建好后名字框会打开，可以马上改。
+ */
+export function suggestGroupName(files: Array<{ name: string }>, now = new Date()): string {
+  const stems = files.map((file) => file.name.replace(/\.[^.]+$/, "").trim()).filter(Boolean);
+  if (!stems.length) return "";
+  let common = stems[0];
+  for (const stem of stems.slice(1)) {
+    let length = 0;
+    while (length < common.length && length < stem.length && common[length] === stem[length]) length += 1;
+    common = common.slice(0, length);
+  }
+  // 去掉末尾的分隔符和 pixiv 的 "_p"（149600469_p0、_p1 → 149600469）。
+  common = common.replace(/(?:_p|[\s_\-.(（[])+$/i, "");
+  const base = stems.length > 1 && common.length >= 4 ? common : stems[0];
+  const short = base.length > 32 ? `${base.slice(0, 32)}…` : base;
+  const date = `${now.getMonth() + 1}-${String(now.getDate()).padStart(2, "0")}`;
+  return stems.length > 1 ? `${short}${base === common ? "" : " 等"} ${stems.length} 张 · ${date}` : `${short} · ${date}`;
+}
 
 type WorkspaceBarProps = {
   workspaces: WorkspaceInfo[];
@@ -23,6 +44,8 @@ type WorkspaceBarProps = {
   onRestoreImages: () => void;
   onToggleTranslate: () => void;
   onChangeProvider: (provider: TranslateProvider) => void;
+  /** 每加一，就打开当前工作区的改名框（新建图片组之后）。 */
+  renameRequest?: number;
 };
 
 export function WorkspaceBar({
@@ -43,11 +66,18 @@ export function WorkspaceBar({
   onRestoreImages,
   onToggleTranslate,
   onChangeProvider,
+  renameRequest = 0,
 }: WorkspaceBarProps) {
   const [path, setPath] = useState("");
   // 正在改名时是输入框里的名字，否则 null。
   const [renaming, setRenaming] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const currentName = current?.name ?? null;
+  useEffect(() => {
+    if (renameRequest && currentName !== null) setRenaming(currentName);
+    // 只响应新的请求；之后切换工作区不再自动打开。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRequest]);
   const llmReady = Boolean(llm?.available);
   // 谷歌翻译不用配置；AI 翻译要先配好 LLM。
   const translateReady = translateProvider === "google" || llmReady;
@@ -115,7 +145,9 @@ export function WorkspaceBar({
             autoFocus
             maxLength={80}
             onChange={(event) => setRenaming(event.target.value)}
+            onFocus={(event) => event.target.select()}
             onKeyDown={(event) => event.key === "Escape" && setRenaming(null)}
+            placeholder="给这组图片起个名字"
             value={renaming}
           />
           <button aria-label="保存名称" className="sl-icon-btn" disabled={busy || !renaming.trim()} title="保存（Enter）" type="submit">

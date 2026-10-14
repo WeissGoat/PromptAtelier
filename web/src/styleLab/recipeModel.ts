@@ -1,6 +1,7 @@
 /**
  * 配方编辑的纯函数：划分、建议、移动、按来源增删、文本编辑。
- * 所有函数都返回新对象，不改动传入的配方。
+ * 配方里的一个 token 是一块（一整组提示词：划分时标出的原文、一块素材），不按 tag 分词；
+ * 要按 tag 拆开时由用户显式操作（splitToken）。所有函数都返回新对象，不改动传入的配方。
  */
 import type { ImageRecord, Recipe, RecipeMaterial, RecipeToken, TagCategory } from "./api";
 import { DEFAULT_SEP, hasSeparator, innerTags, tokenize } from "./tokens";
@@ -29,19 +30,9 @@ export function newTokenId(): string {
   return `t${Date.now().toString(36)}${counter.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/**
- * 去重用的规范形式：忽略 {} [] 和大小写空格；但数字权重要保留，
- * "0.0::loli::"（去掉这个元素）和 "loli" 意思相反，不能当成同一个 tag。
- */
-export function normalizeText(text: string): string {
-  const weight = /^\s*(-?\d+(?:\.\d+)?)::/.exec(text)?.[1];
-  const base = innerTags(text).join(", ") || text.trim().toLowerCase();
-  return weight !== undefined && Number(weight) !== 1 ? `${Number(weight)}::${base}` : base;
-}
-
 // ---- 划分阶段：在原文上拖选标记 ----
 
-/** 标出来的一段原文，锁定后整段是一个 token（内部不再分词）。没标的都是主体，照常分词。 */
+/** 标出来的一段原文，锁定后整段是一块（内部不再分词）。没标的是主体，两段标记之间的主体也是一块。 */
 export type MarkZone = Exclude<Zone, "subject">;
 export type TextMark = { start: number; end: number; zone: MarkZone };
 export type TextSplit = { text: string; marks: TextMark[] };
@@ -139,7 +130,7 @@ function isBoundary(text: string, start: number, end: number): boolean {
  * 原文里找不到的（解锁后手改过的）接在原文末尾再标上，重新划分不会丢。
  * 重新划分时，原文里哪个区都找不到的部分（之前从主体里删掉的）标成丢弃，不会悄悄回到主体。
  */
-export function textSplitOf(recipe: Recipe, sourcePrompt?: string | null): TextSplit {
+export function textSplitOf(recipe: Recipe, sourcePrompt?: string | null, markUnclaimed = true): TextSplit {
   let text = sourcePrompt?.trim() ? sourcePrompt : tokensToText([...recipe.prefix, ...recipe.subject, ...recipe.suffix, ...recipe.dropped]);
   const claimed: Array<[number, number]> = [];
   const found: TextMark[] = [];
@@ -167,7 +158,7 @@ export function textSplitOf(recipe: Recipe, sourcePrompt?: string | null): TextS
     }
   }
   recipe.subject.forEach((token) => claim(token.text));
-  const resplit = recipe.stage === "edit" || recipe.prefix.length + recipe.suffix.length + recipe.dropped.length > 0;
+  const resplit = markUnclaimed && (recipe.stage === "edit" || recipe.prefix.length + recipe.suffix.length + recipe.dropped.length > 0);
   if (resplit) {
     let cursor = 0;
     for (const [a, b] of [...claimed].sort((x, y) => x[0] - y[0])) {
@@ -184,11 +175,15 @@ export function textSplitOf(recipe: Recipe, sourcePrompt?: string | null): TextS
   return found.reduce<TextSplit>((split, mark) => markRange(split, mark.start, mark.end, mark.zone), { text, marks: [] });
 }
 
-/** 按类别和同组出现率给原文里的每个 token 建议区，拿不准的保持原样。 */
+/**
+ * 按类别和同组出现率给原文里的每个 token 建议区，拿不准的保持原样。
+ * 连着的同区 token 标成一块；perTag 时每个 token 各成一块。
+ */
 export function suggestTextMarks(
   split: TextSplit,
   categories: Record<string, TagCategory>,
   frequency: Map<string, number>,
+  perTag = false,
 ): { split: TextSplit; unsure: number } {
   const spans = tokenSpans(split.text);
   const suggestions = suggestZones(
@@ -196,19 +191,29 @@ export function suggestTextMarks(
     categories,
     frequency,
   );
-  let next = split;
+  const runs: Array<{ start: number; end: number; zone: Zone; last: number }> = [];
   let unsure = 0;
   spans.forEach((span, index) => {
     const zone = suggestions[`t${index}`]?.zone;
-    if (zone) next = markRange(next, span.start, span.end, zone);
-    else unsure += 1;
+    if (!zone) {
+      unsure += 1;
+      return;
+    }
+    const run = runs[runs.length - 1];
+    if (!perTag && run && run.zone === zone && run.last === index - 1) {
+      run.end = span.end;
+      run.last = index;
+    } else {
+      runs.push({ start: span.start, end: span.end, zone, last: index });
+    }
   });
+  const next = runs.reduce((current, run) => markRange(current, run.start, run.end, run.zone), split);
   return { split: next, unsure };
 }
 
 /**
- * 把标记写回配方（保持原文顺序），进入编辑阶段并锁定画风。标出来的一段整段是一个 token，没标的主体照常分词。
- * 文字相同的 token 沿用原来的 id 和来源；主体里原图之外的 token（素材、手打的）留在主体末尾。
+ * 把标记写回配方（保持原文顺序），进入编辑阶段并锁定画风。每段都整段成一块，不分词（两头的逗号空格去掉）。
+ * 文字相同的块沿用原来的 id 和来源；主体里原图之外的块（素材、手打的）留在主体末尾。
  */
 export function commitTextSplit(recipe: Recipe, split: TextSplit): Recipe {
   const pool = new Map<string, RecipeToken[]>();
@@ -222,22 +227,18 @@ export function commitTextSplit(recipe: Recipe, split: TextSplit): Recipe {
   // 每个区上一块在原文里的结尾：同区的两块之间只隔着分隔符时（如 "a|b" 分开标），沿用原文的分隔符。
   const lastEnd: Partial<Record<Zone, number>> = {};
   for (const segment of textSegments(split)) {
-    const piece = split.text.slice(segment.start, segment.end);
-    let pieces = segment.zone === "subject" ? tokenize(piece).tokens : [];
-    if (segment.zone !== "subject") {
-      const before = lastEnd[segment.zone];
-      const gap = before === undefined ? "" : split.text.slice(before, segment.start);
-      pieces = [{ text: piece, sep: gap && isEdgeOnly(gap) ? gap : "" }];
-      lastEnd[segment.zone] = segment.end;
-    }
-    for (const token of pieces) {
-      const reuse = pool.get(token.text)?.shift();
-      const next = reuse
-        ? { ...reuse, sep: token.sep }
-        : { id: newTokenId(), text: token.text, sep: token.sep, origins: [SOURCE_ORIGIN] };
-      used.add(next.id);
-      zones[segment.zone].push(next);
-    }
+    const range = snapRange(split.text, segment.start, segment.end);
+    if (!range) continue;
+    const [start, end] = range;
+    const text = split.text.slice(start, end);
+    const before = lastEnd[segment.zone];
+    const gap = before === undefined ? "" : split.text.slice(before, start);
+    const sep = gap && isEdgeOnly(gap) ? gap : "";
+    lastEnd[segment.zone] = end;
+    const reuse = pool.get(text)?.shift();
+    const next = reuse ? { ...reuse, sep } : { id: newTokenId(), text, sep, origins: [SOURCE_ORIGIN] };
+    used.add(next.id);
+    zones[segment.zone].push(next);
   }
   const extras = recipe.subject.filter((token) => !used.has(token.id) && token.origins.some((origin) => origin !== SOURCE_ORIGIN));
   return {
@@ -418,37 +419,11 @@ export function placeToken(recipe: Recipe, id: string, zone: Zone, index: number
   return next;
 }
 
-/**
- * 往一串 token 里加 tag：已有同一 tag 时不重复，只给它多记一个来源；新的按顺序插在 at 处（默认末尾）。
- */
-function addToList(list: RecipeToken[], texts: string[], origin: string, at?: number): { tokens: RecipeToken[]; added: number } {
-  const tokens = list.map((token) => ({ ...token, origins: [...token.origins] }));
-  const index = new Map(tokens.map((token) => [normalizeText(token.text), token]));
-  const fresh: RecipeToken[] = [];
-  for (const text of texts) {
-    const clean = text.trim();
-    if (!clean) continue;
-    const key = normalizeText(clean);
-    const existing = index.get(key);
-    if (existing) {
-      if (!existing.origins.includes(origin)) existing.origins.push(origin);
-      continue;
-    }
-    const token: RecipeToken = { id: newTokenId(), text: clean, sep: "", origins: [origin] };
-    fresh.push(token);
-    index.set(key, token);
-  }
-  const position = at === undefined ? tokens.length : Math.max(0, Math.min(at, tokens.length));
-  tokens.splice(position, 0, ...fresh);
-  return { tokens, added: fresh.length };
-}
-
-/** 去掉某个来源：只属于它的 token 删掉，共有的只去掉这个来源。text 给了时只处理这一个 tag。 */
-function removeFromList(list: RecipeToken[], origin: string, text?: string): RecipeToken[] {
-  const key = text === undefined ? null : normalizeText(text);
+/** 去掉某个来源：只属于它的块删掉，共有的（旧版按 tag 去重存的）只去掉这个来源。 */
+function removeFromList(list: RecipeToken[], origin: string): RecipeToken[] {
   const tokens: RecipeToken[] = [];
   for (const token of list) {
-    if (!token.origins.includes(origin) || (key !== null && normalizeText(token.text) !== key)) {
+    if (!token.origins.includes(origin)) {
       tokens.push(token);
       continue;
     }
@@ -458,13 +433,44 @@ function removeFromList(list: RecipeToken[], origin: string, text?: string): Rec
   return tokens;
 }
 
+/** 一组 tag 拼成一块的文字。 */
+export function joinTags(texts: string[]): string {
+  return texts.map((text) => text.trim()).filter(Boolean).join(DEFAULT_SEP);
+}
+
+/** 整段文字作为一块；空文字没有块。 */
+export function textBlock(text: string, origin: string = MANUAL_ORIGIN): RecipeToken[] {
+  const clean = text.trim();
+  return clean ? [{ id: newTokenId(), text: clean, sep: "", origins: [origin] }] : [];
+}
+
 /**
- * 素材卡片加入 tag：主体里已有同一 tag 时不重复，只给它多记一个来源。
- * at 是插入位置（拖进主体时），默认追加到末尾。返回新配方和真正新增的数量。
+ * 某个来源（素材块）在一串块里的那一块换成 text：原来有就在原位置换掉（旧版按 tag 存的几块合成一块），
+ * 没有就插在 at 处（默认末尾）；text 为空时去掉。
+ */
+export function setOriginBlock(list: RecipeToken[], origin: string, text: string, at?: number): RecipeToken[] {
+  const first = list.findIndex((token) => token.origins.includes(origin));
+  const kept = removeFromList(list, origin);
+  const clean = text.trim();
+  if (!clean) return kept;
+  const keptIds = new Set(kept.map((token) => token.id));
+  const position =
+    first >= 0
+      ? list.slice(0, first).filter((token) => keptIds.has(token.id)).length
+      : Math.max(0, Math.min(at ?? kept.length, kept.length));
+  const id = first >= 0 && !keptIds.has(list[first].id) ? list[first].id : newTokenId();
+  const block: RecipeToken = { id, text: clean, sep: "", origins: [origin] };
+  return [...kept.slice(0, position), block, ...kept.slice(position)];
+}
+
+/**
+ * 素材块加进主体：整块是一块，不拆成 tag。已经加过就在原位置换成新的内容。
+ * at 是插入位置（拖进主体时），默认追加到末尾。返回新配方和新增的块数。
  */
 export function addTokens(recipe: Recipe, texts: string[], origin: string, at?: number): { recipe: Recipe; added: number } {
-  const { tokens, added } = addToList(recipe.subject, texts, origin, at);
-  return { recipe: { ...recipe, subject: tokens }, added };
+  const existed = recipe.subject.some((token) => token.origins.includes(origin));
+  const subject = setOriginBlock(recipe.subject, origin, joinTags(texts), at);
+  return { recipe: { ...recipe, subject }, added: existed || subject.length === recipe.subject.length ? 0 : 1 };
 }
 
 /** 一键移除某张卡片：只删只属于这张卡的 token；共有的 token 只去掉这个来源。 */
@@ -474,11 +480,6 @@ export function removeOrigin(recipe: Recipe, origin: string): Recipe {
 
 export function originCount(recipe: Recipe, origin: string): number {
   return recipe.subject.filter((token) => token.origins.includes(origin)).length;
-}
-
-/** 主体文本模式：重新分词，文字没变的 token 保留原来的 id 和来源，新出现的标为手打。 */
-export function setSubjectText(recipe: Recipe, text: string): Recipe {
-  return { ...recipe, subject: retokenize(recipe.subject, text) };
 }
 
 export function retokenize(previous: RecipeToken[], text: string): RecipeToken[] {
@@ -507,18 +508,95 @@ export function tokensToText(tokens: RecipeToken[]): string {
   return out;
 }
 
-/** 恢复原图主体：主体换回原图里属于主体的 token（画风区不动，锁定保护的就是这个）。 */
+/** 恢复原图主体：原图里不属于前缀、后缀、丢弃的几段各成一块（画风区不动，锁定保护的就是这个）。 */
 export function restoreSourceSubject(recipe: Recipe, sourcePrompt: string): Recipe {
-  const styleTexts = new Set([...recipe.prefix, ...recipe.suffix, ...recipe.dropped].map((token) => token.text));
-  const subject = tokenize(sourcePrompt)
-    .tokens.filter((token) => !styleTexts.has(token.text))
-    .map((token) => ({ id: newTokenId(), text: token.text, sep: token.sep, origins: [SOURCE_ORIGIN] }));
+  const split = textSplitOf({ ...recipe, subject: [] }, sourcePrompt, false);
+  const subject = textSegments(split).flatMap((segment) => {
+    const range = segment.zone === "subject" ? snapRange(split.text, segment.start, segment.end) : null;
+    return range ? textBlock(split.text.slice(range[0], range[1]), SOURCE_ORIGIN) : [];
+  });
   return { ...recipe, subject };
 }
 
-/** 素材卡片上单个 tag 的开关：去掉这张卡对该 tag 的来源，没有其他来源时整个删掉。 */
-export function removeOriginForText(recipe: Recipe, text: string, origin: string): Recipe {
-  return { ...recipe, subject: removeFromList(recipe.subject, origin, text) };
+// ---- 块的编辑：双击改文字、加一块、合并、按 tag 拆开（四个区和每条角色提示词用同一套） ----
+
+/** 对配方里的每一串块（四个区、每条角色提示词的正向）做同一个变换。 */
+function mapLists(recipe: Recipe, fn: (list: RecipeToken[]) => RecipeToken[]): Recipe {
+  const next = { ...recipe } as Recipe;
+  for (const zone of ZONES) next[zone] = fn(recipe[zone]);
+  next.character = {
+    ...recipe.character,
+    captions: recipe.character.captions.map((caption) => ({ ...caption, tokens: fn(caption.tokens) })),
+  };
+  return next;
+}
+
+export function findToken(recipe: Recipe, id: string): RecipeToken | null {
+  for (const list of [...ZONES.map((zone) => recipe[zone]), ...recipe.character.captions.map((caption) => caption.tokens)]) {
+    const token = list.find((item) => item.id === id);
+    if (token) return token;
+  }
+  return null;
+}
+
+/** 改一块的文字；改成空的就删掉。改过的原图块记为手打（重新划分时不会当成原文）。 */
+export function editInList(list: RecipeToken[], id: string, text: string): RecipeToken[] {
+  const clean = text.trim();
+  return list.flatMap((token) => {
+    if (token.id !== id) return [token];
+    if (!clean) return [];
+    if (clean === token.text) return [token];
+    const origins = [...new Set([...token.origins.filter((origin) => origin !== SOURCE_ORIGIN), MANUAL_ORIGIN])];
+    return [{ ...token, text: clean, origins }];
+  });
+}
+
+export function editToken(recipe: Recipe, id: string, text: string): Recipe {
+  return mapLists(recipe, (list) => editInList(list, id, text));
+}
+
+export function addBlock(recipe: Recipe, zone: Zone, text: string): Recipe {
+  return { ...recipe, [zone]: [...recipe[zone], ...textBlock(text)] };
+}
+
+/** 同一串里选中的几块合成一块，放在第一块的位置，原来的分隔符照留。 */
+export function mergeInList(list: RecipeToken[], ids: Set<string>): RecipeToken[] {
+  const picked = list.filter((token) => ids.has(token.id));
+  if (picked.length < 2) return list;
+  const merged: RecipeToken = {
+    ...picked[0],
+    text: tokensToText(picked),
+    origins: [...new Set(picked.flatMap((token) => token.origins))],
+  };
+  return list.flatMap((token) => (token === picked[0] ? [merged] : ids.has(token.id) ? [] : [token]));
+}
+
+export function mergeTokens(recipe: Recipe, ids: string[]): Recipe {
+  const set = new Set(ids);
+  return mapLists(recipe, (list) => mergeInList(list, set));
+}
+
+/** 一块按 tag 拆开（用户显式要求时才分词），拼回去文字不变。 */
+export function splitInList(list: RecipeToken[], id: string): RecipeToken[] {
+  return list.flatMap((token) => {
+    if (token.id !== id) return [token];
+    const parts = tokenize(token.text).tokens;
+    if (parts.length <= 1) return [token];
+    return parts.map((part, index) => ({
+      id: index === 0 ? token.id : newTokenId(),
+      text: part.text,
+      sep: index === 0 ? token.sep : part.sep,
+      origins: [...token.origins],
+    }));
+  });
+}
+
+export function splitToken(recipe: Recipe, id: string): Recipe {
+  return mapLists(recipe, (list) => splitInList(list, id));
+}
+
+export function canSplit(token: RecipeToken | null): boolean {
+  return Boolean(token && tokenize(token.text).tokens.length > 1);
 }
 
 /** 所有角色提示词的 token（不含负面）。 */
@@ -591,52 +669,50 @@ export function characterHasOrigin(recipe: Recipe, origin: string): boolean {
 
 const GENDER_TAG = /^(girl|boy|1girl|1boy|woman|man|other)$/i;
 
-/** 放进第 index 条角色提示词（没有就新加一条）：角色卡替换整条（没有 girl/boy 时补 girl），动作卡追加到后面。 */
+/** 角色卡作角色提示词时没有 girl/boy 就补 girl。 */
+function captionTags(role: RecipeMaterial["role"], tags: string[]): string[] {
+  return role === "character" && tags.length && !tags.some((tag) => GENDER_TAG.test(tag.trim())) ? ["girl", ...tags] : tags;
+}
+
+/** 放进第 index 条角色提示词（没有就新加一条）：角色卡替换整条（没有 girl/boy 时补 girl），动作卡作为一块追加到后面。 */
 export function applyToCharacter(recipe: Recipe, drag: MaterialDrag, index = 0): Recipe {
   const captions = [...recipe.character.captions];
   const at = Math.min(index, captions.length);
   const caption = captions[at] ?? { tokens: [], negative: [] };
-  if (drag.role === "character") {
-    const tags = drag.tags.some((tag) => GENDER_TAG.test(tag.trim())) ? drag.tags : ["girl", ...drag.tags];
-    captions[at] = { ...caption, tokens: addToList([], tags, drag.origin).tokens };
-  } else {
-    captions[at] = { ...caption, tokens: addToList(caption.tokens, drag.tags, drag.origin).tokens };
-  }
+  const text = joinTags(captionTags(drag.role, drag.tags));
+  const tokens = drag.role === "character" ? textBlock(text, drag.origin) : setOriginBlock(caption.tokens, drag.origin, text);
+  captions[at] = { ...caption, tokens };
   return { ...recipe, character: { ...recipe.character, enabled: true, captions } };
 }
 
-/** 卡片上点一个 tag：切换筛选；这块素材已经加进主体或角色提示词时同步增删这个 tag。 */
-export function toggleMaterialTag(recipe: Recipe, origin: string, tag: string): Recipe {
+/** 素材块筛的 tag 变了：主体和用到它的角色提示词里那一块按新的筛选重写。 */
+function setMaterialExcluded(recipe: Recipe, origin: string, allTags: string[], excluded: string[]): Recipe {
   const material = materialsOf(recipe).find((item) => materialOrigin(item) === origin);
   if (!material) return recipe;
-  const excluding = !material.excluded.includes(tag);
-  const materials = materialsOf(recipe).map((item) =>
-    item === material
-      ? { ...item, excluded: excluding ? [...item.excluded, tag] : item.excluded.filter((value) => value !== tag) }
-      : item,
+  const materials = materialsOf(recipe).map((item) => (item === material ? { ...item, excluded } : item));
+  const tags = allTags.filter((tag) => !excluded.includes(tag));
+  const subject = originCount(recipe, origin) ? setOriginBlock(recipe.subject, origin, joinTags(tags)) : recipe.subject;
+  const captions = recipe.character.captions.map((caption) =>
+    caption.tokens.some((token) => token.origins.includes(origin))
+      ? { ...caption, tokens: setOriginBlock(caption.tokens, origin, joinTags(captionTags(material.role, tags))) }
+      : caption,
   );
-  let subject = recipe.subject;
-  if (originCount(recipe, origin)) {
-    subject = excluding ? removeFromList(subject, origin, tag) : addToList(subject, [tag], origin).tokens;
-  }
-  // 只改用到了这块素材的那几条角色提示词。
-  const captions = recipe.character.captions.map((caption) => {
-    if (!caption.tokens.some((token) => token.origins.includes(origin))) return caption;
-    const tokens = excluding ? removeFromList(caption.tokens, origin, tag) : addToList(caption.tokens, [tag], origin).tokens;
-    return { ...caption, tokens };
-  });
   return { ...recipe, materials, subject, character: { ...recipe.character, captions } };
 }
 
-/** 全选 / 全不选：同 toggleMaterialTag，一次处理整块。 */
-export function setMaterialTags(recipe: Recipe, origin: string, allTags: string[], include: boolean): Recipe {
+/** 卡片上点一个 tag：切换筛选；这块素材已经加进主体或角色提示词时同步重写那一块。 */
+export function toggleMaterialTag(recipe: Recipe, origin: string, tag: string, allTags: string[]): Recipe {
   const material = materialsOf(recipe).find((item) => materialOrigin(item) === origin);
   if (!material) return recipe;
-  let next = recipe;
-  for (const tag of allTags) {
-    if (material.excluded.includes(tag) === include) next = toggleMaterialTag(next, origin, tag);
-  }
-  return next;
+  const excluded = material.excluded.includes(tag)
+    ? material.excluded.filter((value) => value !== tag)
+    : [...material.excluded, tag];
+  return setMaterialExcluded(recipe, origin, allTags, excluded);
+}
+
+/** 全选 / 全不选。 */
+export function setMaterialTags(recipe: Recipe, origin: string, allTags: string[], include: boolean): Recipe {
+  return setMaterialExcluded(recipe, origin, allTags, include ? [] : [...allTags]);
 }
 
 /** 只从角色提示词里去掉这块素材的 tag。 */

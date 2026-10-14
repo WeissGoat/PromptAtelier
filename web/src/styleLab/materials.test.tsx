@@ -94,46 +94,53 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("material blocks", () => {
-  it("adds at a drop index and keeps existing tags as shared sources", () => {
-    const next = addTokens(recipe(["1girl", "smile"]), ["aqua hair", "smile"], origin, 1).recipe;
-    expect(next.subject.map((item) => item.text)).toEqual(["1girl", "aqua hair", "smile"]);
-    expect(next.subject[2].origins).toEqual(["source", origin]);
+  it("adds a material as one block at a drop index, and replaces it in place when added again", () => {
+    const next = addTokens(recipe(["1girl", "smile"]), ["aqua hair", "smile"], origin, 1);
+    expect(next.added).toBe(1);
+    expect(next.recipe.subject.map((item) => item.text)).toEqual(["1girl", "aqua hair, smile", "smile"]);
+    expect(next.recipe.subject[1].origins).toEqual([origin]);
+    const again = addTokens(next.recipe, ["aqua hair"], origin);
+    expect(again.added).toBe(0);
+    expect(again.recipe.subject.map((item) => item.text)).toEqual(["1girl", "aqua hair", "smile"]);
+    expect(again.recipe.subject[1].id).toBe(next.recipe.subject[1].id);
   });
 
-  it("filters tags and keeps the applied subject in sync", () => {
+  it("filters tags and rewrites the applied block", () => {
+    const all = ["aqua hair", "twintails"];
     let draft = addMaterial(recipe(), miku);
-    draft = addTokens(draft, ["aqua hair", "twintails"], origin).recipe;
-    draft = toggleMaterialTag(draft, origin, "twintails");
+    draft = addTokens(draft, all, origin).recipe;
+    draft = toggleMaterialTag(draft, origin, "twintails", all);
     expect(draft.materials![0].excluded).toEqual(["twintails"]);
     expect(draft.subject.map((item) => item.text)).toEqual(["1girl", "smile", "aqua hair"]);
-    draft = toggleMaterialTag(draft, origin, "twintails");
-    expect(draft.subject.map((item) => item.text)).toContain("twintails");
-    draft = setMaterialTags(draft, origin, ["aqua hair", "twintails"], false);
+    draft = toggleMaterialTag(draft, origin, "twintails", all);
+    expect(draft.subject.map((item) => item.text)).toEqual(["1girl", "smile", "aqua hair, twintails"]);
+    draft = setMaterialTags(draft, origin, all, false);
     expect(draft.subject.map((item) => item.text)).toEqual(["1girl", "smile"]);
   });
 
   it("puts a character block into the character prompt and removes everything with the block", () => {
+    const all = ["aqua hair", "twintails"];
     let draft = addMaterial(recipe(), miku);
     const texts = (index: number) => draft.character.captions[index].tokens.map((item) => item.text);
-    draft = applyToCharacter(draft, { origin, role: "character", tags: ["aqua hair"] });
+    draft = applyToCharacter(draft, { origin, role: "character", tags: all });
     expect(draft.character.enabled).toBe(true);
-    expect(texts(0)).toEqual(["girl", "aqua hair"]);
-    draft = applyToCharacter(draft, { origin: "action:x", role: "action", tags: ["sitting"] });
-    expect(texts(0)).toEqual(["girl", "aqua hair", "sitting"]);
+    expect(texts(0)).toEqual(["girl, aqua hair, twintails"]);
+    draft = applyToCharacter(draft, { origin: "action:x", role: "action", tags: ["sitting", "smile"] });
+    expect(texts(0)).toEqual(["girl, aqua hair, twintails", "sitting, smile"]);
     // 放到第 2 条（还没有就新加）；筛掉 tag 时只改用到这块素材的那几条。
     draft = applyToCharacter(draft, { origin: "character:boy", role: "character", tags: ["boy", "tall"] }, 1);
-    expect(texts(1)).toEqual(["boy", "tall"]);
-    draft = toggleMaterialTag(draft, origin, "aqua hair");
-    expect(texts(0)).toEqual(["girl", "sitting"]);
-    expect(texts(1)).toEqual(["boy", "tall"]);
-    draft = toggleMaterialTag(draft, origin, "aqua hair");
-    expect(texts(0)).toEqual(["girl", "sitting", "aqua hair"]);
+    expect(texts(1)).toEqual(["boy, tall"]);
+    draft = toggleMaterialTag(draft, origin, "aqua hair", all);
+    expect(texts(0)).toEqual(["girl, twintails", "sitting, smile"]);
+    expect(texts(1)).toEqual(["boy, tall"]);
+    draft = toggleMaterialTag(draft, origin, "aqua hair", all);
+    expect(texts(0)).toEqual(["girl, aqua hair, twintails", "sitting, smile"]);
     draft = addTokens(draft, ["aqua hair", "smile"], origin).recipe;
     draft = removeMaterial(draft, origin);
     expect(draft.materials).toEqual([]);
-    expect(texts(0)).toEqual(["sitting"]);
-    expect(texts(1)).toEqual(["boy", "tall"]);
-    // 主体原有的 smile 保留，只去掉素材加的。
+    expect(texts(0)).toEqual(["sitting, smile"]);
+    expect(texts(1)).toEqual(["boy, tall"]);
+    // 主体原有的 smile 保留，只去掉素材加的那一块。
     expect(draft.subject.map((item) => item.text)).toEqual(["1girl", "smile"]);
   });
 });

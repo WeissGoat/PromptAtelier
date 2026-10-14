@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { ImageRecord, Recipe, RecipeToken } from "./api";
 import {
+  addBlock,
   addTokens,
+  canSplit,
   commitTextSplit,
+  editToken,
   markRange,
   markTokens,
+  mergeTokens,
   moveTokens,
   placeToken,
   postFrequency,
@@ -13,6 +17,7 @@ import {
   restoreSourceSubject,
   retokenize,
   snapRange,
+  splitToken,
   suggestTextMarks,
   suggestZones,
   textSplitOf,
@@ -68,14 +73,14 @@ describe("split stage", () => {
     split = mark(split, "shirabi|[[akipeko]]", "prefix");
     split = mark(split, "smooth shading, best quality", "suffix");
     const committed = commitTextSplit(base, split);
-    // 标出的一段整体是一块，里面不再分词；没标的主体照常分词。
+    // 每段整体是一块，里面不分词：标出的是一块，两段标记之间没标的主体也是一块。
     expect(texts(committed.prefix)).toEqual(["shirabi|[[akipeko]]"]);
-    expect(texts(committed.subject)).toEqual(["1girl", "sitting"]);
+    expect(texts(committed.subject)).toEqual(["1girl, sitting"]);
     expect(texts(committed.suffix)).toEqual(["smooth shading, best quality"]);
     expect(committed.stage).toBe("edit");
     expect(committed.locked).toBe(true);
-    // 没变的 token 沿用原来的 id。
-    expect(committed.subject[0].id).toBe(base.subject[2].id);
+    // 再锁定一次，没变的块沿用原来的 id。
+    expect(commitTextSplit(committed, textSplitOf(committed, split.text)).subject[0].id).toBe(committed.subject[0].id);
 
     // 按 tag 拆开标：每个 tag 各成一块，原文的竖线分隔符保留，拼回去和原文一致。
     const start = split.text.indexOf("shirabi");
@@ -89,7 +94,7 @@ describe("split stage", () => {
     const base = recipe(prompt);
     const split = mark(textSplitOf(base, prompt), "-1::,Chibi character,Too precise hair::", "dropped");
     const committed = commitTextSplit(base, split);
-    expect(texts(committed.subject)).toEqual(["1boy", "1girl", "mosaic censorship"]);
+    expect(texts(committed.subject)).toEqual(["1boy,1girl", "mosaic censorship"]);
     expect(texts(committed.dropped)).toEqual(["-1::,Chibi character,Too precise hair::"]);
     // 重新划分：紧贴在 1girl 后面的那块也能在原文里找回原位。
     const again = textSplitOf(committed, prompt);
@@ -154,16 +159,16 @@ describe("split stage", () => {
       ["best quality", "suffix"],
       ["ink wash", "prefix"],
     ]);
-    // 之前从主体里删掉的原文标成丢弃，不会悄悄回到主体。
-    const trimmed = { ...edited, subject: edited.subject.filter((token) => token.text !== "sitting") };
+    // 主体那块改成只剩 1girl：删掉的原文标成丢弃，不会悄悄回到主体。
+    const trimmed = editToken(edited, edited.subject[0].id, "1girl");
     const resplit = textSplitOf(trimmed, prompt);
     expect(resplit.marks.map((item) => [resplit.text.slice(item.start, item.end), item.zone])).toContainEqual(["sitting", "dropped"]);
     expect(texts(commitTextSplit(trimmed, resplit).subject)).toEqual(["1girl", "miku"]);
 
     const again = commitTextSplit(edited, mark(split, "best quality", "subject"));
     expect(texts(again.prefix)).toEqual(["shirabi", "ink wash"]);
-    expect(texts(again.subject)).toEqual(["1girl", "sitting", "best quality", "miku"]);
-    expect(again.subject[3].origins).toEqual(["character:F:/miku"]);
+    expect(texts(again.subject)).toEqual(["1girl, sitting, best quality", "miku"]);
+    expect(again.subject[1].origins).toEqual(["character:F:/miku"]);
   });
 
   it("suggests zones from categories and group frequency", () => {
@@ -210,6 +215,18 @@ describe("split stage", () => {
     expect(texts(commitTextSplit(base, adopted.split).suffix)).toEqual(["best quality"]);
   });
 
+  it("adopts suggestions as whole runs, or per tag on request", () => {
+    const prompt = "artist:a, artist:b, 1girl, best quality, very aesthetic";
+    const base = recipe(prompt);
+    const categories = { "1girl": "count", "best quality": "quality", "very aesthetic": "quality" } as const;
+    const frequency = new Map([["best quality", 1], ["very aesthetic", 1]]);
+    const runs = commitTextSplit(base, suggestTextMarks(textSplitOf(base, prompt), categories, frequency).split);
+    expect(texts(runs.prefix)).toEqual(["artist:a, artist:b"]);
+    expect(texts(runs.suffix)).toEqual(["best quality, very aesthetic"]);
+    const perTag = commitTextSplit(base, suggestTextMarks(textSplitOf(base, prompt), categories, frequency, true).split);
+    expect(texts(perTag.prefix)).toEqual(["artist:a", "artist:b"]);
+  });
+
   it("classifies tokens like the backend", () => {
     expect(tokenCategory("artist:[[unknown]]", {})).toBe("artist");
     expect(tokenCategory("1.2::silver hair, akipeko::", { "silver hair": "appearance", akipeko: "artist" })).toBe("artist");
@@ -237,8 +254,18 @@ describe("edit stage", () => {
     return commitTextSplit(recipe(prompt), split);
   };
 
-  it("moves subject tokens into the style prefix", () => {
+  // 主体按 tag 拆开后的配方：1girl / sitting / school uniform 各一块。
+  const perTag = () => {
     const base = edited();
+    return splitToken(base, base.subject[0].id);
+  };
+
+  it("keeps the unmarked subject as one block", () => {
+    expect(texts(edited().subject)).toEqual(["1girl, sitting, school uniform"]);
+  });
+
+  it("moves subject tokens into the style prefix", () => {
+    const base = perTag();
     const uniform = base.subject.find((token) => token.text === "school uniform")!;
     const moved = moveTokens(base, [uniform.id], "prefix");
     expect(texts(moved.prefix)).toEqual(["shirabi", "school uniform"]);
@@ -248,44 +275,57 @@ describe("edit stage", () => {
   });
 
   it("places a dragged token at an index", () => {
-    const base = edited();
+    const base = perTag();
     const sitting = base.subject.find((token) => token.text === "sitting")!;
     expect(texts(placeToken(base, sitting.id, "subject", 0).subject)).toEqual(["sitting", "1girl", "school uniform"]);
     expect(texts(placeToken(base, sitting.id, "suffix", 1).suffix)).toEqual(["best quality", "sitting"]);
   });
 
-  it("adds card tags without duplicates and removes by origin", () => {
+  it("adds a card as one block and removes it by origin", () => {
     const base = edited();
     const { recipe: withCard, added } = addTokens(base, ["red eyes", "sitting", "  ", "long hair"], "character:krul");
-    expect(added).toBe(2);
-    expect(texts(withCard.subject)).toEqual(["1girl", "sitting", "school uniform", "red eyes", "long hair"]);
-    expect(withCard.subject.find((token) => token.text === "sitting")!.origins).toEqual(["source", "character:krul"]);
-    const removed = removeOrigin(withCard, "character:krul");
-    expect(texts(removed.subject)).toEqual(["1girl", "sitting", "school uniform"]);
-    expect(removed.subject.find((token) => token.text === "sitting")!.origins).toEqual(["source"]);
-  });
-
-  it("does not merge a zero-weighted tag with the plain tag", () => {
-    const base = recipe("1girl, 0.0::loli::, {red eyes}");
-    const { recipe: next, added } = addTokens(base, ["loli", "red eyes"], "character:x");
     expect(added).toBe(1);
-    expect(texts(next.subject)).toEqual(["1girl", "0.0::loli::", "{red eyes}", "loli"]);
-    expect(next.subject[2].origins).toEqual(["source", "character:x"]);
+    expect(texts(withCard.subject)).toEqual(["1girl, sitting, school uniform", "red eyes, sitting, long hair"]);
+    const removed = removeOrigin(withCard, "character:krul");
+    expect(texts(removed.subject)).toEqual(["1girl, sitting, school uniform"]);
   });
 
-  it("keeps ids and origins when the subject is edited as text", () => {
+  it("edits, adds, merges and splits blocks without retokenizing anything else", () => {
     const base = edited();
-    const next = retokenize(base.subject, "1girl, sitting on bed, school uniform");
-    expect(next[0].id).toBe(base.subject[0].id);
+    const block = base.subject[0];
+    // 双击改文字：改过的原图块记为手打；清空就删掉。
+    const changed = editToken(base, block.id, "1girl-1::,chibi::, sitting");
+    expect(texts(changed.subject)).toEqual(["1girl-1::,chibi::, sitting"]);
+    expect(changed.subject[0].origins).toEqual(["manual"]);
+    expect(editToken(base, block.id, "  ").subject).toEqual([]);
+    // 加一块：整段是一块。
+    const added = addBlock(base, "subject", "looking back, smile");
+    expect(texts(added.subject)).toEqual(["1girl, sitting, school uniform", "looking back, smile"]);
+    // 拆开再合并，文字和原来一样。
+    const split = splitToken(added, added.subject[1].id);
+    expect(texts(split.subject)).toEqual(["1girl, sitting, school uniform", "looking back", "smile"]);
+    expect(canSplit(split.subject[1])).toBe(false);
+    const merged = mergeTokens(split, [split.subject[1].id, split.subject[2].id]);
+    expect(texts(merged.subject)).toEqual(["1girl, sitting, school uniform", "looking back, smile"]);
+    // 角色提示词里的块也一样。
+    const withCaption = { ...base, character: { ...base.character, captions: [{ tokens: tokens("girl, sitting"), negative: [] }] } };
+    const merge = mergeTokens(withCaption, withCaption.character.captions[0].tokens.map((token) => token.id));
+    expect(texts(merge.character.captions[0].tokens)).toEqual(["girl, sitting"]);
+  });
+
+  it("keeps ids and origins when a negative prompt is edited as text", () => {
+    const base = tokens("1girl, sitting, school uniform");
+    const next = retokenize(base, "1girl, sitting on bed, school uniform");
+    expect(next[0].id).toBe(base[0].id);
     expect(next[1].origins).toEqual(["manual"]);
-    expect(next[2].id).toBe(base.subject[2].id);
+    expect(next[2].id).toBe(base[2].id);
   });
 
   it("restores the source subject without touching locked style", () => {
     const base = moveTokens(edited(), [], "subject");
     const changed = { ...base, subject: [] };
     const restored = restoreSourceSubject(changed, "shirabi, 1girl, sitting, school uniform, best quality");
-    expect(texts(restored.subject)).toEqual(["1girl", "sitting", "school uniform"]);
+    expect(texts(restored.subject)).toEqual(["1girl, sitting, school uniform"]);
     expect(texts(restored.prefix)).toEqual(["shirabi"]);
   });
 });

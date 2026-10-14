@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkspaceInfo } from "./api";
-import { WorkspaceBar } from "./WorkspaceBar";
+import { suggestGroupName, WorkspaceBar } from "./WorkspaceBar";
 
 const group: WorkspaceInfo = {
   id: "w1",
@@ -16,9 +16,10 @@ const group: WorkspaceInfo = {
   last_opened_at: 0,
 };
 
-function renderBar(onRename: (name: string) => Promise<boolean>) {
-  const noop = vi.fn();
-  render(
+const noop = () => undefined;
+
+function Bar({ onRename, renameRequest }: { onRename: (name: string) => Promise<boolean>; renameRequest?: number }) {
+  return (
     <WorkspaceBar
       busy={false}
       current={group}
@@ -33,12 +34,17 @@ function renderBar(onRename: (name: string) => Promise<boolean>) {
       onSelectWorkspace={noop}
       onToggleTranslate={noop}
       pretranslate={null}
+      renameRequest={renameRequest}
       translateOn={false}
       translateProvider="google"
       translating={false}
       workspaces={[group]}
-    />,
+    />
   );
+}
+
+function renderBar(onRename: (name: string) => Promise<boolean>) {
+  render(<Bar onRename={onRename} />);
 }
 
 afterEach(cleanup);
@@ -60,6 +66,23 @@ describe("workspace bar", () => {
     fireEvent.keyDown(screen.getByRole("textbox", { name: "工作区名称" }), { key: "Escape" });
     expect(screen.queryByRole("textbox", { name: "工作区名称" })).toBeNull();
     expect(onRename).toHaveBeenCalledTimes(1);
+  });
+
+  it("suggests a recognisable name for a new image group", () => {
+    const now = new Date(2026, 9, 14);
+    expect(suggestGroupName([{ name: "149600469_p0.png" }, { name: "149600469_p1.png" }], now)).toBe("149600469 2 张 · 10-14");
+    expect(suggestGroupName([{ name: "ボテ腹奏ちゃん.png" }, { name: "IMG_3.webp" }, { name: "x.jpg" }], now)).toBe(
+      "ボテ腹奏ちゃん 等 3 张 · 10-14",
+    );
+    expect(suggestGroupName([{ name: "kanade.png" }], now)).toBe("kanade · 10-14");
+  });
+
+  it("opens the name box when asked (right after a new group is created)", () => {
+    const onRename = vi.fn().mockResolvedValue(true);
+    const { rerender } = render(<Bar onRename={onRename} renameRequest={0} />);
+    expect(screen.queryByRole("textbox", { name: "工作区名称" })).toBeNull();
+    rerender(<Bar onRename={onRename} renameRequest={1} />);
+    expect((screen.getByRole("textbox", { name: "工作区名称" }) as HTMLInputElement).value).toBe(group.name);
   });
 
   it("keeps the input open when renaming fails", async () => {

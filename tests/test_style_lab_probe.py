@@ -3,7 +3,14 @@ from unittest import TestCase
 from pydantic import ValidationError
 
 from tags_machine_core.style_lab.probe import ProbeSettings, ablate, probe_variants, swap_character, SwapCharacter
-from tags_machine_core.style_lab.recipe import Recipe, RecipeCaption, RecipeCharacter, tokens_from_text, tokens_text
+from tags_machine_core.style_lab.recipe import (
+    Recipe,
+    RecipeCaption,
+    RecipeCharacter,
+    block_from_text,
+    tokens_from_text,
+    tokens_text,
+)
 
 
 CATEGORIES = {
@@ -73,6 +80,22 @@ class SwapTest(TestCase):
         self.assertEqual(tokens_text(variant.character.captions[1].tokens), "boy, hatsune miku, aqua hair")
         self.assertEqual(meta["target"], "角色提示词 #2")
 
+
+    def test_swap_inside_whole_blocks(self):
+        # 配方里主体、角色提示词都是整组的一块：按 tag 判断去留，其余文字不变。
+        recipe = make_recipe("", None).model_copy(
+            update={
+                "subject": block_from_text("1girl, 1boy, akemi homura, sitting"),
+                "character": RecipeCharacter(
+                    enabled=True,
+                    captions=[RecipeCaption(tokens=block_from_text("girl, akemi homura, black hair|sitting"))],
+                ),
+            }
+        )
+        variant, meta = swap_character(recipe, MIKU, CATEGORIES, ProbeSettings(kind="swap", characters=[MIKU]))
+        self.assertEqual(meta["target"], "角色提示词 #1")
+        self.assertEqual(tokens_text(variant.character.captions[0].tokens), "girl, hatsune miku, aqua hair|sitting")
+        self.assertEqual(tokens_text(variant.subject), "1girl, 1boy, sitting")
 
     def test_swap_follows_the_character_into_the_subject(self):
         # 角色在主体，角色提示词里只写了动作：换主体，动作照留。

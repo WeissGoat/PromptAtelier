@@ -1,22 +1,30 @@
-import { AlertTriangle, ChevronDown, ChevronRight, Plus, RotateCcw, TextSelect, Unlock, UserRound, X } from "lucide-react";
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { AlertTriangle, ChevronDown, ChevronRight, Combine, Plus, RotateCcw, Split, TextSelect, Unlock, UserRound, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
 
 import type { ImageRecord, Recipe, RecipeCaption, RecipePreview, TagCategory } from "./api";
 import {
+  addBlock,
   addTokens,
   applyToCharacter,
+  canSplit,
   categoryLabels,
   characterTokens,
+  editInList,
+  editToken,
+  findToken,
   findZone,
   MATERIAL_DRAG_TYPE,
   materialOrigin,
   materialsOf,
+  mergeTokens,
   moveTokens,
   placeToken,
   removeOrigin,
   restoreSourceSubject,
   retokenize,
-  setSubjectText,
+  SOURCE_ORIGIN,
+  splitToken,
+  textBlock,
   tokenCategory,
   tokenFrequency,
   tokensToText,
@@ -26,8 +34,8 @@ import {
 } from "./recipeModel";
 import { MODELS, SAMPLERS, SCHEDULES } from "./RegenPanel";
 import { SplitView } from "./SplitView";
-import { useTranslations } from "./translations";
-import { ZoneBox, type BlockOptions } from "./ZoneBox";
+import { blockTranslation, splitPromptTags, useTranslations } from "./translations";
+import { BlockChips, ZoneBox, type BlockOptions } from "./ZoneBox";
 
 const KEY_TARGETS: Record<string, { zone: Zone; position: "start" | "end" }> = {
   "1": { zone: "prefix", position: "end" },
@@ -97,11 +105,16 @@ export function RecipeEditor({
 
 function EditView({ draft, source, categories, frequency, translateOn, preview, previewError, onChange }: RecipeEditorProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // 一块里有好几个 tag：按 tag 查译文再拼起来。
   const allTexts = useMemo(
-    () => [...draft.prefix, ...draft.subject, ...draft.suffix, ...draft.dropped, ...characterTokens(draft)].map((token) => token.text),
+    () =>
+      [...draft.prefix, ...draft.subject, ...draft.suffix, ...draft.dropped, ...characterTokens(draft)].flatMap((token) =>
+        splitPromptTags(token.text),
+      ),
     [draft],
   );
-  const { lookup } = useTranslations(allTexts, translateOn);
+  const { lookup: lookupTag } = useTranslations(allTexts, translateOn);
+  const lookup = useCallback((text: string) => blockTranslation(text, lookupTag), [lookupTag]);
   const hints = useMemo(() => {
     const result: Record<string, string> = {};
     for (const token of [...draft.prefix, ...draft.subject, ...draft.suffix, ...draft.dropped]) {
@@ -151,11 +164,49 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
     onRemove: (origin) => onChange(removeOrigin(draft, origin)),
   };
 
-  const shared = { selected, lookup, hints, onSelect: select, onDropToken: dropToken };
+  const edit = (id: string, text: string) => onChange(editToken(draft, id, text));
+  const shared = { selected, lookup, hints, onSelect: select, onDropToken: dropToken, onEdit: edit };
+  const single = selected.size === 1 ? findToken(draft, [...selected][0]) : null;
 
   return (
     <div className="sl-edit">
-      <p className="sl-hint">选中 token 后按 1 / S 划进前缀，2 回主体，3 / Shift+S 进后缀，X 丢弃；也可以直接拖动。紫色区是画风，导出时写进 artist。</p>
+      {selected.size ? (
+        <div className="sl-edit-tools" role="toolbar" aria-label="选中的块">
+          <span>已选 {selected.size} 块</span>
+          <button
+            className="sl-ghost tiny"
+            disabled={selected.size < 2}
+            onClick={() => {
+              onChange(mergeTokens(draft, [...selected]));
+              setSelected(new Set());
+            }}
+            title="同一处选中的几块合成一块"
+            type="button"
+          >
+            <Combine size={13} aria-hidden="true" />
+            合并成一块
+          </button>
+          <button
+            className="sl-ghost tiny"
+            disabled={!canSplit(single)}
+            onClick={() => {
+              onChange(splitToken(draft, [...selected][0]));
+              setSelected(new Set());
+            }}
+            title="这一块按逗号拆成一个个 tag（比如消融时想单独测某个画师）"
+            type="button"
+          >
+            <Split size={13} aria-hidden="true" />
+            按 tag 拆开
+          </button>
+          <span className="sl-muted">按 1 / S 进前缀，2 回主体，3 / Shift+S 进后缀，X 丢弃；Esc 取消选择。</span>
+        </div>
+      ) : (
+        <p className="sl-hint">
+          每块是一整组提示词，不分词。双击一块改文字（清空即删除）；点选后按 1 / S 划进前缀，2 回主体，3 / Shift+S 进后缀，X
+          丢弃，也可以直接拖动。紫色区是画风，导出时写进 artist。
+        </p>
+      )}
       <ZoneBox
         {...shared}
         actions={
@@ -177,10 +228,10 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
             ) : null}
           </>
         }
-        allowText={!draft.locked}
+        editable={!draft.locked}
         hint="tags.txt 第 1 行"
         locked={draft.locked}
-        onTextChange={(text) => onChange({ ...draft, prefix: retokenize(draft.prefix, text) })}
+        onAdd={(text) => onChange(addBlock(draft, "prefix", text))}
         title="画风前缀"
         tokens={draft.prefix}
         zone="prefix"
@@ -200,29 +251,37 @@ function EditView({ draft, source, categories, frequency, translateOn, preview, 
             </button>
           ) : null
         }
-        allowText
         blocks={blocks}
+        editable
         hint="只用于测试出图"
         locked={false}
+        onAdd={(text) => onChange(addBlock(draft, "subject", text))}
         onDropMaterial={(drag, index) => onChange(addTokens(withDragMaterial(draft, drag), drag.tags, drag.origin, index).recipe)}
-        onTextChange={(text) => onChange(setSubjectText(draft, text))}
         title="主体"
         tokens={draft.subject}
         zone="subject"
       />
-      <CharacterSection draft={draft} lookup={lookup} onChange={onChange} preview={preview} source={source} />
+      <CharacterSection
+        draft={draft}
+        lookup={lookup}
+        onChange={onChange}
+        onSelect={select}
+        preview={preview}
+        selected={selected}
+        source={source}
+      />
       <ZoneBox
         {...shared}
-        allowText={!draft.locked}
+        editable={!draft.locked}
         hint="tags.txt 第 3 行"
         locked={draft.locked}
-        onTextChange={(text) => onChange({ ...draft, suffix: retokenize(draft.suffix, text) })}
+        onAdd={(text) => onChange(addBlock(draft, "suffix", text))}
         title="画风后缀"
         tokens={draft.suffix}
         zone="suffix"
       />
       {draft.dropped.length ? (
-        <ZoneBox {...shared} allowText={false} hint="不进提示词" locked={false} title="丢弃" tokens={draft.dropped} zone="dropped" />
+        <ZoneBox {...shared} editable={false} hint="不进提示词" locked={false} title="丢弃" tokens={draft.dropped} zone="dropped" />
       ) : null}
       <NegativeSection draft={draft} onChange={onChange} />
       <StyleParams draft={draft} onChange={onChange} source={source} />
@@ -236,14 +295,19 @@ function CharacterSection({
   source,
   preview,
   lookup,
+  selected,
+  onSelect,
   onChange,
 }: {
   draft: Recipe;
   source: ImageRecord | null;
   preview: RecipePreview | null;
   lookup: (text: string) => string | undefined;
+  selected: Set<string>;
+  onSelect: (id: string, event: React.MouseEvent) => void;
   onChange: (recipe: Recipe) => void;
 }) {
+  const [adding, setAdding] = useState<number | null>(null);
   const sourceCaptions = source?.char_captions ?? [];
   const { captions } = draft.character;
   const predicted = preview?.char_captions ?? [];
@@ -256,8 +320,8 @@ function CharacterSection({
     setCharacter({
       enabled: true,
       captions: sourceCaptions.map((caption) => ({
-        tokens: retokenize([], caption.positive),
-        negative: retokenize([], caption.negative),
+        tokens: textBlock(caption.positive, SOURCE_ORIGIN),
+        negative: textBlock(caption.negative, SOURCE_ORIGIN),
         center: caption.centers?.[0] ?? null,
       })),
     });
@@ -265,8 +329,8 @@ function CharacterSection({
     sourceCaptions.length === captions.length &&
     sourceCaptions.every(
       (caption, index) =>
-        tokensToText(captions[index].tokens) === tokensToText(retokenize([], caption.positive)) &&
-        tokensToText(captions[index].negative) === tokensToText(retokenize([], caption.negative)),
+        tokensToText(captions[index].tokens) === caption.positive.trim() &&
+        tokensToText(captions[index].negative) === caption.negative.trim(),
     );
   // 拖到某一条上放进那一条，拖到区域其他地方新加一条。
   const [dropping, setDropping] = useState<number | "new" | null>(null);
@@ -347,6 +411,15 @@ function CharacterSection({
                 ) : null}
                 <span className="sl-bar-spacer" />
                 <button
+                  aria-label={`角色提示词 #${index + 1} 加一块`}
+                  className="sl-icon-btn"
+                  onClick={() => setAdding(index)}
+                  title="加一块（整段是一块，不分词）"
+                  type="button"
+                >
+                  <Plus size={13} aria-hidden="true" />
+                </button>
+                <button
                   aria-label={`删除角色提示词 #${index + 1}`}
                   className="sl-icon-btn danger"
                   onClick={() => setCharacter({ captions: captions.filter((_, at) => at !== index) })}
@@ -356,24 +429,25 @@ function CharacterSection({
                   <X size={13} aria-hidden="true" />
                 </button>
               </div>
-              <label className="sl-field">
-                <span>正向</span>
-                <TokenText
-                  label={`角色提示词 #${index + 1} 正向`}
-                  onCommit={(text) => setCaption(index, { tokens: retokenize(caption.tokens, text) })}
-                  placeholder="girl, silver hair, red eyes"
-                  rows={2}
-                  value={tokensToText(caption.tokens)}
-                />
-              </label>
-              {caption.tokens.length && lookup(caption.tokens[0].text) !== undefined ? (
-                <p className="sl-muted sl-char-zh">{caption.tokens.map((token) => lookup(token.text) ?? token.text).join("，")}</p>
-              ) : null}
+              <BlockChips
+                adding={adding === index}
+                editable
+                empty="（空，点 + 加一块，或把素材块拖到这里）"
+                label={`角色提示词 #${index + 1}`}
+                lookup={lookup}
+                onAdd={(text) => setCaption(index, { tokens: [...caption.tokens, ...textBlock(text)] })}
+                onAddDone={() => setAdding(null)}
+                onEdit={(id, text) => setCaption(index, { tokens: editInList(caption.tokens, id, text) })}
+                onSelect={onSelect}
+                selected={selected}
+                tokens={caption.tokens}
+                zone="character"
+              />
               <label className="sl-field">
                 <span>负面</span>
                 <TokenText
                   label={`角色提示词 #${index + 1} 负面`}
-                  onCommit={(text) => setCaption(index, { negative: retokenize(caption.negative, text) })}
+                  onCommit={(text) => setCaption(index, { negative: textBlock(text) })}
                   rows={1}
                   value={tokensToText(caption.negative)}
                 />

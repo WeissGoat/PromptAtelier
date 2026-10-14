@@ -165,7 +165,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
   }, [segments, pending, zhAt, heatSpans]);
 
   const adopt = () => {
-    const suggested = suggestTextMarks(split, categories, frequency);
+    const suggested = suggestTextMarks(split, categories, frequency, perTag);
     setSplit(suggested.split);
     setPending(null);
     setNote(suggested.unsure ? `${suggested.unsure} 个拿不准的保持原样` : null);
@@ -188,7 +188,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
             aria-pressed={showHeat}
             className={`sl-ghost ${showHeat ? "on" : ""}`}
             onClick={() => setShowHeat(!showHeat)}
-            title={`底色越深，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越多`}
+            title={`tag 上沿的橙色条越深，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越多`}
             type="button"
           >
             <Flame size={14} aria-hidden="true" />
@@ -199,7 +199,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
           className="sl-ghost"
           disabled={!analysisReady}
           onClick={adopt}
-          title={analysisReady ? "按 tag 类别和同组出现率自动标一遍，标完还可以再改" : "tag 分类还没完成"}
+          title={analysisReady ? "按 tag 类别和同组出现率自动标一遍（连着的同类标成一块，勾了按 tag 拆开时每个 tag 一块），标完还可以再改" : "tag 分类还没完成"}
           type="button"
         >
           <Sparkles size={14} aria-hidden="true" />
@@ -237,7 +237,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
           </>
         ) : (
           <span className="sl-muted">
-            在下面的提示词上按字符拖选一段，标成前缀或后缀，标出的一段整体是一块，里面不再分词；没标的都是主体。点已标的一段可以改。
+            在下面的提示词上按字符拖选一段，标成前缀或后缀。标出的一段整体是一块，里面不分词；两段标记之间没标的主体也各是一块。点已标的一段可以改。
             {note ? `（${note}）` : ""}
           </span>
         )}
@@ -249,7 +249,7 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
       <div className={`sl-mark-text ${heatSpans.length ? "heat" : ""}`} data-testid="split-text" onMouseUp={onMouseUp} ref={textRef}>
         {pieces.map((piece) => (
           <span
-            className={`sl-mark zone-${piece.zone} ${piece.pending ? "pending" : ""}`}
+            className={`sl-mark zone-${piece.zone} ${piece.pending ? "pending" : ""} ${piece.heat ? "hot" : ""}`}
             data-start={piece.start}
             data-zh={piece.zh}
             key={`${piece.start}-${piece.end}`}

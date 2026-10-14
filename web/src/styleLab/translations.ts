@@ -8,6 +8,14 @@ export function splitPromptTags(prompt: string): string[] {
   return tokenize(prompt ?? "").tokens.map((token) => token.text);
 }
 
+/** 一块的译文：块里每个 tag 各查各的再拼起来；一个都没查到时返回 undefined。 */
+export function blockTranslation(text: string, lookup: (tag: string) => string | undefined): string | undefined {
+  const parts = splitPromptTags(text);
+  if (parts.length <= 1) return lookup(text);
+  const found = parts.map((part) => lookup(part));
+  return found.some(Boolean) ? found.map((zh, index) => zh ?? parts[index]).join("，") : undefined;
+}
+
 type Listener = () => void;
 
 /**
