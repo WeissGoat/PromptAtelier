@@ -135,10 +135,11 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
     });
     return map;
   }, [spans, lookup]);
-  // 热力图：每个 token 在工作区投稿里的出现率。
+  // 热力图：每个 token 在工作区投稿里的出现率。只有 1 个投稿时出现率全是 100%，看不出区别，不显示。
+  const heatUseful = Boolean(heat && heat.posts >= 2);
   const heatSpans = useMemo(
-    () => (heat && showHeat ? spans.map((span) => ({ ...span, value: tokenFrequency(span.text, heat.frequency) })) : []),
-    [spans, heat, showHeat],
+    () => (heat && heatUseful && showHeat ? spans.map((span) => ({ ...span, value: tokenFrequency(span.text, heat.frequency) })) : []),
+    [spans, heat, heatUseful, showHeat],
   );
   // 显示用：标记段按待标的选区、有译文的 token 末尾和（热力图时）每个 token 的边界切开，选区单独高亮。
   const pieces = useMemo(() => {
@@ -183,19 +184,24 @@ export function SplitView({ recipe, sourcePrompt, categories, frequency, heat, a
           <span className="sl-legend dropped">丢弃 {result.dropped.length}</span>
         </div>
         <span className="sl-bar-spacer" />
-        {heat && showHeat ? (
+        {heat && heatUseful && showHeat ? (
           <span className="sl-heat-legend" title={`工作区 ${heat.posts} 个投稿里的出现率`}>
             少见
             <i aria-hidden="true" />
-            常见
+            常见 · {heat.posts} 个投稿
           </span>
         ) : null}
         {heat ? (
           <button
-            aria-pressed={showHeat}
-            className={`sl-ghost ${showHeat ? "on" : ""}`}
+            aria-pressed={heatUseful && showHeat}
+            className={`sl-ghost ${heatUseful && showHeat ? "on" : ""}`}
+            disabled={!heatUseful}
             onClick={() => setShowHeat(!showHeat)}
-            title={`tag 上沿的色条从蓝到红，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越来越多`}
+            title={
+              heatUseful
+                ? `tag 上沿的色条从蓝到红，这个 tag 在工作区 ${heat.posts} 个投稿里出现得越来越多`
+                : "工作区只有 1 个投稿，每个 tag 的出现率都是 100%，热力图看不出区别"
+            }
             type="button"
           >
             <Flame size={14} aria-hidden="true" />

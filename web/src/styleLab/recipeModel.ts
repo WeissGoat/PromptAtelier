@@ -271,7 +271,7 @@ export function tokenCategory(text: string, categories: Record<string, TagCatego
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
-/** 投稿级 tag 出现率：一个投稿算一次，多图投稿不会放大权重。 */
+/** 投稿级 tag 出现率：一个投稿算一次，多图投稿不会放大权重；没有投稿目录的散图（如拖进图片组的）每张各算一个。 */
 export function postFrequency(images: ImageRecord[]): Map<string, number> {
   const posts = new Map<string, Set<string>>();
   for (const image of images) {

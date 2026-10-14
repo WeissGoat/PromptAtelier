@@ -425,6 +425,8 @@ class WebStyleLabTest(TestCase):
         ).json()
         copy = Path(uploaded["images"][0]["path"])
         self.assertTrue(copy.is_file())
+        # uploads/ 不是投稿目录：拖进来的每张图各算一张散图（热力图、按投稿分组才不会把它们当成同一个投稿）。
+        self.assertIsNone(uploaded["images"][0]["post"])
         removed = self.client.post(
             f"/api/style-lab/workspaces/{workspace_id}/images/remove", json={"image_ids": [uploaded["images"][0]["id"]]}
         ).json()

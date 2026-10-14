@@ -203,8 +203,19 @@ class WorkspaceStore:
         if cached and cached[0] == mtime:
             return cached[1]
         index = WorkspaceIndex.model_validate_json(path.read_text(encoding="utf-8"))
+        index = index.model_copy(update={"images": self._without_upload_posts(info, index.images)})
         self._index_cache[info.id] = (mtime, index)
         return index
+
+    def _without_upload_posts(self, info: WorkspaceInfo, records: list[ImageRecord]) -> list[ImageRecord]:
+        """拖进图片组的图都复制在 uploads/ 下，这个目录不是投稿：每张图各算一张散图（旧索引里记成了投稿 "uploads"）。"""
+        if info.kind != "files":
+            return records
+        uploads = self.uploads_dir(info)
+        return [
+            record.model_copy(update={"post": None}) if record.post and Path(record.path).parent == uploads else record
+            for record in records
+        ]
 
     def scan(self, info: WorkspaceInfo) -> tuple[WorkspaceIndex, dict[str, int]]:
         """增量扫描：路径、大小、mtime_ns 都没变的图片沿用旧记录，不重新读文件。"""
@@ -236,6 +247,7 @@ class WorkspaceStore:
                 except OSError as exc:
                     logger.warning("Style Lab failed to read %s: %s", path, exc)
                     stats["failed"] += 1
+            records = self._without_upload_posts(info, records)
             records.sort(key=lambda record: ((record.post.date or "") if record.post else "", record.rel_path))
             index = WorkspaceIndex(scanned_at=time.time(), images=records)
             data_dir = Path(info.data_dir)

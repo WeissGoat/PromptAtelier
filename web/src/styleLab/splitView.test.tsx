@@ -99,6 +99,14 @@ describe("split view", () => {
     expect(screen.getByTestId("split-text").className).not.toContain("heat");
   });
 
+  it("turns the heatmap off when the workspace has a single post", () => {
+    const heat = { frequency: new Map([["color trace", 1]]), posts: 1 };
+    render(<SplitView analysisReady={false} categories={{}} frequency={new Map()} heat={heat} onCommit={vi.fn()} recipe={recipe()} sourcePrompt={PROMPT} translateOn={false} />);
+    expect(screen.getByRole("button", { name: /热力图/ })).toHaveProperty("disabled", true);
+    expect(screen.getByTestId("split-text").className).not.toContain("heat");
+    expect(screen.getByTestId("split-text").querySelector(".hot")).toBeNull();
+  });
+
   it("selects a whole mark on click so it can be changed", () => {
     const onCommit = vi.fn();
     const base = recipe();
