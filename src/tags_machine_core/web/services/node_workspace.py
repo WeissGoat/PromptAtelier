@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
+from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository, is_legacy_artist_dir
 from tags_machine_core.nodes.path_guard import contained_path, relative_within
 from tags_machine_core.nodes.reader import NodeReader
 from tags_machine_core.nodes.role_paths import role_roots
@@ -237,12 +237,7 @@ class NodeWorkspace:
         return self.read_node(path)
 
     def _read_node_document(self, path: Path, *, role: str | None) -> NodeDocument:
-        if (
-            role == "artist"
-            and path.is_dir()
-            and (path / "tags.txt").exists()
-            and not any((path / name).exists() for name in ("meta.yaml", "node.yaml"))
-        ):
+        if role == "artist" and is_legacy_artist_dir(path):
             artist_ref = relative_within(self.artist_repository.artist_root, path) or str(path.resolve())
             return self.artist_repository.load_node(artist_ref)
         return self.reader.read(path)
