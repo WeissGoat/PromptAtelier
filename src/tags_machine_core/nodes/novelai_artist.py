@@ -21,6 +21,15 @@ LEGACY_EXTENSION_MARKERS = (
 )
 
 
+def is_legacy_artist_dir(path: Path) -> bool:
+    """只有 tags.txt、没有 meta.yaml / node.yaml 的旧画风目录，要走 NovelAIArtistRepository 读。"""
+    return (
+        path.is_dir()
+        and (path / "tags.txt").exists()
+        and not any((path / name).exists() for name in ("meta.yaml", "node.yaml"))
+    )
+
+
 class NovelAIArtist(BaseModel):
     artist_ref: str
     path: Path
