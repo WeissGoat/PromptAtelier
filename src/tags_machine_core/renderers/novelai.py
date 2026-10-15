@@ -478,7 +478,8 @@ class NovelAIRenderAdapter:
             "director_reference_images": params.get("director_reference_images", []),
             "extra_noise_seed": extra_noise_seed,
             "v4_prompt": {
-                "use_coords": False,
+                # 显式角色提示词带着原图的位置时按位置摆放（V4.5 也支持）。
+                "use_coords": bool((character_prompt_meta or {}).get("use_coords")),
                 "use_order": params.get("use_order", True if legacy_artist else False),
                 "caption": {"base_caption": positive, "char_captions": char_captions},
             },
@@ -506,7 +507,7 @@ class NovelAIRenderAdapter:
             final_params["inpaintImg2ImgStrength"] = params.get("inpaintImg2ImgStrength", 1.0)
             final_params["legacy_uc"] = params.get("legacy_uc", False)
             # V5 支持自由坐标（use_coords），可从 params 传入启用。
-            use_coords = params.get("use_coords", False)
+            use_coords = params.get("use_coords", False) or final_params["v4_prompt"]["use_coords"]
             final_params["v4_prompt"]["use_coords"] = use_coords
             final_params["use_coords"] = use_coords
 
@@ -546,7 +547,7 @@ class NovelAIRenderAdapter:
         dict[str, Any] | None,
     ]:
         config = params.get("character_prompts")
-        if not isinstance(config, dict) or config.get("mode") != "auto":
+        if not isinstance(config, dict) or config.get("mode") not in {"auto", "explicit"}:
             return positive, negative, [], [], None
         if not self._supports_character_prompts(model):
             return (
@@ -554,8 +555,10 @@ class NovelAIRenderAdapter:
                 negative,
                 [],
                 [],
-                {"mode": "auto", "status": "unsupported_model"},
+                {"mode": config["mode"], "status": "unsupported_model"},
             )
+        if config["mode"] == "explicit":
+            return self._explicit_character_prompts(config, positive=positive, negative=negative, model=model)
         materials = self._character_prompt_materials(bundle, resolved_nodes)
         if not materials:
             return (
@@ -735,6 +738,53 @@ class NovelAIRenderAdapter:
                 "male_caption_added": male_caption_added,
             },
         )
+
+    def _explicit_character_prompts(
+        self,
+        config: dict[str, Any],
+        *,
+        positive: str,
+        negative: str,
+        model: str | None,
+    ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+        """直接使用调用方给的角色提示词（Style Lab 配方），base 提示词不动。
+
+        config["captions"] 是 [{"positive": ..., "negative": ..., "center": {"x", "y"}?}]；和 auto 模式一样，
+        add_male_caption 开着时按 base 里的 1boy 等计数补男角色提示词。
+        center 只在 config["use_coords"]（或 params["use_coords"]）开着时模型才会用。
+        """
+        model_max_characters = 32 if str(model or "").startswith("nai-diffusion-5") else 6
+        captions = [
+            item
+            for item in config.get("captions") or []
+            if isinstance(item, dict) and str(item.get("positive") or "").strip()
+        ][:model_max_characters]
+        char_captions = [
+            {"char_caption": str(item["positive"]).strip(), "centers": _caption_centers(item.get("center"))}
+            for item in captions
+        ]
+        negative_char_captions = [
+            {"char_caption": str(item.get("negative") or "").strip(), "centers": _caption_centers(item.get("center"))}
+            for item in captions
+        ]
+        male_caption_added = False
+        male_count = _extract_male_character_count(_legacy_prompt_tags(positive))
+        if (
+            char_captions
+            and _enabled_config(config.get("add_male_caption"), default=True)
+            and male_count > 0
+            and not _contains_male_character([caption["char_caption"] for caption in char_captions])
+        ):
+            for _ in range(min(male_count, model_max_characters - len(char_captions))):
+                char_captions.append(
+                    {"char_caption": MALE_CHARACTER_CAPTION, "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS)}
+                )
+                negative_char_captions.append({"char_caption": "", "centers": copy.deepcopy(DEFAULT_CHARACTER_CENTERS)})
+                male_caption_added = True
+        meta: dict[str, Any] = {"mode": "explicit", "count": len(char_captions), "male_caption_added": male_caption_added}
+        if config.get("use_coords"):
+            meta["use_coords"] = True
+        return positive, negative, char_captions, negative_char_captions, meta
 
     def _supports_character_prompts(self, model: str | None) -> bool:
         prefix = str(model or "")
@@ -1213,6 +1263,12 @@ def _pad_negative_character_captions(
             }
         )
     return result
+
+
+def _caption_centers(center: Any) -> list[dict[str, float]]:
+    if isinstance(center, dict) and all(isinstance(center.get(key), (int, float)) for key in ("x", "y")):
+        return [{"x": float(center["x"]), "y": float(center["y"])}]
+    return copy.deepcopy(DEFAULT_CHARACTER_CENTERS)
 
 
 def _character_prompts_parameter(

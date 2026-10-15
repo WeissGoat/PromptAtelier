@@ -1,0 +1,580 @@
+import json
+import tempfile
+import time
+from pathlib import Path
+from unittest import TestCase
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from tags_machine_core.config import LLMConfig
+from tags_machine_core.contracts import GeneratedImage, GenerationResult
+from tags_machine_core.llm import LLMCache, LLMClient
+from tags_machine_core.web import create_app
+from tags_machine_core.web.routes import style_lab as style_lab_routes
+
+from tags_machine_core.style_lab.recipe import character_prompts_param
+from tests.test_style_lab import write_nai_png
+
+
+class _Response:
+    status_code = 200
+
+    def __init__(self, payload):
+        self._payload = payload
+        self.text = json.dumps(payload)
+
+    def json(self):
+        return self._payload
+
+
+class _TranslateSession:
+    def __init__(self):
+        self.calls = 0
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.calls += 1
+        tags = __import__("json").loads(json["messages"][1]["content"])
+        if "分类" in json["messages"][0]["content"]:
+            results = {tag: "artist" if tag.startswith("foo") else "appearance" for tag in tags}
+        else:
+            results = {tag: f"译:{tag}" for tag in tags}
+        content = __import__("json").dumps({"results": results}, ensure_ascii=False)
+        return _Response({"data": {"choices": [{"message": {"content": content}}]}})
+
+
+def _fake_executor(request, options):
+    out_dir = Path(options["output_dir"])
+    out = out_dir / f"gen_{request.seed}.png"
+    write_nai_png(out, **{k: v for k, v in request.params.items() if k != "n_samples"})
+    return GenerationResult(backend="novelai", images=[GeneratedImage(path=out, filename=out.name)])
+
+
+
+def _tag_tokens(blocks):
+    """新建配方的主体是整段一块；测试按 tag 划分，先拆开。"""
+    from tags_machine_core.style_lab.recipe import tokens_from_text
+
+    return [token.model_dump() for block in blocks for token in tokens_from_text(block["text"])]
+
+class WebStyleLabTest(TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self.temp_dir.name)
+        design = self.tmp / "design"
+        design.mkdir()
+        config = self.tmp / "config.yaml"
+        config.write_text(
+            json.dumps(
+                {
+                    "legacy": {"tags_machine_root": str(self.tmp), "design_root": str(design)},
+                    "runtime": {"output_dir": str(self.tmp / "outputs"), "cache_dir": str(self.tmp / "cache")},
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.cache = LLMCache(self.tmp / "llm.sqlite")
+        self.session = _TranslateSession()
+        llm = LLMClient(LLMConfig(base_url="https://llm.test/v1", api_key="sk"), session=self.session, cache=self.cache)
+        self.app = create_app(
+            config_path=config,
+            generation_executor=_fake_executor,
+            llm_client=llm,
+            style_lab_dir=self.tmp / "stylelab",
+        )
+        self.client = TestClient(self.app)
+        self.corpus = self.tmp / "20260717" / "105845157"
+        write_nai_png(self.corpus / "origin" / "2026-01-11_1_a" / "1_p0.png")
+        write_nai_png(self.corpus / "origin" / "2026-01-12_2_b" / "2_p0.png", request_type="NativeInfillingRequest")
+
+    def tearDown(self):
+        self.cache.close()
+        self.temp_dir.cleanup()
+
+    def _open(self):
+        response = self.client.post("/api/style-lab/workspaces", json={"root": str(self.corpus)})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def _wait_run(self, workspace_id, run_id):
+        deadline = time.time() + 10
+        while True:
+            run = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/runs/{run_id}").json()["run"]
+            if run["status"] not in {"queued", "running"} or time.time() > deadline:
+                return run
+            time.sleep(0.05)
+
+    def test_open_workspace_lists_images_and_serves_files(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        self.assertEqual(data["scan"]["read"], 2)
+        self.assertEqual(len(data["images"]), 2)
+        image = data["images"][0]
+
+        listed = self.client.get("/api/style-lab/workspaces").json()["workspaces"]
+        self.assertEqual([item["id"] for item in listed], [workspace_id])
+
+        detail = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/images/{image['id']}").json()
+        self.assertEqual(detail["raw_parameters"]["seed"], 1234)
+        self.assertIn("Comment", detail["png_text_keys"])
+
+        file_response = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file?image_id={image['id']}")
+        self.assertEqual(file_response.status_code, 200)
+        thumb = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file?image_id={image['id']}&size=160")
+        self.assertEqual(thumb.headers["content-type"], "image/webp")
+
+        outside = write_nai_png(self.tmp / "elsewhere.png")
+        forbidden = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file", params={"path": str(outside)})
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_material_shelf_round_trips_and_dedups(self):
+        self.assertEqual(self.client.get("/api/style-lab/shelf").json()["materials"], [])
+        miku = {"role": "character", "ref": "chars/miku", "name": "Miku", "excluded": ["twintails"]}
+        saved = self.client.put(
+            "/api/style-lab/shelf",
+            json={"materials": [miku, {**miku, "excluded": []}], "facets": {"action": {"cast": "solo"}}},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        shelf = self.client.get("/api/style-lab/shelf").json()
+        self.assertEqual(shelf["materials"], [{**miku, "excluded": []}])
+        self.assertEqual(shelf["facets"], {"action": {"cast": "solo"}})
+        bad = self.client.put("/api/style-lab/shelf", json={"materials": [{"role": "pose", "ref": "x", "name": "x"}]})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_reveal_opens_workspace_files_only(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image = data["images"][0]
+        revealed = []
+        with (
+            patch.object(style_lab_routes, "_reveal_in_explorer", revealed.append),
+            patch.object(style_lab_routes.sys, "platform", "win32"),
+        ):
+            response = self.client.post(f"/api/style-lab/workspaces/{workspace_id}/reveal", json={"image_id": image["id"]})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(revealed, [Path(image["path"]).resolve()])
+
+            info = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/file-info", params={"image_id": image["id"]}).json()
+            self.assertEqual(info["path"], str(Path(image["path"]).resolve()))
+            self.assertEqual(info["size_bytes"], Path(image["path"]).stat().st_size)
+
+            outside = write_nai_png(self.tmp / "elsewhere.png")
+            forbidden = self.client.post(f"/api/style-lab/workspaces/{workspace_id}/reveal", json={"path": str(outside)})
+            self.assertEqual(forbidden.status_code, 403)
+            self.assertEqual(len(revealed), 1)
+
+    def test_regenerate_creates_run_and_compares(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = data["images"][0]["id"]
+        response = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": image_id, "settings": {"count": 1}},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        run_id = response.json()["run"]["id"]
+
+        run = self._wait_run(workspace_id, run_id)
+        self.assertEqual(run["status"], "succeeded", run)
+        item = run["items"][0]
+        self.assertEqual(item["compare"]["verdict"], "match")
+        generated = self.client.get(
+            f"/api/style-lab/workspaces/{workspace_id}/file", params={"path": item["image_path"], "size": 160}
+        )
+        self.assertEqual(generated.status_code, 200)
+
+        runs = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/runs?image_id={image_id}").json()["runs"]
+        self.assertEqual([r["id"] for r in runs], [run_id])
+
+        # 同样的请求再发一次：409，带上上一次的 run；确认后带 force 才出图。
+        again = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": image_id, "settings": {"count": 1}},
+        )
+        self.assertEqual(again.status_code, 409, again.text)
+        error = again.json()["error"]
+        self.assertEqual(error["code"], "duplicate_request")
+        self.assertEqual(error["details"]["run_id"], run_id)
+        forced = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": image_id, "settings": {"count": 1}, "force": True},
+        )
+        self.assertEqual(forced.status_code, 200, forced.text)
+        self._wait_run(workspace_id, forced.json()["run"]["id"])
+
+    def test_library_search_merges_copies(self):
+        root = self.tmp / "design" / "角色"
+        for folder, node_id in (("vocaloid/miku", "miku"), ("特殊/miku - 快捷方式", "miku - 快捷方式")):
+            node = root / folder
+            node.mkdir(parents=True)
+            (node / "meta.yaml").write_text(f"kind: character\nid: {node_id}\ntags:\n  hair: [aqua_hair]\n", encoding="utf-8")
+        data = self.client.get("/api/style-lab/library/search", params={"role": "character", "q": "miku"}).json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["nodes"][0]["relative"], "vocaloid/miku")
+        self.assertEqual(data["nodes"][0]["copies"], 1)
+        bad = self.client.get("/api/style-lab/library/search", params={"role": "artist"})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_regenerate_rejects_bad_settings_and_warns_for_inpaint(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        bad = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": data["images"][0]["id"], "settings": {"seed_mode": "fixed"}},
+        )
+        self.assertEqual(bad.status_code, 400)
+        inpaint = next(img for img in data["images"] if "inpaint" in img["flags"])
+        response = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/regenerate",
+            json={"image_id": inpaint["id"], "settings": {}},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["run"]["warnings"])
+        self._wait_run(workspace_id, response.json()["run"]["id"])
+
+    def test_translate_and_llm_status(self):
+        status = self.client.get("/api/style-lab/llm/status").json()
+        self.assertTrue(status["available"])
+        self.assertEqual(status["models"]["text"], "deepseek-4.1-flash")
+        response = self.client.post("/api/style-lab/translate", json={"texts": ["{{thin lines}}", "solo"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["translations"], {"{{thin lines}}": "译:thin lines", "solo": "译:solo"}
+        )
+        bad = self.client.post("/api/style-lab/translate", json={"texts": "solo"})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_translate_with_google(self):
+        sent = []
+
+        class FakeResponse:
+            status_code = 200
+
+            def __init__(self, text):
+                self.text = text
+
+            def json(self):
+                lines = self.text.split("\n")
+                return [[[f"谷:{line}" + ("\n" if i < len(lines) - 1 else ""), line] for i, line in enumerate(lines)]]
+
+        def fake_post(self, url, params=None, data=None, timeout=None):
+            sent.append(data["q"])
+            return FakeResponse(data["q"])
+
+        with patch("requests.Session.post", fake_post):
+            response = self.client.post(
+                "/api/style-lab/translate",
+                json={"texts": ["{{thin lines}}", "silver_hair", "少女站着", "thin lines"], "provider": "google"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            # 同一个 tag 只请求一次；中文不翻。
+            self.assertEqual(sent, ["thin lines\nsilver hair"])
+            self.assertEqual(
+                response.json()["translations"],
+                {"{{thin lines}}": "谷:thin lines", "thin lines": "谷:thin lines", "silver_hair": "谷:silver hair"},
+            )
+            # 第二次全部命中缓存。
+            again = self.client.post("/api/style-lab/translate", json={"texts": ["silver hair"], "provider": "google"})
+            self.assertEqual(again.json()["translations"], {"silver hair": "谷:silver hair"})
+            self.assertEqual(len(sent), 1)
+        bad = self.client.post("/api/style-lab/translate", json={"texts": ["x"], "provider": "bing"})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_open_workspace_analyzes_prompts_and_groups(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        job_id = data["analysis_job_id"]
+        self.assertTrue(job_id)
+        self.app.state.job_manager.wait(job_id, timeout=10)
+        job = self.client.get(f"/api/jobs/{job_id}").json()
+        self.assertEqual(job["status"], "succeeded", job)
+        calls = self.session.calls
+        response = self.client.post("/api/style-lab/translate", json={"texts": ["girl", "silver hair", "lowres"]})
+        self.assertEqual(response.json()["translations"]["silver hair"], "译:silver hair")
+        self.assertEqual(self.session.calls, calls)
+
+        analysis = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/analysis").json()
+        self.assertEqual(analysis["categories"]["foo"], "artist")
+        self.assertEqual(analysis["categories"]["1girl"], "count")
+        self.assertEqual(analysis["groups"][0]["name"], "foo")
+        self.assertEqual(analysis["groups"][0]["post_count"], 2)
+        self.assertEqual(self.session.calls, calls)
+
+    def test_draft_recipe_is_saved_only_when_created(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
+        draft = self.client.post(base, json={"image_id": image_id, "draft": True}).json()["recipe"]
+        self.assertEqual(draft["version"], 0)
+        self.assertEqual(self.client.get(base).json()["recipes"], [])
+        self.assertEqual(self.client.get(f"{base}/{draft['id']}").status_code, 404)
+
+        draft["name"] = "改过的"
+        created = self.client.post(base, json={"recipe": draft})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["recipe"]["version"], 1)
+        self.assertEqual([item["name"] for item in self.client.get(base).json()["recipes"]], ["改过的"])
+        # 同一个草稿不能创建两次（比如两个标签页）。
+        self.assertEqual(self.client.post(base, json={"recipe": draft}).status_code, 409)
+
+    def test_recipe_create_preview_save_and_generate(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
+        recipe = self.client.post(base, json={"image_id": image_id, "name": "测试配方"}).json()["recipe"]
+        self.assertEqual(recipe["stage"], "split")
+
+        # 划分：artist:foo 作前缀，最后一个 token 作后缀，开启角色提示词。
+        tokens = _tag_tokens(recipe["subject"])
+        recipe["prefix"], recipe["subject"], recipe["suffix"] = tokens[:1], tokens[1:-1], tokens[-1:]
+        recipe["stage"], recipe["locked"] = "edit", True
+        preview = self.client.post(f"{base}/preview", json={"recipe": recipe})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview = preview.json()["preview"]
+        self.assertTrue(preview["prompt"].startswith("artist:foo"))
+        # legacy 画风的拼接格式：逗号不带空格、末尾带逗号，和导出后正式出图一致。
+        self.assertEqual(preview["prompt"], "artist:foo,1girl,solo,sitting,")
+        self.assertEqual(preview["char_captions"], ["girl, silver hair"])
+        self.assertEqual(preview["character_prompts"]["mode"], "explicit")
+
+        saved = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["recipe"]["version"], 2)
+        conflict = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})
+        self.assertEqual(conflict.status_code, 409)
+
+        listed = self.client.get(base).json()["recipes"]
+        self.assertEqual([item["name"] for item in listed], ["测试配方"])
+        detail = self.client.get(f"{base}/{recipe['id']}").json()
+        self.assertEqual([item["version"] for item in detail["history"]], [1])
+
+        run = self.client.post(f"{base}/{recipe['id']}/generate", json={"settings": {"count": 1}})
+        self.assertEqual(run.status_code, 200, run.text)
+        run = self._wait_run(workspace_id, run.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["kind"], "recipe")
+        self.assertEqual(run["recipe"]["version"], 2)
+        self.assertEqual(run["items"][0]["compare"]["verdict"], "reference")
+
+    def test_files_workspace_upload(self):
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "拖入"}).json()
+        workspace_id = created["workspace"]["id"]
+        png = write_nai_png(self.tmp / "upload_src.png").read_bytes()
+        response = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/upload",
+            files=[("files", ("drop.png", png, "image/png")), ("files", ("notes.txt", b"x", "text/plain"))],
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["uploaded"], 1)
+        self.assertEqual(len(response.json()["images"]), 1)
+
+    def test_rename_workspace(self):
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "图片组 1"}).json()
+        url = f"/api/style-lab/workspaces/{created['workspace']['id']}/name"
+        renamed = self.client.put(url, json={"name": "  奏  测试 "})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["workspace"]["name"], "奏 测试")
+        listed = self.client.get("/api/style-lab/workspaces").json()["workspaces"]
+        self.assertEqual([item["name"] for item in listed], ["奏 测试"])
+        self.assertEqual(self.client.put(url, json={"name": " "}).status_code, 400)
+
+    def test_delete_workspace(self):
+        # 图片组：整个数据目录移到 trash，列表里没有了。
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "要删的组"}).json()["workspace"]
+        deleted = self.client.delete(f"/api/style-lab/workspaces/{created['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(Path(created["data_dir"]).exists())
+        self.assertTrue((Path(deleted.json()["trash"]) / "workspace.json").is_file())
+        self.assertEqual(self.client.get(f"/api/style-lab/workspaces/{created['id']}").status_code, 404)
+
+        # 文件夹工作区：只从列表去掉，.stylelab 留着，重新打开就回来。
+        folder = self._open()["workspace"]
+        deleted = self.client.delete(f"/api/style-lab/workspaces/{folder['id']}")
+        self.assertEqual(deleted.json()["trash"], None)
+        self.assertTrue(Path(folder["data_dir"]).is_dir())
+        self.assertEqual(self.client.get("/api/style-lab/workspaces").json()["workspaces"], [])
+        self.assertEqual(self._open()["workspace"]["id"], folder["id"])
+
+    def test_remove_images_keeps_originals_and_can_restore(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image = data["images"][0]
+        url = f"/api/style-lab/workspaces/{workspace_id}/images"
+        removed = self.client.post(f"{url}/remove", json={"image_ids": [image["id"]]})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.json()["removed"], 1)
+        self.assertEqual(len(removed.json()["images"]), 1)
+        self.assertEqual(removed.json()["workspace"]["excluded"], [image["path"]])
+        # 文件夹里的原图不动；重新扫描也不会回来。
+        self.assertTrue(Path(image["path"]).is_file())
+        rescanned = self.client.post(f"/api/style-lab/workspaces/{workspace_id}/scan", json={}).json()
+        self.assertEqual(len(rescanned["images"]), 1)
+        restored = self.client.post(f"{url}/restore").json()
+        self.assertEqual(len(restored["images"]), 2)
+        self.assertEqual(restored["workspace"]["excluded"], [])
+        self.assertEqual(self.client.post(f"{url}/remove", json={"image_ids": []}).status_code, 400)
+
+    def test_remove_uploaded_image_deletes_the_copy(self):
+        created = self.client.post("/api/style-lab/workspaces", json={"files": [], "name": "拖入"}).json()
+        workspace_id = created["workspace"]["id"]
+        png = write_nai_png(self.tmp / "upload_src.png").read_bytes()
+        uploaded = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/upload", files=[("files", ("drop.png", png, "image/png"))]
+        ).json()
+        copy = Path(uploaded["images"][0]["path"])
+        self.assertTrue(copy.is_file())
+        # uploads/ 不是投稿目录：拖进来的每张图各算一张散图（热力图、按投稿分组才不会把它们当成同一个投稿）。
+        self.assertIsNone(uploaded["images"][0]["post"])
+        removed = self.client.post(
+            f"/api/style-lab/workspaces/{workspace_id}/images/remove", json={"image_ids": [uploaded["images"][0]["id"]]}
+        ).json()
+        self.assertEqual(removed["images"], [])
+        self.assertFalse(copy.exists())
+        self.assertEqual(removed["workspace"]["excluded"], [])
+        self.assertTrue((self.tmp / "upload_src.png").is_file())
+
+    def _locked_recipe(self, workspace_id, image_id):
+        base = f"/api/style-lab/workspaces/{workspace_id}/recipes"
+        recipe = self.client.post(base, json={"image_id": image_id, "name": "导出测试"}).json()["recipe"]
+        tokens = _tag_tokens(recipe["subject"])
+        recipe["prefix"], recipe["subject"], recipe["suffix"] = tokens[:1], tokens[1:-1], tokens[-1:]
+        recipe["stage"], recipe["locked"] = "edit", True
+        recipe["character"]["enabled"] = True
+        saved = self.client.put(f"{base}/{recipe['id']}", json={"recipe": recipe, "base_version": 1})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        return base, saved.json()["recipe"]
+
+    def test_probe_swap_and_ablation_share_one_seed_and_compare_to_baseline(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base, recipe = self._locked_recipe(workspace_id, image_id)
+        url = f"{base}/{recipe['id']}/probe"
+
+        unit = {"label": "artist:foo", "token_ids": [recipe["prefix"][0]["id"]]}
+        response = self.client.post(url, json={"settings": {"kind": "ablation", "units": [unit]}})
+        self.assertEqual(response.status_code, 200, response.text)
+        run = self._wait_run(workspace_id, response.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["kind"], "ablation")
+        self.assertEqual([item["role"] for item in run["items"]], ["baseline", "variant"])
+        self.assertEqual({item["seed"] for item in run["items"]}, {1234})
+        self.assertEqual(run["items"][1]["removed"], ["artist:foo"])
+        self.assertIn("similarity", run["items"][1]["baseline_compare"])
+        self.assertNotIn("baseline_compare", run["items"][0])
+        self.assertEqual(run["recipe"]["version"], recipe["version"])
+
+        # 同样的请求再来一次会被拦下。
+        again = self.client.post(url, json={"settings": {"kind": "ablation", "units": [unit]}})
+        self.assertEqual(again.status_code, 409)
+        stale = self.client.post(url, json={"settings": {"kind": "ablation", "units": [{"label": "x", "token_ids": ["nope"]}]}})
+        self.assertEqual(stale.status_code, 400)
+        self.assertEqual(self.client.post(url, json={"settings": {"kind": "swap"}}).status_code, 400)
+
+        miku = {"ref": "chars/miku", "name": "Miku", "tags": ["hatsune miku", "aqua hair"]}
+        response = self.client.post(
+            url, json={"settings": {"kind": "swap", "characters": [miku], "include_baseline": False, "seed_mode": "fixed", "seed": 7}}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        run = self._wait_run(workspace_id, response.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        item = run["items"][0]
+        self.assertEqual((item["label"], item["target"], item["seed"]), ("Miku", "角色提示词 #1", 7))
+        self.assertEqual(item["added"], ["hatsune miku", "aqua hair"])
+        self.assertEqual(item["compare"]["verdict"], "reference")
+
+    def test_export_artist_then_regression_and_matrix(self):
+        data = self._open()
+        workspace_id = data["workspace"]["id"]
+        image_id = next(img["id"] for img in data["images"] if not img["flags"])
+        base, recipe = self._locked_recipe(workspace_id, image_id)
+        url = f"{base}/{recipe['id']}"
+
+        defaults = self.client.get(f"{url}/exports").json()
+        self.assertEqual(defaults["author"], "105845157")
+        self.assertEqual(defaults["exports"], [])
+
+        bad = self.client.post(f"{url}/export/preview", json={"name": "带 空格", "author": "105845157"})
+        self.assertEqual(bad.status_code, 400)
+        preview = self.client.post(f"{url}/export/preview", json={"name": "Foo_Style", "author": "105845157"})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview = preview.json()["preview"]
+        self.assertEqual(preview["folder"], "105845157_Foo_Style")
+        self.assertTrue(preview["roundtrip_ok"])
+        self.assertEqual(preview["tags_txt"].splitlines()[:3], ["artist:foo", ",", "sitting"])
+
+        exported = self.client.post(
+            f"{url}/export", json={"name": "Foo_Style", "author": "105845157", "expected_folder": preview["folder"]}
+        )
+        self.assertEqual(exported.status_code, 200, exported.text)
+        folder = exported.json()["export"]["folder"]
+        self.assertTrue((self.tmp / "design" / "画风" / folder / "tags.txt").is_file())
+        listed = self.client.get(f"{url}/exports").json()
+        self.assertEqual([item["folder"] for item in listed["exports"]], [folder])
+        self.assertTrue(listed["exports"][0]["exists"])
+        stale = self.client.post(f"{url}/export", json={"name": "Foo_Style", "author": "105845157", "expected_folder": folder})
+        self.assertEqual(stale.status_code, 409)
+
+        # 导出后按名字读回的 artist，和配方本身拼出的请求完全一样。
+        service = self.app.state.style_lab_service
+        info = self.app.state.style_lab_store.get(workspace_id)
+        recipe_obj = service.recipes(info).get(recipe["id"])
+        from_recipe = service.recipe_render_request(info, recipe_obj, seed=5)
+        from_disk = service._plan(
+            {
+                "compose": {"prompt": "1girl, solo", "negative": ""},
+                "render": {
+                    "backend": "novelai",
+                    "artist": folder,
+                    "width": from_recipe["size"]["width"],
+                    "height": from_recipe["size"]["height"],
+                    "seed": 5,
+                    "params": {
+                        "size": "custom",
+                        "n_samples": 1,
+                        "character_prompts": character_prompts_param(recipe_obj),
+                    },
+                },
+            }
+        )
+        for key in ("prompt", "negative_prompt", "model", "size"):
+            self.assertEqual(from_disk[key], from_recipe[key], key)
+        self.assertEqual(from_disk["params"], from_recipe["params"])
+
+        regression = self.client.post(
+            f"{url}/artist-test", json={"settings": {"kind": "regression", "artist": folder}}
+        )
+        self.assertEqual(regression.status_code, 200, regression.text)
+        run = self._wait_run(workspace_id, regression.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["kind"], "regression")
+        self.assertEqual(len(run["items"]), 1)  # 另一张是局部重绘，不参与
+        item = run["items"][0]
+        self.assertEqual(item["seed"], 1234)
+        self.assertEqual(item["subject"], "1girl, solo")
+        self.assertEqual(item["removed"], ["artist:foo", "sitting"])
+        self.assertEqual(item["compare"]["verdict"], "reference")
+
+        character = self.tmp / "design" / "角色" / "homura"
+        character.mkdir(parents=True)
+        (character / "meta.yaml").write_text(
+            "schema: tags-machine.character/v1\nkind: character\nid: homura\ntags:\n  character:\n    - akemi homura\n",
+            encoding="utf-8",
+        )
+        matrix = self.client.post(
+            f"{url}/artist-test",
+            json={"settings": {"kind": "matrix", "artist": folder, "characters": [str(character)], "seed_mode": "fixed", "seed": 9}},
+        )
+        self.assertEqual(matrix.status_code, 200, matrix.text)
+        run = self._wait_run(workspace_id, matrix.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["items"][0]["character"], str(character))
+        self.assertNotIn("compare", run["items"][0])
+
+        runs = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/runs", params={"recipe_id": recipe["id"]}).json()
+        self.assertEqual(sorted(item["kind"] for item in runs["runs"]), ["matrix", "regression"])
+
+        missing = self.client.post(f"{url}/artist-test", json={"settings": {"kind": "regression", "artist": "nope"}})
+        self.assertEqual(missing.status_code, 400)

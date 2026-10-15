@@ -1,0 +1,929 @@
+/* 画风工坊 P2：分组、划分、配方编辑、素材卡片。变量定义在 styleLab.css 的 .sl-page 上。 */
+
+/* ---- 按钮 ---- */
+
+.sl-ghost {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  color: #3c4043;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  min-height: 30px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.sl-ghost:hover:not(:disabled) {
+  background: #f3f4f7;
+}
+
+.sl-ghost.tiny {
+  min-height: 24px;
+  padding: 1px 7px;
+}
+
+.sl-primary.small {
+  align-self: auto;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 3px 12px;
+}
+
+.sl-new-recipe {
+  margin-top: 4px;
+}
+
+.sl-mini-btn.on {
+  background: var(--sl-accent-bg);
+  border-color: var(--sl-accent-border);
+}
+
+/* ---- 分组 ---- */
+
+.sl-groups {
+  border-bottom: 1px solid var(--sl-border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 12px;
+}
+
+.sl-groups-head {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.sl-groups-head h3 {
+  color: var(--sl-muted);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.sl-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.sl-group-row {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 3px 8px;
+  text-align: left;
+}
+
+.sl-group-row:hover {
+  background: #eef0f4;
+}
+
+.sl-group-row.on {
+  background: var(--sl-accent-bg);
+  border-color: var(--sl-accent-border);
+}
+
+.sl-group-row.main {
+  font-weight: 600;
+}
+
+.sl-group-row.child {
+  font-size: 12px;
+  margin-left: 12px;
+}
+
+.sl-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-group-dates {
+  color: var(--sl-muted);
+  font-size: 11px;
+  padding-left: 9px;
+}
+
+.sl-group-modes {
+  align-self: flex-start;
+  margin: 2px 0 4px;
+}
+
+/* 投稿多的时候单独滚动，下面的配方列表不被挤走。 */
+.sl-bucket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.sl-group-row.bucket {
+  align-items: flex-start;
+}
+
+.sl-bucket-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sl-bucket-text .sl-group-dates {
+  padding-left: 0;
+}
+
+.sl-recipe-link {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.sl-recipe-link span:nth-child(2) {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-recipe-link:hover {
+  background: #eef0f4;
+}
+
+.sl-recipe-link.on {
+  background: var(--sl-style-bg);
+  border-color: #afa9ec;
+}
+
+/* ---- token 小块：紫色是画风（导出），青色是主体（只用于测试） ---- */
+
+.sl-chip {
+  align-items: flex-start;
+  background: #f3f4f7;
+  border: 1px solid #e3e6eb;
+  border-radius: 6px;
+  color: #202124;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 100%;
+  min-height: 0;
+  padding: 2px 7px;
+  position: relative;
+  text-align: left;
+}
+
+.sl-chip-en {
+  overflow-wrap: anywhere;
+}
+
+.sl-chip-zh {
+  color: var(--sl-muted);
+  font-size: 11px;
+}
+
+.sl-chip.zone-prefix,
+.sl-chip.zone-suffix {
+  background: var(--sl-style-bg);
+  border-color: #afa9ec;
+  color: #3c3489;
+}
+
+.sl-chip.zone-subject {
+  background: #e1f5ee;
+  border-color: #5dcaa5;
+  color: #085041;
+}
+
+.sl-chip.zone-dropped {
+  background: #fff;
+  border-style: dashed;
+  color: var(--sl-muted);
+  text-decoration: line-through;
+}
+
+.sl-chip.zone-prefix .sl-chip-zh,
+.sl-chip.zone-suffix .sl-chip-zh {
+  color: #534ab7;
+}
+
+.sl-chip.zone-subject .sl-chip-zh {
+  color: #0f6e56;
+}
+
+.sl-chip.selected {
+  box-shadow: 0 0 0 2px var(--sl-accent);
+}
+
+.sl-chip.origin-character {
+  border-left: 3px solid #d85a30;
+}
+
+.sl-chip.origin-action {
+  border-left: 3px solid #378add;
+}
+
+.sl-chip.origin-manual {
+  border-left: 3px solid #888780;
+}
+
+.sl-chip[draggable="true"] {
+  cursor: grab;
+}
+
+/* ---- 划分 ---- */
+
+.sl-split {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sl-split-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sl-split-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sl-legend {
+  border-radius: 5px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.sl-legend.prefix,
+.sl-legend.suffix {
+  background: var(--sl-style-bg);
+  color: #3c3489;
+}
+
+.sl-legend.subject {
+  background: #e1f5ee;
+  color: #085041;
+}
+
+.sl-legend.dropped {
+  background: #f3f4f7;
+  color: var(--sl-muted);
+}
+
+.sl-mark-bar {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.sl-mark-excerpt {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-mark-btn {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 3px 8px;
+}
+
+.sl-mark-btn kbd {
+  color: var(--sl-muted);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.sl-mark-btn.zone-prefix {
+  background: #e4e1fc;
+  border-color: #8f86e0;
+  color: #3c3489;
+}
+
+.sl-mark-btn.zone-suffix {
+  background: #fbe4ef;
+  border-color: #d989b2;
+  color: #8a2a5c;
+}
+
+.sl-mark-text {
+  background: #fff;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  cursor: text;
+  font-size: 14px;
+  line-height: 2;
+  overflow-wrap: anywhere;
+  padding: 12px 14px;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.sl-mark.zone-prefix {
+  background: #e4e1fc;
+  border-radius: 3px;
+  box-shadow: inset 0 -2px #8f86e0;
+  color: #3c3489;
+}
+
+.sl-mark.zone-suffix {
+  background: #fbe4ef;
+  border-radius: 3px;
+  box-shadow: inset 0 -2px #d989b2;
+  color: #8a2a5c;
+}
+
+.sl-mark.zone-dropped {
+  color: var(--sl-muted);
+  text-decoration: line-through;
+}
+
+.sl-mark[data-zh]::after {
+  color: var(--sl-muted);
+  content: "\3014" attr(data-zh) "\3015";
+  font-size: 11px;
+  margin-right: 2px;
+  user-select: none;
+}
+
+.sl-mark.pending {
+  background: #ffe9a8;
+  box-shadow: inset 0 -2px #e0a800;
+}
+
+/* 热力图：每个 tag 上沿一条色条，从蓝（少见）经绿、黄到红（几乎每个投稿都有）；区的底色和下划线不变。 */
+.sl-mark-text.heat .sl-mark.hot {
+  --heat-color: hsl(calc(225 - var(--heat, 0) * 225) 85% 48%);
+  -webkit-box-decoration-break: clone;
+  background-image: linear-gradient(to bottom, var(--heat-color) 0 5px, transparent 5px);
+  box-decoration-break: clone;
+}
+
+.sl-heat-legend {
+  align-items: center;
+  color: var(--sl-muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+}
+
+.sl-heat-legend i {
+  background: linear-gradient(to right, hsl(225 85% 48%), hsl(150 85% 40%), hsl(55 90% 48%), hsl(0 85% 48%));
+  border-radius: 3px;
+  display: inline-block;
+  height: 6px;
+  width: 64px;
+}
+
+.sl-mark-pertag {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.sl-split-result {
+  display: grid;
+  font-size: 12px;
+  gap: 4px 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+}
+
+.sl-split-result dt {
+  color: var(--sl-style);
+}
+
+.sl-split-result dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sl-legend.suffix {
+  background: #fbe4ef;
+  color: #8a2a5c;
+}
+
+/* ---- 配方工作区 ---- */
+
+.sl-recipe-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.sl-recipe-actions > .sl-ghost:first-child {
+  flex: 1;
+}
+
+.sl-ghost.danger:hover:not(:disabled) {
+  background: var(--sl-danger-bg);
+  border-color: var(--sl-danger);
+  color: var(--sl-danger);
+}
+
+.sl-recipe-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 250px minmax(0, 1fr) 340px;
+  min-height: 0;
+}
+
+.sl-recipe-side,
+.sl-recipe-main,
+.sl-library {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sl-recipe-side {
+  background: #fafbfc;
+  border-right: 1px solid var(--sl-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.sl-recipe-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 28px;
+}
+
+.sl-library {
+  background: #fafbfc;
+  border-left: 1px solid var(--sl-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+@media (max-width: 1380px) {
+  .sl-recipe-body {
+    grid-template-columns: 210px minmax(0, 1fr) 300px;
+  }
+}
+
+.sl-recipe-loading {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 48px;
+}
+
+.sl-recipe-name {
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+.sl-recipe-meta {
+  color: var(--sl-muted);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+}
+
+.sl-recipe-source {
+  margin: 0;
+}
+
+.sl-recipe-source img {
+  border-radius: 6px;
+  display: block;
+  width: 100%;
+}
+
+.sl-recipe-source figcaption {
+  color: var(--sl-muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.sl-recipe-group h3 {
+  color: var(--sl-muted);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 4px 0;
+}
+
+.sl-recipe-group p {
+  font-size: 12px;
+  margin: 0 0 6px;
+}
+
+.sl-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sl-zone {
+  background: #fff;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.sl-zone.zone-prefix,
+.sl-zone.zone-suffix {
+  border-color: #cecbf6;
+}
+
+.sl-zone.zone-subject {
+  border-color: #9fe1cb;
+}
+
+.sl-zone.drop-target {
+  box-shadow: 0 0 0 2px var(--sl-accent-border);
+}
+
+.sl-zone-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sl-zone-title {
+  align-items: center;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 4px;
+}
+
+.sl-zone-chips {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 26px;
+}
+
+.sl-chip-slot {
+  display: inline-flex;
+  max-width: 100%;
+  position: relative;
+}
+
+/* 每块右上角的删除按钮。 */
+.sl-chip.removable {
+  padding-right: 20px;
+}
+
+.sl-chip-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--sl-muted);
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 2px;
+  top: 3px;
+  width: 16px;
+}
+
+.sl-chip-remove:hover {
+  background: #fde2e1;
+  color: #b42318;
+}
+
+.sl-chip-slot.drop-before::before,
+.sl-drop-end {
+  align-self: stretch;
+  background: var(--sl-accent);
+  border-radius: 2px;
+  content: "";
+  display: inline-block;
+  margin-right: 3px;
+  width: 3px;
+}
+
+.sl-zone textarea,
+.sl-field textarea,
+.sl-field input {
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  resize: vertical;
+  width: 100%;
+}
+
+/* 双击就地编辑一块：占满一行。 */
+.sl-chip-slot.editing,
+.sl-zone-chips > .sl-block-editor {
+  flex: 1 1 100%;
+}
+
+.sl-block-editor {
+  border: 1px solid var(--sl-accent-border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 7px;
+  resize: vertical;
+  width: 100%;
+}
+
+.sl-edit-tools {
+  align-items: center;
+  background: #fff8e1;
+  border: 1px solid #f0d78c;
+  border-radius: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px 10px;
+  padding: 5px 8px;
+}
+
+.sl-chip.zone-character {
+  background: #fdf0e8;
+  border-color: #eab08f;
+  color: #712b13;
+}
+
+.sl-chip.zone-character .sl-chip-zh {
+  color: #993c1d;
+}
+
+.sl-field {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 3px;
+}
+
+.sl-field > span {
+  color: var(--sl-muted);
+}
+
+.sl-char-ref,
+.sl-char-predict {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sl-char-ref-item {
+  background: #f3f4f7;
+  border-radius: 5px;
+  font-size: 12px;
+  padding: 2px 7px;
+}
+
+.sl-char-caption {
+  border: 1px solid var(--sl-border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.sl-char-caption.drop-target {
+  box-shadow: 0 0 0 2px var(--sl-accent-border);
+}
+
+.sl-char-caption-head {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.sl-char-caption-head .sl-muted {
+  font-weight: 400;
+}
+
+.sl-char-options {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.sl-span2 {
+  grid-column: span 2;
+}
+
+.sl-preview-text {
+  background: #f8f9fb;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.sl-preview-text.muted {
+  color: var(--sl-muted);
+}
+
+.sl-hint svg {
+  vertical-align: -2px;
+}
+
+/* ---- 素材卡片 ---- */
+
+.sl-library-tabs {
+  align-self: stretch;
+  display: flex;
+}
+
+.sl-library-tabs button {
+  flex: 1;
+}
+
+.sl-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sl-card {
+  background: #fff;
+  border: 1px solid var(--sl-border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.sl-card.origin-character {
+  border-left-color: #d85a30;
+}
+
+.sl-card.origin-action {
+  border-left-color: #378add;
+}
+
+.sl-card-head {
+  display: flex;
+  gap: 8px;
+}
+
+.sl-card-thumb {
+  align-items: center;
+  background: #f0f1f4;
+  border-radius: 6px;
+  color: var(--sl-muted);
+  display: flex;
+  flex: none;
+  height: 72px;
+  justify-content: center;
+  overflow: hidden;
+  width: 56px;
+}
+
+.sl-card-thumb img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.sl-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sl-card-info strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sl-card-section {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.sl-card-section-name {
+  color: var(--sl-muted);
+  font-size: 11px;
+  min-width: 100%;
+}
+
+.sl-card-tag {
+  cursor: pointer;
+  user-select: text;
+  background: #f3f4f7;
+  border: 1px solid #e3e6eb;
+  border-radius: 5px;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 11px;
+  line-height: 1.3;
+  min-height: 0;
+  padding: 1px 6px;
+  text-align: left;
+}
+
+.sl-card-tag.on {
+  background: #e1f5ee;
+  border-color: #5dcaa5;
+  color: #085041;
+}
+
+.sl-card-tag.present {
+  border-color: #5dcaa5;
+  border-style: dashed;
+}
+
+.sl-added-row {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--sl-border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.sl-added-row span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-added-row.origin-character {
+  border-left-color: #d85a30;
+}
+
+.sl-added-row.origin-action {
+  border-left-color: #378add;
+}

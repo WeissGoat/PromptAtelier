@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tags_machine_core.clients.novelai import model_from_source_label
 from tags_machine_core.verification.image_params import read_image_parameters
 
 
@@ -157,6 +158,12 @@ def _model_from_source(source: dict[str, Any]) -> str | None:
     source_text = source.get("Source")
     if not isinstance(source_text, str):
         return None
+    hashed = model_from_source_label(source_text)
+    if hashed:
+        return hashed
+    # 只写了代际、没有哈希的旧格式。
+    if "V5" in source_text:
+        return "nai-diffusion-5-curated" if "curated" in source_text.lower() else "nai-diffusion-5-full"
     if "V4.5" in source_text:
         return "nai-diffusion-4-5-full"
     if "V4" in source_text:

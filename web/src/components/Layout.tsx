@@ -1,7 +1,7 @@
-import { GitCompare, Images, Layers3, PanelLeft } from "lucide-react";
+import { FlaskConical, GitCompare, Images, Layers3, PanelLeft } from "lucide-react";
 import type { ReactNode } from "react";
 
-export type PageKey = "custom" | "results" | "compare";
+export type PageKey = "custom" | "results" | "compare" | "style-lab";
 
 type LayoutProps = {
   page: PageKey;
@@ -13,6 +13,7 @@ const nav = [
   { key: "custom", label: "Custom", icon: PanelLeft },
   { key: "results", label: "出图历史", icon: Images },
   { key: "compare", label: "Compare", icon: GitCompare },
+  { key: "style-lab", label: "画风工坊", icon: FlaskConical },
 ] as const;
 
 export function Layout({ page, onPageChange, children }: LayoutProps) {

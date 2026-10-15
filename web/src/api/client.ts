@@ -1,6 +1,6 @@
 // 构建产物由后端同源托管，走相对路径；开发模式下 dev_web.py 会注入 VITE_API_ROOT。
 const API_ROOT =
-  import.meta.env.VITE_API_ROOT ?? (import.meta.env.PROD ? "/api" : "http://127.0.0.1:8765/api");
+  import.meta.env.VITE_API_ROOT ?? (import.meta.env.PROD ? "/api" : "http://127.0.0.1:53211/api");
 
 export function apiUrl(path: string): string {
   return `${API_ROOT}${path}`;

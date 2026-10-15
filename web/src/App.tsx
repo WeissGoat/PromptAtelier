@@ -4,19 +4,26 @@ import { Layout, type PageKey } from "./components/Layout";
 import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
 import { HistoryPage } from "./pages/HistoryPage";
+import { StyleLabErrorBoundary } from "./styleLab/StyleLabErrorBoundary";
+import { StyleLabPage } from "./styleLab/StyleLabPage";
 import { CustomWorkspaceProvider } from "./workspace/CustomWorkspaceProvider";
 import "./styles.css";
 
 const PAGE_STORAGE_KEY = "promptatelier.active-page/v1";
+const PAGE_KEYS: readonly PageKey[] = ["custom", "results", "compare", "style-lab"];
+
+function isPageKey(value: string | null): value is PageKey {
+  return value !== null && (PAGE_KEYS as readonly string[]).includes(value);
+}
 
 function getInitialPage(): PageKey {
   if (typeof window !== "undefined") {
     const rawHash = window.location.hash.replace(/^#\/?/, "");
-    if (rawHash === "custom" || rawHash === "results" || rawHash === "compare") {
+    if (isPageKey(rawHash)) {
       return rawHash;
     }
-    const saved = window.localStorage?.getItem(PAGE_STORAGE_KEY) as PageKey;
-    if (saved === "custom" || saved === "results" || saved === "compare") {
+    const saved = window.localStorage?.getItem(PAGE_STORAGE_KEY) ?? null;
+    if (isPageKey(saved)) {
       return saved;
     }
   }
@@ -37,7 +44,7 @@ export function App() {
   useEffect(() => {
     function onHashChange() {
       const rawHash = window.location.hash.replace(/^#\/?/, "");
-      if (rawHash === "custom" || rawHash === "results" || rawHash === "compare") {
+      if (isPageKey(rawHash)) {
         setPage(rawHash);
       }
     }
@@ -49,6 +56,11 @@ export function App() {
     custom: <CustomStudio />,
     results: <HistoryPage />,
     compare: <CompareStudio />,
+    "style-lab": (
+      <StyleLabErrorBoundary>
+        <StyleLabPage />
+      </StyleLabErrorBoundary>
+    ),
   }[page];
 
   return (
