@@ -19,6 +19,7 @@ web-batch-draft/
 local.yaml
 configs/local.yaml
 configs/server.yaml
+configs/cloud.yaml
 .env
 .env.*
 !.env.example
