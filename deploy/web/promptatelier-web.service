@@ -1,0 +1,23 @@
+# PromptAtelier Web 服务器部署：前端构建产物与 API 同源托管，只监听本机。
+# 安装方法见 deploy/web/README.md。
+[Unit]
+Description=PromptAtelier Web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/project/tags_machine/refactor
+# 可选：NAI_ACCESS_TOKEN、TM_COMFYUI_MODAL_TOKEN 等密钥放在不提交的 .env 中。
+EnvironmentFile=-/root/project/tags_machine/refactor/.env
+ExecStart=/root/project/tags_machine/refactor/.venv/bin/python -m tags_machine_core.web \
+    --config configs/server.yaml \
+    --host 127.0.0.1 \
+    --port 8766 \
+    --static-dir web/dist
+Restart=on-failure
+RestartSec=5
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

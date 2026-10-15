@@ -63,3 +63,36 @@ class WebAppTest(TestCase):
                 os.environ["TAGS_MACHINE_CONFIG"] = original_env
             else:
                 os.environ.pop("TAGS_MACHINE_CONFIG", None)
+
+    def test_static_dir_serves_frontend_alongside_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            (dist / "index.html").write_text("<!doctype html><title>PA</title>", encoding="utf-8")
+            (dist / "assets").mkdir()
+            (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+            client = TestClient(create_app(static_dir=dist))
+
+            index = client.get("/")
+            asset = client.get("/assets/app.js")
+            health = client.get("/api/health")
+
+        self.assertEqual(index.status_code, 200)
+        self.assertIn("<title>PA</title>", index.text)
+        self.assertEqual(asset.status_code, 200)
+        self.assertEqual(health.json()["status"], "ok")
+
+    def test_static_dir_without_build_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(RuntimeError, "npm run build"):
+                create_app(static_dir=tmp)
+
+    def test_root_returns_api_banner_without_static_dir(self):
+        original_env = os.environ.pop("PROMPTATELIER_STATIC_DIR", None)
+        try:
+            response = TestClient(create_app()).get("/")
+        finally:
+            if original_env is not None:
+                os.environ["PROMPTATELIER_STATIC_DIR"] = original_env
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("api_docs", response.json())
