@@ -324,6 +324,41 @@ batch:
             self.assertEqual([task.source["action_group"] for task in tasks], ["st_rp", "st_rp"])
             self.assertEqual(tasks[0].render.artist, "20260412")
 
+    def _plan_two_actions(self, archive: dict):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_node(root / "characters" / "homura", kind="character", node_id="homura", prompt="akemi_homura")
+            for name in ("standing", "sitting"):
+                _write_node(root / "actions" / name, kind="action", node_id=name, prompt=name)
+            spec = BatchSpec.model_validate(
+                {
+                    "name": "task-dir-name",
+                    "defaults": {"composer": "script", "artist": "20260412"},
+                    "select": {
+                        "characters": [{"selector": "explicit", "refs": [str(root / "characters" / "homura")]}],
+                        "actions": [
+                            {"selector": "explicit", "refs": [str(root / "actions" / "standing"), str(root / "actions" / "sitting")]}
+                        ],
+                    },
+                    "expand": {"mode": "product"},
+                    "archive": archive,
+                }
+            )
+            return BatchPlanner(base_dir=root).plan(spec, output_dir=root / "out", run_id="testrun")
+
+    def test_task_output_dir_defaults_to_task_id(self):
+        tasks = self._plan_two_actions({})
+
+        self.assertEqual([Path(task.output.output_dir).name for task in tasks], [task.id for task in tasks])
+
+    def test_ordered_task_output_dir_sorts_in_task_order(self):
+        tasks = self._plan_two_actions({"task_dir_name": "ordered"})
+
+        names = [Path(task.output.output_dir).name for task in tasks]
+        self.assertEqual(names, [f"00000_homura_standing_{tasks[0].id[-8:]}", f"00001_homura_sitting_{tasks[1].id[-8:]}"])
+        self.assertEqual(sorted(names), names)
+        self.assertEqual([Path(task.output.task_dir).name for task in tasks], [task.id for task in tasks])
+
     def test_batch_resolution_accepts_nai_const_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

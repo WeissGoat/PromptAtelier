@@ -68,6 +68,8 @@ class ArchiveConfig(BaseModel):
     save_png_params: bool = True
     save_parameter_image: bool = False
     copy_images: bool = False
+    # 输出目录下每个任务的文件夹名：task_id 沿用任务 ID；ordered 以补零序号开头，按名称排序即出图顺序
+    task_dir_name: Literal["task_id", "ordered"] = "task_id"
 
 
 class ReportConfig(BaseModel):

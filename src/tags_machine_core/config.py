@@ -40,6 +40,8 @@ class LoggingConfig(BaseModel):
 
 class WebConfig(BaseModel):
     project_requires: list[str] = Field(default_factory=list)
+    # 出图历史额外扫描的目录（如定时跑图输出 design/auto），每个子目录算一批
+    history_roots: list[str] = Field(default_factory=list)
 
 
 class NovelAIConfig(BaseModel):

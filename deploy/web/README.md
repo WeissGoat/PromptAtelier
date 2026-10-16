@@ -52,5 +52,6 @@ journalctl -u promptatelier-web -f
 ```
 
 - 输出图片写在 `outputs/`，注意磁盘空间。
+- 出图历史默认只列 `outputs/` 下的批次；`configs/server.yaml` 的 `web.history_roots` 可以追加目录（如定时跑图的 `design/auto`），每个日期子目录显示为 `auto · YYYYMMDD` 一批。stop.sh 上传后会删除本地图片，所以只能看到还没上传的那部分。
 - ComfyUI Modal 目标需要 `TM_COMFYUI_MODAL_TOKEN`（写在 `.env`）；云端状态探测还需要 Modal SDK 凭据（`modal token new` 生成 `~/.modal.toml`）。
 - “打开所在文件夹”只在 Windows 本地可用，服务器上会返回 501。

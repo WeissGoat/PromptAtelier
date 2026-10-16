@@ -18,6 +18,9 @@ web:
   project_requires:
     - examples/project/collections.yaml
     - examples/project/nai_const_action_groups.yaml
+  # 出图历史额外扫描的目录，每个子目录算一批；这里是定时跑图（../run_daily_batch.sh）的输出
+  history_roots:
+    - "/root/project/tags_machine/design/auto"
 
 artist_input_filter:
   negative_prompt:
