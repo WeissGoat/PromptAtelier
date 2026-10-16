@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 from typing import Any
 
 import yaml
@@ -707,16 +708,52 @@ def check_action_outfit(root_str: str, file_set: set[str]) -> bool:
     return False
 
 
+def _is_link_dir(path: str) -> bool:
+    """判断目录是否为符号链接或 Windows 联接（Python 3.10 的 islink 认不出联接）。"""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _is_within(path: str, roots: list[str]) -> bool:
+    norm = os.path.normcase(path)
+    for root in roots:
+        if norm == root or norm.startswith(root.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
 def discover_clothing_candidate_dirs(action_root: Path) -> list[tuple[str, Path]]:
     """扫描 action 根目录下符合条件的服装候选目录。
 
     返回: list of (source_category, node_dir)
     source_category 为 "st_clothes" 或 "action_outfit"
+
+    链接目录（如 new 联接、pn_* 分类视图里的联接）只在第一次进入其真实目录时遍历；
+    pn_* 排在最后，所以指回 new 的视图联接会被跳过，不会重复扫描。
     """
     candidates: list[tuple[str, Path]] = []
     seen = set()
+    walked_real_roots = [os.path.normcase(os.path.realpath(action_root))]
 
-    for root_str, _, filenames in os.walk(action_root):
+    # followlinks=True 让符号链接与联接行为一致；重复与环路由 walked_real_roots 剪掉
+    for root_str, dirnames, filenames in os.walk(action_root, followlinks=True):
+        dirnames.sort(key=lambda d: (d.startswith("pn_"), d))
+        kept_dirs: list[str] = []
+        for name in dirnames:
+            sub = os.path.join(root_str, name)
+            if _is_link_dir(sub):
+                real = os.path.normcase(os.path.realpath(sub))
+                if _is_within(real, walked_real_roots):
+                    continue
+                walked_real_roots.append(real)
+            kept_dirs.append(name)
+        dirnames[:] = kept_dirs
+
         file_set = set(filenames)
         if "tags.txt" not in file_set and "meta.yaml" not in file_set:
             continue
@@ -1035,6 +1072,103 @@ def _node_name_quality(name: str) -> tuple[int, int, str]:
     return (score, len(name), name)
 
 
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+IMAGE_MODES = ("copy", "symlink", "none")
+EXPORT_DESCRIPTION_PREFIX = "Extracted from "
+
+
+def _sync_node_images(node_dir: Path, target_dir: Path, mode: str) -> dict[str, int]:
+    """把动作节点的预览图同步到服装节点目录：copy 复制，symlink 建文件符号链接（失败时回退复制）。
+
+    目标目录里已不在源目录中的图片（或指向它们的链接）会被移除。
+    """
+    stats = {"images": 0, "linked": 0, "copied": 0, "link_fallbacks": 0, "removed": 0}
+    if mode == "none":
+        return stats
+
+    sources = {
+        p.name: p
+        for p in sorted(node_dir.iterdir())
+        if p.suffix.lower() in IMAGE_SUFFIXES and p.is_file()
+    }
+    for existing in target_dir.iterdir():
+        if existing.suffix.lower() in IMAGE_SUFFIXES and existing.name not in sources:
+            if existing.is_symlink() or existing.is_file():
+                existing.unlink()
+                stats["removed"] += 1
+
+    for name, src in sources.items():
+        stats["images"] += 1
+        dest = target_dir / name
+        real_src = src.resolve()
+        if mode == "symlink":
+            if dest.is_symlink() and Path(os.readlink(dest)).resolve() == real_src:
+                stats["linked"] += 1
+                continue
+            if dest.is_symlink() or dest.exists():
+                dest.unlink()
+            try:
+                os.symlink(real_src, dest)
+                stats["linked"] += 1
+                continue
+            except OSError:
+                stats["link_fallbacks"] += 1
+        elif dest.is_symlink():
+            dest.unlink()
+        try:
+            shutil.copy2(real_src, dest)
+            stats["copied"] += 1
+        except OSError:
+            pass
+    return stats
+
+
+def _prune_stale_exports(
+    export_root: Path,
+    keep_rel_paths: set[Path],
+    *,
+    max_prune: int,
+) -> dict[str, Any]:
+    """删除导出目录中由本脚本生成、但源动作已不再产出的服装节点。
+
+    只处理 description 以 "Extracted from " 开头的 meta.yaml，手写的服装节点不受影响。
+    只删除 meta.yaml 和图片（链接），目录空了才移除；超过 max_prune 个时整体放弃并报告。
+    """
+    stale: list[Path] = []
+    for meta_file in sorted(export_root.rglob("meta.yaml")):
+        rel = meta_file.parent.relative_to(export_root)
+        if rel in keep_rel_paths:
+            continue
+        try:
+            data = yaml.safe_load(meta_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict) or data.get("kind") != "clothing":
+            continue
+        if not str(data.get("description") or "").startswith(EXPORT_DESCRIPTION_PREFIX):
+            continue
+        stale.append(rel)
+
+    stale_list = [str(p).replace("\\", "/") for p in stale]
+    if len(stale) > max_prune:
+        return {"pruned_count": 0, "prune_aborted": True, "stale_count": len(stale), "stale": stale_list}
+
+    for rel in stale:
+        node_dir = export_root / rel
+        for item in node_dir.iterdir():
+            if item.name == "meta.yaml" or item.suffix.lower() in IMAGE_SUFFIXES:
+                if item.is_symlink() or item.is_file():
+                    item.unlink()
+        current = node_dir
+        while current != export_root:
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
+    return {"pruned_count": len(stale), "prune_aborted": False, "stale_count": len(stale), "stale": stale_list}
+
+
 def export_clothing_nodes(
     action_root: Path,
     export_root: Path,
@@ -1043,8 +1177,17 @@ def export_clothing_nodes(
     min_tags: int = 4,
     dedup: bool = True,
     blocked_patterns: list[str | re.Pattern] | None = None,
+    images: str = "copy",
+    prune: bool = False,
+    max_prune: int = 50,
 ) -> dict[str, Any]:
-    """将清洗出的有效服装节点导出到指定服装目录 (例如 design/服装/)。"""
+    """将清洗出的有效服装节点导出到指定服装目录 (例如 design/服装/)。
+
+    images: "copy" 复制预览图，"symlink" 建文件符号链接指向动作目录里的原图，"none" 不处理图片。
+    prune: 删除源动作已不再产出的旧导出节点（见 _prune_stale_exports）。
+    """
+    if images not in IMAGE_MODES:
+        raise ValueError(f"images must be one of {IMAGE_MODES}: {images}")
     candidates = discover_clothing_candidate_dirs(action_root)
     compiled_blocked = compile_blocked_patterns(blocked_patterns)
     export_root.mkdir(parents=True, exist_ok=True)
@@ -1055,6 +1198,7 @@ def export_clothing_nodes(
     skipped_duplicate_count = 0
     exported_nodes: list[dict[str, Any]] = []
     filtered_words_counter: Counter[str] = Counter()
+    image_stats: Counter[str] = Counter()
 
     # 1. 扫描提取并清洗候选节点
     valid_candidates: list[dict[str, Any]] = []
@@ -1155,7 +1299,7 @@ def export_clothing_nodes(
             "kind": "clothing",
             "id": clothing_id,
             "name": node_name,
-            "description": f"Extracted from {cat} action: {node_dir.name}",
+            "description": f"{EXPORT_DESCRIPTION_PREFIX}{cat} action: {node_dir.name}",
             "tags": ordered_tags,
         }
         if neg_list:
@@ -1166,13 +1310,8 @@ def export_clothing_nodes(
             encoding="utf-8",
         )
 
-        # 迁移关联预览图
-        for img_ext in (".png", ".jpg", ".jpeg", ".webp"):
-            for img_file in node_dir.glob(f"*{img_ext}"):
-                try:
-                    shutil.copy2(img_file, target_dir / img_file.name)
-                except Exception:
-                    pass
+        # 关联预览图（复制或符号链接）
+        image_stats.update(_sync_node_images(node_dir, target_dir, images))
 
         exported_count += 1
         exported_nodes.append({
@@ -1183,6 +1322,11 @@ def export_clothing_nodes(
             "tag_count": routed_in_node,
         })
 
+    prune_result: dict[str, Any] = {"pruned_count": 0, "prune_aborted": False, "stale_count": 0, "stale": []}
+    if prune:
+        keep = {item["node_dir"].relative_to(action_root) for item in selected_candidates}
+        prune_result = _prune_stale_exports(export_root, keep, max_prune=max_prune)
+
     return {
         "summary": {
             "total_candidates": len(candidates),
@@ -1191,10 +1335,16 @@ def export_clothing_nodes(
             "skipped_duplicate_count": skipped_duplicate_count,
             "skipped_existing_count": skipped_existing_count,
             "export_dir": str(export_root),
+            "images_mode": images,
+            "image_stats": {k: image_stats.get(k, 0) for k in ("images", "linked", "copied", "link_fallbacks", "removed")},
+            "pruned_count": prune_result["pruned_count"],
+            "prune_aborted": prune_result["prune_aborted"],
+            "stale_count": prune_result["stale_count"],
             "filtered_words_count": sum(filtered_words_counter.values()),
             "filtered_words_frequency": dict(filtered_words_counter.most_common()),
         },
         "exported_nodes": exported_nodes,
+        "pruned_nodes": prune_result["stale"],
     }
 
 
@@ -1211,6 +1361,9 @@ def main():
     parser.add_argument("--no-dedup", action="store_true", help="Disable prompt tag content deduplication")
     parser.add_argument("--filter-words", default="halo", help="Comma-separated list of blocked words/patterns to filter out (default: halo)")
     parser.add_argument("--no-filter-words", action="store_true", help="Disable blocked words filtering")
+    parser.add_argument("--images", choices=IMAGE_MODES, default="copy", help="How to bring preview images into exported nodes: copy (default), symlink (file symlinks to the action originals, falls back to copy), none")
+    parser.add_argument("--prune", action="store_true", help="Remove previously exported nodes whose source action no longer produces them (only nodes written by this script)")
+    parser.add_argument("--max-prune", type=int, default=50, help="Abort pruning if more than this many nodes would be removed (default: 50)")
     args = parser.parse_args()
 
     action_root = Path(args.root)
@@ -1239,6 +1392,8 @@ def main():
         print(f"Min Tags: {args.min_tags}")
         print(f"Deduplication: {not args.no_dedup}")
         print(f"Filter Words: {blocked_patterns if blocked_patterns is not None else ['halo']}")
+        print(f"Images: {args.images}")
+        print(f"Prune: {args.prune} (max {args.max_prune})")
         print("-" * 60)
         res = export_clothing_nodes(
             action_root,
@@ -1247,6 +1402,9 @@ def main():
             min_tags=args.min_tags,
             dedup=not args.no_dedup,
             blocked_patterns=blocked_patterns,
+            images=args.images,
+            prune=args.prune,
+            max_prune=args.max_prune,
         )
         sm = res["summary"]
         print(f"Total Candidates Scanned : {sm['total_candidates']}")
@@ -1254,6 +1412,17 @@ def main():
         print(f"Skipped Below Threshold  : {sm['skipped_empty_count']}")
         print(f"Skipped Duplicate Content: {sm['skipped_duplicate_count']}")
         print(f"Skipped Already Existing : {sm['skipped_existing_count']}")
+        ist = sm["image_stats"]
+        print(f"Images                   : {ist['images']} (linked {ist['linked']}, copied {ist['copied']}, link fallbacks {ist['link_fallbacks']}, removed {ist['removed']})")
+        if args.prune:
+            if sm["prune_aborted"]:
+                print(f"Prune ABORTED            : {sm['stale_count']} stale nodes > --max-prune {args.max_prune}; nothing removed")
+                for rel in res["pruned_nodes"][:20]:
+                    print(f"  stale: {rel}")
+            else:
+                print(f"Pruned Stale Nodes       : {sm['pruned_count']}")
+                for rel in res["pruned_nodes"]:
+                    print(f"  pruned: {rel}")
         if sm.get("filtered_words_frequency"):
             print("-" * 60)
             print(f"本次被过滤的提示词频 (共 {sm['filtered_words_count']} 次):")
@@ -1264,7 +1433,7 @@ def main():
         if args.save_report:
             Path(args.save_report).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"Export report saved to {args.save_report}")
-        return 0
+        return 2 if sm["prune_aborted"] else 0
 
     report = run_dryrun_analysis(action_root, min_tags=args.min_tags, blocked_patterns=blocked_patterns)
 
@@ -1318,4 +1487,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

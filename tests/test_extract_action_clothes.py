@@ -1,4 +1,7 @@
+import os
 from pathlib import Path
+import shutil
+
 import pytest
 
 from tools.legacy_migration.extract_action_clothes import (
@@ -409,6 +412,97 @@ def test_clean_and_route_tags_disable_filter():
     res = clean_and_route_tags(raw_tags, blocked_patterns=[])
     assert res["blocked"] == []
     assert "halo" in res["sections"].get("headwear", [])
+
+
+def _make_outfit_node(node_dir: Path, tags: str = "white shirt, sailor collar, blue pleated skirt, loafers") -> None:
+    node_dir.mkdir(parents=True)
+    (node_dir / "tags.txt").write_text(f"type,dress\n{tags}\n", encoding="utf-8")
+    (node_dir / "preview.png").write_bytes(b"dummy image")
+
+
+def _symlink_dir_or_skip(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+
+def test_discover_skips_view_links_back_into_walked_tree(tmp_path: Path):
+    repo = tmp_path / "repo"
+    action = tmp_path / "action"
+    _make_outfit_node(action / "20260502_maid")
+    # new -> action（外部真实目录，应遍历）；pn_* 视图里的链接指回 new 的子目录（应跳过）
+    _symlink_dir_or_skip(repo / "new", action)
+    _symlink_dir_or_skip(repo / "pn_human_x" / "02_core_20260502_maid", action / "20260502_maid")
+
+    candidates = discover_clothing_candidate_dirs(repo)
+    assert [p.relative_to(repo).as_posix() for _, p in candidates] == ["new/20260502_maid"]
+
+
+def test_export_images_symlink_mode(tmp_path: Path):
+    action_root = tmp_path / "action_root"
+    node = action_root / "new" / "20260502_maid"
+    _make_outfit_node(node)
+    export_root = tmp_path / "export"
+
+    res = export_clothing_nodes(action_root, export_root, images="symlink")
+    target = export_root / "new" / "20260502_maid" / "preview.png"
+    ist = res["summary"]["image_stats"]
+    assert ist["images"] == 1
+    if ist["link_fallbacks"]:
+        assert not target.is_symlink() and target.read_bytes() == b"dummy image"
+    else:
+        assert target.is_symlink()
+        assert target.resolve() == (node / "preview.png").resolve()
+
+    # 源图被删后 --force 重新导出，失效的图片链接被清掉
+    (node / "preview.png").unlink()
+    res2 = export_clothing_nodes(action_root, export_root, images="symlink", force=True)
+    assert res2["summary"]["image_stats"]["removed"] == 1
+    assert not target.exists() and not target.is_symlink()
+
+
+def test_export_prune_removes_only_generated_stale_nodes(tmp_path: Path):
+    import yaml
+
+    action_root = tmp_path / "action_root"
+    keep_node = action_root / "new" / "keep"
+    gone_node = action_root / "new" / "gone"
+    _make_outfit_node(keep_node)
+    _make_outfit_node(gone_node, "black dress, white apron, maid headdress, kneehighs")
+    export_root = tmp_path / "export"
+    export_clothing_nodes(action_root, export_root)
+
+    manual = export_root / "manual" / "my_outfit"
+    manual.mkdir(parents=True)
+    (manual / "meta.yaml").write_text(
+        yaml.safe_dump({"kind": "clothing", "id": "my_outfit", "description": "hand written"}),
+        encoding="utf-8",
+    )
+
+    shutil.rmtree(gone_node)
+    res = export_clothing_nodes(action_root, export_root, prune=True)
+    assert res["summary"]["pruned_count"] == 1
+    assert res["pruned_nodes"] == ["new/gone"]
+    assert not (export_root / "new" / "gone").exists()
+    assert (export_root / "new" / "keep" / "meta.yaml").exists()
+    assert (manual / "meta.yaml").exists()
+
+
+def test_export_prune_aborts_above_limit(tmp_path: Path):
+    action_root = tmp_path / "action_root"
+    for i in range(3):
+        _make_outfit_node(action_root / "new" / f"n{i}", f"white shirt, skirt, loafers, ribbon{i} bow")
+    export_root = tmp_path / "export"
+    export_clothing_nodes(action_root, export_root)
+
+    shutil.rmtree(action_root / "new")
+    (action_root / "new").mkdir()
+    res = export_clothing_nodes(action_root, export_root, prune=True, max_prune=2)
+    assert res["summary"]["prune_aborted"] is True
+    assert res["summary"]["pruned_count"] == 0
+    assert all((export_root / "new" / f"n{i}" / "meta.yaml").exists() for i in range(3))
 
 
 
