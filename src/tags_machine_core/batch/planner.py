@@ -122,13 +122,17 @@ class BatchPlanner:
             random.shuffle(tasks)
         if spec.expand.max_tasks is not None and spec.expand.mode != "blackboard_rounds":
             tasks = tasks[: spec.expand.max_tasks]
+        index_width = max(5, len(str(len(tasks) - 1)))
         return [
             task.model_copy(
                 update={
                     "index": index,
                     "output": TaskOutput(
                         task_dir=str(resolved_run_dir / "tasks" / task.id),
-                        output_dir=str(resolved_output_dir / task.id),
+                        output_dir=str(
+                            resolved_output_dir
+                            / _task_output_dir_name(task, index, spec.archive.task_dir_name, index_width)
+                        ),
                     ),
                 }
             )
@@ -983,6 +987,18 @@ def _task_id(*parts: Any) -> str:
     prefix = "_".join(clean[:4])[:80].strip("_") or "task"
     digest = hashlib.sha256("|".join(str(part) for part in parts).encode("utf-8")).hexdigest()[:8]
     return f"{prefix}_{digest}"
+
+
+def _task_output_dir_name(task: BatchTask, index: int, naming: str, width: int) -> str:
+    """ordered：<补零序号>_<角色>_<动作>_<task_id 摘要>；摘要保证同一天多次运行共用日期目录时不重名。"""
+    if naming != "ordered":
+        return task.id
+    labels = [task.source.get("character"), task.source.get("action")]
+    if not any(labels):
+        labels = [task.source.get("prompt_id")]
+    label = "_".join(_slug(value[0] if isinstance(value, list) else value) for value in labels if value)
+    digest = task.id.rsplit("_", 1)[-1]
+    return "_".join(part for part in (f"{index:0{width}d}", label[:60].strip("_"), digest) if part)
 
 
 def _slug(value: Any) -> str:

@@ -542,6 +542,7 @@ run:
 | `save_png_params` | `true` | 保存从 PNG 读取到的参数摘要 `png_params.json`。 |
 | `save_parameter_image` | `false` | 生成一张人可读的参数详情图，文件名为 `zz_<task_id>_parameter_details.png`，保存到该任务的输出/归档目录；`zz_` 前缀用于按名称排序时放在生成图后面。 |
 | `copy_images` | `false` | 是否把图片复制进任务输出/归档目录。默认图片仍保存在生成器输出路径，但路径会写进结果。 |
+| `task_dir_name` | `task_id` | 图片输出目录下每个任务的文件夹名。`task_id` 直接用任务 ID；`ordered` 用 `<补零序号>_<角色>_<动作>_<8位摘要>`（如 `00012_homura_standing_38c0529e`），按名称排序就是出图顺序，适合同步到云盘后浏览。工作区 `tasks/<task_id>/` 不受影响。 |
 
 建议日常保持默认，便于问题排查和对比旧 tags_machine。
 
