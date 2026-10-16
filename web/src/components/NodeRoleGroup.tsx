@@ -8,6 +8,7 @@ import type { NodeVariantSlot } from "../workspace/types";
 import { NodeSlot } from "./NodeSlot";
 
 const labels: Record<GroupRole, string> = { artist: "Artist", character: "Character", action: "Action" };
+const titles: Record<GroupRole, string> = { artist: "画风", character: "角色", action: "动作" };
 
 function isDirty(slot: NodeVariantSlot): boolean {
   const status = nodeSlotStatus(slot);
@@ -51,11 +52,17 @@ export function NodeRoleGroup({ role, onEditSlot }: { role: GroupRole; onEditSlo
     );
   }
 
+  const variants = 1 + group.compares.length;
   return (
-    <section className="node-role-group">
+    <section className={`node-role-group role-${role}`}>
       <div className="node-role-title">
-        <h3>{label}</h3>
-        <button aria-label={`新增${label} Compare`} className="icon-button" onClick={() => workspace.addCompare(role)} title="新增 Compare" type="button"><Plus size={16} /></button>
+        <h3>
+          <span className="role-dot" aria-hidden="true" />
+          {titles[role]}
+          <small>{label}</small>
+          {variants > 1 ? <span className="chip violet">{variants} 个对比</span> : null}
+        </h3>
+        <button aria-label={`新增${label} Compare`} className="btn-sm btn-ghost" onClick={() => workspace.addCompare(role)} title="新增 Compare：同一位置放多个节点做对比" type="button"><Plus size={14} /> Compare</button>
       </div>
       {renderSlot(group.primary)}
       {group.compares.map(renderSlot)}

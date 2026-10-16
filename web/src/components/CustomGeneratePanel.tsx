@@ -9,7 +9,7 @@ import { compareComposeRequest, compareItemLabels, createCompareGroupOutputDir, 
 import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeRole } from "../nodes/types";
 import { listAllPoolNodes } from "../randomNodes/api";
-import { hasRandomSlots, hasSequentialSlot, isSequentialSlot, resolveRandomItems } from "../randomNodes/resolve";
+import { assertGroupHasSelection, hasRandomSlots, hasSequentialSlot, isSequentialSlot, resolvedSlot, resolveRandomItems } from "../randomNodes/resolve";
 import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
@@ -88,6 +88,7 @@ function validateSelected(slots: Partial<Record<NodeRole, NodeVariantSlot | null
     }
     if (slot.sourceKind === "random") {
       if (!slot.randomSpec?.source.value.trim()) return `${slotLabels[role]} 随机节点尚未配置来源。`;
+      if (slot.randomSpec.selection && !slot.randomSpec.selection.refs.length) return `${slotLabels[role]} 节点组一个成员都没勾选。`;
       continue;
     }
     const status = nodeSlotStatus(slot);
@@ -252,14 +253,7 @@ export function CustomGeneratePanel() {
       `/nodes/read?${new URLSearchParams({ ref: candidate.ref, role: actionSlot.role })}`,
     );
     return {
-      resolved: {
-        ...actionSlot,
-        sourceKind: "fixed",
-        randomSpec: null,
-        sourceRef: candidate.ref,
-        sourceNode: structuredClone(nodeResponse.node),
-        draftNode: structuredClone(nodeResponse.node),
-      },
+      resolved: resolvedSlot(actionSlot, nodeResponse.node, candidate.ref),
       candidate,
       total: response.items.length,
     };
@@ -318,6 +312,7 @@ export function CustomGeneratePanel() {
   async function submitSequential(all: boolean) {
     const actionSlot = primary.action;
     if (!actionSlot || !isSequentialSlot(actionSlot)) return;
+    assertGroupHasSelection(actionSlot);
     const startCursor = actionSlot.poolCursor ?? 0;
     const { n, seedAt } = planSeeds(params);
     const pool = await listAllPoolNodes(actionSlot.role, actionSlot.randomSpec!);
@@ -407,7 +402,7 @@ export function CustomGeneratePanel() {
       />
       <div className="button-row ordinary-generate-actions">
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>
-        <button disabled={busy} onClick={() => void generate()} type="button">
+        <button className="btn-primary" disabled={busy} onClick={() => void generate()} type="button">
           <Play size={16} /> {primaryHasSequential ? (rounds > 1 ? `Generate Next (${rounds})` : "Generate Next") : (rounds > 1 ? `Generate Primary (${rounds} 轮)` : "Generate Primary")}
         </button>
         {primaryHasSequential ? <button disabled={busy} onClick={() => void generateAllSequential()} type="button"><ListOrdered size={16} /> Run All</button> : null}

@@ -24,10 +24,12 @@ export function NodeGroupSummary({ slot, onOpen }: { slot: NodeVariantSlot; onOp
   const specSignature = useMemo(() => JSON.stringify(spec), [spec]);
   const [members, setMembers] = useState<NodePoolCandidate[]>([]);
   const [total, setTotal] = useState<number | null>(null);
+  const [unselected, setUnselected] = useState(0);
   const [error, setError] = useState("");
+  const noneSelected = Boolean(spec?.selection && spec.selection.refs.length === 0);
 
   useEffect(() => {
-    if (!spec?.source.value.trim()) {
+    if (!spec?.source.value.trim() || noneSelected) {
       setMembers([]);
       setTotal(null);
       return;
@@ -39,6 +41,7 @@ export function NodeGroupSummary({ slot, onOpen }: { slot: NodeVariantSlot; onOp
           if (!active) return;
           setMembers(response.items);
           setTotal(response.total);
+          setUnselected(response.stats.unselected ?? 0);
           setError("");
         })
         .catch((requestError) => {
@@ -51,15 +54,18 @@ export function NodeGroupSummary({ slot, onOpen }: { slot: NodeVariantSlot; onOp
     };
     // spec 用签名比较，避免每次渲染都重新扫描。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specSignature, cursor, slot.role]);
+  }, [specSignature, cursor, slot.role, noneSelected]);
 
   const source = spec?.source;
   const finished = sequential && total !== null && cursor >= total;
+  // 有勾选时显示"已选 x / 整组 y"，否则"共 y 个"。
+  const count = spec?.selection ? `已选 ${total ?? 0} / ${(total ?? 0) + unselected}` : `共 ${total} 个`;
   let detail = "";
   if (!source?.value) detail = "未配置来源";
+  else if (noneSelected) detail = "一个成员都没勾选";
   else if (total === null) detail = error ? "" : "正在读取成员…";
-  else if (sequential) detail = finished ? `共 ${total} 个 · 已跑完，请重置位置` : `共 ${total} 个 · 下一个 #${cursor + 1}${members[0] ? ` ${members[0].name}` : ""}`;
-  else detail = `共 ${total} 个 · 每次随机抽一个`;
+  else if (sequential) detail = finished ? `${count} · 已跑完，请重置位置` : `${count} · 下一个 #${cursor + 1}${members[0] ? ` ${members[0].name}` : ""}`;
+  else detail = `${count} · 每次随机抽一个`;
 
   return (
     <button aria-label={`编辑节点组：${source?.value ?? "未配置"}`} className="node-group-summary" onClick={onOpen} type="button">

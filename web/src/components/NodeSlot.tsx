@@ -1,4 +1,4 @@
-import { FilePlus2, Layers, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronDown, FilePlus2, Layers, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
@@ -6,6 +6,7 @@ import type { NodeReadResponse, NodeSummary } from "../api/types";
 import { nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeDocument } from "../nodes/types";
 import type { NodeVariantSlot } from "../workspace/types";
+import { GroupMembers, memberEdited } from "./GroupMembers";
 import { NodeGroupSummary } from "./NodeGroupSummary";
 import { NodePicker } from "./NodePicker";
 import { NodePreviewImage } from "./NodePreviewImage";
@@ -59,6 +60,12 @@ function displayName(slot: NodeVariantSlot): string {
   return name && (status === "modified" || status === "temporary") ? `${name} *` : name;
 }
 
+/** 路径只留最后两级，完整路径放在 title 里。 */
+function shortPath(ref: string): string {
+  const parts = ref.split(/[/\\]/).filter(Boolean);
+  return parts.slice(-2).join(" / ");
+}
+
 export function NodeSlot({
   label,
   slot,
@@ -84,6 +91,7 @@ export function NodeSlot({
 }: NodeSlotProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const readRequestId = useRef(0);
 
   useEffect(() => {
@@ -156,73 +164,111 @@ export function NodeSlot({
     action();
   }
 
+  const isGroup = slot.sourceKind === "random";
+  const status = nodeSlotStatus(slot);
+  const memberCount = Object.keys(slot.memberDrafts ?? {}).filter((ref) => memberEdited(slot, ref)).length;
+
   return (
-    <section className={`node-slot ${slot.mode === "compare" ? "compare-node-slot" : ""}`}>
+    <section className={`node-slot slot-card${slot.mode === "compare" ? " compare-node-slot" : ""}${isGroup ? " is-group" : ""}`}>
       <div className="node-slot-header">
+        <div aria-label={`${label}节点来源`} className="slot-mode" role="group">
+          <button
+            aria-pressed={!isGroup}
+            className={!isGroup ? "active" : ""}
+            onClick={() => {
+              if (isGroup) runReplacingAction(onClear, "切换成单个节点会清掉当前节点组设置，是否继续？");
+            }}
+            title="选一个固定节点"
+            type="button"
+          >
+            单个
+          </button>
+          {onCreateRandom ? (
+            <button
+              aria-label={`创建${label}节点组`}
+              aria-pressed={isGroup}
+              className={isGroup ? "active" : ""}
+              onClick={() => {
+                if (isGroup) onEditRandom?.();
+                else runReplacingAction(onCreateRandom, "当前节点将被替换为节点组，是否继续？");
+              }}
+              title="节点组：一组节点随机或按顺序抽取"
+              type="button"
+            >
+              <Layers size={13} /> 节点组
+            </button>
+          ) : null}
+        </div>
         <div className="node-slot-labels">
-          {slot.mode === "compare" ? <span className="compare-badge">Compare</span> : null}
-          <span className="node-status">{statusLabel(slot)}</span>
+          {slot.mode === "compare" ? <span className="compare-badge chip violet">Compare</span> : null}
+          {!isGroup ? <span className={`node-status chip${status === "modified" ? " accent" : status === "temporary" ? " warning" : ""}`}>{statusLabel(slot)}</span> : null}
         </div>
         <div className="node-slot-actions">
-          <button aria-label={`编辑${label}节点`} className="icon-button" disabled={(!slot.draftNode && slot.sourceKind !== "random") || loading} onClick={() => void handleEdit()} title="编辑节点" type="button"><Pencil size={16} /></button>
-          <button aria-label={`新建空白${label}节点`} className="icon-button" onClick={() => runReplacingAction(onCreateBlank, "当前临时修改将被替换，是否继续？")} title="新建空白节点" type="button"><FilePlus2 size={16} /></button>
-          {onCreateRandom ? <button aria-label={`创建${label}节点组`} className="icon-button" onClick={() => runReplacingAction(onCreateRandom, "当前节点将被替换为节点组，是否继续？")} title="节点组：一组节点随机或按顺序抽取" type="button"><Layers size={16} /></button> : null}
-          <button aria-label={`还原${label}节点`} className="icon-button" disabled={!slot.sourceNode} onClick={() => runReplacingAction(onRestore, "当前临时修改将被还原，是否继续？")} title="还原原始节点" type="button"><RotateCcw size={16} /></button>
+          <button aria-label={`编辑${label}节点`} className="icon-button btn-ghost" disabled={(!slot.draftNode && !isGroup) || loading} onClick={() => void handleEdit()} title={isGroup ? "节点组设置" : "编辑节点"} type="button"><Pencil size={15} /></button>
+          {!isGroup ? <button aria-label={`新建空白${label}节点`} className="icon-button btn-ghost" onClick={() => runReplacingAction(onCreateBlank, "当前临时修改将被替换，是否继续？")} title="新建空白临时节点" type="button"><FilePlus2 size={15} /></button> : null}
+          {!isGroup ? <button aria-label={`还原${label}节点`} className="icon-button btn-ghost" disabled={!slot.sourceNode || status === "original"} onClick={() => runReplacingAction(onRestore, "当前临时修改将被还原，是否继续？")} title="还原原始节点" type="button"><RotateCcw size={15} /></button> : null}
           {onRemove ? (
-            <button aria-label={`删除${label} Compare节点`} className="icon-button" onClick={onRemove} title="删除 Compare 节点" type="button"><Trash2 size={16} /></button>
+            <button aria-label={`删除${label} Compare节点`} className="icon-button btn-ghost btn-danger" onClick={onRemove} title="删除 Compare 节点" type="button"><Trash2 size={15} /></button>
           ) : null}
         </div>
       </div>
-      {slot.sourceKind === "random" ? (
-        <NodeGroupSummary onOpen={onEditRandom} slot={slot} />
+      {isGroup ? (
+        <div className="slot-group">
+          <NodeGroupSummary onOpen={onEditRandom} slot={slot} />
+          {slot.randomSpec?.source.value.trim() ? (
+            <>
+              <button
+                aria-expanded={membersOpen}
+                className="slot-group-toggle btn-sm btn-ghost"
+                onClick={() => setMembersOpen((open) => !open)}
+                type="button"
+              >
+                <ChevronDown className={membersOpen ? "chevron open" : "chevron"} size={14} />
+                {membersOpen ? "收起成员" : "展开成员"}
+                {memberCount ? <span className="chip accent">{memberCount} 个改过</span> : null}
+              </button>
+              {membersOpen ? <GroupMembers slot={slot} variant="list" /> : null}
+            </>
+          ) : null}
+        </div>
       ) : (
-        <NodePicker
-          label={label}
-          onClear={() => runReplacingAction(onClear, "当前临时修改将被清除，是否继续？")}
-          onSelect={(node) => void handleSelect(node)}
-          placeholder={placeholder}
-          role={slot.role}
-          value={displayName(slot)}
-        />
+        <>
+          <NodePicker
+            label={label}
+            onClear={() => runReplacingAction(onClear, "当前临时修改将被清除，是否继续？")}
+            onSelect={(node) => void handleSelect(node)}
+            placeholder={placeholder}
+            role={slot.role}
+            value={displayName(slot)}
+          />
+          {slot.sourceRef ? (
+            <div className="slot-node-card">
+              <NodePreviewImage className="node-slot-preview" name={displayName(slot) || slot.sourceRef} nodeRef={slot.sourceRef} size={240} />
+              <div className="slot-node-meta">
+                <span className="slot-node-name">{displayName(slot)}</span>
+                <span className="slot-node-path" title={slot.sourceRef}>{shortPath(slot.sourceRef)}</span>
+              </div>
+            </div>
+          ) : slot.draftNode ? (
+            <div className="slot-node-card temporary">
+              <span className="slot-node-meta">
+                <span className="slot-node-name">{displayName(slot)}</span>
+                <span className="slot-node-path">还没有源文件，只用于这次出图</span>
+              </span>
+            </div>
+          ) : null}
+        </>
       )}
-      {slot.sourceKind !== "random" && slot.sourceRef ? (
-        <NodePreviewImage className="node-slot-preview" name={displayName(slot) || slot.sourceRef} nodeRef={slot.sourceRef} />
-      ) : null}
       {slot.role === "character" ? (
         slot.clothingSlots && slot.clothingSlots.length > 0 ? (
-          <div
-            className="clothing-overlay-group"
-            style={{
-              marginTop: "0.5rem",
-              paddingLeft: "0.5rem",
-              borderLeft: "2px solid #cbd6e3",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "0.35rem",
-              }}
-            >
-              <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#687182" }}>
-                服装 (Clothing Overlay)
-              </span>
+          <div className="clothing-overlay-group">
+            <div className="clothing-overlay-head">
+              <span>服装覆盖 <small>不选就用角色自带服装</small></span>
               {onAddClothingCompare ? (
-                <button
-                  aria-label="新增服装 Compare"
-                  className="icon-button"
-                  onClick={onAddClothingCompare}
-                  style={{ height: "24px", minHeight: "24px", width: "24px" }}
-                  title="新增服装 Compare"
-                  type="button"
-                >
-                  <Plus size={14} />
-                </button>
+                <button aria-label="新增服装 Compare" className="icon-button btn-ghost btn-sm" onClick={onAddClothingCompare} title="新增服装 Compare" type="button"><Plus size={14} /></button>
               ) : null}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div className="clothing-overlay-list">
               {slot.clothingSlots.map((clothingSlot, index) => (
                 <NodeSlot
                   key={clothingSlot.slotId}
@@ -258,19 +304,11 @@ export function NodeSlot({
             </div>
           </div>
         ) : (
-          <div className="clothing-overlay-picker" style={{ marginTop: "0.5rem", paddingLeft: "0.5rem", borderLeft: "2px solid var(--border-color, #444)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.25rem" }}>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-muted, #888)" }}>服装 (Clothing Overlay)</span>
+          <div className="clothing-overlay-group">
+            <div className="clothing-overlay-head">
+              <span>服装覆盖 <small>不选就用角色自带服装</small></span>
               {slot.clothingRef ? (
-                <button
-                  className="icon-button"
-                  onClick={() => onSelectClothing?.(null, null)}
-                  style={{ fontSize: "0.75rem", padding: "0 0.25rem", height: "auto" }}
-                  title="清除服装覆盖"
-                  type="button"
-                >
-                  清除
-                </button>
+                <button className="btn-sm btn-ghost" onClick={() => onSelectClothing?.(null, null)} title="清除服装覆盖" type="button">清除</button>
               ) : null}
             </div>
             <NodePicker
