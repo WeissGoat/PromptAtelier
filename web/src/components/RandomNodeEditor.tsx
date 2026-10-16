@@ -6,6 +6,8 @@ import type { NodePoolScanResponse } from "../api/types";
 import { listNodePoolCollections, scanNodePool } from "../randomNodes/api";
 import { withoutSelection } from "../randomNodes/resolve";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
+import { SEQUENTIAL_ROLE_ORDER } from "../generation/sequentialPlan";
+import { isSequentialSlot } from "../randomNodes/resolve";
 import type { NodePoolSpec, NodeVariantSlot } from "../workspace/types";
 import { ClassifyFilterEditor } from "./ClassifyFilterEditor";
 import { GroupMembers } from "./GroupMembers";
@@ -93,6 +95,20 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
 
   const isSequential = spec.drawMode === "sequential";
   const cursor = slot.poolCursor ?? 0;
+  // 普通出图里同时按顺序的其他位置（只看 Primary）：多个位置一起按顺序时两两交叉。
+  const groups = workspace.state.groups;
+  const primarySlots: Record<string, NodeVariantSlot | null | undefined> = {
+    artist: groups.artist.primary,
+    character: groups.character.primary,
+    clothing: groups.character.primary.clothingSlots?.[0],
+    action: groups.action.primary,
+  };
+  const sequentialRoles = SEQUENTIAL_ROLE_ORDER.filter((role) => role === slot.role
+    ? isSequential && slot.mode === "primary"
+    : isSequentialSlot(primarySlots[role]));
+  const crossHint = isSequential && slot.mode === "primary" && sequentialRoles.length > 1
+    ? `和 ${sequentialRoles.filter((role) => role !== slot.role).map((role) => roleLabels[role as NodeVariantSlot["role"]]).join("、")} 一起按顺序：两两交叉跑，${roleLabels[sequentialRoles[sequentialRoles.length - 1] as NodeVariantSlot["role"]]} 变化最快。`
+    : "";
   const selectedTotal = spec.selection ? spec.selection.refs.length : scan?.stats.total ?? 0;
   const sourceSummary = spec.source.value
     ? `${spec.source.type === "collection" ? "Collection" : spec.source.type === "glob" ? "Glob" : "文件夹"} · ${spec.source.value}${spec.source.recursive ? " · 递归" : ""}`
@@ -132,6 +148,9 @@ export function RandomNodeEditor({ slot }: { slot: NodeVariantSlot }) {
           </span>
         ) : null}
       </div>
+
+      {crossHint ? <div className="editor-hint">{crossHint}</div> : null}
+      {isSequential && slot.mode === "compare" ? <div className="editor-hint">Compare 里的节点组按随机抽取；按顺序只用于普通出图（Generate Next / Run All）。</div> : null}
 
       <details className="group-source" onToggle={(event) => setSourceOpen((event.target as HTMLDetailsElement).open)} open={sourceOpen}>
         <summary>

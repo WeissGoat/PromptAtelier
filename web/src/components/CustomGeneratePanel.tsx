@@ -2,7 +2,7 @@ import { Eye, Grid2X2, ListOrdered, Play } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost, errorMessage } from "../api/client";
-import type { ComposePreviewResponse, NodePoolCandidate, NodeReadResponse } from "../api/types";
+import type { ComposePreviewResponse, NodeReadResponse } from "../api/types";
 import { compareDimensions } from "../compare/matrix";
 import { compareRunCount } from "../compare/runPlan";
 import { compareComposeRequest, compareItemLabels, createCompareGroupOutputDir, createCompareOutputDir, planCompareRun } from "../compare/useCompareRunController";
@@ -10,6 +10,7 @@ import { hasUsablePositivePrompt, nodeSlotStatus } from "../nodes/temporaryNodes
 import type { NodeRole } from "../nodes/types";
 import { listAllPoolNodes } from "../randomNodes/api";
 import { assertGroupHasSelection, hasRandomSlots, hasSequentialSlot, isSequentialSlot, resolvedSlot, resolveRandomItems } from "../randomNodes/resolve";
+import { planSequentialRun, SEQUENTIAL_ROLE_ORDER } from "../generation/sequentialPlan";
 import { findPromptBehaviorVariant } from "../workspace/promptBehavior";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
@@ -241,27 +242,8 @@ export function CustomGeneratePanel() {
     }
   }
 
-  async function resolveSequentialAction(
-    actionSlot: NodeVariantSlot,
-    cursor: number,
-  ): Promise<{ resolved: NodeVariantSlot; candidate: NodePoolCandidate; total: number }> {
-    const response = await listAllPoolNodes(actionSlot.role, actionSlot.randomSpec!);
-    if (!response.items.length) throw new Error("顺序池中没有可用候选节点。");
-    const index = cursor % response.items.length;
-    const candidate = response.items[index];
-    const nodeResponse = await apiGet<NodeReadResponse>(
-      `/nodes/read?${new URLSearchParams({ ref: candidate.ref, role: actionSlot.role })}`,
-    );
-    return {
-      resolved: resolvedSlot(actionSlot, nodeResponse.node, candidate.ref),
-      candidate,
-      total: response.items.length,
-    };
-  }
-
   async function generateAllSequential() {
-    const actionSlot = primary.action;
-    if (!actionSlot || !isSequentialSlot(actionSlot)) return;
+    if (!primaryHasSequential) return;
     const validation = validateSelected(primary);
     if (validation) {
       setError(validation);
@@ -308,41 +290,69 @@ export function CustomGeneratePanel() {
     await submitBackground({ label: `Random · ${items.length} 轮`, kind: "random", output_dir: outputDir, items });
   }
 
-  /** 顺序池：all=false 只交当前这一个动作，all=true 交从当前位置到池末尾的全部动作；交出去就推进游标。 */
+  /**
+   * 顺序节点组：all=false 交接下来的 N 组，all=true 交从当前位置到最后一组。
+   * 多个位置都按顺序时两两交叉（见 sequentialPlan）；同时存在的随机节点组每组各抽一次。交出去就推进各位置的游标。
+   */
   async function submitSequential(all: boolean) {
-    const actionSlot = primary.action;
-    if (!actionSlot || !isSequentialSlot(actionSlot)) return;
-    assertGroupHasSelection(actionSlot);
-    const startCursor = actionSlot.poolCursor ?? 0;
+    const axes = SEQUENTIAL_ROLE_ORDER
+      .map((role) => ({ role, slot: primary[role] }))
+      .filter((axis): axis is { role: NodeRole; slot: NodeVariantSlot } => isSequentialSlot(axis.slot));
+    if (!axes.length) return;
+    axes.forEach((axis) => assertGroupHasSelection(axis.slot));
+    const pools = await Promise.all(axes.map((axis) => listAllPoolNodes(axis.slot.role, axis.slot.randomSpec!)));
+    axes.forEach((axis, index) => {
+      if (!pools[index].items.length) throw new Error(`${slotLabels[axis.role]} 顺序节点组里没有可用成员。`);
+    });
+    const totals = pools.map((pool) => pool.items.length);
     const { n, seedAt } = planSeeds(params);
-    const pool = await listAllPoolNodes(actionSlot.role, actionSlot.randomSpec!);
-    const total = pool.items.length;
-    if (!total) throw new Error("顺序池中没有可用候选节点。");
-    const count = all
-      ? Math.max(0, total - startCursor)
-      : Math.min(n, total - startCursor);
-    const cursors = Array.from({ length: count }, (_, offset) => startCursor + offset);
-    if (!cursors.length) throw new Error("顺序池已经跑到末尾，请先重置游标。");
+    const plan = planSequentialRun(totals, axes.map((axis) => axis.slot.poolCursor ?? 0), all ? null : n);
+
+    // 交叉时同一个成员会出现很多次，节点只读一次。
+    const nodeCache = new Map<string, Promise<NodeReadResponse>>();
+    const readNode = (role: NodeRole, ref: string) => {
+      const key = `${role}\u0000${ref}`;
+      if (!nodeCache.has(key)) nodeCache.set(key, apiGet<NodeReadResponse>(`/nodes/read?${new URLSearchParams({ ref, role })}`));
+      return nodeCache.get(key)!;
+    };
+
+    const prepared: Array<{ slots: typeof primary; label: string; index: number }> = [];
+    for (const [offset, combo] of plan.combos.entries()) {
+      setStatus(`准备后台任务 ${offset + 1}/${plan.combos.length}`);
+      const slots = { ...primary };
+      const labels: string[] = [];
+      for (const [axisIndex, axis] of axes.entries()) {
+        const candidate = pools[axisIndex].items[combo[axisIndex]];
+        const response = await readNode(axis.slot.role, candidate.ref);
+        slots[axis.role] = resolvedSlot(axis.slot, response.node, candidate.ref);
+        labels.push(`#${combo[axisIndex] + 1} ${candidate.name || candidate.ref}`);
+      }
+      prepared.push({ slots, label: labels.join(" · "), index: plan.startIndex + offset });
+    }
+    // 其他位置如果还是随机节点组，每一组单独抽一次。
+    const resolved = hasRandomSlots(prepared[0]?.slots ?? primary)
+      ? await resolveRandomItems(prepared.map((item) => ({ value: item, slots: item.slots })))
+      : prepared.map((item) => ({ value: item, slots: item.slots, randomSelections: [] }));
+
     const outputDir = createCompareOutputDir(all ? "sequential-all" : "sequential");
-    const items: BackgroundRequestItem[] = [];
-    for (const [offset, cursor] of cursors.entries()) {
-      setStatus(`准备后台任务 ${offset + 1}/${cursors.length}`);
-      const { resolved, candidate } = await resolveSequentialAction(actionSlot, cursor);
-      const actionName = candidate.name || candidate.ref;
+    const items: BackgroundRequestItem[] = resolved.map((entry, offset) => {
       const seed = seedAt(offset);
       const runParams = { ...params, seed: String(seed) };
-      items.push({
-        label: `#${(cursor % total) + 1} ${actionName}`,
+      const extra = randomSelectionLabel(entry.randomSelections);
+      return {
+        label: extra ? `${entry.value.label} · ${extra}` : entry.value.label,
         seed,
-        compose_request: buildComposeRenderRequest({ ...primary, action: resolved }, runParams, {
-          promptBehavior: primaryBehavior.value,
+        compose_request: buildComposeRenderRequest(entry.slots, runParams, { promptBehavior: primaryBehavior.value }),
+        generate: backgroundGenerateOptions(params, {
+          output_dir: createCompareGroupOutputDir(outputDir, entry.value.index + 1, seed),
+          ...(entry.randomSelections.length ? { random_selections: entry.randomSelections } : {}),
         }),
-        generate: backgroundGenerateOptions(params, { output_dir: createCompareGroupOutputDir(outputDir, cursor + 1, seed) }),
-      });
-    }
-    const label = all ? `Sequential All · ${cursors.length} 个动作` : `Sequential · ${cursors.length} 个动作`;
+      };
+    });
+    const unit = axes.length === 1 && axes[0].role === "action" ? "个动作" : "组";
+    const label = `${all ? "Sequential All" : "Sequential"} · ${items.length} ${unit}`;
     await submitBackground({ label, kind: "sequential", output_dir: outputDir, items });
-    for (let step = 0; step < cursors.length; step += 1) workspace.advancePoolCursor(actionSlot.slotId);
+    axes.forEach((axis, index) => workspace.setPoolCursor(axis.slot.slotId, plan.nextCursors[index]));
   }
 
   async function submitCompare() {
