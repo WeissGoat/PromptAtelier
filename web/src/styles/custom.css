@@ -1043,3 +1043,82 @@
 .spin {
   animation: random-spin 0.9s linear infinite;
 }
+
+/* ---------- 分区标签编辑（服装 / 角色） ---------- */
+.tag-sections h3 small {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.tag-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tag-section-row {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+}
+
+.tag-section-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-top: 7px;
+}
+
+.tag-section-name .mono {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-section-name small {
+  color: var(--text-4);
+  font-size: var(--text-xs);
+}
+
+.tag-section-input {
+  field-sizing: content;
+  min-height: var(--control-h);
+  resize: vertical;
+  width: 100%;
+}
+
+.tag-section-structured {
+  min-width: 0;
+}
+
+.tag-section-empty {
+  font-size: var(--text-sm);
+  padding: 4px 0;
+}
+
+.tag-section-add {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.tag-section-add > button {
+  color: var(--text-3);
+}
+
+.tag-section-new {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tag-section-new input {
+  min-height: var(--control-h-sm);
+  width: 120px;
+}
