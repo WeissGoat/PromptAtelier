@@ -10,7 +10,7 @@
 }
 
 .sl-viewer-panel {
-  background: #fff;
+  background: var(--surface);
   border-radius: 10px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
   display: flex;
@@ -43,7 +43,7 @@
 }
 
 .sl-viewer-stage {
-  background: #1b1d22;
+  background: var(--inverse);
   display: flex;
   flex: 1;
   min-height: 0;
@@ -95,7 +95,7 @@
 }
 
 .sl-viewer-nav:hover {
-  background: #fff;
+  background: var(--surface);
 }
 
 .sl-viewer-nav.prev {

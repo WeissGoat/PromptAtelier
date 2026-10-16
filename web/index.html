@@ -1,9 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PromptAtelier</title>
+    <script>
+      // 首屏前就定好主题，避免深色模式刷新时先闪一下白底；逻辑同 src/theme.ts。
+      (function () {
+        var pref = "system";
+        try { pref = localStorage.getItem("promptatelier.theme/v1") || "system"; } catch (e) {}
+        var dark = pref === "dark" || (pref !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

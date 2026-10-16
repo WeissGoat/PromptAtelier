@@ -30,7 +30,7 @@
 
 .sl-probe-token {
   align-items: baseline;
-  background: #f3f4f7;
+  background: var(--surface-2);
   border: 1px solid transparent;
   border-radius: 5px;
   cursor: pointer;
@@ -128,7 +128,7 @@
 }
 
 .sl-history-row:hover {
-  background: #eef0f4;
+  background: var(--surface-3);
 }
 
 .sl-history-version {

@@ -12,7 +12,7 @@
 }
 
 .sl-modal {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 10px;
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
@@ -96,7 +96,7 @@
 }
 
 .sl-export-target code {
-  background: #f6f7f9;
+  background: var(--surface-2);
   border-radius: 4px;
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -104,7 +104,7 @@
 }
 
 .sl-pill {
-  background: #f1f3f6;
+  background: var(--surface-3);
   border-radius: 999px;
   color: var(--sl-muted);
   font-size: 11px;
@@ -176,7 +176,7 @@
 }
 
 .sl-export-tags {
-  background: #f6f7f9;
+  background: var(--surface-2);
   border-radius: 6px;
   font-size: 12px;
   margin: 0;
@@ -233,7 +233,7 @@
 
 .sl-export-chip {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 6px;
   display: inline-flex;
@@ -276,7 +276,7 @@
 
 .sl-test-thumb {
   aspect-ratio: 3 / 4;
-  background: #f1f3f6;
+  background: var(--surface-3);
   border: 2px solid transparent;
   border-radius: 6px;
   overflow: hidden;
@@ -303,7 +303,7 @@
 .sl-test-thumb-order {
   background: rgba(17, 24, 39, 0.7);
   border-radius: 4px;
-  color: #fff;
+  color: var(--on-inverse);
   font-size: 10px;
   padding: 0 4px;
   position: absolute;
@@ -350,7 +350,7 @@
 
 .sl-node-chip {
   align-items: center;
-  background: #f1f3f6;
+  background: var(--surface-3);
   border-radius: 999px;
   display: inline-flex;
   font-size: 12px;
@@ -369,7 +369,7 @@
 }
 
 .sl-node-noimg {
-  background: #e5e7eb;
+  background: var(--surface-4);
 }
 
 .sl-node-search {
@@ -450,7 +450,7 @@
 
 .sl-regression-images img,
 .sl-matrix img {
-  background: #f1f3f6;
+  background: var(--surface-3);
   border-radius: 4px;
   display: block;
   width: 100%;
@@ -476,7 +476,7 @@
 .sl-test-empty {
   align-items: center;
   aspect-ratio: 2 / 3;
-  background: #f6f7f9;
+  background: var(--surface-2);
   border-radius: 4px;
   color: var(--sl-muted);
   display: flex;
