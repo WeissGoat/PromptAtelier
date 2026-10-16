@@ -193,3 +193,55 @@ class WebNodeSaveTest(TestCase):
             self.assertEqual(raw["tags"]["role"], ["{{alternative_clothing}}"])
             self.assertEqual(raw["kind"], "clothing")
             self.assertEqual(raw["schema"], "tags-machine.clothing/v1")
+
+
+class WebNodeSourceFilesTest(TestCase):
+    def _action(self, design: Path) -> Path:
+        node = design / "动作改2" / "standing"
+        node.mkdir(parents=True)
+        (node / "tags.txt").write_bytes(b"standing,\r\nhands_up\r\n")
+        (node / "classify.yaml").write_text("phase: core\n", encoding="utf-8")
+        (node / "preview.png").write_bytes(b"not text")
+        return node
+
+    def test_lists_text_sources_and_saves_raw_edit_with_original_line_endings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            node = self._action(design)
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+
+            listed = client.get("/api/nodes/source-files", params={"ref": str(node)})
+            self.assertEqual(listed.status_code, 200, listed.text)
+            files = listed.json()["files"]
+            self.assertEqual([item["name"] for item in files], ["tags.txt", "classify.yaml"])
+            self.assertEqual(files[0]["text"], "standing,\r\nhands_up\r\n")
+
+            # 浏览器 textarea 只给 \n；写回时要还原成原文件的 CRLF。
+            preview = client.post("/api/nodes/source-save-preview", json={
+                "ref": str(node),
+                "role": "action",
+                "files": [{"name": "tags.txt", "text": "standing,\nhands_up, smile\n"}],
+            })
+            self.assertEqual(preview.status_code, 200, preview.text)
+            self.assertIn("+hands_up, smile", preview.json()["files"][0]["diff"])
+            self.assertEqual((node / "tags.txt").read_bytes(), b"standing,\r\nhands_up\r\n")
+
+            committed = client.put("/api/nodes/save-commit", json={"preview_id": preview.json()["preview_id"]})
+            self.assertEqual(committed.status_code, 200, committed.text)
+            self.assertEqual((node / "tags.txt").read_bytes(), b"standing,\r\nhands_up, smile\r\n")
+            positive = " ".join(item["text"] for item in committed.json()["node"]["prompt"]["positive"])
+            self.assertIn("smile", positive)
+
+    def test_rejects_files_outside_the_node_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            node = self._action(design)
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+
+            for name in ("preview.png", "../outside.txt", "new.txt"):
+                response = client.post("/api/nodes/source-save-preview", json={
+                    "ref": str(node), "role": "action", "files": [{"name": name, "text": "x"}],
+                })
+                self.assertEqual(response.status_code, 400, name)
+            outside = client.get("/api/nodes/source-files", params={"ref": str(Path(tmp))})
+            self.assertEqual(outside.status_code, 400)

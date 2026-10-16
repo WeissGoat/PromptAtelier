@@ -1,18 +1,18 @@
 .sl-page {
-  --sl-border: #d9dde5;
-  --sl-border-strong: #c3c8d2;
-  --sl-muted: #6b7280;
-  --sl-accent: #2f6fe4;
-  --sl-accent-bg: #e8f0fe;
-  --sl-accent-border: #9bbcff;
-  --sl-style: #534ab7;
-  --sl-style-bg: #eeedfe;
-  --sl-ok: #1f7a4a;
-  --sl-ok-bg: #e3f4ea;
-  --sl-warn: #8a5a00;
-  --sl-warn-bg: #fdf1d8;
-  --sl-danger: #b42318;
-  --sl-danger-bg: #fdecea;
+  --sl-border: var(--border);
+  --sl-border-strong: var(--border-strong);
+  --sl-muted: var(--text-3);
+  --sl-accent: var(--accent);
+  --sl-accent-bg: var(--accent-soft);
+  --sl-accent-border: var(--accent-border);
+  --sl-style: var(--violet-text);
+  --sl-style-bg: var(--violet-soft);
+  --sl-ok: var(--success-text);
+  --sl-ok-bg: var(--success-soft);
+  --sl-warn: var(--warning-text);
+  --sl-warn-bg: var(--warning-soft);
+  --sl-danger: var(--danger-text);
+  --sl-danger-bg: var(--danger-soft);
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -34,7 +34,7 @@
 
 .sl-bar {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border-bottom: 1px solid var(--sl-border);
   display: flex;
   flex-wrap: wrap;
@@ -63,7 +63,7 @@
 .sl-toggle,
 .sl-primary {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border-strong);
   border-radius: 6px;
   display: inline-flex;
@@ -115,12 +115,12 @@
 .sl-toggle.on {
   background: var(--sl-accent-bg);
   border-color: var(--sl-accent-border);
-  color: #1a4fb5;
+  color: var(--accent-text);
 }
 
 .sl-banner {
   background: var(--sl-warn-bg);
-  border-bottom: 1px solid #f0d9a8;
+  border-bottom: 1px solid var(--warning-border);
   color: var(--sl-warn);
   font-size: 13px;
   padding: 7px 12px;
@@ -128,7 +128,7 @@
 
 .sl-banner.error {
   background: var(--sl-danger-bg);
-  border-color: #f5c2bd;
+  border-color: var(--danger-border);
   color: var(--sl-danger);
 }
 
@@ -149,7 +149,7 @@
 }
 
 .sl-filters {
-  background: #fafbfc;
+  background: var(--surface-2);
   border-right: 1px solid var(--sl-border);
   display: flex;
   flex-direction: column;
@@ -158,7 +158,7 @@
 }
 
 .sl-inspector {
-  background: #fff;
+  background: var(--surface);
   border-left: 1px solid var(--sl-border);
 }
 
@@ -193,7 +193,7 @@
 }
 
 .sl-welcome h2 {
-  color: #202124;
+  color: var(--text);
   font-size: 18px;
   font-weight: 600;
   margin: 0;
@@ -209,7 +209,7 @@
 
 .sl-search {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border-strong);
   border-radius: 6px;
   color: var(--sl-muted);
@@ -260,7 +260,7 @@
 }
 
 .sl-filter-chip:hover {
-  background: #eef0f4;
+  background: var(--surface-3);
 }
 
 .sl-filter-chip.on {
@@ -277,7 +277,7 @@
 
 .sl-check {
   align-items: center;
-  color: #3c4043;
+  color: var(--text-2);
   display: flex;
   font-size: 12px;
   gap: 6px;
@@ -297,7 +297,7 @@
 
 .sl-post-head {
   align-items: baseline;
-  background: #f5f6f8;
+  background: var(--surface-2);
   display: flex;
   gap: 10px;
   padding: 12px 0 6px;
@@ -328,7 +328,7 @@
 
 .sl-tile {
   aspect-ratio: 3 / 4;
-  background: #e9ebef;
+  background: var(--surface-3);
   border: 1px solid var(--sl-border);
   border-radius: 6px;
   overflow: hidden;
@@ -365,7 +365,7 @@
 .sl-badge {
   background: rgba(255, 255, 255, 0.92);
   border-radius: 4px;
-  color: #3c4043;
+  color: var(--text-2);
   font-size: 11px;
   line-height: 1.5;
   padding: 0 5px;
@@ -426,7 +426,7 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #3c4043;
+  color: var(--text-2);
   display: inline-flex;
   gap: 4px;
   min-height: 28px;
@@ -436,7 +436,7 @@
 }
 
 .sl-icon-btn:hover {
-  background: #eef0f4;
+  background: var(--surface-3);
 }
 
 .sl-copied {
@@ -445,7 +445,7 @@
 }
 
 .sl-preview {
-  background: #f0f1f4;
+  background: var(--surface-3);
   border-radius: 8px;
   display: flex;
   justify-content: center;
@@ -474,7 +474,7 @@
 }
 
 .sl-section {
-  border-top: 1px solid #eceef2;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -531,8 +531,8 @@
 }
 
 .sl-tag {
-  background: #f3f4f7;
-  border: 1px solid #e3e6eb;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   display: inline-flex;
   flex-direction: column;
@@ -552,7 +552,7 @@
 }
 
 .sl-char {
-  border: 1px solid #e3e6eb;
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -616,7 +616,7 @@
 
 .sl-form-row > label,
 .sl-form-label {
-  color: #3c4043;
+  color: var(--text-2);
   min-width: 36px;
 }
 
@@ -640,7 +640,7 @@
 }
 
 .sl-segmented {
-  background: #eef0f4;
+  background: var(--surface-3);
   border-radius: 7px;
   display: inline-flex;
   gap: 2px;
@@ -657,7 +657,7 @@
 }
 
 .sl-segmented button.on {
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
@@ -667,7 +667,7 @@
 }
 
 .sl-mini-btn {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 5px;
   font-size: 11px;
@@ -680,7 +680,7 @@
   align-self: flex-start;
   background: none;
   border: 0;
-  color: #3c4043;
+  color: var(--text-2);
   display: inline-flex;
   font-size: 12px;
   gap: 2px;
@@ -714,13 +714,13 @@
   align-self: stretch;
   background: var(--sl-accent);
   border-color: var(--sl-accent);
-  color: #fff;
+  color: var(--on-inverse);
   font-weight: 600;
   justify-content: center;
 }
 
 .sl-primary:hover:not(:disabled) {
-  background: #2560cc;
+  background: var(--accent-strong);
 }
 
 /* ---- 重生记录与对照 ---- */
@@ -732,7 +732,7 @@
 }
 
 .sl-run {
-  border: 1px solid #e3e6eb;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 8px;
 }
@@ -778,7 +778,7 @@
 .sl-run-status.queued,
 .sl-run-status.running {
   background: var(--sl-accent-bg);
-  color: #1a4fb5;
+  color: var(--accent-text);
 }
 
 .sl-run-items {
@@ -790,7 +790,7 @@
 
 .sl-run-thumb {
   align-items: center;
-  background: #f0f1f4;
+  background: var(--surface-3);
   border: 1px solid var(--sl-border);
   border-radius: 5px;
   display: flex;
@@ -819,7 +819,7 @@
 }
 
 .sl-verdict-dot {
-  border: 1.5px solid #fff;
+  border: 1.5px solid var(--border);
   border-radius: 50%;
   height: 10px;
   position: absolute;
@@ -829,15 +829,15 @@
 }
 
 .sl-verdict-dot.match {
-  background: #2e9b5f;
+  background: var(--success);
 }
 
 .sl-verdict-dot.drift {
-  background: #e0a100;
+  background: var(--warning);
 }
 
 .sl-verdict-dot.param_diff {
-  background: #d93025;
+  background: var(--danger);
 }
 
 .sl-compare {
@@ -896,7 +896,7 @@
 .sl-compare-side img,
 .sl-compare-empty {
   aspect-ratio: 3 / 4;
-  background: #f0f1f4;
+  background: var(--surface-3);
   border-radius: 6px;
   display: block;
   object-fit: contain;
@@ -919,7 +919,7 @@
 }
 
 .sl-compare-slider {
-  background: #f0f1f4;
+  background: var(--surface-3);
   border-radius: 6px;
   overflow: hidden;
   position: relative;
@@ -936,7 +936,7 @@
 }
 
 .sl-slider-line {
-  background: #fff;
+  background: var(--surface);
   bottom: 0;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
   pointer-events: none;
@@ -958,7 +958,7 @@
 .sl-slider-label {
   background: rgba(0, 0, 0, 0.55);
   border-radius: 4px;
-  color: #fff;
+  color: var(--on-inverse);
   font-size: 11px;
   padding: 1px 6px;
   pointer-events: none;
@@ -994,7 +994,7 @@
 
 .sl-diffs th,
 .sl-diffs td {
-  border-bottom: 1px solid #eceef2;
+  border-bottom: 1px solid var(--border);
   overflow-wrap: anywhere;
   padding: 3px 4px;
   text-align: left;
@@ -1023,7 +1023,7 @@
 }
 
 .sl-diff-key {
-  background: #f1f3f6;
+  background: var(--surface-3);
   border-radius: 4px;
   cursor: help;
   padding: 0 5px;
@@ -1072,7 +1072,7 @@
 
 .sl-drop-target {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 2px dashed var(--sl-accent-border);
   border-radius: 12px;
   color: var(--sl-accent);
@@ -1134,8 +1134,8 @@
 }
 
 .sl-crash-detail {
-  background: #fff4f2;
-  border: 1px solid #f3c1b8;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   font-size: 12px;
   max-height: 60vh;

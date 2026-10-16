@@ -3,7 +3,7 @@
 .sl-duplicate {
   align-items: flex-start;
   background: var(--sl-warn-bg);
-  border: 1px solid #f0d69a;
+  border: 1px solid var(--warning-border);
   border-radius: 6px;
   color: var(--sl-warn);
   display: flex;
@@ -46,7 +46,7 @@
 
 .sl-facet {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 6px;
   display: flex;
@@ -80,7 +80,7 @@
 }
 
 .sl-msearch-menu {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border-strong);
   border-radius: 8px;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
@@ -130,7 +130,7 @@
 
 .sl-msearch-item img,
 .sl-msearch-noimg {
-  background: #eef0f3;
+  background: var(--surface-3);
   border-radius: 5px;
   flex: none;
   height: 40px;
@@ -215,7 +215,7 @@
 }
 
 .sl-mblock {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-left-width: 3px;
   border-radius: 8px;
@@ -226,11 +226,11 @@
 }
 
 .sl-mblock.origin-character {
-  border-left-color: #d85a30;
+  border-left-color: var(--warning);
 }
 
 .sl-mblock.origin-action {
-  border-left-color: #378add;
+  border-left-color: var(--accent);
 }
 
 .sl-mblock-head[draggable="true"] {
@@ -250,7 +250,7 @@
 
 .sl-mblock-thumb {
   align-items: center;
-  background: #f0f1f4;
+  background: var(--surface-3);
   border-radius: 5px;
   color: var(--sl-muted);
   display: flex;
@@ -300,9 +300,9 @@
 }
 
 .sl-card-tag.off {
-  background: #fafafa;
+  background: var(--surface-2);
   border-style: dashed;
-  color: #9ca3af;
+  color: var(--text-4);
   text-decoration: line-through;
 }
 
@@ -323,7 +323,7 @@
 
 .sl-chip-block {
   align-items: center;
-  border: 1px dashed #c9cdd5;
+  border: 1px dashed var(--border-strong);
   border-radius: 7px;
   display: inline-flex;
   flex-wrap: wrap;
@@ -333,13 +333,13 @@
 }
 
 .sl-chip-block.origin-character {
-  background: rgba(216, 90, 48, 0.05);
-  border-color: rgba(216, 90, 48, 0.45);
+  background: color-mix(in srgb, var(--warning) 5%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
 }
 
 .sl-chip-block.origin-action {
-  background: rgba(55, 138, 221, 0.05);
-  border-color: rgba(55, 138, 221, 0.45);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .sl-chip-block-label {
@@ -363,7 +363,7 @@
 /* ---- 共性分析 ---- */
 
 .sl-common {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 8px;
   margin-top: 14px;
@@ -402,7 +402,7 @@
 
 .sl-common-pick {
   align-items: center;
-  background: #fafbfc;
+  background: var(--surface-2);
   border: 1px solid var(--sl-border);
   border-radius: 8px;
   display: flex;
@@ -457,8 +457,8 @@
 
 .sl-common-tag {
   align-items: baseline;
-  background: #f3f4f7;
-  border: 1px solid #e3e6eb;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 5px;
   display: inline-flex;
   flex-wrap: wrap;
@@ -476,21 +476,21 @@
 
 .sl-common-tag.tier-all {
   background: var(--sl-ok-bg);
-  border-color: #9fd8b8;
+  border-color: var(--success-border);
 }
 
 .sl-common-tag.tier-most {
-  background: #f1f6ff;
-  border-color: #cddcf8;
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
 }
 
 .sl-common-tag.mixed {
-  border-color: #e4b75c;
+  border-color: var(--warning);
   border-style: dashed;
 }
 
 .sl-common-weight {
-  background: rgba(83, 74, 183, 0.1);
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
   border-radius: 3px;
   color: var(--sl-style);
   font-size: 10px;
@@ -544,7 +544,7 @@
 }
 
 .sl-common-params tr.diff td {
-  background: #fffaf0;
+  background: var(--warning-soft);
 }
 
 .sl-common-value {
@@ -567,7 +567,7 @@
 }
 
 .sl-common-images tbody tr:hover {
-  background: #f7f9fc;
+  background: var(--surface-2);
 }
 
 .sl-common-images tbody tr.on {
@@ -627,7 +627,7 @@
 /* ---- 共性分析：选中的图 ---- */
 
 .sl-common-focus {
-  background: #fafbfd;
+  background: var(--surface-2);
   border: 1px solid var(--sl-accent-border);
   border-radius: 8px;
   padding: 8px 10px;
@@ -668,7 +668,7 @@
 }
 
 .sl-common-target-all {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border-strong);
   border-radius: 6px;
   flex: none;
@@ -695,12 +695,12 @@
 
 .sl-common-tag.diff-added {
   background: var(--sl-style-bg);
-  border-color: #c7c2f2;
+  border-color: var(--accent-border);
 }
 
 .sl-common-tag.diff-missing {
   background: var(--sl-danger-bg);
-  border-color: #f3b9b3;
+  border-color: var(--danger-border);
 }
 
 @media (max-width: 900px) {

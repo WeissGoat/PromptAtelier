@@ -1,5 +1,5 @@
-import { StructuredValueEditor } from "../StructuredValueEditor";
 import { StringListField, recordValue, stringList } from "./NodeFormFields";
+import { CLOTHING_SECTIONS, TagSectionsField } from "./TagSectionsField";
 
 export function ClothingNodeForm({ values, onChange }: { values: Record<string, unknown>; onChange(values: Record<string, unknown>): void }) {
   const update = (key: string, value: unknown) => onChange({ ...values, [key]: value });
@@ -14,10 +14,7 @@ export function ClothingNodeForm({ values, onChange }: { values: Record<string, 
         </div>
       </section>
       <StringListField label="Negative Prompt" onChange={(items) => update("negative", items)} values={stringList(values.negative)} />
-      <section className="node-form-section">
-        <h3>Tags</h3>
-        <StructuredValueEditor onChange={(next) => update("tags", next)} path={["tags"]} value={recordValue(values.tags)} />
-      </section>
+      <TagSectionsField label="服装标签" onChange={(next) => update("tags", next)} suggested={CLOTHING_SECTIONS} value={recordValue(values.tags)} />
     </>
   );
 }

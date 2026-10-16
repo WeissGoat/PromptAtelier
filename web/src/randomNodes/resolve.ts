@@ -44,6 +44,13 @@ export function isSequentialSlot(slot: NodeVariantSlot | null | undefined): bool
   return isRandomSlot(slot) && slot.randomSpec?.drawMode === "sequential";
 }
 
+/** 勾选记录为空数组表示一个都没选；后端把空勾选当整组，所以前端先拦下。 */
+export function assertGroupHasSelection(slot: NodeVariantSlot): void {
+  if (slot.randomSpec?.selection && slot.randomSpec.selection.refs.length === 0) {
+    throw new Error("节点组一个成员都没勾选，请至少勾选一个，或点“恢复整组”。");
+  }
+}
+
 export async function resolveRandomItems<T>(items: Array<SlotSetItem<T>>): Promise<Array<ResolvedRandomItem<T>>> {
   const occurrences = new Map<string, {
     slot: NodeVariantSlot & { randomSpec: NodePoolSpec };
@@ -54,6 +61,7 @@ export async function resolveRandomItems<T>(items: Array<SlotSetItem<T>>): Promi
     for (const role of Object.keys(item.slots) as NodeRole[]) {
       const slot = item.slots[role];
       if (!isRandomSlot(slot)) continue;
+      assertGroupHasSelection(slot);
       const selectionKey = randomSelectionKey(item, itemIndex, slot.slotId);
       const current = occurrences.get(slot.slotId) ?? {
         slot,
@@ -107,15 +115,31 @@ function randomSelectionKey<T>(item: SlotSetItem<T>, itemIndex: number, slotId: 
   return scope ? `${scope}\u0000${slotId}` : `${itemIndex}\u0000${slotId}`;
 }
 
-function resolvedSlot(slot: NodeVariantSlot, node: NodeDocument, ref: string): NodeVariantSlot {
+/**
+ * 抽到的成员变成一个普通槽位；成员有临时修改时用修改后的节点出图（按临时节点内联发给后端）。
+ * 顺序模式也走这里，保证随机和顺序对同一成员的修改效果一致。
+ */
+export function resolvedSlot(slot: NodeVariantSlot, node: NodeDocument, ref: string): NodeVariantSlot {
+  const draft = slot.memberDrafts?.[ref];
   return {
     ...slot,
     sourceKind: "fixed",
     randomSpec: null,
     sourceRef: ref,
     sourceNode: structuredClone(node),
-    draftNode: structuredClone(node),
+    draftNode: structuredClone(draft ? draft.draftNode : node),
     sourceEditor: null,
     draftEditorValues: null,
+    memberDrafts: undefined,
   };
+}
+
+/** 浏览成员时要看到整组（含没勾选的），所以去掉勾选条件再扫描。 */
+export function withoutSelection(spec: NodePoolSpec): NodePoolSpec {
+  const { selection: _selection, ...rest } = spec;
+  return rest;
+}
+
+export function selectedRefs(spec: NodePoolSpec | null | undefined): string[] {
+  return spec?.selection?.refs ?? [];
 }

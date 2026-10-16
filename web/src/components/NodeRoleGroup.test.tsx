@@ -15,8 +15,8 @@ describe("NodeRoleGroup", () => {
     render(<CustomWorkspaceProvider><NodeRoleGroup role="artist" /></CustomWorkspaceProvider>);
     fireEvent.click(screen.getByRole("button", { name: "新增Artist Compare" }));
     fireEvent.click(screen.getByRole("button", { name: "新增Artist Compare" }));
-    expect(screen.getAllByText("Compare")).toHaveLength(2);
+    expect(screen.getAllByText("Compare", { selector: ".compare-badge" })).toHaveLength(2);
     fireEvent.click(screen.getAllByRole("button", { name: "删除Artist Compare节点" })[0]);
-    expect(screen.getAllByText("Compare")).toHaveLength(1);
+    expect(screen.getAllByText("Compare", { selector: ".compare-badge" })).toHaveLength(1);
   });
 });
