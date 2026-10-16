@@ -63,6 +63,12 @@ class OutputHistory:
     # ---- 批次列表 ----
 
     def list_runs(self) -> list[dict[str, Any]]:
+        # 输出目录还没生成过图时可能不存在，额外目录照样列出
+        runs = self._output_runs() + self._extra_runs()
+        runs.sort(key=lambda run: run["created_at"], reverse=True)
+        return runs
+
+    def _output_runs(self) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = []
         root_listing = self._listing(self.root)
         if root_listing is None:
@@ -89,8 +95,6 @@ class OutputHistory:
                 images=images,
                 path=self.root,
             ))
-        runs.extend(self._extra_runs())
-        runs.sort(key=lambda run: run["created_at"], reverse=True)
         return runs
 
     def _extra_runs(self) -> list[dict[str, Any]]:

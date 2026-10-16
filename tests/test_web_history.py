@@ -92,6 +92,15 @@ class OutputHistoryTest(TestCase):
             with self.assertRaises(FileNotFoundError):
                 history.run_images(bad)
 
+    def test_extra_roots_listed_when_output_root_missing(self):
+        auto = Path(self._tmp.name) / "design" / "auto"
+        write_png(auto / "20261016" / "00000_homura_standing_aaaa" / "a.png", seed=1)
+
+        runs = OutputHistory(self.root, extra_roots=[auto]).list_runs()
+
+        self.assertFalse(self.root.exists())
+        self.assertEqual([run["id"] for run in runs], ["@0/20261016"])
+
 
 class HistoryHttpTest(TestCase):
     def setUp(self):
