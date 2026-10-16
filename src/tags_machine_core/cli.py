@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from collections import Counter
@@ -351,6 +352,38 @@ def cmd_comfyui_check(args) -> int:
     )
     print_json(report, full=args.full)
     return 0 if report["ok"] else 1
+
+
+def cmd_novelai_usage(args) -> int:
+    from tags_machine_core.services.novelai_usage import (
+        format_usage_summary,
+        inquire_novelai_usage,
+    )
+
+    token = getattr(args, "token", None) or os.environ.get("NAI_ACCESS_TOKEN")
+    if not token and getattr(args, "config", None):
+        try:
+            cfg = load_config(Path(args.config))
+            token = cfg.novelai.access_token or (
+                os.environ.get(cfg.novelai.access_token_env) if cfg.novelai.access_token_env else None
+            )
+        except Exception:
+            pass
+    if not token:
+        try:
+            cfg = load_config(Path("configs/local.yaml"))
+            token = cfg.novelai.access_token or (
+                os.environ.get(cfg.novelai.access_token_env) if cfg.novelai.access_token_env else None
+            )
+        except Exception:
+            pass
+
+    info = inquire_novelai_usage(token)
+    if getattr(args, "json", False):
+        print(json.dumps(info.model_dump(), ensure_ascii=False, indent=2))
+    else:
+        print(format_usage_summary(info))
+    return 0 if (info.configured and not info.error) else 1
 
 
 def cmd_inspect_artist(args) -> int:
@@ -2297,6 +2330,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check the full workflow instead of the output_nodes subgraph",
     )
     comfyui_check.set_defaults(func=cmd_comfyui_check)
+
+    novelai_usage = subparsers.add_parser(
+        "novelai-usage",
+        parents=[output_parent],
+        help="Query NovelAI account subscription status and V5 usage quota",
+    )
+    novelai_usage.add_argument("--token", "-t", help="NovelAI Access Token")
+    novelai_usage.add_argument("--config", "-c", help="Config file path")
+    novelai_usage.add_argument("--json", action="store_true", help="Output as JSON")
+    novelai_usage.set_defaults(func=cmd_novelai_usage)
 
     inspect_node = subparsers.add_parser(
         "inspect-node",

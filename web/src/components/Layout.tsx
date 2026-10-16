@@ -1,6 +1,8 @@
 import { FlaskConical, GitCompare, Images, Layers3, PanelLeft } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { NovelAIUsageBadge } from "./NovelAIUsageBadge";
+
 export type PageKey = "custom" | "results" | "compare" | "style-lab";
 
 type LayoutProps = {
@@ -40,6 +42,9 @@ export function Layout({ page, onPageChange, children }: LayoutProps) {
             );
           })}
         </nav>
+        <div className="sidebar-footer">
+          <NovelAIUsageBadge />
+        </div>
       </aside>
       {children}
     </div>

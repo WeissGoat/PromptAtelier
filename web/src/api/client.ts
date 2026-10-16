@@ -87,6 +87,14 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
+export async function getNovelAIUsage(): Promise<import("./types").NovelAIUsageInfo> {
+  return apiGet<import("./types").NovelAIUsageInfo>("/novelai/usage");
+}
+
+export async function refreshNovelAIUsage(): Promise<import("./types").NovelAIUsageInfo> {
+  return apiPost<import("./types").NovelAIUsageInfo>("/novelai/usage/refresh", {});
+}
+
 async function toApiError(response: Response): Promise<ApiClientError> {
   const text = await response.text();
   try {

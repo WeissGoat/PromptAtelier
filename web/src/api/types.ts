@@ -280,3 +280,18 @@ export type HistoryRunImagesResponse = {
   limit: number;
   images: HistoryImage[];
 };
+
+export type NovelAIUsageInfo = {
+  configured: boolean;
+  token_masked: string;
+  active: boolean;
+  tier: number;
+  tier_name: string;
+  anlas: number;
+  fixed_anlas: number;
+  purchased_anlas: number;
+  usage_percent: number;
+  time_until_next_percent: number;
+  unlimited_v5_eligible: boolean;
+  error?: string | null;
+};

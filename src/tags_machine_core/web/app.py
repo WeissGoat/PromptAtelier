@@ -30,6 +30,7 @@ from .routes import (
     jobs,
     node_pools,
     nodes,
+    novelai,
     results,
     style_lab,
 )
@@ -151,6 +152,7 @@ def create_app(
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
     app.include_router(compare.router, prefix="/api", tags=["compare"])
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
+    app.include_router(novelai.router, prefix="/api", tags=["novelai"])
     app.include_router(style_lab.router, prefix="/api", tags=["style-lab"])
 
     resolved_static_dir = _resolve_static_dir(static_dir)
