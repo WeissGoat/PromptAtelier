@@ -63,9 +63,24 @@ class NodePoolFilters(BaseModel):
     classify: ClassifyFilter = Field(default_factory=ClassifyFilter)
 
 
+class NodePoolSelection(BaseModel):
+    """节点组里勾选的成员（节点目录的绝对路径）；为空表示整组都参与抽取。"""
+
+    refs: list[str] = Field(default_factory=list)
+
+    @field_validator("refs", mode="before")
+    @classmethod
+    def _normalize_refs(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        items = value if isinstance(value, list) else [value]
+        return list(dict.fromkeys(str(item).strip() for item in items if str(item).strip()))
+
+
 class NodePoolSpec(BaseModel):
     source: NodePoolSource
     filters: NodePoolFilters = Field(default_factory=NodePoolFilters)
+    selection: NodePoolSelection = Field(default_factory=NodePoolSelection)
 
 
 class CandidateNode(BaseModel):
@@ -82,6 +97,9 @@ class NodePoolStats(BaseModel):
     invalid_classify: int = 0
     classify_mismatch: int = 0
     invalid_node: int = 0
+    # 设置了勾选成员时：没勾选而被排除的候选数，以及勾选了但已不在组里的成员数。
+    unselected: int = 0
+    selection_missing: int = 0
 
 
 class NodePoolScanResult(BaseModel):

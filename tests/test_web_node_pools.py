@@ -155,3 +155,33 @@ class WebNodePoolTest(TestCase):
             )
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["total"], 2)
+
+
+class WebNodePoolSelectionTest(WebNodePoolTest):
+    def test_selection_limits_scan_sample_and_sequential_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            actions = root / "design" / "动作改2"
+            a, b, c = (self._node(actions, name) for name in ("a", "b", "c"))
+            collections = root / "collections.yaml"
+            collections.write_text(yaml.safe_dump({"collections": {}}, sort_keys=False), encoding="utf-8")
+            client = self._client(root, collections)
+            spec = {
+                "source": {"type": "folder", "value": "."},
+                "selection": {"refs": [str(c), str(a), str(root / "gone")]},
+            }
+
+            listed = client.post("/api/node-pools/list-all", json={"role": "action", "spec": spec})
+            self.assertEqual(listed.status_code, 200, listed.text)
+            # 顺序按组内原次序，不按勾选次序。
+            self.assertEqual([item["name"] for item in listed.json()["items"]], ["a", "c"])
+            self.assertEqual(listed.json()["stats"]["unselected"], 1)
+            self.assertEqual(listed.json()["stats"]["selection_missing"], 1)
+
+            sampled = client.post("/api/node-pools/sample", json={"role": "action", "spec": spec, "count": 6})
+            self.assertEqual(sampled.status_code, 200, sampled.text)
+            self.assertEqual({item["candidate"]["name"] for item in sampled.json()["items"]}, {"a", "c"})
+
+            unselected = client.post("/api/node-pools/scan", json={"role": "action", "spec": {"source": spec["source"]}})
+            self.assertEqual(unselected.json()["total"], 3)
+            self.assertNotIn(str(b.resolve()), [item["candidate"]["ref"] for item in sampled.json()["items"]])

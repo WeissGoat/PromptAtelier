@@ -94,6 +94,7 @@ class NodePoolResolver:
                 name=path.name,
                 relative=self._relative(path, root=relative_root),
             ))
+        candidates = self._apply_selection(candidates, spec, stats)
         stats.total = len(candidates)
         return NodePoolScanResult(
             candidates=candidates,
@@ -152,6 +153,22 @@ class NodePoolResolver:
                 raise ValueError("random node pool has no readable nodes")
         return NodePoolSampleResult(items=result, stats=scan.stats)
 
+    @staticmethod
+    def _apply_selection(
+        candidates: list[CandidateNode],
+        spec: NodePoolSpec,
+        stats: NodePoolStats,
+    ) -> list[CandidateNode]:
+        # 只在勾选的成员里随机或按序；保持组内原来的次序，顺序模式的位置按勾选后的列表算。
+        refs = spec.selection.refs
+        if not refs:
+            return candidates
+        wanted = {_normalized_ref(ref) for ref in refs}
+        selected = [candidate for candidate in candidates if _normalized_ref(candidate.ref) in wanted]
+        stats.unselected = len(candidates) - len(selected)
+        stats.selection_missing = len(wanted - {_normalized_ref(candidate.ref) for candidate in selected})
+        return selected
+
     def _resolve_ref(self, role: str, raw_ref: str) -> str:
         path = Path(raw_ref)
         if not path.is_absolute():
@@ -169,6 +186,10 @@ class NodePoolResolver:
 
     def _relative(self, path: Path, *, root: Path | None = None) -> str | None:
         return relative_within(root or self.design_root, path)
+
+
+def _normalized_ref(ref: str) -> str:
+    return str(Path(ref).resolve())
 
 
 def _matches_classify(classify: dict[str, set[str]], spec: NodePoolSpec) -> bool:
