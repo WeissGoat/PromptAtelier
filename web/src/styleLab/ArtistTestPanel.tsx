@@ -10,13 +10,15 @@ import type {
   ImageRecord,
   LibraryNodeSummary,
   SeedMode,
+  SizeMode,
 } from "./api";
 import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl, startArtistTest } from "./api";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { MaterialSearch } from "./MaterialSearch";
 import { formatTime, runStatusLabels } from "./format";
 import { runViewerItem, useImageViewer, type ViewerItem } from "./ImageViewer";
-import { Segmented, SIZE_PRESETS } from "./RegenPanel";
+import { CompareView } from "./RunPanel";
+import { Segmented, SIZE_MODE_HINTS, SIZE_PRESETS } from "./RegenPanel";
 
 const MAX_REGRESSION = 12;
 const DEFAULT_REGRESSION = 4;
@@ -81,6 +83,12 @@ export function ArtistTestPanel({
   const [seedMode, setSeedMode] = useState<SeedMode>("source");
   const [seed, setSeed] = useState<number | null>(null);
   const [size, setSize] = useState<[number, number]>([832, 1216]);
+  // 回归默认各自原图尺寸，矩阵默认自定义（竖图）；切换模式时各自记住。
+  const [regressionSize, setRegressionSize] = useState<SizeMode>("source");
+  const [matrixSize, setMatrixSize] = useState<SizeMode>("custom");
+  const sizeMode = mode === "regression" ? regressionSize : matrixSize;
+  const setSizeMode = mode === "regression" ? setRegressionSize : setMatrixSize;
+  const [dropped, setDropped] = useState<"keep" | "strip">("keep");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateRequest | null>(null);
@@ -117,8 +125,10 @@ export function ArtistTestPanel({
       actions: mode === "matrix" ? actions.map((node) => node.ref) : [],
       seed_mode: seedMode,
       seed: seedMode === "fixed" ? seed : null,
-      width: mode === "matrix" ? size[0] : null,
-      height: mode === "matrix" ? size[1] : null,
+      size_mode: sizeMode,
+      width: sizeMode === "custom" ? size[0] : null,
+      height: sizeMode === "custom" ? size[1] : null,
+      dropped,
     };
     setSubmitting(true);
     setError(null);
@@ -254,10 +264,21 @@ export function ArtistTestPanel({
                 value={seed ?? ""}
               />
             ) : null}
-            {mode === "matrix" ? (
-              <>
-                <span className="sl-form-label">尺寸</span>
-                {SIZE_PRESETS.map(([w, h]) => (
+          </div>
+          <div className="sl-form-row">
+            <span className="sl-form-label">尺寸</span>
+            <Segmented
+              onChange={(value) => setSizeMode(value as SizeMode)}
+              options={[
+                ...(mode === "regression" ? ([["source", "各自原图"]] as Array<[string, string]>) : []),
+                ["custom", "指定"],
+                ["random", "随机"],
+                ["loop", "轮换"],
+              ]}
+              value={sizeMode}
+            />
+            {sizeMode === "custom"
+              ? SIZE_PRESETS.map(([w, h]) => (
                   <button
                     className={`sl-mini-btn ${size[0] === w && size[1] === h ? "on" : ""}`}
                     key={`${w}x${h}`}
@@ -266,10 +287,28 @@ export function ArtistTestPanel({
                   >
                     {w}×{h}
                   </button>
-                ))}
-              </>
-            ) : null}
+                ))
+              : null}
+            {SIZE_MODE_HINTS[sizeMode] ? <span className="sl-muted">{SIZE_MODE_HINTS[sizeMode]}</span> : null}
           </div>
+          {mode === "regression" ? (
+            <div className="sl-form-row">
+              <span className="sl-form-label">丢弃的词</span>
+              <Segmented
+                onChange={(value) => setDropped(value as "keep" | "strip")}
+                options={[
+                  ["keep", "留在内容里"],
+                  ["strip", "一起去掉"],
+                ]}
+                value={dropped}
+              />
+              <span className="sl-muted">
+                {dropped === "keep"
+                  ? "原图里有这些词，留着才是和原图比同一张图，只看画风还原得准不准"
+                  : "去掉后看导出的画风本身能画成什么样（丢弃的词如果影响画风，会和原图差得多）"}
+              </span>
+            </div>
+          ) : null}
           {error ? <p className="sl-error">{error}</p> : null}
           {duplicate ? (
             <DuplicateNotice duplicate={duplicate} onDismiss={() => setDuplicate(null)} onForce={() => void start(true)} />
@@ -426,13 +465,25 @@ function Generated({
   );
 }
 
+/** 两段提示词的 tag 一样、只有逗号后的空格不同（tags.txt 画风走旧链路会去掉空格）。 */
+export function onlySpacingDiffers(item: ArtistTestItem): boolean {
+  const prompt = item.compare?.diffs.find((diff) => diff.path === "$.parameters.prompt");
+  if (!prompt || typeof prompt.left !== "string" || typeof prompt.right !== "string") return false;
+  const tags = (text: string) => text.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean).join(",");
+  return tags(prompt.left) === tags(prompt.right);
+}
+
 function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: string }) {
   const open = useOpenTestImage(run);
   const openGenerated = (path: string) => open((file) => "path" in file && file.path === path);
+  // 下方展开对照的那一对；默认第一张。
+  const [selected, setSelected] = useState(0);
+  const current = run.items.find((item) => item.index === selected) ?? run.items[0];
   return (
+    <>
     <div className="sl-regression-grid">
       {run.items.map((item) => (
-        <figure className="sl-regression-pair" key={item.index}>
+        <figure className={`sl-regression-pair ${current && item.index === current.index ? "on" : ""}`} key={item.index}>
           <div className="sl-regression-images">
             {item.source ? (
               <button
@@ -452,6 +503,16 @@ function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId:
             <span>{item.label}</span>
             <span className="sl-muted">种子 {item.seed}</span>
             {similarityText(item) ? <span className="sl-verdict-num">{similarityText(item)}</span> : null}
+            {item.source ? (
+              <button
+                aria-pressed={current?.index === item.index}
+                className="sl-link-btn"
+                onClick={() => setSelected(item.index)}
+                type="button"
+              >
+                与原图对照
+              </button>
+            ) : null}
           </figcaption>
           {item.subject !== undefined ? (
             <details className="sl-regression-subject">
@@ -463,6 +524,29 @@ function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId:
         </figure>
       ))}
     </div>
+    {current?.source ? (
+      <div className="sl-regression-compare">
+        <h4>
+          与原图对照 · {current.label}
+        </h4>
+        <CompareView
+          generatedLabel="回归"
+          hint={
+            onlySpacingDiffers(current) ? (
+              <p className="sl-hint">
+                提示词的 tag 和原图一样，只是逗号后的空格被去掉了：tags.txt 画风走旧版兼容链路，会把“a, b”拼成“a,b”。NovelAI
+                对空格敏感，种子相同画面也会有些差别。
+              </p>
+            ) : null
+          }
+          item={current}
+          sourceImageId={current.source.image_id}
+          sourceViewer={{ file: { imageId: current.source.image_id }, label: `${current.label ?? ""} · 原图`, path: current.source.path }}
+          workspaceId={workspaceId}
+        />
+      </div>
+    ) : null}
+    </>
   );
 }
 

@@ -1,11 +1,11 @@
 import { CircleCheck, CircleX, LoaderCircle, Square, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { computeTagDiff } from "../compare/tagDiff";
 import type { CompareVerdict, ImageRecord, ParamDiff, RunItem, StyleLabRun } from "./api";
 import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl } from "./api";
 import { formatTime, formatValue, runStatusLabels, verdictLabels } from "./format";
-import { runViewerItem, sourceViewerItem, useImageViewer } from "./ImageViewer";
+import { runViewerItem, sourceViewerItem, useImageViewer, type ViewerItem } from "./ImageViewer";
 
 type RunPanelProps = {
   workspaceId: string;
@@ -89,7 +89,13 @@ export function RunPanel({ workspaceId, image, runs, onCancel }: RunPanelProps) 
         ))}
       </div>
 
-      <CompareView image={image} item={item} run={run} workspaceId={workspaceId} />
+      <CompareView
+        item={item}
+        runError={run.error}
+        sourceImageId={image.id}
+        sourceViewer={sourceViewerItem(image)}
+        workspaceId={workspaceId}
+      />
     </section>
   );
 }
@@ -114,6 +120,10 @@ export function describeSettings(run: StyleLabRun): string {
   }
   if (settings.size_mode === "custom") {
     parts.push(`${settings.width}×${settings.height}`);
+  } else if (settings.size_mode === "random") {
+    parts.push("随机尺寸");
+  } else if (settings.size_mode === "loop") {
+    parts.push("尺寸轮换");
   }
   const overrides = Object.keys(settings.overrides ?? {});
   if (overrides.length) {
@@ -126,26 +136,38 @@ function VerdictDot({ verdict }: { verdict: CompareVerdict }) {
   return <span className={`sl-verdict-dot ${verdict}`} title={verdictLabels[verdict]} />;
 }
 
-function CompareView({
+/**
+ * 原图和一张生成图的对照：并排或滑块，下面是相似度和参数、提示词差异。
+ * 原参重生和画风测试的回归对照共用。
+ */
+export function CompareView({
   workspaceId,
-  image,
-  run,
+  sourceImageId,
+  sourceViewer,
   item,
+  runError,
+  generatedLabel = "重生",
+  hint,
 }: {
   workspaceId: string;
-  image: ImageRecord;
-  run: StyleLabRun;
+  sourceImageId: string;
+  sourceViewer: ViewerItem;
   item: RunItem;
+  runError?: string | null;
+  /** 生成图这一边叫什么（重生 / 回归）。 */
+  generatedLabel?: string;
+  /** 对照下方的额外说明。 */
+  hint?: ReactNode;
 }) {
   const [mode, setMode] = useState<"side" | "slider">("side");
   const [split, setSplit] = useState(50);
   const [showExpected, setShowExpected] = useState(false);
   const viewer = useImageViewer();
   const compare = item.compare;
-  const sourceUrl = sourceImageUrl(workspaceId, image.id, 640);
+  const sourceUrl = sourceImageUrl(workspaceId, sourceImageId, 640);
   const viewerItems = [
-    sourceViewerItem(image),
-    ...(item.image_path ? [runViewerItem(item.image_path, `重生 · 第 ${item.index + 1} 张`, item.seed)] : []),
+    sourceViewer,
+    ...(item.image_path ? [runViewerItem(item.image_path, `${generatedLabel} · 第 ${item.index + 1} 张`, item.seed)] : []),
   ];
   const generatedUrl = item.image_path ? runImageUrl(workspaceId, item.image_path, 640) : null;
 
@@ -175,22 +197,24 @@ function CompareView({
           <figure>
             {generatedUrl ? (
               <button className="sl-zoomable" onClick={() => viewer.open(viewerItems, 1)} title="查看大图和文件位置" type="button">
-                <img alt="重生" src={generatedUrl} />
+                <img alt={generatedLabel} src={generatedUrl} />
               </button>
             ) : (
               <div className="sl-compare-empty">{statusText(item)}</div>
             )}
-            <figcaption>重生 · 种子 {item.seed}</figcaption>
+            <figcaption>
+              {generatedLabel} · 种子 {item.seed}
+            </figcaption>
           </figure>
         </div>
       ) : (
         <div className="sl-compare-slider">
           <img alt="原图" src={sourceUrl} />
-          <img alt="重生" src={generatedUrl} style={{ clipPath: `inset(0 0 0 ${split}%)` }} />
+          <img alt={generatedLabel} src={generatedUrl} style={{ clipPath: `inset(0 0 0 ${split}%)` }} />
           <span className="sl-slider-line" style={{ left: `${split}%` }} />
           <input aria-label="分割位置" max={100} min={0} onChange={(event) => setSplit(Number(event.target.value))} type="range" value={split} />
           <span className="sl-slider-label left">原图</span>
-          <span className="sl-slider-label right">重生</span>
+          <span className="sl-slider-label right">{generatedLabel}</span>
         </div>
       )}
 
@@ -204,7 +228,8 @@ function CompareView({
           {item.error}
         </p>
       ) : null}
-      {run.error ? <p className="sl-error">{run.error}</p> : null}
+      {runError ? <p className="sl-error">{runError}</p> : null}
+      {hint}
 
       {compare && compare.diffs.length ? (
         <div className="sl-diffs">
@@ -222,7 +247,7 @@ function CompareView({
               <tr>
                 <th>参数</th>
                 <th>原图</th>
-                <th>重生</th>
+                <th>{generatedLabel}</th>
               </tr>
             </thead>
             <tbody>
@@ -237,7 +262,7 @@ function CompareView({
                       <span className="sl-diff-keys">
                         {entry.group.map((diff) => (
                           <span className="sl-diff-key" key={diff.path} title={`原图：${formatValue(diff.left)}
-重生：${missingLabel(diff.right)}`}>
+${generatedLabel}：${missingLabel(diff.right)}`}>
                             {diffName(diff)}
                           </span>
                         ))}
@@ -252,7 +277,7 @@ function CompareView({
                   </td>
                   {isPromptDiff(entry) ? (
                     <td colSpan={2}>
-                      <PromptDiff left={String(entry.left)} right={String(entry.right)} />
+                      <PromptDiff generatedLabel={generatedLabel} left={String(entry.left)} right={String(entry.right)} />
                     </td>
                   ) : (
                     <>
@@ -316,7 +341,7 @@ function visibleDiffs(diffs: ParamDiff[], showExpected: boolean): ParamDiff[] {
   );
 }
 
-function PromptDiff({ left, right }: { left: string; right: string }) {
+function PromptDiff({ left, right, generatedLabel }: { left: string; right: string; generatedLabel: string }) {
   const diff = computeTagDiff(left, right);
   return (
     <div className="sl-prompt-diff">
@@ -326,7 +351,7 @@ function PromptDiff({ left, right }: { left: string; right: string }) {
         </span>
       ))}
       {diff.added.map((tag, index) => (
-        <span className="sl-diff-tag added" key={`a-${tag}-${index}`} title="只在重生">
+        <span className="sl-diff-tag added" key={`a-${tag}-${index}`} title={`只在${generatedLabel}`}>
           + {tag}
         </span>
       ))}

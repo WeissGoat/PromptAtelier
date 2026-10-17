@@ -1,4 +1,4 @@
-import { ArrowLeft, FlaskConical, Play, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, FlaskConical, GitCompareArrows, Play, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../api/client";
@@ -38,11 +38,12 @@ import { fileName, formatTime, generationSize, modelLabel } from "./format";
 import { sourceViewerItem, useImageViewer } from "./ImageViewer";
 import { LibraryPanel } from "./LibraryPanel";
 import { ProbePanel } from "./ProbePanel";
+import { RecipeCompareDialog } from "./RecipeCompare";
 import { RecipeHistory, type HistoryEntry } from "./RecipeHistory";
 import { moveTokens, normalizeRecipe, postFrequency } from "./recipeModel";
 import { RecipeEditor } from "./RecipeEditor";
 import { styleChanged } from "./recipeVersions";
-import { defaultRegenSettings, Segmented, SIZE_PRESETS } from "./RegenPanel";
+import { defaultRegenSettings, Segmented, SIZE_MODE_HINTS, SIZE_PRESETS } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
 
 const RUN_SETTINGS_KEY = "promptatelier.style-lab.recipe-run/v1";
@@ -137,6 +138,7 @@ export function RecipeWorkspace({
   const [submitting, setSubmitting] = useState(false);
   const [duplicate, setDuplicate] = useState<DuplicateRequest | null>(null);
   const [restored, setRestored] = useState(false);
+  const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -450,7 +452,20 @@ export function RecipeWorkspace({
           workspaceId={workspaceId}
         />
         <section className="sl-recipe-group">
-          <h3>配方</h3>
+          <h3>
+            配方
+            {!isNew && (recipes.length > 1 || saved.version > 1) ? (
+              <button
+                className="sl-link-btn sl-h3-action"
+                onClick={() => setComparing(true)}
+                title="和别的配方或旧版本逐区对比 tag 和参数"
+                type="button"
+              >
+                <GitCompareArrows size={13} aria-hidden="true" />
+                对比
+              </button>
+            ) : null}
+          </h3>
           {recipes.map((item) => (
             <button
               className={`sl-recipe-link ${item.id === recipeId ? "on" : ""}`}
@@ -464,6 +479,19 @@ export function RecipeWorkspace({
             </button>
           ))}
         </section>
+        {comparing ? (
+          <RecipeCompareDialog
+            initial={{
+              left: { id: saved.id, version: null },
+              right: recipes.find((item) => item.id !== saved.id)
+                ? { id: recipes.find((item) => item.id !== saved.id)!.id, version: null }
+                : { id: saved.id, version: saved.version - 1 },
+            }}
+            onClose={() => setComparing(false)}
+            recipes={recipes}
+            workspaceId={workspaceId}
+          />
+        ) : null}
       </aside>
 
       <main className="sl-recipe-main">
@@ -541,9 +569,12 @@ export function RecipeWorkspace({
                 options={[
                   ["source", source && generationSize(source) ? `原图 ${generationSize(source)}` : "原图"],
                   ["custom", "自定义"],
+                  ["random", "随机"],
+                  ["loop", "轮换"],
                 ]}
                 value={runSettings.size_mode}
               />
+              {SIZE_MODE_HINTS[runSettings.size_mode] ? <span className="sl-muted">{SIZE_MODE_HINTS[runSettings.size_mode]}</span> : null}
               {runSettings.size_mode === "custom"
                 ? SIZE_PRESETS.map(([w, h]) => (
                     <button

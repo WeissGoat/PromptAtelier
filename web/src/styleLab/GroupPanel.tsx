@@ -1,4 +1,4 @@
-import { FlaskConical, LoaderCircle } from "lucide-react";
+import { FlaskConical, GitCompareArrows, LoaderCircle } from "lucide-react";
 
 import type { Analysis, ImageRecord, RecipeSummary } from "./api";
 import { modelLabel, vibeLabel } from "./format";
@@ -28,6 +28,8 @@ type GroupPanelProps = {
   onChangeMode: (mode: GroupMode) => void;
   onSelectGroup: (id: string | null) => void;
   onOpenRecipe: (id: string) => void;
+  /** 打开配方对比（两个以上配方时显示）。 */
+  onCompareRecipes?: () => void;
 };
 
 function vibeText(vibe: string): string {
@@ -54,6 +56,7 @@ export function GroupPanel({
   onChangeMode,
   onSelectGroup,
   onOpenRecipe,
+  onCompareRecipes,
 }: GroupPanelProps) {
   const groups = analysis?.groups ?? [];
   const hasPosts = postBuckets.length > 0;
@@ -151,6 +154,12 @@ export function GroupPanel({
       <div className="sl-groups-head">
         <h3>配方</h3>
         <span className="sl-muted">{recipes.length}</span>
+        {onCompareRecipes && recipes.length > 1 ? (
+          <button className="sl-link-btn" onClick={onCompareRecipes} title="两个配方逐区对比 tag 和参数" type="button">
+            <GitCompareArrows size={13} aria-hidden="true" />
+            对比
+          </button>
+        ) : null}
       </div>
       {recipes.length === 0 ? <p className="sl-hint">选一张图，在右侧点“从这张图新建配方”。</p> : null}
       {recipes.map((recipe) => (

@@ -32,6 +32,12 @@ export const SIZE_PRESETS: Array<[number, number]> = [
   [1024, 1024],
 ];
 
+/** 随机、轮换两种尺寸的说明：每张在竖、横、方三个标准尺寸里选。 */
+export const SIZE_MODE_HINTS: Partial<Record<RegenSettings["size_mode"], string>> = {
+  random: "每张从 832×1216、1216×832、1024×1024 里随机抽一个",
+  loop: "按 832×1216 → 1216×832 → 1024×1024 依次轮换",
+};
+
 type RegenPanelProps = {
   image: ImageRecord;
   settings: RegenSettings;
@@ -112,10 +118,13 @@ export function RegenPanel({ image, settings, submitting, error, notice, onChang
           options={[
             ["source", generationSize(image) ? `原图 ${generationSize(image)}` : "原图"],
             ["custom", "自定义"],
+            ["random", "随机"],
+            ["loop", "轮换"],
           ]}
           value={settings.size_mode}
         />
       </div>
+      {SIZE_MODE_HINTS[settings.size_mode] ? <p className="sl-hint">{SIZE_MODE_HINTS[settings.size_mode]}。</p> : null}
       {settings.size_mode === "custom" ? (
         <div className="sl-form-row sl-indent">
           <input

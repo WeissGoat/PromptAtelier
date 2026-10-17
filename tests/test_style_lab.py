@@ -227,6 +227,19 @@ class RegenerateTest(TestCase):
         with self.assertRaises(ValueError):
             RegenSettings(overrides={"prompt": "x"})
 
+    def test_plan_sizes_random_and_loop(self):
+        from tags_machine_core.style_lab.regenerate import plan_sizes
+
+        self.assertEqual(plan_sizes("source", 2), [None, None])
+        self.assertEqual(plan_sizes("custom", 2, 640, 640), [(640, 640), (640, 640)])
+        self.assertEqual(plan_sizes("loop", 4), [(832, 1216), (1216, 832), (1024, 1024), (832, 1216)])
+        sizes = plan_sizes("random", 6, rng=random.Random(3))
+        self.assertTrue(set(sizes) <= {(832, 1216), (1216, 832), (1024, 1024)})
+        settings = RegenSettings(count=3, size_mode="loop")
+        self.assertEqual(expected_diff_keys(settings, self.record), {"seed", "width", "height"})
+        request = build_regen_request(self.record, settings, 1, (1216, 832))
+        self.assertEqual(request["size"], {"width": 1216, "height": 832})
+
     def test_build_request_keeps_source_params_and_applies_overrides(self):
         settings = RegenSettings(size_mode="custom", width=832, height=1216, overrides={"steps": 23, "model": ""})
         request = build_regen_request(self.record, settings, 99)

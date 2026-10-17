@@ -196,6 +196,60 @@ describe("ArtistTestPanel", () => {
     );
   });
 
+  it("sends the size mode and what to do with dropped words", async () => {
+    api.startArtistTest.mockResolvedValue({ run: { id: "run" } });
+    const onStarted = vi.fn();
+    render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[image("a")]} onStarted={onStarted} runs={[]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "轮换" }));
+    expect(screen.getByText(/依次轮换/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "一起去掉" }));
+    fireEvent.click(screen.getByRole("button", { name: /用 1_Ink 生成/ }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(api.startArtistTest.mock.calls[0][2]).toMatchObject({ size_mode: "loop", width: null, height: null, dropped: "strip" });
+  });
+
+  it("compares a regression image with its original below the grid", () => {
+    const original = "artist:foo, 1girl, very aesthetic";
+    const run: ArtistTestRun = {
+      id: "t1",
+      kind: "regression",
+      status: "succeeded",
+      created_at: 0,
+      finished_at: 1,
+      job_id: null,
+      source: null,
+      settings: { kind: "regression", artist: "1_Ink", image_ids: ["a"], characters: [], actions: [], seed_mode: "source", seed: null, width: null, height: null },
+      expected_diff_keys: [],
+      warnings: [],
+      artist: { folder: "1_Ink" },
+      items: [
+        {
+          index: 0,
+          seed: 7,
+          status: "succeeded",
+          label: "post-a",
+          image_path: "runs/t1/a.png",
+          source: { image_id: "a", path: "F:/x/a.png", rel_path: "a.png" },
+          subject: "1girl",
+          removed: ["artist:foo", "very aesthetic"],
+          compare: {
+            verdict: "reference",
+            similarity: 0.84,
+            dhash_distance: 12,
+            param_diff_count: 1,
+            param_diff_no_resolution_count: 1,
+            diffs: [{ path: "$.parameters.prompt", kind: "value", left: original, right: "artist:foo,1girl,very aesthetic,", key: "prompt", expected: false }],
+          },
+        },
+      ],
+    };
+    render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[image("a")]} onStarted={vi.fn()} runs={[run]} />);
+    expect(screen.getByText("与原图对照 · post-a")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "滑块" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "回归" })).toBeTruthy();
+    expect(screen.getByText(/只是逗号后的空格被去掉了/)).toBeTruthy();
+  });
+
   it("needs a character or action before a matrix run", () => {
     render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[]} onStarted={vi.fn()} runs={[]} />);
     fireEvent.click(screen.getByRole("radio", { name: "泛化矩阵" }));

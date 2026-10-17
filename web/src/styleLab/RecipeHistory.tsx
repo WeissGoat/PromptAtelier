@@ -5,7 +5,9 @@ import { errorMessage } from "../api/client";
 import type { AnyRun, ArtistExport, Recipe } from "./api";
 import { getRecipeVersion } from "./api";
 import { formatTime } from "./format";
-import { recipeDiff, restoreVersion } from "./recipeVersions";
+import { ComparisonView } from "./RecipeCompare";
+import { compareRecipes } from "./recipeComparison";
+import { restoreVersion } from "./recipeVersions";
 
 export type HistoryEntry = { version: number; updated_at: number };
 
@@ -123,7 +125,7 @@ function VersionDialog({
 
   const left = loaded[before];
   const right = loaded[after];
-  const diff = left && right && before !== after ? recipeDiff(left, right) : null;
+  const diff = left && right && before !== after ? compareRecipes(left, right) : null;
   const target = loaded[version];
 
   return (
@@ -173,7 +175,7 @@ function VersionDialog({
           ) : diff.same ? (
             <p className="sl-muted">两个版本内容一样。</p>
           ) : (
-            <DiffView diff={diff} />
+            <ComparisonView comparison={diff} leftLabel={`v${before}`} rightLabel={`v${after}`} />
           )}
         </div>
         <footer className="sl-modal-foot">
@@ -194,50 +196,6 @@ function VersionDialog({
           </button>
         </footer>
       </section>
-    </div>
-  );
-}
-
-function DiffView({ diff }: { diff: ReturnType<typeof recipeDiff> }) {
-  return (
-    <div className="sl-history-diff">
-      {diff.zones.map((zone) => (
-        <div className="sl-history-zone" key={zone.label}>
-          <span className="sl-history-label">{zone.label}</span>
-          <div className="sl-prompt-diff">
-            {zone.removed.map((tag, index) => (
-              <span className="sl-diff-tag removed" key={`r-${tag}-${index}`}>
-                − {tag}
-              </span>
-            ))}
-            {zone.added.map((tag, index) => (
-              <span className="sl-diff-tag added" key={`a-${tag}-${index}`}>
-                + {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-      ))}
-      {diff.fields.length ? (
-        <table className="sl-history-fields">
-          <thead>
-            <tr>
-              <th>设置</th>
-              <th>之前</th>
-              <th>之后</th>
-            </tr>
-          </thead>
-          <tbody>
-            {diff.fields.map((field) => (
-              <tr key={field.label}>
-                <td>{field.label}</td>
-                <td>{field.before}</td>
-                <td>{field.after}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : null}
     </div>
   );
 }

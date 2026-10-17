@@ -83,7 +83,7 @@ export type ImageDetail = {
 };
 
 export type SeedMode = "source" | "random" | "fixed";
-export type SizeMode = "source" | "custom";
+export type SizeMode = "source" | "custom" | "random" | "loop";
 
 export type RegenOverrides = Partial<{
   model: string;
@@ -578,6 +578,10 @@ export type ArtistTestSettings = {
   seed: number | null;
   width: number | null;
   height: number | null;
+  /** 没有时按旧规则：给了宽高是 custom，否则 source。 */
+  size_mode?: SizeMode;
+  /** 回归对照时配方里丢弃的词：keep 留在内容里（默认），strip 一起去掉。 */
+  dropped?: "keep" | "strip";
 };
 
 export type ArtistTestItem = RunItem & {

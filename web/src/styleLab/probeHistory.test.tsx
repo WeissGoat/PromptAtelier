@@ -15,7 +15,8 @@ vi.mock("./api", async (importOriginal) => ({ ...(await importOriginal<typeof im
 import { resetShelfForTests } from "./materialShelf";
 import { ablationUnits, orderedProbeItems, ProbePanel } from "./ProbePanel";
 import { RecipeHistory } from "./RecipeHistory";
-import { recipeDiff, restoreVersion, styleChanged } from "./recipeVersions";
+import { compareRecipes } from "./recipeComparison";
+import { restoreVersion, styleChanged } from "./recipeVersions";
 
 function token(text: string, id = `t-${text}`): RecipeToken {
   return { id, text, sep: "", origins: ["source"] };
@@ -67,13 +68,18 @@ describe("recipe versions", () => {
       params: { steps: 23, sampler: "k_euler" },
       character: { enabled: true, captions: [{ tokens: [token("girl")], negative: [] }], add_male_caption: false },
     });
-    const diff = recipeDiff(before, after);
-    expect(diff.zones).toEqual([
-      { label: "画风前缀", added: ["thick lines"], removed: ["flat color"] },
-      { label: "角色提示词 #1", added: ["girl"], removed: [] },
+    const diff = compareRecipes(before, after);
+    const changed = diff.zones.filter((zone) => zone.changed || zone.reordered);
+    expect(changed.map((zone) => [zone.label, zone.reordered])).toEqual([
+      ["画风前缀", false],
+      ["主体", true],
+      ["角色提示词 #1", false],
     ]);
-    expect(diff.fields.map((field) => field.label)).toEqual(["参数 sampler", "参数 steps", "启用角色提示词", "主体"]);
-    expect(recipeDiff(before, { ...before, version: 9, updated_at: 99 }).same).toBe(true);
+    expect(changed[0].left.map((chip) => [chip.text, chip.status])).toEqual([["artist:foo", "same"], ["flat color", "only"]]);
+    expect(changed[0].right.map((chip) => [chip.text, chip.status])).toEqual([["artist:foo", "same"], ["thick lines", "only"]]);
+    expect(diff.fields.map((field) => field.label)).toEqual(["参数 sampler", "参数 steps", "启用角色提示词"]);
+    expect(diff.styleSame).toBe(false);
+    expect(compareRecipes(before, { ...before, version: 9, updated_at: 99 }).same).toBe(true);
 
     const restored = restoreVersion(after, { ...before, version: 1, created_at: 0, updated_at: 0 });
     expect([restored.version, restored.created_at, restored.updated_at]).toEqual([3, 1, 3]);
@@ -120,9 +126,9 @@ describe("recipe versions", () => {
     expect(screen.getByText("导出 a_Style")).toBeTruthy();
     fireEvent.click(screen.getByText("v2"));
     // 默认看 v1 → v2 改了什么。
-    expect(await screen.findByText("+ artist:foo")).toBeTruthy();
+    expect((await screen.findByTitle("只在 v2")).textContent).toBe("artist:foo");
     fireEvent.click(screen.getByRole("radio", { name: /和当前比/ }));
-    expect(await screen.findByText("+ flat color")).toBeTruthy();
+    expect((await screen.findByTitle("只在 v3")).textContent).toBe("flat color");
     fireEvent.click(screen.getByRole("button", { name: /恢复成 v2/ }));
     const restored = onRestore.mock.calls[0][0] as Recipe;
     expect(restored.version).toBe(3);

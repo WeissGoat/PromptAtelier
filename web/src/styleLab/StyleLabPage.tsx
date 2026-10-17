@@ -40,6 +40,7 @@ import { GroupPanel, groupImageIds, groupOfImage, monthBuckets, postBuckets, typ
 import { emptyFilters, filterImages, FilterPanel, ImageGrid, type ImageFilters } from "./ImageBrowser";
 import { ImageInspector } from "./ImageInspector";
 import { ImageViewerProvider } from "./ImageViewer";
+import { RecipeCompareDialog } from "./RecipeCompare";
 import { RecipeWorkspace } from "./RecipeWorkspace";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { defaultRegenSettings, RegenPanel } from "./RegenPanel";
@@ -112,6 +113,7 @@ export function StyleLabPage() {
   const [analyzing, setAnalyzing] = useState<{ jobId: string; done: number; total: number } | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
+  const [comparingRecipes, setComparingRecipes] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [renameRequest, setRenameRequest] = useState(0);
   const [groupMode, setGroupMode] = useState<GroupMode>(() => load<GroupMode>(STORAGE.groupMode, "style"));
@@ -581,6 +583,7 @@ export function StyleLabPage() {
                   setSelectedGroup(null);
                   save(STORAGE.groupMode, mode);
                 }}
+                onCompareRecipes={() => setComparingRecipes(true)}
                 onOpenRecipe={(id) => openRecipe(id)}
                 onSelectGroup={setSelectedGroup}
                 postBuckets={posts}
@@ -644,6 +647,14 @@ export function StyleLabPage() {
           </aside>
         </div>
       )}
+      {comparingRecipes && workspace && recipes.length > 1 ? (
+        <RecipeCompareDialog
+          initial={{ left: { id: recipes[0].id, version: null }, right: { id: recipes[1].id, version: null } }}
+          onClose={() => setComparingRecipes(false)}
+          recipes={recipes}
+          workspaceId={workspace.id}
+        />
+      ) : null}
       {dragging ? (
         <div className="sl-drop-overlay">
           {workspace?.kind === "files" ? (

@@ -21,6 +21,7 @@ from .artist_test import (
     regression_payload,
     shared_random_seed,
     strip_style,
+    style_blocks,
     style_norms,
     subject_norms,
 )
@@ -31,7 +32,7 @@ from .grouping import build_groups, workspace_tags
 from .metadata import ImageRecord
 from .probe import ProbeSettings, probe_seed, probe_variants
 from .recipe import Recipe, RecipeStore, artist_node, character_prompts_param, recipe_from_image, tokens_text
-from .regenerate import RegenSettings, build_regen_request, expected_diff_keys, plan_seeds
+from .regenerate import RegenSettings, build_regen_request, expected_diff_keys, plan_seeds, plan_sizes
 from .workspace import RUN_SCHEMA, WorkspaceInfo, WorkspaceStore
 
 
@@ -90,7 +91,8 @@ class StyleLabService:
         if not record.has_metadata:
             raise ValueError(f"Image has no NovelAI metadata: {record.rel_path}")
         seeds = plan_seeds(settings, record.seed)
-        requests = [build_regen_request(record, settings, seed) for seed in seeds]
+        sizes = plan_sizes(settings.size_mode, len(seeds), settings.width, settings.height)
+        requests = [build_regen_request(record, settings, seed, size) for seed, size in zip(seeds, sizes)]
         return self._start_run(
             info,
             record,
@@ -180,10 +182,12 @@ class StyleLabService:
         recipe = self.recipes(info).get(recipe_id)
         record = self._recipe_source(info, recipe)
         seeds = plan_seeds(settings, record.seed if record else None)
-        width = settings.width if settings.size_mode == "custom" else None
-        height = settings.height if settings.size_mode == "custom" else None
+        sizes = plan_sizes(settings.size_mode, len(seeds), settings.width, settings.height)
         requests = [
-            self.recipe_render_request(info, recipe, seed=seed, width=width, height=height) for seed in seeds
+            self.recipe_render_request(
+                info, recipe, seed=seed, width=size[0] if size else None, height=size[1] if size else None
+            )
+            for seed, size in zip(seeds, sizes)
         ]
         return self._start_run(
             info,
@@ -293,13 +297,16 @@ class StyleLabService:
             if not picked:
                 raise ValueError("没有可用于回归对照的原图（需要有元数据、不是局部重绘或图生图）。")
             categories = self._cached_categories(images)
-            norms = style_norms(recipe)
-            keep = subject_norms(recipe)
-            for image in picked:
-                subject, removed = strip_style(image.prompt, norms, categories, keep)
+            strip_dropped = settings.dropped == "strip"
+            norms = style_norms(recipe, strip_dropped=strip_dropped)
+            keep = subject_norms(recipe, keep_dropped=not strip_dropped)
+            blocks = style_blocks(recipe, strip_dropped=strip_dropped)
+            sizes = plan_sizes(settings.size_mode or "source", len(picked), settings.width, settings.height)
+            for image, size in zip(picked, sizes):
+                subject, removed = strip_style(image.prompt, norms, categories, keep, blocks=blocks)
                 seed = plan_seed(settings, image.seed, shared)
                 seeds.append(seed)
-                requests.append(self._plan(regression_payload(settings, image, subject, seed)))
+                requests.append(self._plan(regression_payload(settings, image, subject, seed, size)))
                 metas.append(
                     {
                         "label": image.post.post_id if image.post and image.post.post_id else Path(image.path).stem,
@@ -310,9 +317,11 @@ class StyleLabService:
                 )
         else:
             seed = plan_seed(settings, record.seed if record else None, shared)
-            for character, action in matrix_cells(settings):
+            cells = matrix_cells(settings)
+            sizes = plan_sizes(settings.size_mode or "source", len(cells), settings.width, settings.height)
+            for (character, action), size in zip(cells, sizes):
                 seeds.append(seed)
-                requests.append(self._plan(matrix_payload(settings, character, action, seed)))
+                requests.append(self._plan(matrix_payload(settings, character, action, seed, size)))
                 metas.append({"character": character, "action": action})
         return self._start_run(
             info,
