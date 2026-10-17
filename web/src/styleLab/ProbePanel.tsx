@@ -1,8 +1,25 @@
 import { FlaskConical, LoaderCircle, Play, Repeat2, Square } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../api/client";
-import type { AblationUnit, ImageRecord, ProbeItem, ProbeRun, ProbeSettings, Recipe, RecipeMaterial, SeedMode } from "./api";
+import {
+  defaultPieces,
+  loadPieces,
+  mergePieces,
+  newPiece,
+  pieceLabel,
+  pieceSize,
+  pieceValid,
+  piecesToUnits,
+  savePieces,
+  splitPiece,
+  styleSignature,
+  ZONE_LABELS,
+  type AblationPiece,
+  type PieceMode,
+  type PieceZone,
+} from "./ablationPieces";
+import type { ImageRecord, ProbeItem, ProbeRun, ProbeSettings, Recipe, RecipeMaterial, SeedMode } from "./api";
 import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl, startProbe } from "./api";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
 import { formatTime, runStatusLabels } from "./format";
@@ -25,11 +42,24 @@ type ProbePanelProps = {
   onSave: () => Promise<Recipe | null>;
   onStarted: (run: ProbeRun) => void;
   onCancel: (run: ProbeRun) => void;
-  /** 消融结果里点“从配方去掉”：把这些 token 挪进丢弃区。 */
+  /** 消融结果里点“从配方去掉”：把这些块挪进丢弃区（旧记录按块）。 */
   onDropTokens: (ids: string[]) => void;
+  /** 同上，按 tag：块里只挪走这几个 tag。 */
+  onDropTags: (tags: string[]) => void;
 };
 
-export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, onStarted, onCancel, onDropTokens }: ProbePanelProps) {
+export function ProbePanel({
+  workspaceId,
+  draft,
+  dirty,
+  source,
+  runs,
+  onSave,
+  onStarted,
+  onCancel,
+  onDropTokens,
+  onDropTags,
+}: ProbePanelProps) {
   const [mode, setMode] = useState<ProbeSettings["kind"]>("swap");
   const [seedMode, setSeedMode] = useState<SeedMode>(source?.seed != null ? "source" : "random");
   const [seed, setSeed] = useState<number | null>(null);
@@ -54,14 +84,26 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
     return list;
   }, [shelf.materials, draft]);
 
-  const styleTokens = useMemo(
-    () => [
-      ...draft.prefix.map((token) => ({ token, zone: "前缀" })),
-      ...draft.suffix.map((token) => ({ token, zone: "后缀" })),
-    ],
-    [draft.prefix, draft.suffix],
-  );
-  const liveSelected = selected.filter((id) => styleTokens.some((item) => item.token.id === id));
+  // 消融的分组：只在测试里用，不改配方；按配方存在浏览器里，画风变了就重新分（手动新增的组留着）。
+  const signature = styleSignature(draft);
+  const [pieceMode, setPieceMode] = useState<PieceMode>(() => loadPieces(draft).mode);
+  const [pieces, setPieces] = useState<AblationPiece[]>(() => loadPieces(draft).pieces);
+  const [newText, setNewText] = useState("");
+  useEffect(() => {
+    const loaded = loadPieces(draft);
+    setPieceMode(loaded.mode);
+    setPieces(loaded.pieces);
+    setSelected([]);
+    // 只在换配方或画风文字变了时重新读。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.id, signature]);
+  useEffect(() => {
+    savePieces(draft, pieceMode, pieces);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pieces, pieceMode]);
+  const validIds = useMemo(() => new Set(pieces.filter((piece) => pieceValid(piece, draft)).map((piece) => piece.id)), [pieces, draft]);
+  const liveSelected = selected.filter((id) => validIds.has(id));
+  const selectedPieces = pieces.filter((piece) => liveSelected.includes(piece.id));
   const captionsOn = draft.character.enabled && draft.character.captions.some((caption) => caption.tokens.length);
 
   const variantCount = mode === "swap" ? picked.length : together ? Math.min(1, liveSelected.length) : liveSelected.length;
@@ -100,7 +142,7 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
           }),
         );
       } else {
-        settings.units = ablationUnits(current, liveSelected, together);
+        settings.units = piecesToUnits(pieces, liveSelected, together);
       }
       const { run } = await startProbe(workspaceId, current.id, settings, force);
       onStarted(run);
@@ -138,7 +180,7 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
         <span className="sl-muted">
           {mode === "swap"
             ? "原图的角色换成素材架上的角色，动作、构图和画风不变，看画风换了人还稳不稳"
-            : "画风前缀、后缀里每次去掉选中的 token，和完整配方比，看哪些 token 真的在起作用"}
+            : "画风前缀、后缀里每次去掉一组 tag（或加上配方里没有的 tag），和完整配方比，看哪些 tag 真的在起作用"}
         </span>
       </div>
 
@@ -195,35 +237,151 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
         </>
       ) : (
         <>
-          <div className="sl-probe-tokens">
-            {styleTokens.map(({ token, zone }) => (
-              <button
-                aria-pressed={liveSelected.includes(token.id)}
-                className={`sl-probe-token ${liveSelected.includes(token.id) ? "on" : ""}`}
-                key={token.id}
-                onClick={() => setSelected((list) => toggle(list, token.id, together ? Infinity : MAX_UNITS))}
-                title={`画风${zone}`}
-                type="button"
-              >
-                <span className="sl-muted">{zone}</span>
-                {token.text}
-              </button>
-            ))}
-            {!styleTokens.length ? <p className="sl-muted">画风前缀、后缀是空的。</p> : null}
+          <div className="sl-form-row">
+            <Segmented
+              onChange={(value) => {
+                const mode = value as PieceMode;
+                setPieceMode(mode);
+                setPieces([...defaultPieces(draft, mode), ...pieces.filter((piece) => piece.zone === "new")]);
+                setSelected([]);
+              }}
+              options={[
+                ["tag", "按 tag 分"],
+                ["block", "按块分"],
+              ]}
+              value={pieceMode}
+            />
+            <button
+              className="sl-link-btn"
+              onClick={() => {
+                setPieces(defaultPieces(draft, pieceMode));
+                setSelected([]);
+              }}
+              title="回到默认分组，合并和新增的都去掉"
+              type="button"
+            >
+              重新划分
+            </button>
+            <span className="sl-muted">怎么分组只在测试里用，不改配方</span>
+          </div>
+          <div className="sl-probe-pieces">
+            {(["prefix", "suffix", "new"] as PieceZone[]).map((zone) => {
+              const list = pieces.filter((piece) => piece.zone === zone);
+              if (!list.length) return null;
+              return (
+                <div className="sl-probe-piece-zone" key={zone}>
+                  <span className="sl-probe-piece-zone-label">{ZONE_LABELS[zone]}</span>
+                  <div className="sl-probe-tokens">
+                    {list.map((piece) => {
+                      const valid = validIds.has(piece.id);
+                      const on = liveSelected.includes(piece.id);
+                      return (
+                        <button
+                          aria-pressed={on}
+                          className={`sl-probe-token ${on ? "on" : ""} ${valid ? "" : "invalid"} ${piece.add.length ? "adds" : ""}`}
+                          disabled={!valid}
+                          key={piece.id}
+                          onClick={() => setSelected((list) => toggle(list, piece.id, together ? Infinity : MAX_UNITS))}
+                          title={
+                            valid
+                              ? piece.add.length
+                                ? "加上配方里没有的 tag（加在后缀末尾），看画面怎么变"
+                                : "去掉这组 tag，看画面怎么变"
+                              : "配方改过，画风里已经找不到这些 tag"
+                          }
+                          type="button"
+                        >
+                          {pieceLabel(piece)}
+                          {pieceSize(piece) > 1 ? <span className="sl-count">{pieceSize(piece)}</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {!pieces.length ? <p className="sl-muted">画风前缀、后缀是空的，可以在下面新增要加上试试的 tag。</p> : null}
           </div>
           <div className="sl-form-row">
-            <button className="sl-link-btn" onClick={() => setSelected(styleTokens.slice(0, MAX_UNITS).map((item) => item.token.id))} type="button">
-              选前 {Math.min(MAX_UNITS, styleTokens.length)} 个
+            <button
+              className="sl-ghost tiny"
+              disabled={selectedPieces.length < 2}
+              onClick={() => {
+                const result = mergePieces(pieces, liveSelected);
+                setPieces(result.pieces);
+                setSelected(result.merged ? [result.merged] : []);
+              }}
+              title="选中的几组合成一组，一起去掉（或加上）出一张"
+              type="button"
+            >
+              合成一组
+            </button>
+            <button
+              className="sl-ghost tiny"
+              disabled={!selectedPieces.some((piece) => pieceSize(piece) > 1)}
+              onClick={() => {
+                let next = pieces;
+                selectedPieces.filter((piece) => pieceSize(piece) > 1).forEach((piece) => (next = splitPiece(next, piece.id)));
+                setPieces(next);
+                setSelected([]);
+              }}
+              title="选中的组拆回每个 tag 一组"
+              type="button"
+            >
+              拆开
+            </button>
+            <button
+              className="sl-ghost tiny"
+              disabled={!selected.length}
+              onClick={() => {
+                setPieces(pieces.filter((piece) => !selected.includes(piece.id)));
+                setSelected([]);
+              }}
+              title="从测试分组里拿掉（配方不变，重新划分可以找回）"
+              type="button"
+            >
+              移除
+            </button>
+            <form
+              className="sl-probe-add"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const piece = newPiece(newText, draft);
+                if (!piece) return;
+                setPieces([...pieces, piece]);
+                setSelected((list) => toggle(list, piece.id, together ? Infinity : MAX_UNITS));
+                setNewText("");
+              }}
+            >
+              <input
+                aria-label="新增一组"
+                onChange={(event) => setNewText(event.target.value)}
+                placeholder="新增一组：输入 tag，逗号分隔"
+                title="画风里有的 tag 算去掉，没有的算加上（加在后缀末尾）"
+                value={newText}
+              />
+              <button className="sl-ghost tiny" disabled={!newText.trim()} type="submit">
+                新增
+              </button>
+            </form>
+          </div>
+          <div className="sl-form-row">
+            <button
+              className="sl-link-btn"
+              onClick={() => setSelected(pieces.filter((piece) => validIds.has(piece.id)).slice(0, MAX_UNITS).map((piece) => piece.id))}
+              type="button"
+            >
+              选前 {Math.min(MAX_UNITS, validIds.size)} 组
             </button>
             <button className="sl-link-btn" onClick={() => setSelected([])} type="button">
               清空
             </button>
-            <label className="sl-check" title="选中的 token 作为一组一起去掉，只出一张">
+            <label className="sl-check" title="选中的组一起改，只出一张">
               <input checked={together} onChange={(event) => setTogether(event.target.checked)} type="checkbox" />
-              一起去掉
+              一起改
             </label>
             <span className="sl-muted">
-              {together ? `去掉选中的 ${liveSelected.length} 个，出 1 张` : `选了 ${liveSelected.length} 个（最多 ${MAX_UNITS}），每个单独去掉出 1 张`}，另加 1 张完整配方作基准
+              {together ? `选中的 ${liveSelected.length} 组一起改，出 1 张` : `选了 ${liveSelected.length} 组（最多 ${MAX_UNITS}），每组出 1 张`}，另加 1 张完整配方作基准
             </span>
           </div>
         </>
@@ -260,7 +418,16 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
       {runs.length ? (
         <div className="sl-test-runs">
           {runs.map((run) => (
-            <ProbeRunCard draft={draft} key={run.id} onCancel={onCancel} onDropTokens={onDropTokens} run={run} source={source} workspaceId={workspaceId} />
+            <ProbeRunCard
+              draft={draft}
+              key={run.id}
+              onCancel={onCancel}
+              onDropTags={onDropTags}
+              onDropTokens={onDropTokens}
+              run={run}
+              source={source}
+              workspaceId={workspaceId}
+            />
           ))}
         </div>
       ) : null}
@@ -268,11 +435,12 @@ export function ProbePanel({ workspaceId, draft, dirty, source, runs, onSave, on
   );
 }
 
-/** 选中的 token 按配方里的顺序排好；一起去掉时合成一组。 */
-export function ablationUnits(recipe: Recipe, ids: string[], together: boolean): AblationUnit[] {
-  const tokens = [...recipe.prefix, ...recipe.suffix].filter((token) => ids.includes(token.id));
-  if (together) return tokens.length ? [{ label: tokens.map((token) => token.text).join(", "), token_ids: tokens.map((token) => token.id) }] : [];
-  return tokens.map((token) => ({ label: token.text, token_ids: [token.id] }));
+/** 消融变体的标题：去掉了什么、加上了什么。 */
+function ablationTitle(item: ProbeItem): string {
+  const parts = [];
+  if (item.removed?.length) parts.push(`去掉 ${item.removed.join(", ")}`);
+  if (item.added?.length) parts.push(`加上 ${item.added.join(", ")}`);
+  return parts.join("；") || item.label;
 }
 
 function percent(value: number | null | undefined): string | null {
@@ -296,6 +464,7 @@ function ProbeRunCard({
   workspaceId,
   onCancel,
   onDropTokens,
+  onDropTags,
 }: {
   run: ProbeRun;
   draft: Recipe;
@@ -303,6 +472,7 @@ function ProbeRunCard({
   workspaceId: string;
   onCancel: (run: ProbeRun) => void;
   onDropTokens: (ids: string[]) => void;
+  onDropTags: (tags: string[]) => void;
 }) {
   const viewer = useImageViewer();
   const active = ACTIVE_RUN_STATUSES.has(run.status);
@@ -349,7 +519,15 @@ function ProbeRunCard({
           const toSource = item.compare?.similarity;
           const baselineToSource = baseline?.compare?.similarity;
           const sourceDelta = item.role !== "baseline" && typeof toSource === "number" && typeof baselineToSource === "number" ? toSource - baselineToSource : null;
-          const droppable = run.kind === "ablation" && item.role === "variant" && item.token_ids?.length && item.token_ids.every((id) => styleIds.has(id));
+          const byBlock = Boolean(item.token_ids?.length);
+          // 只去掉、没加 tag 的组才能“从配方去掉”；按块的旧记录看块还在不在，按 tag 的看 tag 还在不在。
+          const droppable =
+            run.kind === "ablation" &&
+            item.role === "variant" &&
+            !item.added?.length &&
+            (byBlock
+              ? item.token_ids!.every((id) => styleIds.has(id))
+              : Boolean(item.removed?.length) && pieceValid({ id: "", zone: "new", remove: item.removed!, add: [] }, draft));
           return (
             <figure className={`sl-probe-cell ${item.role}`} key={item.index}>
               {item.image_path ? (
@@ -362,7 +540,7 @@ function ProbeRunCard({
                 </div>
               )}
               <figcaption>
-                <strong title={item.label}>{run.kind === "ablation" && item.role === "variant" ? `去掉 ${item.label}` : item.label}</strong>
+                <strong title={item.label}>{run.kind === "ablation" && item.role === "variant" ? ablationTitle(item) : item.label}</strong>
                 {item.target ? <span className="sl-muted">换进{item.target}</span> : null}
                 {item.baseline_compare?.similarity != null ? (
                   <span className="sl-verdict-num" title="和完整配方（同一个种子）的相似度，越低说明这处改动对画面影响越大">
@@ -379,7 +557,12 @@ function ProbeRunCard({
                 ) : null}
               </figcaption>
               {droppable ? (
-                <button className="sl-ghost tiny" onClick={() => onDropTokens(item.token_ids!)} title="挪进丢弃区（不保存，保存后生效）" type="button">
+                <button
+                  className="sl-ghost tiny"
+                  onClick={() => (byBlock ? onDropTokens(item.token_ids!) : onDropTags(item.removed!))}
+                  title="挪进丢弃区（不保存，保存后生效）；tag 在一整块里时只挪走这几个"
+                  type="button"
+                >
                   从配方去掉
                 </button>
               ) : null}

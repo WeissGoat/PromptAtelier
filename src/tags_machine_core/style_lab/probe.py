@@ -2,7 +2,8 @@
 
 - 替换角色：原角色在哪（主体或某条角色提示词）就在哪去掉它的名字和外貌（可选连服装一起），换成素材库里的角色，
   动作等其他 tag 照留，看画风换了人还稳不稳；
-- 消融测试：画风前缀、后缀里每次去掉一个（或一组）token，和完整配方比，看哪些 token 真的在起作用。
+- 消融测试：画风前缀、后缀里每次去掉一个（或一组）tag，或者加上配方里没有的 tag，和完整配方比，
+  看哪些 tag 真的在起作用。怎么分组只在这次测试里用，不改配方。
 
 两种都可以带一张“完整配方”的基准图，其余每张和基准图算相似度。
 """
@@ -37,10 +38,26 @@ class SwapCharacter(BaseModel):
 
 
 class AblationUnit(BaseModel):
-    """一次去掉的 token（画风前缀或后缀里的 token id），label 用于显示。"""
+    """一张变体图对完整配方的改动，label 用于显示。
+
+    - token_ids：整块去掉画风前缀或后缀里的这些块；
+    - remove：按 tag 去掉（块按 tag 拆开后比文字），一块里只去掉其中几个 tag 也行；
+    - add：加上这些 tag（配方里没有的），加在 add_to 指的画风区末尾。
+    """
 
     label: str
-    token_ids: list[str] = Field(min_length=1)
+    token_ids: list[str] = Field(default_factory=list)
+    remove: list[str] = Field(default_factory=list)
+    add: list[str] = Field(default_factory=list)
+    add_to: Literal["prefix", "suffix"] = "suffix"
+
+    @model_validator(mode="after")
+    def _check(self) -> "AblationUnit":
+        self.remove = [text.strip() for text in self.remove if text.strip()]
+        self.add = [text.strip() for text in self.add if text.strip()]
+        if not (self.token_ids or self.remove or self.add):
+            raise ValueError("ablation unit needs token_ids, remove or add")
+        return self
 
 
 class ProbeSettings(BaseModel):
@@ -232,6 +249,10 @@ def swap_character(
     return variant, meta
 
 
+def _tag_key(text: str) -> str:
+    return " ".join(text.split())
+
+
 def ablate(recipe: Recipe, unit: AblationUnit) -> tuple[Recipe, dict[str, Any]]:
     ids = set(unit.token_ids)
     style_ids = {token.id for token in (*recipe.prefix, *recipe.suffix)}
@@ -239,10 +260,36 @@ def ablate(recipe: Recipe, unit: AblationUnit) -> tuple[Recipe, dict[str, Any]]:
     if missing:
         raise ValueError(f"消融的 token 不在画风前缀或后缀里（配方可能已经改过）：{', '.join(sorted(missing))}")
     removed = [token.text for token in (*recipe.prefix, *recipe.suffix) if token.id in ids]
-    variant = recipe.model_copy(
-        update={
-            "prefix": [token for token in recipe.prefix if token.id not in ids],
-            "suffix": [token for token in recipe.suffix if token.id not in ids],
-        }
-    )
-    return variant, {"label": unit.label, "role": "variant", "token_ids": sorted(ids), "removed": removed}
+    prefix = [token for token in recipe.prefix if token.id not in ids]
+    suffix = [token for token in recipe.suffix if token.id not in ids]
+    if unit.remove:
+        # 按 tag 去掉：块拆成 tag（拼回去文字不变），去掉文字相同的，每个只去一次。
+        wanted = [_tag_key(text) for text in unit.remove]
+        pending = list(wanted)
+
+        def drop(tokens: list[RecipeToken]) -> list[RecipeToken]:
+            kept = []
+            for token in _split_blocks(tokens):
+                key = _tag_key(token.text)
+                if key in pending:
+                    pending.remove(key)
+                    removed.append(token.text)
+                    continue
+                kept.append(token)
+            return kept
+
+        prefix, suffix = drop(prefix), drop(suffix)
+        if pending:
+            raise ValueError(f"画风前缀、后缀里找不到这些 tag（配方可能已经改过）：{', '.join(pending)}")
+    added = list(unit.add)
+    if added:
+        tokens = [_token(text, "probe") for text in added]
+        if unit.add_to == "prefix":
+            prefix = [*prefix, *tokens]
+        else:
+            suffix = [*suffix, *tokens]
+    variant = recipe.model_copy(update={"prefix": prefix, "suffix": suffix})
+    meta: dict[str, Any] = {"label": unit.label, "role": "variant", "token_ids": sorted(ids), "removed": removed}
+    if added:
+        meta["added"] = added
+    return variant, meta

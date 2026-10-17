@@ -40,7 +40,7 @@ import { LibraryPanel } from "./LibraryPanel";
 import { ProbePanel } from "./ProbePanel";
 import { RecipeCompareDialog } from "./RecipeCompare";
 import { RecipeHistory, type HistoryEntry } from "./RecipeHistory";
-import { moveTokens, normalizeRecipe, postFrequency } from "./recipeModel";
+import { dropStyleTags, moveTokens, normalizeRecipe, postFrequency } from "./recipeModel";
 import { RecipeEditor } from "./RecipeEditor";
 import { styleChanged } from "./recipeVersions";
 import { defaultRegenSettings, Segmented, SIZE_MODE_HINTS, SIZE_PRESETS } from "./RegenPanel";
@@ -619,6 +619,7 @@ export function RecipeWorkspace({
             dirty={dirty}
             draft={draft}
             onCancel={(run) => run.job_id && void cancelJob(run.job_id)}
+            onDropTags={(tags) => setDraft((current) => (current ? dropStyleTags(current, tags) : current))}
             onDropTokens={(ids) => setDraft((current) => (current ? moveTokens(current, ids, "dropped") : current))}
             onSave={save}
             onStarted={(run) => setProbeRuns((items) => [run, ...items])}

@@ -381,3 +381,59 @@
 .sl-test-run:not(.open) {
   gap: 0;
 }
+
+/* 消融分组：按区排开；加 tag 的组选中时是绿色，失效的组划掉变灰 */
+.sl-probe-pieces {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sl-probe-piece-zone {
+  align-items: baseline;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 36px minmax(0, 1fr);
+}
+
+.sl-probe-piece-zone-label {
+  color: var(--sl-muted);
+  font-size: 12px;
+}
+
+.sl-probe-token .sl-count {
+  font-size: 10px;
+}
+
+.sl-probe-token.adds.on {
+  background: var(--sl-ok-bg);
+  border-color: var(--sl-ok);
+  color: var(--sl-ok);
+  text-decoration: none;
+}
+
+.sl-probe-token.invalid {
+  cursor: not-allowed;
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.sl-probe-add {
+  align-items: center;
+  display: inline-flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.sl-probe-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 表单行里的复选框不吃输入框的宽高 */
+.sl-form-row input[type="checkbox"] {
+  min-height: 0;
+  padding: 0;
+  width: auto;
+}

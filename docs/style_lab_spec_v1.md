@@ -352,7 +352,7 @@ gen_json, {"model": ..., "sampler": ..., ...}
   - 换进角色提示词：这一条里去掉角色卡加进来的 token 和类别为 character、appearance（`replace_clothing` 时加 clothing）的 token，性别词保留，新角色插在第一个被去掉的位置；没有性别词时补 `girl`。主体里只去掉角色名和角色卡的 token。
   - 换进主体：去掉同样的 token，新角色插在原来的位置；没有可去的就放在开头的人数 tag 后面。启用了角色提示词且只有一条时，那一条里的同类 token 也去掉（多半是同一个角色写的动作），两条以上不动。
   - 每张记录 `target`、`removed`、`added`。
-- 消融：`units` 是 `[{label, token_ids}]`（最多 12 组），token 必须在画风前缀或后缀里，否则 400（配方改过了）。每组去掉后出一张，记录 `token_ids`、`removed`。
+- 消融：`units` 是 `[{label, token_ids, remove, add, add_to}]`（最多 12 组），每组出一张。`token_ids` 整块去掉画风前缀或后缀里的块；`remove` 按 tag 去掉（块按 tag 拆开后比文字，空白合并），一块里只去其中几个 tag 也行；`add` 加上配方里没有的 tag，加在 `add_to`（默认 `suffix`）末尾。块或 tag 不在画风前缀、后缀里时 400（配方改过了）。记录 `token_ids`、`removed`、`added`。怎么分组由界面决定，不改配方。
 - 查重同其他出图：同一配方上一次同类探针的请求完全相同时 409。
 
 ### 版本历史

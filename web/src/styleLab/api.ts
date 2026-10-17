@@ -643,7 +643,8 @@ export function startArtistTest(
 // ---- 替换角色、消融测试 ----
 
 export type SwapCharacter = { ref: string; name: string; tags: string[] };
-export type AblationUnit = { label: string; token_ids: string[] };
+/** 一张变体图的改动：token_ids 整块去掉；remove 按 tag 去掉；add 加上配方里没有的 tag（默认加在后缀末尾）。 */
+export type AblationUnit = { label: string; token_ids: string[]; remove?: string[]; add?: string[]; add_to?: "prefix" | "suffix" };
 
 export type ProbeSettings = {
   kind: "swap" | "ablation";

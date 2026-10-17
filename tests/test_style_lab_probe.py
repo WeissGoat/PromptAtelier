@@ -2,7 +2,7 @@ from unittest import TestCase
 
 from pydantic import ValidationError
 
-from tags_machine_core.style_lab.probe import ProbeSettings, ablate, probe_variants, swap_character, SwapCharacter
+from tags_machine_core.style_lab.probe import AblationUnit, ProbeSettings, ablate, probe_variants, swap_character, SwapCharacter
 from tags_machine_core.style_lab.recipe import (
     Recipe,
     RecipeCaption,
@@ -143,6 +143,32 @@ class AblationTest(TestCase):
         stale = both.model_copy(update={"token_ids": [recipe.subject[0].id]})
         with self.assertRaises(ValueError):
             ablate(recipe, stale)
+
+    def test_ablate_by_tag_inside_whole_blocks_and_add_new_tags(self):
+        recipe = make_recipe("1girl").model_copy(
+            update={
+                "prefix": block_from_text("0.6::ixy::, 0.9::keihh::,  flat color"),
+                "suffix": block_from_text("very aesthetic, masterpiece"),
+            }
+        )
+        unit = AblationUnit(label="keihh + masterpiece", remove=["0.9::keihh::", "masterpiece"])
+        variant, meta = ablate(recipe, unit)
+        self.assertEqual(tokens_text(variant.prefix), "0.6::ixy::,  flat color")
+        self.assertEqual(tokens_text(variant.suffix), "very aesthetic")
+        self.assertEqual(meta["removed"], ["0.9::keihh::", "masterpiece"])
+        # 配方本身不变。
+        self.assertEqual(tokens_text(recipe.prefix), "0.6::ixy::, 0.9::keihh::,  flat color")
+
+        variant, meta = ablate(recipe, AblationUnit(label="+ thick lines", add=["thick lines"]))
+        self.assertEqual(tokens_text(variant.suffix), "very aesthetic, masterpiece, thick lines")
+        self.assertEqual(meta["added"], ["thick lines"])
+        variant, _ = ablate(recipe, AblationUnit(label="前", add=["sketch"], add_to="prefix"))
+        self.assertEqual(tokens_text(variant.prefix), "0.6::ixy::, 0.9::keihh::,  flat color, sketch")
+
+        with self.assertRaises(ValueError):
+            ablate(recipe, AblationUnit(label="x", remove=["not there"]))
+        with self.assertRaises(ValidationError):
+            AblationUnit(label="empty", remove=["  "])
 
     def test_settings_validation(self):
         with self.assertRaises(ValidationError):

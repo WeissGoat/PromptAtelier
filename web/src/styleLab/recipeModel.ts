@@ -634,6 +634,33 @@ export function splitToken(recipe: Recipe, id: string): Recipe {
   return mapLists(recipe, (list) => splitInList(list, id));
 }
 
+/**
+ * 消融结果里点“从配方去掉”：画风前缀、后缀里这些 tag 挪进丢弃区。tag 在一整块里时先把那块按 tag 拆开，
+ * 只挪走这几个，块里其余的 tag 留在原处。每个 tag 只挪一次。
+ */
+export function dropStyleTags(recipe: Recipe, tags: string[]): Recipe {
+  const key = (text: string) => text.trim().split(/\s+/).join(" ");
+  const pending = tags.map(key);
+  const moving: string[] = [];
+  let next = recipe;
+  for (const zone of ["prefix", "suffix"] as const) {
+    for (const block of recipe[zone]) {
+      const parts = tokenize(block.text).tokens.map((part) => key(part.text));
+      if (!parts.some((part) => pending.includes(part))) continue;
+      const split = splitInList(next[zone], block.id);
+      const start = split.findIndex((token) => token.id === block.id);
+      split.slice(start, start + parts.length).forEach((token) => {
+        const index = pending.indexOf(key(token.text));
+        if (index < 0) return;
+        pending.splice(index, 1);
+        moving.push(token.id);
+      });
+      next = { ...next, [zone]: split };
+    }
+  }
+  return moving.length ? moveTokens(next, moving, "dropped") : recipe;
+}
+
 export function canSplit(token: RecipeToken | null): boolean {
   return Boolean(token && tokenize(token.text).tokens.length > 1);
 }

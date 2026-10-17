@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
 vi.mock("./api", async (importOriginal) => ({ ...(await importOriginal<typeof import("./api")>()), ...api }));
 
 import { resetShelfForTests } from "./materialShelf";
-import { ablationUnits, orderedProbeItems, ProbePanel } from "./ProbePanel";
+import { orderedProbeItems, ProbePanel } from "./ProbePanel";
 import { RecipeHistory } from "./RecipeHistory";
 import { compareRecipes } from "./recipeComparison";
 import { restoreVersion, styleChanged } from "./recipeVersions";
@@ -145,18 +145,8 @@ describe("probe panel", () => {
     onStarted: vi.fn(),
     onCancel: vi.fn(),
     onDropTokens: vi.fn(),
+    onDropTags: vi.fn(),
   };
-
-  it("builds ablation units in recipe order, singly or together", () => {
-    const draft = recipe();
-    expect(ablationUnits(draft, ["t-very aesthetic", "t-artist:foo"], false)).toEqual([
-      { label: "artist:foo", token_ids: ["t-artist:foo"] },
-      { label: "very aesthetic", token_ids: ["t-very aesthetic"] },
-    ]);
-    expect(ablationUnits(draft, ["t-very aesthetic", "t-artist:foo"], true)).toEqual([
-      { label: "artist:foo, very aesthetic", token_ids: ["t-artist:foo", "t-very aesthetic"] },
-    ]);
-  });
 
   it("orders ablation results by impact with the baseline first", () => {
     const item = (index: number, role: "baseline" | "variant", similarity?: number) => ({
@@ -217,9 +207,37 @@ describe("probe panel", () => {
       kind: "ablation",
       include_baseline: true,
       units: [
-        { label: "flat color", token_ids: ["t-flat color"] },
-        { label: "very aesthetic", token_ids: ["t-very aesthetic"] },
+        { label: "flat color", token_ids: [], remove: ["flat color"], add: [] },
+        { label: "very aesthetic", token_ids: [], remove: ["very aesthetic"], add: [] },
       ],
     });
+  });
+
+  it("regroups a whole block for ablation without touching the recipe", async () => {
+    api.startProbe.mockResolvedValue({ run: { id: "run3" } });
+    const draft = recipe({ id: "r-block", prefix: [token("artist:foo, 0.6::ixy::, flat color", "block")] });
+    const onSave = vi.fn().mockResolvedValue(draft);
+    render(<ProbePanel {...props} draft={draft} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("radio", { name: "消融测试" }));
+    // 默认按 tag：一整块拆成三组。
+    fireEvent.click(screen.getByRole("button", { name: "artist:foo" }));
+    fireEvent.click(screen.getByRole("button", { name: "0.6::ixy::" }));
+    fireEvent.click(screen.getByRole("button", { name: "合成一组" }));
+    expect(screen.getByRole("button", { name: /^artist:foo, 0\.6::ixy::/ }).getAttribute("aria-pressed")).toBe("true");
+    // 新增：画风里没有的算加上。
+    fireEvent.change(screen.getByRole("textbox", { name: "新增一组" }), { target: { value: "thick lines" } });
+    fireEvent.click(screen.getByRole("button", { name: "新增" }));
+    fireEvent.click(screen.getByRole("button", { name: /生成 · 3 张/ }));
+    await waitFor(() => expect(api.startProbe).toHaveBeenCalled());
+    expect(api.startProbe.mock.calls[0][2].units).toEqual([
+      { label: "artist:foo, 0.6::ixy::", token_ids: [], remove: ["artist:foo", "0.6::ixy::"], add: [] },
+      { label: "+ thick lines", token_ids: [], remove: [], add: ["thick lines"] },
+    ]);
+    expect(draft.prefix.map((item) => item.text)).toEqual(["artist:foo, 0.6::ixy::, flat color"]);
+
+    // 按块分：回到一整块一组；重新打开时记得上次的分法。
+    fireEvent.click(screen.getByRole("radio", { name: "按块分" }));
+    expect(screen.getByRole("button", { name: /^artist:foo, 0\.6::ixy::, flat color/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /\+ thick lines/ })).toBeTruthy();
   });
 });
