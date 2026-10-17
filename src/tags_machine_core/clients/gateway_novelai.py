@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,69 @@ def sanitize_proxy_env() -> None:
 sanitize_proxy_env()
 
 
+# 与旧链路 novelai/constant.py 的 HEADERS 一致（Content-Type 由 httpx 按 json 自动设置）
+BROWSER_HEADERS = {
+    "Origin": "https://novelai.net",
+    "Referer": "https://novelai.net",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
+
+
+class _SharedTransport:
+    """进程内共用的 NovelAI 连接。
+
+    执行器每个任务都会新建 GatewayNovelAIRawClient；这里用一个后台线程常驻事件循环，
+    同一组 token / 地址 / 超时只初始化一次 NovelAIRawClient，像旧链路一样一直复用 HTTPS 连接，
+    而不是每张图重新握手。进程退出时统一关闭。
+    """
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._start_lock = threading.Lock()
+        self._init_lock: asyncio.Lock | None = None
+        self._clients: dict[tuple[Any, ...], NovelAIRawClient] = {}
+
+    def run(self, key: tuple[Any, ...], config: ProviderConfig, payload: NovelAIRawPayload):
+        future = asyncio.run_coroutine_threadsafe(self._generate(key, config, payload), self._ensure_loop())
+        return future.result()
+
+    def close(self) -> None:
+        if self._loop is None or not self._clients:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._close_all(), self._loop).result(timeout=10)
+        except Exception:
+            pass
+
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        with self._start_lock:
+            if self._loop is None:
+                loop = asyncio.new_event_loop()
+                threading.Thread(target=loop.run_forever, name="novelai-transport", daemon=True).start()
+                self._loop = loop
+                atexit.register(self.close)
+            return self._loop
+
+    async def _generate(self, key: tuple[Any, ...], config: ProviderConfig, payload: NovelAIRawPayload):
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+        async with self._init_lock:
+            client = self._clients.get(key)
+            if client is None:
+                client = NovelAIRawClient(config)
+                await client.initialize()
+                self._clients[key] = client
+        return await client.generate_raw(payload)
+
+    async def _close_all(self) -> None:
+        clients, self._clients = list(self._clients.values()), {}
+        for client in clients:
+            await client.close()
+
+
+_TRANSPORT = _SharedTransport()
+
+
 @dataclass
 class GatewayNovelAIRawClient:
     access_token: str
@@ -51,7 +116,7 @@ class GatewayNovelAIRawClient:
     def generate_images(self, request: RenderRequest) -> list[NovelAIImage]:
         self.last_retry_records = []
         payload = NovelAIRawPayload.model_validate(self.build_payload(request))
-        result = asyncio.run(self._generate_raw(payload))
+        result = self._generate_raw(payload)
         self.last_retry_records = [
             record.model_dump(mode="json")
             for record in result.retry_records
@@ -61,21 +126,17 @@ class GatewayNovelAIRawClient:
             for image in result.images
         ]
 
-    async def _generate_raw(self, payload: NovelAIRawPayload):
-        client = NovelAIRawClient(
-            ProviderConfig(
-                enabled=True,
-                auth={"access_token": self.access_token},
-                settings={
-                    "base_url": self.base_url,
-                    "timeout": self.timeout,
-                    "retry": self.retry,
-                    "retry_interval": self.retry_interval,
-                },
-            )
+    def _generate_raw(self, payload: NovelAIRawPayload):
+        key = (self.access_token, self.base_url, self.timeout, self.retry, self.retry_interval)
+        config = ProviderConfig(
+            enabled=True,
+            auth={"access_token": self.access_token},
+            settings={
+                "base_url": self.base_url,
+                "timeout": self.timeout,
+                "retry": self.retry,
+                "retry_interval": self.retry_interval,
+                "headers": BROWSER_HEADERS,
+            },
         )
-        await client.initialize()
-        try:
-            return await client.generate_raw(payload)
-        finally:
-            await client.close()
+        return _TRANSPORT.run(key, config, payload)
