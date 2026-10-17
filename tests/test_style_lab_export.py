@@ -10,6 +10,7 @@ from tags_machine_core.style_lab.artist_test import (
     pick_regression_images,
     plan_seed,
     strip_style,
+    style_blocks,
     style_norms,
     subject_norms,
 )
@@ -229,6 +230,37 @@ class ArtistTestPlanTest(TestCase):
         self.assertEqual(subject, "1girl, outer glow")
         self.assertEqual(removed, ["drop shadow"])
 
+    def test_strip_style_cuts_whole_blocks_and_keeps_dropped_by_default(self):
+        prefix = "0.6::ixy::, 1.2::oekaki,:: -2::sketch, jaggy lines,::, 1.5::key art:: highres"
+        recipe = _recipe(
+            prefix=[RecipeToken(text=prefix)],
+            subject=[RecipeToken(text="1girl, sex", origins=["action:x"])],
+            suffix=[RecipeToken(text="very aesthetic, masterpiece")],
+            dropped=[RecipeToken(text="0.5::Glitch::, abstract, orange black white palette, poster")],
+        )
+        prompt = f"{prefix}, 0.5::Glitch::, abstract, orange black white palette,  poster, very aesthetic, masterpiece"
+        categories = {"abstract": "style", "orange black white palette": "style"}
+        # 默认：丢弃的词留在内容里，分类说是风格也不去掉；画风块整段去掉，不留 "::" 碎片。
+        subject, removed = strip_style(
+            prompt, style_norms(recipe, strip_dropped=False), categories,
+            subject_norms(recipe, keep_dropped=True), blocks=style_blocks(recipe, strip_dropped=False),
+        )
+        self.assertEqual(subject, "0.5::Glitch::, abstract, orange black white palette,  poster")
+        self.assertEqual(removed, [prefix, "very aesthetic, masterpiece"])
+        # 一起去掉：只剩空。
+        subject, _ = strip_style(prompt, style_norms(recipe), categories, subject_norms(recipe), blocks=style_blocks(recipe))
+        self.assertEqual(subject, "")
+
+    def test_strip_style_block_cut_respects_tag_boundaries(self):
+        subject, removed = strip_style("1girl, girl, sitting", set(), {}, blocks=["girl"])
+        self.assertEqual(subject, "1girl, sitting")
+        self.assertEqual(removed, ["girl"])
+        # 拆不开的权重组被分类去掉一半时，留下的空 "::" 也去掉。
+        subject, _ = strip_style(
+            "1.2::oekaki,:: -2::sketch, jaggy lines,::, 1girl", {"1.2::oekaki,:: -2::sketch", "jaggy lines"}, {}
+        )
+        self.assertEqual(subject, "1girl")
+
     def test_pick_regression_images_one_per_post_source_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -255,6 +287,14 @@ class ArtistTestPlanTest(TestCase):
         self.assertEqual(matrix_cells(matrix), [("c1", "a1"), ("c2", "a1")])
         with self.assertRaises(ValueError):
             ArtistTestSettings(kind="matrix", artist="a")
+
+    def test_size_mode_defaults_follow_old_settings(self):
+        self.assertEqual(ArtistTestSettings(kind="regression", artist="a").size_mode, "source")
+        old = ArtistTestSettings(kind="matrix", artist="a", actions=["x"], width=832, height=1216)
+        self.assertEqual(old.size_mode, "custom")
+        self.assertEqual(ArtistTestSettings(kind="regression", artist="a", size_mode="loop").dropped, "keep")
+        with self.assertRaises(ValueError):
+            ArtistTestSettings(kind="regression", artist="a", size_mode="custom")
 
 
 class DiffNoiseTest(TestCase):
