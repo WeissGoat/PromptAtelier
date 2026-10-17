@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from tags_machine_core.verification.image_params import (
+    is_png,
     read_image_parameters,
     read_png_dimensions,
 )
@@ -140,7 +141,8 @@ class ResultIndex:
             "model": None,
             "timing": None,
         }
-        if target.suffix.lower() != ".png":
+        # 按文件头认 PNG：存成 .jpg 的 PNG 也读。
+        if not is_png(target):
             result["metadata_error"] = "PNG metadata is only available for PNG images"
             return result
 

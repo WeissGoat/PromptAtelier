@@ -13,7 +13,8 @@ from tags_machine_core.verification.image_params import read_image_parameters, r
 
 IMAGE_SUFFIXES = {".png", ".webp", ".jpg", ".jpeg"}
 # 解析规则变了就加一：旧记录即使文件没变也会重新读取。2：按 Source 的模型哈希认 Curated / Full。
-RECORD_VERSION = 4
+# 5：按文件头认 PNG（存成 .jpg 的 PNG 也读），文本块没了再读藏在像素里的参数。
+RECORD_VERSION = 5
 _POST_DIR_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d+)_?(.*)$")
 
 
@@ -119,8 +120,6 @@ def resolve_actual_prompts(params: dict[str, Any]) -> dict[str, Any]:
 
 def read_source_parameters(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """返回 (NovelAI 参数, PNG 文本块)；读不到时返回两个空字典。"""
-    if path.suffix.lower() != ".png":
-        return {}, {}
     try:
         meta = read_image_parameters(path)
     except (OSError, ValueError):
@@ -189,13 +188,12 @@ def _relative(path: Path, base: Path) -> str:
 def _fill_dimensions(record: ImageRecord, path: Path, params: dict[str, Any]) -> None:
     record.gen_width = _optional_int(params.get("width"))
     record.gen_height = _optional_int(params.get("height"))
-    if path.suffix.lower() == ".png":
-        try:
-            dims = read_png_dimensions(path)
-            record.width, record.height = dims["width"], dims["height"]
-            return
-        except (OSError, ValueError, KeyError):
-            pass
+    try:
+        dims = read_png_dimensions(path)
+        record.width, record.height = dims["width"], dims["height"]
+        return
+    except (OSError, ValueError, KeyError):
+        pass
     record.width = _optional_int(params.get("width"))
     record.height = _optional_int(params.get("height"))
 

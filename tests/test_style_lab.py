@@ -1,3 +1,4 @@
+import gzip
 import json
 import random
 import tempfile
@@ -20,6 +21,7 @@ from tags_machine_core.style_lab import (
     parse_post_dir,
     plan_seeds,
 )
+from tags_machine_core.verification.image_params import read_image_parameters, read_stealth_text
 
 
 def write_nai_png(
@@ -57,6 +59,36 @@ def write_nai_png(
     info.add_text("Source", source)
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, color).save(path, format="PNG", pnginfo=info)
+    return path
+
+
+def write_stealth_png(path: Path, text: str, *, kind="alpha", compressed=True, size=(64, 96)) -> Path:
+    """参数只藏在像素最低位里、没有文本块的图（NovelAI 官网、SD stealth pnginfo 的写法）。"""
+    data = text.encode("utf-8")
+    if compressed:
+        data = gzip.compress(data)
+    magic = f"stealth_{'png' if kind == 'alpha' else 'rgb'}{'comp' if compressed else 'info'}".encode()
+    bits = "".join(f"{byte:08b}" for byte in magic) + f"{len(data) * 8:032b}" + "".join(f"{byte:08b}" for byte in data)
+    width, height = size
+    image = Image.new("RGBA", size, (200, 180, 160, 255))
+    pixels = image.load()
+    per_pixel = 1 if kind == "alpha" else 3
+    assert len(bits) <= width * height * per_pixel
+    for index in range(0, len(bits), per_pixel):
+        pixel = index // per_pixel
+        x, y = divmod(pixel, height)  # 按列：先从上到下，再从左到右
+        r, g, b, a = pixels[x, y]
+        chunk = bits[index : index + per_pixel]
+        if kind == "alpha":
+            a = (a & 0xFE) | int(chunk)
+        else:
+            channels = [r, g, b]
+            for offset, bit in enumerate(chunk):
+                channels[offset] = (channels[offset] & 0xFE) | int(bit)
+            r, g, b = channels
+        pixels[x, y] = (r, g, b, a)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, format="PNG")
     return path
 
 
@@ -129,6 +161,28 @@ class MetadataTest(TestCase):
         record = build_image_record(plain, base=self.tmp)
         self.assertEqual(record.flags, ["no_metadata"])
         self.assertFalse(record.has_metadata)
+
+    def test_record_reads_parameters_hidden_in_pixels_and_png_named_jpg(self):
+        comment = {"prompt": "artist:bar, 1girl", "seed": 42, "steps": 28, "scale": 5.0, "width": 832, "height": 1216}
+        hidden = json.dumps(
+            {"Description": "artist:bar, 1girl", "Source": "NovelAI Diffusion V4.5 4BDE2A90", "Comment": json.dumps(comment)}
+        )
+        # 文本块被去掉、扩展名还写成 .jpg：按文件头认 PNG，再从 alpha 最低位读出参数。
+        record = build_image_record(write_stealth_png(self.tmp / "x_tmb.jpg", hidden), base=self.tmp)
+        self.assertTrue(record.has_metadata)
+        self.assertEqual((record.prompt, record.seed, record.model), ("artist:bar, 1girl", 42, "nai-diffusion-4-5-full"))
+        self.assertEqual((record.width, record.height, record.gen_width), (64, 96, 832))
+
+        # SD 扩展的 rgb 版、不压缩：读成 parameters 文字。
+        sd = write_stealth_png(self.tmp / "sd.png", "1girl\nSteps: 20, Seed: 7", kind="rgb", compressed=False)
+        self.assertEqual(read_stealth_text(sd), {"parameters": "1girl\nSteps: 20, Seed: 7"})
+        self.assertEqual(read_image_parameters(sd)["png_text"]["parameters"], "1girl\nSteps: 20, Seed: 7")
+
+        # 文本块里有参数时不读像素；没藏东西的图照旧是 no_metadata。
+        self.assertEqual(read_stealth_text(write_nai_png(self.tmp / "plain.png")), {})
+        jpeg = self.tmp / "real.jpg"
+        Image.new("RGB", (8, 8)).save(jpeg, format="JPEG")
+        self.assertEqual(build_image_record(jpeg, base=self.tmp).flags, ["no_metadata"])
 
     def test_parse_post_dir_without_pattern(self):
         self.assertIsNone(parse_post_dir("misc").post_id)

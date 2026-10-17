@@ -56,7 +56,7 @@ Style Lab 是 PromptAtelier 里的画风复刻工作台，用来替代 `artist-s
 | `vibe` | 内嵌 vibe 的数量、每张的短 hash、强度、信息提取度 |
 | `flags` | `no_metadata`、`inpaint`、`img2img`、`vibe_missing`（有 vibe 参数但没有内嵌图）、`director_ref` |
 
-隐水印元数据恢复会写回原图，P1 只把这类图片标成 `no_metadata`，不自动恢复。
+按文件头认 PNG，不看扩展名（存成 `.jpg` 的 PNG 也读）。PNG 文本块里没有参数时，再读藏在像素最低位里的元数据（`stealth_pngcomp` / `stealth_pnginfo` 用 alpha 通道，`stealth_rgbcomp` / `stealth_rgbinfo` 用 RGB，按列读，`comp` 的数据 gzip 压过），只读不写回原图。NovelAI 藏的是一段 JSON（`Comment`、`Description`、`Source` 等），和文本块同样解析；SD 扩展藏的 `parameters` 文字也能读出来。PNG、WebP 都试，JPEG 有损压缩留不住，仍标 `no_metadata`。
 
 ## 原参重生
 

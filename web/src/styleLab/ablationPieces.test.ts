@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   defaultPieces,
+  isDefaultGrouping,
   loadPieces,
   mergePieces,
   newPiece,
@@ -10,6 +11,7 @@ import {
   piecesToUnits,
   savePieces,
   splitPiece,
+  styleSignature,
 } from "./ablationPieces";
 import type { Recipe, RecipeToken } from "./api";
 import { dropStyleTags, tokensToText } from "./recipeModel";
@@ -70,6 +72,11 @@ describe("ablation pieces", () => {
       { label: "masterpiece, + thick lines", token_ids: [], remove: ["masterpiece"], add: ["thick lines"] },
     ]);
     expect(piecesToUnits(all, [merged.merged!, added.id], true)).toHaveLength(1);
+
+    expect(isDefaultGrouping(pieces, draft, "tag")).toBe(true);
+    expect(isDefaultGrouping(defaultPieces(draft, "tag"), draft, "tag")).toBe(true);
+    expect(isDefaultGrouping(merged.pieces, draft, "tag")).toBe(false);
+    expect(isDefaultGrouping(pieces, draft, "block")).toBe(false);
   });
 
   it("remembers the grouping per recipe and regroups when the style changes", () => {
@@ -84,6 +91,14 @@ describe("ablation pieces", () => {
     expect(reloaded.mode).toBe("block");
     expect(reloaded.pieces.map(pieceLabel)).toEqual(["artist:foo, 0.6::ixy::, flat color", "masterpiece", "+ thick lines"]);
     expect(pieceValid(pieces[1], edited)).toBe(false);
+
+    // 旧版本存的分组（分词规则变过）也按默认重新分。
+    const stale = recipe();
+    localStorage.setItem(
+      "promptatelier.style-lab.ablation.r-pieces",
+      JSON.stringify({ signature: styleSignature(stale), mode: "tag", pieces: [{ id: "old", zone: "prefix", remove: ["::"], add: [] }] }),
+    );
+    expect(loadPieces(stale).pieces.map(pieceLabel)).toEqual(defaultPieces(stale, "tag").map(pieceLabel));
   });
 
   it("drops chosen tags out of a whole block into the dropped zone", () => {

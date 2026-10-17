@@ -255,11 +255,10 @@ class ArtistTestPlanTest(TestCase):
         subject, removed = strip_style("1girl, girl, sitting", set(), {}, blocks=["girl"])
         self.assertEqual(subject, "1girl, sitting")
         self.assertEqual(removed, ["girl"])
-        # 拆不开的权重组被分类去掉一半时，留下的空 "::" 也去掉。
-        subject, _ = strip_style(
-            "1.2::oekaki,:: -2::sketch, jaggy lines,::, 1girl", {"1.2::oekaki,:: -2::sketch", "jaggy lines"}, {}
-        )
-        self.assertEqual(subject, "1girl")
+        # 两个权重组之间只隔空格时是一个 tag，整个去掉，不会留下半个组或空的 "::"。
+        weighted = "1.2::oekaki,:: -2::sketch, jaggy lines,::"
+        self.assertEqual(strip_style(f"{weighted}, 1girl", {weighted}, {}), ("1girl", [weighted]))
+        self.assertEqual(strip_style(f"{weighted}, 1girl", set(), {}, blocks=[weighted]), ("1girl", [weighted]))
 
     def test_pick_regression_images_one_per_post_source_first(self):
         with tempfile.TemporaryDirectory() as tmp:

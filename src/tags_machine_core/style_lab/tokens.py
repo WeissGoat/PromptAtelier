@@ -142,7 +142,10 @@ def _weight_ranges(text: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     index = 0
     while index < len(text):
-        match = _WEIGHT_OPEN_RE.match(text, index) if _is_token_start(text, index) else None
+        # 紧跟在上一个权重组后面（只隔空格）的也算组的开头："1.2::a,:: -2::b, c,::"。
+        after_group = bool(ranges) and not text[ranges[-1][1] : index].strip(" \t")
+        start = after_group or _is_token_start(text, index)
+        match = _WEIGHT_OPEN_RE.match(text, index) if start else None
         if not match:
             index += 1
             continue

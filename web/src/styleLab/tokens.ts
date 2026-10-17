@@ -138,7 +138,9 @@ function weightRanges(text: string): Array<[number, number]> {
   let index = 0;
   while (index < text.length) {
     WEIGHT_OPEN_RE.lastIndex = index;
-    const match = isTokenStart(text, index) ? WEIGHT_OPEN_RE.exec(text) : null;
+    // 紧跟在上一个权重组后面（只隔空格）的也算组的开头："1.2::a,:: -2::b, c,::"。
+    const afterGroup = ranges.length > 0 && !text.slice(ranges[ranges.length - 1][1], index).replace(/[ \t]/g, "");
+    const match = afterGroup || isTokenStart(text, index) ? WEIGHT_OPEN_RE.exec(text) : null;
     if (!match) {
       index += 1;
       continue;

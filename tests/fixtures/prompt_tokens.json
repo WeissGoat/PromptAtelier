@@ -79,6 +79,11 @@
       "name": "角色块语法",
       "input": "1girl, ::character A: girl, silver hair ::",
       "tokens": ["1girl", "::character A: girl", "silver hair ::"]
+    },
+    {
+      "name": "两个权重组之间只隔空格，后一个组照样认出来",
+      "input": "1.2::oekaki,:: -2::sketch, jaggy lines,::, -0.2::chiaroscuro::",
+      "tokens": ["1.2::oekaki,:: -2::sketch, jaggy lines,::", "-0.2::chiaroscuro::"]
     }
   ],
   "inner_tags": [

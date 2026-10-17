@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { errorMessage } from "../api/client";
 import {
   defaultPieces,
+  isDefaultGrouping,
   loadPieces,
   mergePieces,
   newPiece,
@@ -104,6 +105,7 @@ export function ProbePanel({
   const validIds = useMemo(() => new Set(pieces.filter((piece) => pieceValid(piece, draft)).map((piece) => piece.id)), [pieces, draft]);
   const liveSelected = selected.filter((id) => validIds.has(id));
   const selectedPieces = pieces.filter((piece) => liveSelected.includes(piece.id));
+  const defaultGrouping = isDefaultGrouping(pieces, draft, pieceMode);
   const captionsOn = draft.character.enabled && draft.character.captions.some((caption) => caption.tokens.length);
 
   const variantCount = mode === "swap" ? picked.length : together ? Math.min(1, liveSelected.length) : liveSelected.length;
@@ -253,16 +255,17 @@ export function ProbePanel({
             />
             <button
               className="sl-link-btn"
+              disabled={defaultGrouping}
               onClick={() => {
                 setPieces(defaultPieces(draft, pieceMode));
                 setSelected([]);
               }}
-              title="回到默认分组，合并和新增的都去掉"
+              title={defaultGrouping ? "现在就是默认分组" : "回到默认分组，合并、拆开、移除和新增的都撤掉"}
               type="button"
             >
-              重新划分
+              恢复默认分组
             </button>
-            <span className="sl-muted">怎么分组只在测试里用，不改配方</span>
+            <span className="sl-muted">点选几组后「合成一组」，或选一组「拆开」，就是重新划分；只在测试里用，不改配方</span>
           </div>
           <div className="sl-probe-pieces">
             {(["prefix", "suffix", "new"] as PieceZone[]).map((zone) => {
@@ -337,7 +340,7 @@ export function ProbePanel({
                 setPieces(pieces.filter((piece) => !selected.includes(piece.id)));
                 setSelected([]);
               }}
-              title="从测试分组里拿掉（配方不变，重新划分可以找回）"
+              title="从测试分组里拿掉（配方不变，恢复默认分组可以找回）"
               type="button"
             >
               移除

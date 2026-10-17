@@ -48,6 +48,12 @@ export function defaultPieces(recipe: Recipe, mode: PieceMode): AblationPiece[] 
   );
 }
 
+/** 现在的分组就是默认分组（没合并、拆开、移除或新增过）。 */
+export function isDefaultGrouping(pieces: AblationPiece[], recipe: Recipe, mode: PieceMode): boolean {
+  const shape = (list: AblationPiece[]) => JSON.stringify(list.map((piece) => [piece.zone, piece.remove, piece.add]));
+  return shape(pieces) === shape(defaultPieces(recipe, mode));
+}
+
 /** 画风前缀、后缀里每个 tag 出现几次。 */
 function styleTagCounts(recipe: Recipe): Map<string, number> {
   const counts = new Map<string, number>();
@@ -140,7 +146,10 @@ export function styleSignature(recipe: Recipe): string {
   return `${tokensToText(recipe.prefix)}\n${tokensToText(recipe.suffix)}`;
 }
 
-type Stored = { signature: string; mode: PieceMode; pieces: AblationPiece[] };
+type Stored = { version?: number; signature: string; mode: PieceMode; pieces: AblationPiece[] };
+
+/** 分词规则变了就加一：旧的分组按默认重新分（手动新增、还有效的组留着）。2：两个权重组只隔空格时是一个 tag。 */
+const STORAGE_VERSION = 2;
 
 const storageKey = (recipeId: string) => `promptatelier.style-lab.ablation.${recipeId}`;
 
@@ -153,14 +162,16 @@ export function loadPieces(recipe: Recipe): { mode: PieceMode; pieces: AblationP
     stored = null;
   }
   if (!stored || !Array.isArray(stored.pieces)) return { mode: "tag", pieces: defaultPieces(recipe, "tag") };
-  if (stored.signature === styleSignature(recipe)) return { mode: stored.mode, pieces: stored.pieces };
+  if (stored.version === STORAGE_VERSION && stored.signature === styleSignature(recipe)) {
+    return { mode: stored.mode, pieces: stored.pieces };
+  }
   const kept = stored.pieces.filter((piece) => piece.zone === "new" && pieceValid(piece, recipe));
   return { mode: stored.mode, pieces: [...defaultPieces(recipe, stored.mode), ...kept] };
 }
 
 export function savePieces(recipe: Recipe, mode: PieceMode, pieces: AblationPiece[]): void {
   try {
-    const value: Stored = { signature: styleSignature(recipe), mode, pieces };
+    const value: Stored = { version: STORAGE_VERSION, signature: styleSignature(recipe), mode, pieces };
     localStorage.setItem(storageKey(recipe.id), JSON.stringify(value));
   } catch {
     // 浏览器不让存就算了，只是下次要重新分。
