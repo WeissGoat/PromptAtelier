@@ -107,8 +107,9 @@ def create_app(
             roots.append(config.legacy.design_root)
         if getattr(config.legacy, "tags_machine_root", None):
             roots.append(config.legacy.tags_machine_root)
+    roots.extend(config.web.history_roots)
     app.state.result_index = result_index or ResultIndex(roots=roots, thumb_dir=web_data_dir / "thumbs")
-    app.state.output_history = OutputHistory(config.runtime.output_dir)
+    app.state.output_history = OutputHistory(config.runtime.output_dir, extra_roots=config.web.history_roots)
     app.state.comfyui_targets = ComfyUITargetService(config.comfyui)
     policy_provider = build_prompt_policy_provider(
         config,

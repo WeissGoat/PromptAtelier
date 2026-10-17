@@ -30,6 +30,17 @@ export type NodePoolSpec = {
   };
   filters: { classify: ClassifyFilter };
   drawMode?: DrawMode;
+  /** 组内勾选的成员（节点目录的绝对路径）；为空表示整组都参与随机/顺序。 */
+  selection?: { refs: string[] };
+};
+
+/** 节点组成员的临时修改：抽到这个成员时用 draftNode 出图，不改源文件。 */
+export type MemberDraft = {
+  name: string;
+  sourceNode: NodeDocument;
+  draftNode: NodeDocument;
+  sourceEditor?: NodeEditorDocument | null;
+  draftEditorValues?: Record<string, unknown> | null;
 };
 
 export type NodeVariantSlot = {
@@ -47,6 +58,8 @@ export type NodeVariantSlot = {
   clothingNode?: NodeDocument | null;
   clothingSlots?: NodeVariantSlot[];
   poolCursor?: number;
+  /** 节点组成员的临时修改，按成员 ref 存。 */
+  memberDrafts?: Record<string, MemberDraft>;
 };
 
 export type RoleNodeGroup = {
@@ -99,10 +112,14 @@ export type PromptBehaviorGroup = {
   compares: PromptBehaviorVariant[];
 };
 
+export type EditorTab = "form" | "json" | "source";
+
 export type WorkspaceEditorState = {
   slotId: string | null;
   kind?: "node" | "random" | null;
-  tab: "form" | "json";
+  /** 正在编辑节点组里的某个成员时是它的 ref；编辑槽位自己的节点时为空。 */
+  memberRef?: string | null;
+  tab: EditorTab;
   draftNode: NodeDocument | null;
   baselineNode: NodeDocument | null;
   editValues: Record<string, unknown> | null;

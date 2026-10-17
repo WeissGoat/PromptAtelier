@@ -2,6 +2,8 @@ import { errorMessage } from "../api/client";
 import type { GroupRole, NodeDocument, NodeRole } from "../nodes/types";
 import type {
   CustomWorkspaceState,
+  EditorTab,
+  MemberDraft,
   NodeVariantSlot,
   RenderWorkspaceParams,
   RoleNodeGroup,
@@ -83,7 +85,7 @@ export function createEmptyWorkspace(): CustomWorkspaceState {
     params: { negative: "", width: 1024, height: 1024, nt: 1, n: 1, seed: "-1" },
     promptBehaviorGroup: createDefaultPromptBehaviorGroup(),
     activePromptBehaviorSlotId: PRIMARY_PROMPT_BEHAVIOR_SLOT_ID,
-    editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
+    editor: { slotId: null, kind: null, memberRef: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
     preview: null,
     revision: 0,
   };
@@ -156,6 +158,23 @@ function migrateWorkspace(value: unknown): unknown {
     ? requestedActive
     : promptBehaviorGroup.primary.slotId;
 
+  const normalizeMemberDrafts = (raw: unknown): Record<string, MemberDraft> | null => {
+    if (!isObject(raw)) return null;
+    const entries = Object.entries(raw).filter(([, draft]) => (
+      isObject(draft) && isObject(draft.sourceNode) && isObject(draft.draftNode)
+    )).map(([ref, draft]) => {
+      const value = draft as Record<string, unknown>;
+      return [ref, {
+        name: typeof value.name === "string" ? value.name : ref,
+        sourceNode: value.sourceNode as NodeDocument,
+        draftNode: value.draftNode as NodeDocument,
+        sourceEditor: isObject(value.sourceEditor) ? (value.sourceEditor as any) : null,
+        draftEditorValues: isObject(value.draftEditorValues) ? (value.draftEditorValues as any) : null,
+      }] as const;
+    });
+    return entries.length ? Object.fromEntries(entries) : null;
+  };
+
   const healRandomSpec = (rawSpec: unknown, role: NodeRole) => {
     if (!isObject(rawSpec)) return null;
     const spec = { ...rawSpec } as any;
@@ -204,6 +223,8 @@ function migrateWorkspace(value: unknown): unknown {
       draftEditorValues: isObject(slot.draftEditorValues) ? (slot.draftEditorValues as any) : null,
       poolCursor: typeof slot.poolCursor === "number" ? slot.poolCursor : 0,
     };
+    const memberDrafts = normalizeMemberDrafts(slot.memberDrafts);
+    if (memberDrafts) normalized.memberDrafts = memberDrafts;
 
     if (role === "character") {
       let clothingSlots: NodeVariantSlot[] = [];
@@ -266,10 +287,11 @@ function migrateWorkspace(value: unknown): unknown {
   const editorKind = rawEditor.kind === "random" || rawEditor.kind === "node"
     ? rawEditor.kind
     : (editorSlotId ? "node" : null);
-  const editorTab = rawEditor.tab === "json" ? "json" : "form";
+  const editorTab: EditorTab = rawEditor.tab === "json" || rawEditor.tab === "source" ? rawEditor.tab : "form";
   const editor = {
     slotId: editorSlotId,
     kind: editorKind,
+    memberRef: typeof rawEditor.memberRef === "string" ? rawEditor.memberRef : null,
     tab: editorTab,
     draftNode: isObject(rawEditor.draftNode) ? (rawEditor.draftNode as NodeDocument) : null,
     baselineNode: isObject(rawEditor.baselineNode) ? (rawEditor.baselineNode as NodeDocument) : null,

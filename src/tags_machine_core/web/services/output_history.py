@@ -2,6 +2,7 @@
 
 - `outputs/` 和 `outputs/compares/` 下的每个子目录算一批（含 group_* 子目录里的图）；
 - `outputs/` 根目录下的散图按创建日期归成"散图"批次，只读，不移动、不改名；
+- `web.history_roots` 配置的额外目录（如定时跑图的 design/auto）下每个子目录也算一批，批次 ID 为 `@<序号>/<子目录>`；
 - 以 `.` 开头的目录（如 `.web` 缓存）不扫。
 
 目录内容按目录 mtime 缓存，PNG 摘要按文件 mtime / 大小缓存，重复刷新不会重读整个输出目录。
@@ -23,6 +24,7 @@ from tags_machine_core.verification.image_params import read_image_parameters
 
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 LOOSE_PREFIX = "loose/"
+EXTRA_PREFIX = "@"
 _RUN_KIND = re.compile(r"^(compare|random|sequential-all|sequential|primary)_")
 _MAX_DEPTH = 3
 
@@ -51,8 +53,9 @@ class _DirListing:
 
 
 class OutputHistory:
-    def __init__(self, output_root: str | Path):
+    def __init__(self, output_root: str | Path, extra_roots: list[str | Path] | None = None):
         self.root = Path(output_root).resolve()
+        self.extra_roots = [Path(root).resolve() for root in extra_roots or []]
         self._dirs: dict[Path, _DirListing] = {}
         self._summaries: dict[tuple[Path, int, int], dict[str, Any]] = {}
         self._lock = threading.Lock()
@@ -60,6 +63,12 @@ class OutputHistory:
     # ---- 批次列表 ----
 
     def list_runs(self) -> list[dict[str, Any]]:
+        # 输出目录还没生成过图时可能不存在，额外目录照样列出
+        runs = self._output_runs() + self._extra_runs()
+        runs.sort(key=lambda run: run["created_at"], reverse=True)
+        return runs
+
+    def _output_runs(self) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = []
         root_listing = self._listing(self.root)
         if root_listing is None:
@@ -86,7 +95,26 @@ class OutputHistory:
                 images=images,
                 path=self.root,
             ))
-        runs.sort(key=lambda run: run["created_at"], reverse=True)
+        return runs
+
+    def _extra_runs(self) -> list[dict[str, Any]]:
+        runs: list[dict[str, Any]] = []
+        for index, root in enumerate(self.extra_roots):
+            listing = self._listing(root)
+            if listing is None:
+                continue
+            for run_dir in listing.subdirs:
+                images = self._images_under(run_dir)
+                if not images:
+                    continue
+                runs.append(self._run_entry(
+                    run_id=f"{EXTRA_PREFIX}{index}/{run_dir.name}",
+                    name=f"{root.name} · {run_dir.name}",
+                    kind=self._kind(run_dir.name),
+                    created_at=created_time(run_dir.stat()),
+                    images=images,
+                    path=run_dir,
+                ))
         return runs
 
     def run_images(self, run_id: str, *, offset: int = 0, limit: int = 300) -> dict[str, Any]:
@@ -160,11 +188,17 @@ class OutputHistory:
             if not images:
                 raise FileNotFoundError(run_id)
             return self.root, images
+        root = self.root
+        if run_id.startswith(EXTRA_PREFIX):
+            index, _, run_id = run_id[len(EXTRA_PREFIX):].partition("/")
+            if not index.isdigit() or int(index) >= len(self.extra_roots):
+                raise FileNotFoundError(run_id)
+            root = self.extra_roots[int(index)]
         relative = Path(run_id)
         if relative.is_absolute() or ".." in relative.parts or not relative.parts:
             raise FileNotFoundError(run_id)
-        run_dir = (self.root / relative).resolve()
-        if not run_dir.is_relative_to(self.root) or not run_dir.is_dir():
+        run_dir = (root / relative).resolve()
+        if not run_dir.is_relative_to(root) or not run_dir.is_dir():
             raise FileNotFoundError(run_id)
         return run_dir, self._images_under(run_dir)
 

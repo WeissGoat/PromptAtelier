@@ -8,6 +8,7 @@ import { StyleLabErrorBoundary } from "./styleLab/StyleLabErrorBoundary";
 import { StyleLabPage } from "./styleLab/StyleLabPage";
 import { CustomWorkspaceProvider } from "./workspace/CustomWorkspaceProvider";
 import "./styles.css";
+import "./styles/custom.css";
 
 const PAGE_STORAGE_KEY = "promptatelier.active-page/v1";
 const PAGE_KEYS: readonly PageKey[] = ["custom", "results", "compare", "style-lab"];

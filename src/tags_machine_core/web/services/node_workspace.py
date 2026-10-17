@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from tags_machine_core.nodes.models import NodeDocument
-from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
+from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository, is_legacy_artist_dir
 from tags_machine_core.nodes.path_guard import contained_path, relative_within
 from tags_machine_core.nodes.reader import NodeReader
 from tags_machine_core.nodes.role_paths import role_roots
@@ -16,6 +16,17 @@ from tags_machine_core.web.node_editing import FileMutation, NodeSourceAdapterRe
 from tags_machine_core.web.node_editing.text_utils import source_hash
 from tags_machine_core.web.services.node_previews import NodePreviewIndex
 from tags_machine_core.web.services.node_save_preview_store import SourceChangedError
+
+
+SOURCE_FILE_SUFFIXES = {".txt", ".yaml", ".yml", ".json", ".md"}
+SOURCE_FILE_ORDER = ("tags.txt", "meta.yaml", "node.yaml", "classify.yaml")
+SOURCE_FILE_MAX_BYTES = 512 * 1024
+
+
+def _read_source_text(path: Path) -> str:
+    # newline="" 保留原文件的 CRLF，保存时 diff 才不会整篇都变。
+    with path.open(encoding="utf-8-sig", errors="replace", newline="") as handle:
+        return handle.read()
 
 
 class NodeWorkspace:
@@ -198,7 +209,8 @@ class NodeWorkspace:
             for mutation in changed:
                 mutation.path.parent.mkdir(parents=True, exist_ok=True)
                 temp = mutation.path.with_name(f".{mutation.path.name}.{uuid.uuid4().hex}.promptatelier.tmp")
-                temp.write_text(mutation.after_text, encoding="utf-8")
+                with temp.open("w", encoding="utf-8", newline=mutation.newline) as handle:
+                    handle.write(mutation.after_text)
                 temporary.append((temp, mutation.path))
             for temp, target in temporary:
                 temp.replace(target)
@@ -206,6 +218,64 @@ class NodeWorkspace:
             for temp, _ in temporary:
                 if temp.exists():
                     temp.unlink()
+
+    def source_files(self, ref: str | Path) -> list[dict[str, Any]]:
+        """节点目录里能直接当文本编辑的源文件（tags.txt、meta.yaml、classify.yaml 等），按常用程度排序。"""
+        node_dir = self._source_dir(ref)
+        files = [
+            path for path in node_dir.iterdir()
+            if path.is_file()
+            and path.suffix.lower() in SOURCE_FILE_SUFFIXES
+            and not path.name.startswith(".")
+            and path.stat().st_size <= SOURCE_FILE_MAX_BYTES
+        ]
+        files.sort(key=lambda path: (
+            SOURCE_FILE_ORDER.index(path.name) if path.name in SOURCE_FILE_ORDER else len(SOURCE_FILE_ORDER),
+            path.name,
+        ))
+        return [
+            {
+                "name": path.name,
+                "path": str(path),
+                "format": path.suffix.lower().lstrip("."),
+                "sha256": source_hash(path),
+                "text": _read_source_text(path),
+            }
+            for path in files
+        ]
+
+    def preview_source_mutations(self, ref: str | Path, files: list[dict[str, Any]]) -> list[FileMutation]:
+        """直接改源文件文本：只允许改节点目录里已有的文本源文件，换行风格跟原文件保持一致。"""
+        node_dir = self._source_dir(ref)
+        allowed = {item["name"] for item in self.source_files(node_dir)}
+        mutations: list[FileMutation] = []
+        for item in files:
+            name = str(item.get("name") or "").strip()
+            text = item.get("text")
+            if name not in allowed or not isinstance(text, str):
+                raise ValueError(f"不能编辑这个源文件：{name or '(空)'}")
+            path = node_dir / name
+            before = _read_source_text(path)
+            after = text.replace("\r\n", "\n")
+            if "\r\n" in before:
+                after = after.replace("\n", "\r\n")
+            mutations.append(FileMutation(
+                path=path,
+                format=path.suffix.lower().lstrip("."),
+                before_text=before,
+                after_text=after,
+                before_sha256=source_hash(path),
+                newline="",
+            ))
+        if not mutations:
+            raise ValueError("没有要保存的源文件")
+        return mutations
+
+    def _source_dir(self, ref: str | Path) -> Path:
+        node_dir = self.resolve_node_path(ref)
+        if not node_dir.is_dir() or not self._has_node_file(node_dir):
+            raise ValueError(f"不是节点目录：{node_dir}")
+        return node_dir
 
     def resolve_node_path(self, ref: str | Path) -> Path:
         candidate = Path(ref)
@@ -237,12 +307,7 @@ class NodeWorkspace:
         return self.read_node(path)
 
     def _read_node_document(self, path: Path, *, role: str | None) -> NodeDocument:
-        if (
-            role == "artist"
-            and path.is_dir()
-            and (path / "tags.txt").exists()
-            and not any((path / name).exists() for name in ("meta.yaml", "node.yaml"))
-        ):
+        if role == "artist" and is_legacy_artist_dir(path):
             artist_ref = relative_within(self.artist_repository.artist_root, path) or str(path.resolve())
             return self.artist_repository.load_node(artist_ref)
         return self.reader.read(path)

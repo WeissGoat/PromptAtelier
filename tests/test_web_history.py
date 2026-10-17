@@ -72,6 +72,35 @@ class OutputHistoryTest(TestCase):
             with self.assertRaises(FileNotFoundError):
                 history.run_images(bad)
 
+    def test_extra_roots_list_each_subdir_as_run(self):
+        auto = Path(self._tmp.name) / "design" / "auto"
+        write_png(auto / "20261016" / "00001_homura_sitting_bbbb" / "b.png", seed=2)
+        write_png(auto / "20261016" / "00000_homura_standing_aaaa" / "a.png", seed=1)
+        write_png(self.root / "primary_20261016000000_cccc" / "c.png", seed=3)
+        history = OutputHistory(self.root, extra_roots=[auto])
+
+        runs = {run["id"]: run for run in history.list_runs()}
+
+        self.assertEqual(set(runs), {"primary_20261016000000_cccc", "@0/20261016"})
+        self.assertEqual((runs["@0/20261016"]["name"], runs["@0/20261016"]["group_count"]), ("auto · 20261016", 2))
+        listing = history.run_images("@0/20261016")
+        self.assertEqual(
+            [image["group"] for image in listing["images"]],
+            ["00000_homura_standing_aaaa", "00001_homura_sitting_bbbb"],
+        )
+        for bad in ("@0/../outputs", "@1/20261016", "@x/20261016", "@0/missing"):
+            with self.assertRaises(FileNotFoundError):
+                history.run_images(bad)
+
+    def test_extra_roots_listed_when_output_root_missing(self):
+        auto = Path(self._tmp.name) / "design" / "auto"
+        write_png(auto / "20261016" / "00000_homura_standing_aaaa" / "a.png", seed=1)
+
+        runs = OutputHistory(self.root, extra_roots=[auto]).list_runs()
+
+        self.assertFalse(self.root.exists())
+        self.assertEqual([run["id"] for run in runs], ["@0/20261016"])
+
 
 class HistoryHttpTest(TestCase):
     def setUp(self):

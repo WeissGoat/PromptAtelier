@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NodeDocument } from "../nodes/types";
 import { createEmptySlot } from "../workspace/storage";
 import { createDefaultNodePoolSpec } from "./spec";
-import { resolveRandomItems } from "./resolve";
+import { resolveRandomItems, withoutSelection } from "./resolve";
 
 const sampleNodePool = vi.fn();
 
@@ -71,5 +71,33 @@ describe("random node resolution", () => {
     expect(createDefaultNodePoolSpec("artist").source.value).toBe(".");
     expect(createDefaultNodePoolSpec("action").source.value).toBe("new");
     expect(createDefaultNodePoolSpec().source.value).toBe("");
+  });
+});
+
+describe("node group members", () => {
+  beforeEach(() => sampleNodePool.mockReset());
+
+  it("draws a member with its temporary edit and refuses an empty selection", async () => {
+    const slot = createEmptySlot("character", "primary");
+    slot.sourceKind = "random";
+    slot.randomSpec = { ...createDefaultNodePoolSpec(), selection: { refs: ["a"] } };
+    slot.randomSpec.source.value = "group";
+    slot.memberDrafts = { a: { name: "A", sourceNode: node("A"), draftNode: { ...node("A"), name: "A edited" } } };
+    sampleNodePool.mockResolvedValue({
+      items: [{ candidate: { role: "character", ref: "a", name: "A" }, node: node("A"), draw_index: 0, deck_cycle: 1 }],
+      stats: { raw_total: 2, total: 1, missing_classify: 0, invalid_classify: 0, classify_mismatch: 0, invalid_node: 0 },
+    });
+
+    const [result] = await resolveRandomItems([{ value: 1, slots: { artist: null, character: slot, action: null, clothing: null } }]);
+    // 勾选记录原样发给后端，由后端只在勾选成员里抽。
+    expect(sampleNodePool).toHaveBeenCalledWith("character", slot.randomSpec, 1);
+    expect(result.slots.character?.sourceNode?.name).toBe("A");
+    expect(result.slots.character?.draftNode?.name).toBe("A edited");
+    expect(result.slots.character?.memberDrafts).toBeUndefined();
+
+    const empty = { ...slot, randomSpec: { ...slot.randomSpec, selection: { refs: [] } } };
+    await expect(resolveRandomItems([{ value: 1, slots: { artist: null, character: empty, action: null, clothing: null } }]))
+      .rejects.toThrow("一个成员都没勾选");
+    expect(withoutSelection(slot.randomSpec).selection).toBeUndefined();
   });
 });

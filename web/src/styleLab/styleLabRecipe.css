@@ -4,10 +4,10 @@
 
 .sl-ghost {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border-strong);
   border-radius: 6px;
-  color: #3c4043;
+  color: var(--text-2);
   display: inline-flex;
   font-size: 12px;
   gap: 4px;
@@ -17,7 +17,7 @@
 }
 
 .sl-ghost:hover:not(:disabled) {
-  background: #f3f4f7;
+  background: var(--surface-2);
 }
 
 .sl-ghost.tiny {
@@ -87,7 +87,7 @@
 }
 
 .sl-group-row:hover {
-  background: #eef0f4;
+  background: var(--surface-3);
 }
 
 .sl-group-row.on {
@@ -166,22 +166,22 @@
 }
 
 .sl-recipe-link:hover {
-  background: #eef0f4;
+  background: var(--surface-3);
 }
 
 .sl-recipe-link.on {
   background: var(--sl-style-bg);
-  border-color: #afa9ec;
+  border-color: var(--accent-muted);
 }
 
 /* ---- token 小块：紫色是画风（导出），青色是主体（只用于测试） ---- */
 
 .sl-chip {
   align-items: flex-start;
-  background: #f3f4f7;
-  border: 1px solid #e3e6eb;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #202124;
+  color: var(--text);
   display: inline-flex;
   flex-direction: column;
   font-size: 12px;
@@ -205,18 +205,18 @@
 .sl-chip.zone-prefix,
 .sl-chip.zone-suffix {
   background: var(--sl-style-bg);
-  border-color: #afa9ec;
-  color: #3c3489;
+  border-color: var(--accent-muted);
+  color: var(--accent-text);
 }
 
 .sl-chip.zone-subject {
-  background: #e1f5ee;
-  border-color: #5dcaa5;
-  color: #085041;
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success-text);
 }
 
 .sl-chip.zone-dropped {
-  background: #fff;
+  background: var(--surface);
   border-style: dashed;
   color: var(--sl-muted);
   text-decoration: line-through;
@@ -224,11 +224,11 @@
 
 .sl-chip.zone-prefix .sl-chip-zh,
 .sl-chip.zone-suffix .sl-chip-zh {
-  color: #534ab7;
+  color: var(--accent-text);
 }
 
 .sl-chip.zone-subject .sl-chip-zh {
-  color: #0f6e56;
+  color: var(--success-text);
 }
 
 .sl-chip.selected {
@@ -236,15 +236,15 @@
 }
 
 .sl-chip.origin-character {
-  border-left: 3px solid #d85a30;
+  border-left: 3px solid var(--warning);
 }
 
 .sl-chip.origin-action {
-  border-left: 3px solid #378add;
+  border-left: 3px solid var(--accent);
 }
 
 .sl-chip.origin-manual {
-  border-left: 3px solid #888780;
+  border-left: 3px solid var(--border-stronger);
 }
 
 .sl-chip[draggable="true"] {
@@ -281,22 +281,22 @@
 .sl-legend.prefix,
 .sl-legend.suffix {
   background: var(--sl-style-bg);
-  color: #3c3489;
+  color: var(--accent-text);
 }
 
 .sl-legend.subject {
-  background: #e1f5ee;
-  color: #085041;
+  background: var(--success-soft);
+  color: var(--success-text);
 }
 
 .sl-legend.dropped {
-  background: #f3f4f7;
+  background: var(--surface-2);
   color: var(--sl-muted);
 }
 
 .sl-mark-bar {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 8px;
   display: flex;
@@ -318,7 +318,7 @@
 
 .sl-mark-btn {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border-strong);
   border-radius: 6px;
   cursor: pointer;
@@ -335,19 +335,19 @@
 }
 
 .sl-mark-btn.zone-prefix {
-  background: #e4e1fc;
-  border-color: #8f86e0;
-  color: #3c3489;
+  background: var(--accent-soft-2);
+  border-color: var(--accent-muted);
+  color: var(--accent-text);
 }
 
 .sl-mark-btn.zone-suffix {
-  background: #fbe4ef;
-  border-color: #d989b2;
-  color: #8a2a5c;
+  background: var(--danger-soft);
+  border-color: var(--violet);
+  color: var(--violet-text);
 }
 
 .sl-mark-text {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 8px;
   cursor: text;
@@ -360,17 +360,17 @@
 }
 
 .sl-mark.zone-prefix {
-  background: #e4e1fc;
+  background: var(--accent-soft-2);
   border-radius: 3px;
-  box-shadow: inset 0 -2px #8f86e0;
-  color: #3c3489;
+  box-shadow: inset 0 -2px var(--accent-muted);
+  color: var(--accent-text);
 }
 
 .sl-mark.zone-suffix {
-  background: #fbe4ef;
+  background: var(--danger-soft);
   border-radius: 3px;
-  box-shadow: inset 0 -2px #d989b2;
-  color: #8a2a5c;
+  box-shadow: inset 0 -2px var(--violet);
+  color: var(--violet-text);
 }
 
 .sl-mark.zone-dropped {
@@ -387,8 +387,8 @@
 }
 
 .sl-mark.pending {
-  background: #ffe9a8;
-  box-shadow: inset 0 -2px #e0a800;
+  background: var(--warning-border);
+  box-shadow: inset 0 -2px var(--warning);
 }
 
 /* 热力图：每个 tag 上沿一条色条，从蓝（少见）经绿、黄到红（几乎每个投稿都有）；区的底色和下划线不变。 */
@@ -438,8 +438,8 @@
 }
 
 .sl-legend.suffix {
-  background: #fbe4ef;
-  color: #8a2a5c;
+  background: var(--danger-soft);
+  color: var(--violet-text);
 }
 
 /* ---- 配方工作区 ---- */
@@ -474,7 +474,7 @@
 }
 
 .sl-recipe-side {
-  background: #fafbfc;
+  background: var(--surface-2);
   border-right: 1px solid var(--sl-border);
   display: flex;
   flex-direction: column;
@@ -490,7 +490,7 @@
 }
 
 .sl-library {
-  background: #fafbfc;
+  background: var(--surface-2);
   border-left: 1px solid var(--sl-border);
   display: flex;
   flex-direction: column;
@@ -562,7 +562,7 @@
 }
 
 .sl-zone {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-radius: 8px;
   display: flex;
@@ -573,11 +573,11 @@
 
 .sl-zone.zone-prefix,
 .sl-zone.zone-suffix {
-  border-color: #cecbf6;
+  border-color: var(--accent-border);
 }
 
 .sl-zone.zone-subject {
-  border-color: #9fe1cb;
+  border-color: var(--success-border);
 }
 
 .sl-zone.drop-target {
@@ -635,8 +635,8 @@
 }
 
 .sl-chip-remove:hover {
-  background: #fde2e1;
-  color: #b42318;
+  background: var(--danger-soft);
+  color: var(--danger-text);
 }
 
 .sl-chip-slot.drop-before::before,
@@ -681,8 +681,8 @@
 
 .sl-edit-tools {
   align-items: center;
-  background: #fff8e1;
-  border: 1px solid #f0d78c;
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
   border-radius: 6px;
   display: flex;
   flex-wrap: wrap;
@@ -692,13 +692,13 @@
 }
 
 .sl-chip.zone-character {
-  background: #fdf0e8;
-  border-color: #eab08f;
-  color: #712b13;
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .sl-chip.zone-character .sl-chip-zh {
-  color: #993c1d;
+  color: var(--warning-text);
 }
 
 .sl-field {
@@ -721,7 +721,7 @@
 }
 
 .sl-char-ref-item {
-  background: #f3f4f7;
+  background: var(--surface-2);
   border-radius: 5px;
   font-size: 12px;
   padding: 2px 7px;
@@ -764,7 +764,7 @@
 }
 
 .sl-preview-text {
-  background: #f8f9fb;
+  background: var(--surface-2);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
@@ -800,7 +800,7 @@
 }
 
 .sl-card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-left-width: 3px;
   border-radius: 8px;
@@ -811,11 +811,11 @@
 }
 
 .sl-card.origin-character {
-  border-left-color: #d85a30;
+  border-left-color: var(--warning);
 }
 
 .sl-card.origin-action {
-  border-left-color: #378add;
+  border-left-color: var(--accent);
 }
 
 .sl-card-head {
@@ -825,7 +825,7 @@
 
 .sl-card-thumb {
   align-items: center;
-  background: #f0f1f4;
+  background: var(--surface-3);
   border-radius: 6px;
   color: var(--sl-muted);
   display: flex;
@@ -878,8 +878,8 @@
 .sl-card-tag {
   cursor: pointer;
   user-select: text;
-  background: #f3f4f7;
-  border: 1px solid #e3e6eb;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 5px;
   display: inline-flex;
   flex-direction: column;
@@ -891,19 +891,19 @@
 }
 
 .sl-card-tag.on {
-  background: #e1f5ee;
-  border-color: #5dcaa5;
-  color: #085041;
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success-text);
 }
 
 .sl-card-tag.present {
-  border-color: #5dcaa5;
+  border-color: var(--success);
   border-style: dashed;
 }
 
 .sl-added-row {
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--sl-border);
   border-left-width: 3px;
   border-radius: 6px;
@@ -921,9 +921,9 @@
 }
 
 .sl-added-row.origin-character {
-  border-left-color: #d85a30;
+  border-left-color: var(--warning);
 }
 
 .sl-added-row.origin-action {
-  border-left-color: #378add;
+  border-left-color: var(--accent);
 }

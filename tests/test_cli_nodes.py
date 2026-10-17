@@ -530,6 +530,37 @@ renderers:
             artist_refs = [node for node in data["meta"]["node_refs"] if node["role"] == "artist"]
             self.assertEqual(artist_refs[0]["id"], "cross_backend_style")
 
+    def test_render_plan_nodes_reads_legacy_tags_txt_artist_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            character, action = self._write_sample_nodes(root)
+            artist = root / "画风" / "002"
+            artist.mkdir(parents=True)
+            (artist / "tags.txt").write_text("{artist:legacy_one}, [artist:legacy_two], year 2023\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "render-plan-nodes",
+                        "--backend",
+                        "novelai",
+                        "--character",
+                        str(character),
+                        "--action",
+                        str(action),
+                        "--artist-node",
+                        str(artist),
+                        "--seed",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            prompt = json.loads(stdout.getvalue())["prompt"]
+            self.assertEqual(prompt.count("artist:legacy_one"), 1)
+            self.assertLess(prompt.index("artist:legacy_one"), prompt.index("akemi_homura"))
+
     def test_archive_novelai_acceptance_nodes_builds_core_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

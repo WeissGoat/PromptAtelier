@@ -71,6 +71,20 @@ export type NodeSavePreviewResponse = {
   expires_at: number;
 };
 
+export type NodeSourceFile = {
+  name: string;
+  path: string;
+  format: string;
+  sha256: string | null;
+  text: string;
+};
+
+export type NodeSourceFilesResponse = {
+  schema: "tags-machine-core.web.node-source-files/v1";
+  ref: string;
+  files: NodeSourceFile[];
+};
+
 export type NodeListResponse = {
   schema: string;
   role: string;
@@ -97,6 +111,8 @@ export type NodePoolStats = {
   invalid_classify: number;
   classify_mismatch: number;
   invalid_node: number;
+  unselected?: number;
+  selection_missing?: number;
 };
 
 export type NodePoolScanResponse = {

@@ -131,6 +131,52 @@ def preview_node_save(data: dict, request: Request) -> dict:
         raise ApiError(code="invalid_editor_values", message=str(exc), status_code=400) from exc
 
 
+@router.get("/nodes/source-files")
+def read_source_files(ref: str, request: Request) -> dict:
+    try:
+        return {
+            "schema": "tags-machine-core.web.node-source-files/v1",
+            "ref": str(_workspace(request).resolve_node_path(ref)),
+            "files": _workspace(request).source_files(ref),
+        }
+    except FileNotFoundError as exc:
+        raise ApiError(code="node_not_found", message=str(exc), status_code=404) from exc
+    except ValueError as exc:
+        raise ApiError(code="invalid_node_ref", message=str(exc), status_code=400) from exc
+
+
+@router.post("/nodes/source-save-preview")
+def preview_source_save(data: dict, request: Request) -> dict:
+    """直接改源文件文本的保存预览；确认写入同样走 /nodes/save-commit。"""
+    ref = str(data.get("ref") or "").strip()
+    role = str(data.get("role") or "").strip()
+    files = data.get("files")
+    if not ref or not role or not isinstance(files, list):
+        raise ApiError(code="invalid_source_files", message="nodes/source-save-preview requires ref, role and files", status_code=400)
+    workspace = _workspace(request)
+    try:
+        mutations = workspace.preview_source_mutations(ref, [item for item in files if isinstance(item, dict)])
+        node_dir = str(workspace.resolve_node_path(ref))
+        preview = _save_previews(request).create(
+            ref=node_dir,
+            role=role,
+            node=workspace.read_runtime_node(node_dir, role=role),
+            mutations=mutations,
+        )
+    except FileNotFoundError as exc:
+        raise ApiError(code="node_not_found", message=str(exc), status_code=404) from exc
+    except (ValidationError, ValueError) as exc:
+        raise ApiError(code="invalid_source_files", message=str(exc), status_code=400) from exc
+    return {
+        "schema": "tags-machine-core.web.node-save-preview/v1",
+        "preview_id": preview.preview_id,
+        "node": preview.node.model_dump(mode="json"),
+        "files": [workspace.mutation_payload(mutation, node_dir=preview.ref) for mutation in mutations],
+        "warnings": [],
+        "expires_at": preview.expires_at,
+    }
+
+
 @router.put("/nodes/save-commit")
 def commit_node_save(data: dict, request: Request) -> dict:
     preview_id = str(data.get("preview_id") or "").strip()

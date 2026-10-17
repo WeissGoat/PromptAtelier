@@ -27,6 +27,8 @@ class FileMutation(BaseModel):
     before_text: str = ""
     after_text: str
     before_sha256: str | None = None
+    # 写回时的换行处理，同 open(newline=...)：None 按系统换行写；"" 原样写（直接编辑源文件时保留原换行）。
+    newline: str | None = None
 
     @property
     def changed(self) -> bool:

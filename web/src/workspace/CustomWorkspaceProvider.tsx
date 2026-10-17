@@ -19,6 +19,8 @@ import {
 } from "./promptBehavior";
 import type {
   CustomWorkspaceState,
+  EditorTab,
+  MemberDraft,
   NodePoolSpec,
   NodeVariantSlot,
   PromptBehaviorParams,
@@ -26,10 +28,33 @@ import type {
   RenderWorkspaceParams,
 } from "./types";
 
+/** 编辑器当前编辑的对象：槽位自己的节点，或节点组里的某个成员。 */
+export type EditorTarget = {
+  slot: NodeVariantSlot;
+  memberRef: string | null;
+  role: NodeRole;
+  name: string;
+  sourceRef: string | null;
+  sourceNode: NodeDocument | null;
+  draftNode: NodeDocument | null;
+  sourceEditor: NodeEditorDocument | null;
+  draftEditorValues: Record<string, unknown> | null;
+};
+
 type CustomWorkspaceContextValue = {
   state: CustomWorkspaceState;
   storageWarning: string;
+  editorTarget: EditorTarget | null;
   findSlot(slotId: string): NodeVariantSlot | null;
+  /** 打开节点组成员的编辑器；第一次编辑时用读到的节点建立成员草稿。 */
+  openMemberEditor(slotId: string, ref: string, name: string, response?: NodeReadResponse): void;
+  /** 改编辑对象的运行时节点（JSON / 通用表单 / 表单预览结果）。 */
+  updateEditorTargetDraft(node: NodeDocument): void;
+  restoreEditorTarget(): void;
+  applySavedToEditorTarget(response: NodeReadResponse): void;
+  discardMemberDraft(slotId: string, ref: string): void;
+  /** null：整组都参与；数组：只在这些成员里随机/按序（空数组表示一个都没选）。 */
+  setGroupSelection(slotId: string, refs: string[] | null): void;
   selectNode(slotId: string, ref: string, node: NodeDocument, editor?: NodeEditorDocument | null): void;
   applySavedNode(slotId: string, response: NodeReadResponse): void;
   createBlank(slotId: string): void;
@@ -45,7 +70,7 @@ type CustomWorkspaceContextValue = {
   openEditor(slotId: string, response?: NodeReadResponse): void;
   openRandomEditor(slotId: string): void;
   closeEditor(): void;
-  setEditorTab(tab: "form" | "json"): void;
+  setEditorTab(tab: EditorTab): void;
   setEditorDraft(node: NodeDocument): void;
   setEditorValues(values: Record<string, unknown>): void;
   setParams(patch: Partial<RenderWorkspaceParams>): void;
@@ -64,6 +89,73 @@ type CustomWorkspaceContextValue = {
 };
 
 const CustomWorkspaceContext = createContext<CustomWorkspaceContextValue | null>(null);
+
+const EMPTY_EDITOR: CustomWorkspaceState["editor"] = {
+  slotId: null,
+  kind: null,
+  memberRef: null,
+  tab: "form",
+  draftNode: null,
+  baselineNode: null,
+  editValues: null,
+  baselineValues: null,
+};
+
+function emptyEditor(): CustomWorkspaceState["editor"] {
+  return { ...EMPTY_EDITOR };
+}
+
+function mapMember(
+  state: CustomWorkspaceState,
+  slotId: string,
+  ref: string,
+  update: (draft: MemberDraft) => MemberDraft | null,
+  incrementRevision = true,
+): CustomWorkspaceState {
+  return mapSlot(state, slotId, (slot) => {
+    const current = slot.memberDrafts?.[ref];
+    if (!current) return slot;
+    const next = update(current);
+    const memberDrafts = { ...(slot.memberDrafts ?? {}) };
+    if (next) memberDrafts[ref] = next;
+    else delete memberDrafts[ref];
+    return { ...slot, memberDrafts };
+  }, incrementRevision);
+}
+
+function editorTargetOf(state: CustomWorkspaceState): EditorTarget | null {
+  const { slotId, memberRef } = state.editor;
+  if (!slotId) return null;
+  const slot = findSlotInState(state, slotId);
+  if (!slot) return null;
+  if (memberRef) {
+    const member = slot.memberDrafts?.[memberRef];
+    if (!member) return null;
+    return {
+      slot,
+      memberRef,
+      role: slot.role,
+      name: member.draftNode.name || member.name,
+      sourceRef: memberRef,
+      sourceNode: member.sourceNode,
+      draftNode: member.draftNode,
+      sourceEditor: member.sourceEditor ?? null,
+      draftEditorValues: member.draftEditorValues ?? null,
+    };
+  }
+  if (slot.sourceKind === "random") return null;
+  return {
+    slot,
+    memberRef: null,
+    role: slot.role,
+    name: slot.draftNode?.name || slot.sourceNode?.name || slot.draftNode?.id || "",
+    sourceRef: slot.sourceRef,
+    sourceNode: slot.sourceNode,
+    draftNode: slot.draftNode,
+    sourceEditor: slot.sourceEditor ?? null,
+    draftEditorValues: slot.draftEditorValues ?? null,
+  };
+}
 
 function updateSlotOrClothing(
   slot: NodeVariantSlot,
@@ -203,7 +295,124 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<CustomWorkspaceContextValue>(() => ({
     state,
     storageWarning,
+    editorTarget: editorTargetOf(state),
     findSlot: (slotId) => findSlotInState(state, slotId),
+    openMemberEditor: (slotId, ref, name, response) => setState((current) => {
+      const next = mapSlot(current, slotId, (slot) => {
+        if (slot.memberDrafts?.[ref] || !response) return slot;
+        const sourceNode = cloneNode(response.node);
+        const sourceEditor = response.editor ? structuredClone(response.editor) : null;
+        return {
+          ...slot,
+          memberDrafts: {
+            ...(slot.memberDrafts ?? {}),
+            [ref]: {
+              name,
+              sourceNode,
+              draftNode: cloneNode(sourceNode),
+              sourceEditor,
+              draftEditorValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+            },
+          },
+        };
+      }, false);
+      const member = findSlotInState(next, slotId)?.memberDrafts?.[ref];
+      if (!member) return current;
+      return {
+        ...next,
+        editor: {
+          slotId,
+          kind: "node",
+          memberRef: ref,
+          tab: current.editor.tab,
+          draftNode: cloneNode(member.draftNode),
+          baselineNode: cloneNode(member.sourceNode),
+          editValues: member.draftEditorValues ? structuredClone(member.draftEditorValues) : null,
+          baselineValues: member.sourceEditor ? structuredClone(member.sourceEditor.values) : null,
+        },
+      };
+    }),
+    updateEditorTargetDraft: (node) => setState((current) => {
+      const { slotId, memberRef } = current.editor;
+      if (!slotId) return current;
+      const next = memberRef
+        ? mapMember(current, slotId, memberRef, (draft) => ({ ...draft, draftNode: cloneNode(node) }))
+        : mapSlot(current, slotId, (slot) => ({ ...slot, draftNode: cloneNode(node) }));
+      return { ...next, editor: { ...next.editor, draftNode: cloneNode(node) } };
+    }),
+    restoreEditorTarget: () => setState((current) => {
+      const { slotId, memberRef } = current.editor;
+      if (!slotId) return current;
+      if (!memberRef) {
+        return mapSlot(current, slotId, (slot) => ({
+          ...slot,
+          draftNode: slot.sourceNode ? cloneNode(slot.sourceNode) : null,
+          draftEditorValues: slot.sourceEditor ? structuredClone(slot.sourceEditor.values) : null,
+        }));
+      }
+      const next = mapMember(current, slotId, memberRef, (draft) => ({
+        ...draft,
+        draftNode: cloneNode(draft.sourceNode),
+        draftEditorValues: draft.sourceEditor ? structuredClone(draft.sourceEditor.values) : null,
+      }));
+      const member = findSlotInState(next, slotId)?.memberDrafts?.[memberRef];
+      return member ? {
+        ...next,
+        editor: {
+          ...next.editor,
+          draftNode: cloneNode(member.draftNode),
+          editValues: member.draftEditorValues ? structuredClone(member.draftEditorValues) : null,
+        },
+      } : next;
+    }),
+    applySavedToEditorTarget: (response) => setState((current) => {
+      const { slotId, memberRef } = current.editor;
+      if (!slotId) return current;
+      const sourceNode = cloneNode(response.node);
+      const sourceEditor = response.editor ? structuredClone(response.editor) : null;
+      const next = memberRef
+        ? mapMember(current, slotId, memberRef, (draft) => ({
+          ...draft,
+          sourceNode,
+          draftNode: cloneNode(sourceNode),
+          sourceEditor,
+          draftEditorValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+        }))
+        : mapSlot(current, slotId, (slot) => ({
+          ...slot,
+          sourceKind: "fixed",
+          randomSpec: null,
+          sourceRef: response.ref,
+          sourceNode,
+          draftNode: cloneNode(sourceNode),
+          sourceEditor,
+          draftEditorValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+        }));
+      return {
+        ...next,
+        editor: {
+          ...next.editor,
+          draftNode: cloneNode(sourceNode),
+          baselineNode: cloneNode(sourceNode),
+          editValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+          baselineValues: sourceEditor ? structuredClone(sourceEditor.values) : null,
+        },
+      };
+    }),
+    discardMemberDraft: (slotId, ref) => setState((current) => {
+      const next = mapMember(current, slotId, ref, () => null);
+      return current.editor.slotId === slotId && current.editor.memberRef === ref
+        ? { ...next, editor: emptyEditor() }
+        : next;
+    }),
+    setGroupSelection: (slotId, refs) => setState((current) => mapSlot(current, slotId, (slot) => {
+      if (!slot.randomSpec) return slot;
+      const { selection: _previous, ...rest } = slot.randomSpec;
+      return {
+        ...slot,
+        randomSpec: refs ? { ...rest, selection: { refs: [...new Set(refs)] } } : rest,
+      };
+    })),
     findPromptBehavior: (slotId) => findPromptBehaviorVariant(state.promptBehaviorGroup, slotId),
     selectNode: (slotId, ref, node, editor = null) => setState((current) => mapSlot(current, slotId, (slot) => {
       const sourceNode = cloneNode(node);
@@ -272,15 +481,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       });
       return {
         ...next,
-        editor: {
-          slotId,
-          kind: "random",
-          tab: "form",
-          draftNode: null,
-          baselineNode: null,
-          editValues: null,
-          baselineValues: null,
-        },
+        editor: { ...emptyEditor(), slotId, kind: "random" },
       };
     }),
     updateRandomSpec: (slotId, spec) => setState((current) => mapSlot(current, slotId, (slot) => ({
@@ -376,7 +577,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
               compares: group.compares.filter((slot) => slot.slotId !== slotId),
             } },
             editor: removedIds.has(current.editor.slotId ?? "")
-              ? { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null }
+              ? emptyEditor()
               : current.editor,
             revision: current.revision + 1,
           };
@@ -406,7 +607,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       if (next.editor.slotId === clothingSlotId) {
         next = {
           ...next,
-          editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
+          editor: emptyEditor(),
         };
       }
       return next;
@@ -430,6 +631,7 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       return { ...next, editor: {
         slotId,
         kind: "node",
+        memberRef: null,
         tab: "form",
         draftNode: cloneNode(slot.draftNode),
         baselineNode: cloneNode(slot.draftNode),
@@ -446,20 +648,12 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       if (!slot || slot.sourceKind !== "random" || !slot.randomSpec) return current;
       return {
         ...current,
-        editor: {
-          slotId,
-          kind: "random",
-          tab: "form",
-          draftNode: null,
-          baselineNode: null,
-          editValues: null,
-          baselineValues: null,
-        },
+        editor: { ...emptyEditor(), slotId, kind: "random" },
       };
     }),
     closeEditor: () => setState((current) => ({
       ...current,
-      editor: { slotId: null, kind: null, tab: "form", draftNode: null, baselineNode: null, editValues: null, baselineValues: null },
+      editor: emptyEditor(),
     })),
     setEditorTab: (tab) => setState((current) => ({ ...current, editor: { ...current.editor, tab } })),
     setEditorDraft: (node) => setState((current) => ({
@@ -467,13 +661,19 @@ export function CustomWorkspaceProvider({ children }: { children: ReactNode }) {
       editor: { ...current.editor, draftNode: cloneNode(node) },
     })),
     setEditorValues: (values) => setState((current) => {
-      const slotId = current.editor.slotId;
-      const next = slotId
-        ? mapSlot(current, slotId, (slot) => ({
+      const { slotId, memberRef } = current.editor;
+      let next = current;
+      if (slotId && memberRef) {
+        next = mapMember(current, slotId, memberRef, (draft) => ({
+          ...draft,
+          draftEditorValues: structuredClone(values),
+        }), false);
+      } else if (slotId) {
+        next = mapSlot(current, slotId, (slot) => ({
           ...slot,
           draftEditorValues: structuredClone(values),
-        }), false)
-        : current;
+        }), false);
+      }
       return {
         ...next,
         editor: { ...next.editor, editValues: structuredClone(values) },

@@ -35,6 +35,7 @@ from tags_machine_core.nodes import (
     ResolvedNodeSet,
     validate_node_tree,
 )
+from tags_machine_core.nodes.novelai_artist import is_legacy_artist_dir
 from tags_machine_core.nodes.resolved import node_role_order
 from tags_machine_core.services import GenerationJsonApi, GenerationService
 from tags_machine_core.tools.action_resolver.cli import add_action_resolver_subparser
@@ -1826,7 +1827,7 @@ def _read_resolved_nodes(
     if artist is not None and artist_ref:
         items.append(("artist", artist_ref, artist))
     elif getattr(args, "artist_node", None):
-        node = reader.read(args.artist_node)
+        node = _read_artist_path(args.artist_node)
         items.append(("artist", node.id, node))
     for role, attr in (
         ("character", "character"),
@@ -1853,14 +1854,23 @@ def _read_resolved_nodes(
     return ResolvedNodeSet(resolved)
 
 
+def _read_artist_path(value: str | Path):
+    # 旧画风目录只有 tags.txt：通用 NodeReader 会把整行当成 prompt.positive，画风串会被叠两次；
+    # 和 Web 一样交给 NovelAIArtistRepository，归一成 renderers.novelai 的前后缀。
+    path = Path(value)
+    if is_legacy_artist_dir(path):
+        return NovelAIArtistRepository(path.parent.parent).load_node(str(path.resolve()))
+    return NodeReader().read(value)
+
+
 def _load_render_artist(args):
     artist_filter = _artist_input_filter_for_args(args)
     if getattr(args, "artist_node", None):
-        node = NodeReader().read(args.artist_node)
+        node = _read_artist_path(args.artist_node)
         return str(args.artist_node), artist_filter.apply(node)
     artist_ref = getattr(args, "artist", None)
     if artist_ref and Path(artist_ref).exists():
-        node = NodeReader().read(artist_ref)
+        node = _read_artist_path(artist_ref)
         return artist_ref, artist_filter.apply(node)
     if artist_ref and getattr(args, "config", None):
         config = _load_command_config(args.config, args)
