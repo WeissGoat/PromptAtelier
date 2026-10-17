@@ -1,4 +1,4 @@
-import { FolderOutput, Grid3x3, LoaderCircle, Play, Square, Rows3, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOutput, Grid3x3, LoaderCircle, Play, Square, Rows3, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage, nodePreviewUrl } from "../api/client";
@@ -24,6 +24,8 @@ const MAX_REGRESSION = 12;
 const DEFAULT_REGRESSION = 4;
 const MAX_SIDE = 4;
 const PICKER_LIMIT = 24;
+/** 测试记录默认显示最近几次，更早的点一下再展开。 */
+const RUN_LIMIT = 5;
 const SKIP_FLAGS = new Set(["no_metadata", "inpaint", "img2img"]);
 
 type ArtistTestPanelProps = {
@@ -92,6 +94,12 @@ export function ArtistTestPanel({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateRequest | null>(null);
+  // 展开看结果的那次测试；没点过时展开最新一次，其余只显示一行。
+  const [openRun, setOpenRun] = useState<string | null>(null);
+  const [showAllRuns, setShowAllRuns] = useState(false);
+  const latestRunId = runs[0]?.id ?? null;
+  useEffect(() => setOpenRun(null), [latestRunId]);
+  const expandedRun = openRun ?? latestRunId;
 
   const latest = available[available.length - 1]?.folder ?? null;
   const activeArtist = artist && available.some((item) => item.folder === artist) ? artist : latest;
@@ -322,9 +330,21 @@ export function ArtistTestPanel({
 
       {runs.length ? (
         <div className="sl-test-runs">
-          {runs.map((run) => (
-            <TestRunCard key={run.id} onCancel={onCancel} run={run} workspaceId={workspaceId} />
+          {(showAllRuns ? runs : runs.slice(0, RUN_LIMIT)).map((run) => (
+            <TestRunCard
+              key={run.id}
+              onCancel={onCancel}
+              onToggle={() => setOpenRun(run.id === expandedRun ? "" : run.id)}
+              open={run.id === expandedRun}
+              run={run}
+              workspaceId={workspaceId}
+            />
           ))}
+          {runs.length > RUN_LIMIT ? (
+            <button className="sl-link-btn" onClick={() => setShowAllRuns(!showAllRuns)} type="button">
+              {showAllRuns ? "只看最近的" : `更早的 ${runs.length - RUN_LIMIT} 次`}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -393,16 +413,33 @@ export function meanSimilarity(run: ArtistTestRun): number | null {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
-function TestRunCard({ run, workspaceId, onCancel }: { run: ArtistTestRun; workspaceId: string; onCancel: (run: ArtistTestRun) => void }) {
+function TestRunCard({
+  run,
+  workspaceId,
+  open,
+  onToggle,
+  onCancel,
+}: {
+  run: ArtistTestRun;
+  workspaceId: string;
+  /** 展开显示结果；收起时只有一行。 */
+  open: boolean;
+  onToggle: () => void;
+  onCancel: (run: ArtistTestRun) => void;
+}) {
   const active = ACTIVE_RUN_STATUSES.has(run.status);
   const mean = meanSimilarity(run);
   return (
-    <article className="sl-test-run">
+    <article className={`sl-test-run ${open ? "open" : ""}`}>
       <header className="sl-run-head">
-        {run.kind === "regression" ? <Rows3 size={14} aria-hidden="true" /> : <Grid3x3 size={14} aria-hidden="true" />}
-        <strong>{run.kind === "regression" ? "回归对照" : "泛化矩阵"}</strong>
-        <span className="sl-muted">{run.artist.folder}</span>
-        <span>{formatTime(run.created_at)}</span>
+        <button aria-expanded={open} className="sl-test-run-toggle" onClick={onToggle} type="button">
+          {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+          {run.kind === "regression" ? <Rows3 size={14} aria-hidden="true" /> : <Grid3x3 size={14} aria-hidden="true" />}
+          <strong>{run.kind === "regression" ? "回归对照" : "泛化矩阵"}</strong>
+          <span className="sl-muted">{run.artist.folder}</span>
+          <span>{formatTime(run.created_at)}</span>
+          <span className="sl-muted">{run.items.length} 张</span>
+        </button>
         <span className={`sl-run-status ${run.status}`}>
           {active ? <LoaderCircle className="sl-spin" size={12} /> : null}
           {runStatusLabels[run.status]}
@@ -414,8 +451,12 @@ function TestRunCard({ run, workspaceId, onCancel }: { run: ArtistTestRun; works
           </button>
         ) : null}
       </header>
-      {run.error ? <p className="sl-error">{run.error}</p> : null}
-      {run.kind === "regression" ? <RegressionGrid run={run} workspaceId={workspaceId} /> : <MatrixGrid run={run} workspaceId={workspaceId} />}
+      {open ? (
+        <>
+          {run.error ? <p className="sl-error">{run.error}</p> : null}
+          {run.kind === "regression" ? <RegressionGrid run={run} workspaceId={workspaceId} /> : <MatrixGrid run={run} workspaceId={workspaceId} />}
+        </>
+      ) : null}
     </article>
   );
 }
@@ -476,9 +517,10 @@ export function onlySpacingDiffers(item: ArtistTestItem): boolean {
 function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: string }) {
   const open = useOpenTestImage(run);
   const openGenerated = (path: string) => open((file) => "path" in file && file.path === path);
-  // 下方展开对照的那一对；默认第一张。
-  const [selected, setSelected] = useState(0);
-  const current = run.items.find((item) => item.index === selected) ?? run.items[0];
+  // 下方展开对照的那一对：默认第一张出了图的，再点一次收起；没出图的（失败）不展开。
+  const [selected, setSelected] = useState<number | null | undefined>(undefined);
+  const firstDone = run.items.find((item) => item.image_path && item.source)?.index ?? null;
+  const current = run.items.find((item) => item.index === (selected === undefined ? firstDone : selected) && item.image_path) ?? null;
   return (
     <>
     <div className="sl-regression-grid">
@@ -503,14 +545,14 @@ function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId:
             <span>{item.label}</span>
             <span className="sl-muted">种子 {item.seed}</span>
             {similarityText(item) ? <span className="sl-verdict-num">{similarityText(item)}</span> : null}
-            {item.source ? (
+            {item.source && item.image_path ? (
               <button
                 aria-pressed={current?.index === item.index}
                 className="sl-link-btn"
-                onClick={() => setSelected(item.index)}
+                onClick={() => setSelected(current?.index === item.index ? null : item.index)}
                 type="button"
               >
-                与原图对照
+                {current?.index === item.index ? "收起对照" : "与原图对照"}
               </button>
             ) : null}
           </figcaption>

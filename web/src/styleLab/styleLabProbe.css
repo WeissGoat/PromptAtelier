@@ -358,3 +358,26 @@
   font-size: 13px;
   margin: 0 0 8px;
 }
+
+/* 测试记录：收起时只有一行，点标题展开 */
+.sl-test-run-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex-wrap: wrap;
+  font: inherit;
+  gap: 8px;
+  padding: 0;
+  text-align: left;
+}
+
+.sl-test-run-toggle:hover strong {
+  color: var(--sl-accent);
+}
+
+.sl-test-run:not(.open) {
+  gap: 0;
+}

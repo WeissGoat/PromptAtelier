@@ -250,6 +250,47 @@ describe("ArtistTestPanel", () => {
     expect(screen.getByText(/只是逗号后的空格被去掉了/)).toBeTruthy();
   });
 
+  it("expands only the newest run, hides old ones and skips the comparison for failed images", () => {
+    const run = (id: string, created: number, failed: boolean): ArtistTestRun => ({
+      id,
+      kind: "regression",
+      status: failed ? "failed" : "succeeded",
+      created_at: created,
+      finished_at: created,
+      job_id: null,
+      source: null,
+      settings: { kind: "regression", artist: "1_Ink", image_ids: ["a"], characters: [], actions: [], seed_mode: "source", seed: null, width: null, height: null },
+      expected_diff_keys: [],
+      warnings: [],
+      artist: { folder: "1_Ink" },
+      items: [
+        {
+          index: 0,
+          seed: 7,
+          status: failed ? "failed" : "succeeded",
+          label: `post-${id}`,
+          ...(failed ? { error: "NovelAI 拒绝了请求（HTTP 402）" } : { image_path: `runs/${id}/a.png` }),
+          source: { image_id: "a", path: "F:/x/a.png", rel_path: "a.png" },
+        },
+      ],
+    });
+    const runs = [run("r7", 7, true), ...[6, 5, 4, 3, 2, 1].map((n) => run(`r${n}`, n, false))];
+    render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[image("a")]} onStarted={vi.fn()} runs={runs} />);
+    // 最新一次失败：展开但没有对照；其余 4 次收起，更早的 2 次藏起来。
+    expect(screen.getAllByRole("button", { expanded: true })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { expanded: false })).toHaveLength(4);
+    expect(screen.queryByText(/与原图对照 ·/)).toBeNull();
+    expect(screen.getAllByText("NovelAI 拒绝了请求（HTTP 402）").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "更早的 2 次" }));
+    expect(screen.getAllByRole("button", { expanded: false })).toHaveLength(6);
+    // 点开一次成功的：只展开它，对照自动显示，再点收起对照。
+    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);
+    expect(screen.getAllByRole("button", { expanded: true })).toHaveLength(1);
+    expect(screen.getByText("与原图对照 · post-r6")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "收起对照" }));
+    expect(screen.queryByText("与原图对照 · post-r6")).toBeNull();
+  });
+
   it("needs a character or action before a matrix run", () => {
     render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[]} onStarted={vi.fn()} runs={[]} />);
     fireEvent.click(screen.getByRole("radio", { name: "泛化矩阵" }));
