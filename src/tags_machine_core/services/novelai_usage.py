@@ -58,6 +58,8 @@ def inquire_novelai_usage(
     url = f"{base_url.rstrip('/')}/user/subscription"
     headers = {
         **NOVELAI_WEB_HEADERS,
+        # 官网查订阅时也带这个头；不带 correlation id
+        "Content-Type": "application/json",
         "Authorization": f"Bearer {access_token.strip()}",
     }
 

@@ -74,7 +74,11 @@ class NovelAIClientTest(unittest.TestCase):
         self.assertEqual(session.calls[0]["url"], "https://image.novelai.net/ai/generate-image")
         self.assertEqual(session.calls[0]["headers"]["Authorization"], "Bearer token")
         self.assertEqual(session.calls[0]["headers"]["Origin"], "https://novelai.net")
-        self.assertEqual(session.calls[0]["headers"]["Referer"], "https://novelai.net")
+        self.assertEqual(session.calls[0]["headers"]["Referer"], "https://novelai.net/")
+        self.assertIn("Chrome/", session.calls[0]["headers"]["User-Agent"])
+        self.assertRegex(session.calls[0]["headers"]["x-correlation-id"], r"^[A-Za-z0-9]{6}$")
+        self.assertIn("x-initiated-at", session.calls[0]["headers"])
+        self.assertIs(payload["use_new_shared_trial"], True)
         self.assertEqual(session.calls[0]["timeout"], 120)
 
     def test_build_payload_filters_runtime_only_parameters(self):

@@ -447,7 +447,8 @@ class NovelAIRenderAdapter:
 
         # 这些默认值参考 ComfyUI_NAIDGenerator 的 V4/V4.5 请求结构。
         final_params: dict[str, Any] = {
-            "params_version": 1,
+            # 官网前端对所有模型都发 4
+            "params_version": 4,
             "width": width,
             "height": height,
             "scale": scale,

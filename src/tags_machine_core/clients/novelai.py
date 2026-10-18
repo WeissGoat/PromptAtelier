@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+from ai_image_gateway.providers.novelai.browser import BROWSER_HEADERS, trace_headers
 from requests.adapters import HTTPAdapter, Retry
 
 from tags_machine_core.contracts import RenderRequest
@@ -15,16 +16,8 @@ from tags_machine_core.json_tools import sanitize_json_for_display
 
 
 IMAGE_BASE_URL = "https://image.novelai.net"
-NOVELAI_WEB_HEADERS = {
-    "Content-Type": "application/json",
-    "Origin": "https://novelai.net",
-    "Referer": "https://novelai.net",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-}
+# 和 ai-image-gateway 共用一份，照着官网前端的请求头发
+NOVELAI_WEB_HEADERS = BROWSER_HEADERS
 
 EMPTY_OPTIONAL_PARAMETER_KEYS = {
     "reference_image_multiple",
@@ -273,6 +266,8 @@ class NovelAIClient:
             "model": normalize_novelai_model(request.model),
             "action": request.meta.get("action", "generate"),
             "parameters": self._request_parameters(request),
+            # 官网前端每次出图都带（写死为 true，与是否在试用无关）
+            "use_new_shared_trial": True,
         }
 
     def generate_image_zip(self, request: RenderRequest) -> bytes:
@@ -283,6 +278,7 @@ class NovelAIClient:
             json=payload,
             headers={
                 **NOVELAI_WEB_HEADERS,
+                **trace_headers(),
                 "Authorization": f"Bearer {self.access_token}",
             },
             timeout=self.timeout,
@@ -353,7 +349,7 @@ class NovelAIClient:
                     negative = str(v4_cap.get("base_caption") or "")
 
         if "nai-diffusion-4" in model or "nai-diffusion-5" in model:
-            parameters.setdefault("params_version", 3)
+            parameters.setdefault("params_version", 4)
             if "v4_prompt" not in parameters or not isinstance(parameters.get("v4_prompt"), dict):
                 parameters["v4_prompt"] = {
                     "caption": {"base_caption": request.prompt, "char_captions": []},

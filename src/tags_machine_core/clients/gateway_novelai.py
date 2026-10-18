@@ -38,14 +38,6 @@ def sanitize_proxy_env() -> None:
 sanitize_proxy_env()
 
 
-# 与旧链路 novelai/constant.py 的 HEADERS 一致（Content-Type 由 httpx 按 json 自动设置）
-BROWSER_HEADERS = {
-    "Origin": "https://novelai.net",
-    "Referer": "https://novelai.net",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-
-
 class _SharedTransport:
     """进程内共用的 NovelAI 连接。
 
@@ -136,7 +128,7 @@ class GatewayNovelAIRawClient:
                 "timeout": self.timeout,
                 "retry": self.retry,
                 "retry_interval": self.retry_interval,
-                "headers": BROWSER_HEADERS,
+                # 请求头用 ai-image-gateway 的默认值（照官网前端），这里不再另给
             },
         )
         return _TRANSPORT.run(key, config, payload)

@@ -56,7 +56,7 @@ not_quality_prompts
 
         params = request.params
         self.assertEqual(request.model, "nai-diffusion-4-5-full")
-        self.assertEqual(params["params_version"], 1)
+        self.assertEqual(params["params_version"], 4)
         self.assertEqual(params["width"], 832)
         self.assertEqual(params["height"], 1216)
         self.assertEqual(params["scale"], 5.0)

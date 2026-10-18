@@ -67,7 +67,7 @@ class NAI45RegressionGuardTest(unittest.TestCase):
 
         self.assertEqual(payload["model"], "nai-diffusion-4-5-full")
         params = payload["parameters"]
-        self.assertEqual(params["params_version"], 3)
+        self.assertEqual(params["params_version"], 4)
         self.assertIn("v4_prompt", params)
         self.assertIn("v4_negative_prompt", params)
         self.assertEqual(params["v4_prompt"]["caption"]["base_caption"], "1girl")

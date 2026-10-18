@@ -3,7 +3,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from tags_machine_core.clients import gateway_novelai
-from tags_machine_core.clients.gateway_novelai import BROWSER_HEADERS, GatewayNovelAIRawClient, _SharedTransport
+from tags_machine_core.clients.gateway_novelai import GatewayNovelAIRawClient, _SharedTransport
 
 
 class FakeRawClient:
@@ -40,7 +40,7 @@ class SharedTransportTest(TestCase):
             item.start()
             self.addCleanup(item.stop)
 
-    def test_reuses_one_client_across_tasks_with_browser_headers(self):
+    def test_reuses_one_client_across_tasks(self):
         # 执行器每个任务都新建 GatewayNovelAIRawClient，连接仍应只初始化一次
         for _ in range(3):
             GatewayNovelAIRawClient(access_token="t", base_url="https://image.novelai.net").generate_images(None)
@@ -48,8 +48,6 @@ class SharedTransportTest(TestCase):
         self.assertEqual(len(FakeRawClient.instances), 1)
         client = FakeRawClient.instances[0]
         self.assertEqual((client.initialized, client.calls), (1, 3))
-        self.assertEqual(client.config.settings["headers"], BROWSER_HEADERS)
-        self.assertIn("Chrome", client.config.settings["headers"]["User-Agent"])
 
         self.transport.close()
         self.assertEqual(client.closed, 1)
