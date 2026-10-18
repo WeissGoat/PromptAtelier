@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import io
+import os
 import re
+import sys
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+# 确保能优先从 refactor/vendor/ai-image-gateway 导入包
+_VENDOR_GATEWAY = Path(__file__).resolve().parents[3] / "vendor" / "ai-image-gateway"
+if _VENDOR_GATEWAY.exists() and str(_VENDOR_GATEWAY) not in sys.path:
+    sys.path.insert(0, str(_VENDOR_GATEWAY))
 
 import requests
 from ai_image_gateway.providers.novelai.browser import BROWSER_HEADERS, trace_headers
