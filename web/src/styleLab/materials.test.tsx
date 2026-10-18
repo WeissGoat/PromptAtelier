@@ -210,6 +210,34 @@ describe("LibraryPanel", () => {
     expect((screen.getByLabelText("按人数筛选") as HTMLSelectElement).value).toBe("solo");
   });
 
+  it("asks which character prompt a card goes into when there are several", async () => {
+    api.getShelf.mockResolvedValue({ materials: [{ role: "character", ref: "F:/角色/nahida", name: "nahida", excluded: [] }], facets: {} });
+    api.searchMaterials.mockResolvedValue({ nodes: [], total: 0, has_more: false, facet_options: {} });
+    api.getLibraryNode.mockResolvedValue({ ref: "F:/角色/nahida", role: "character", name: "nahida", has_preview: false, sections: [{ name: "hair", tags: ["green hair"] }] });
+    const caption = (text: string) => ({ tokens: [token(text)], negative: [] });
+    const draft = { ...recipe(), character: { enabled: true, captions: [caption("girl, sandrone"), caption("girl, columbina"), caption("boy, aether")], add_male_caption: false } };
+    const onChange = vi.fn();
+    render(<LibraryPanel draft={draft} onChange={onChange} translateOn={false} />);
+    fireEvent.click(screen.getByRole("tab", { name: /角色/ }));
+    const select = (await screen.findByLabelText("nahida 作角色提示词")) as HTMLSelectElement;
+    await waitFor(() => expect(select.disabled).toBe(false));
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "作角色提示词…",
+      "替换 #1：girl, sandrone",
+      "替换 #2：girl, columbina",
+      "替换 #3：boy, aether",
+      "新加一条 #4",
+    ]);
+    // 选第 2 条：只换第 2 条，第 1 条不被覆盖。
+    fireEvent.change(select, { target: { value: "1" } });
+    const next = onChange.mock.calls[0][0] as Recipe;
+    expect(next.character.captions.map((item) => item.tokens.map((block) => block.text).join(" | "))).toEqual([
+      "girl, sandrone",
+      "girl, green hair",
+      "boy, aether",
+    ]);
+  });
+
   it("filters actions by facet", async () => {
     api.searchMaterials.mockResolvedValue({ nodes: [], total: 0, has_more: false, facet_options: { cast: [{ value: "solo", count: 3 }] } });
     render(<LibraryPanel draft={recipe()} onChange={vi.fn()} translateOn={false} />);

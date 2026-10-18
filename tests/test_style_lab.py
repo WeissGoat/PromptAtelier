@@ -367,6 +367,17 @@ class CompareTest(TestCase):
         c = write_nai_png(self.tmp / "c.png", uc="something else")
         self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
 
+    def test_newlines_written_as_spaces_are_benign(self):
+        # 多行原文导出成 tags.txt 一行：换行变成空格，NovelAI 的分词本来就把换行当空格。
+        a = write_nai_png(self.tmp / "a.png", prompt="artist:foo,\nlens flare\nbloom,  1girl")
+        b = write_nai_png(self.tmp / "b.png", prompt="artist:foo, lens flare bloom, 1girl")
+        result = compare_with_source(a, b)
+        self.assertEqual(result["verdict"], "match")
+        self.assertEqual({d["key"] for d in result["diffs"] if d.get("note")}, {"input", "prompt"})
+        # 逗号后少了空格不算：分出来的词不一样。
+        c = write_nai_png(self.tmp / "c.png", prompt="artist:foo,lens flare bloom,1girl")
+        self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
+
     def test_random_choices_compare_against_the_source_pick(self):
         source = write_nai_png(self.tmp / "src.png", **RANDOM_PICK)
         resolved = {key: value for key, value in RANDOM_PICK.items() if key != "actual_prompts"}

@@ -506,14 +506,6 @@ function Generated({
   );
 }
 
-/** 两段提示词的 tag 一样、只有逗号后的空格不同（tags.txt 画风走旧链路会去掉空格）。 */
-export function onlySpacingDiffers(item: ArtistTestItem): boolean {
-  const prompt = item.compare?.diffs.find((diff) => diff.path === "$.parameters.prompt");
-  if (!prompt || typeof prompt.left !== "string" || typeof prompt.right !== "string") return false;
-  const tags = (text: string) => text.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean).join(",");
-  return tags(prompt.left) === tags(prompt.right);
-}
-
 function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: string }) {
   const open = useOpenTestImage(run);
   const openGenerated = (path: string) => open((file) => "path" in file && file.path === path);
@@ -573,14 +565,6 @@ function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId:
         </h4>
         <CompareView
           generatedLabel="回归"
-          hint={
-            onlySpacingDiffers(current) ? (
-              <p className="sl-hint">
-                提示词的 tag 和原图一样，只是逗号后的空格被去掉了：tags.txt 画风走旧版兼容链路，会把“a, b”拼成“a,b”。NovelAI
-                对空格敏感，种子相同画面也会有些差别。
-              </p>
-            ) : null
-          }
           item={current}
           sourceImageId={current.source.image_id}
           sourceViewer={{ file: { imageId: current.source.image_id }, label: `${current.label ?? ""} · 原图`, path: current.source.path }}

@@ -209,7 +209,7 @@ describe("ArtistTestPanel", () => {
   });
 
   it("compares a regression image with its original below the grid", () => {
-    const original = "artist:foo, 1girl, very aesthetic";
+    const original = "artist:foo,\n1girl, very aesthetic";
     const run: ArtistTestRun = {
       id: "t1",
       kind: "regression",
@@ -247,7 +247,8 @@ describe("ArtistTestPanel", () => {
     expect(screen.getByText("与原图对照 · post-a")).toBeTruthy();
     expect(screen.getByRole("radio", { name: "滑块" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "回归" })).toBeTruthy();
-    expect(screen.getByText(/只是逗号后的空格被去掉了/)).toBeTruthy();
+    expect(screen.getByText(/会把“a, b”拼成“a,b”/)).toBeTruthy();
+    expect(screen.getByText(/原文里的换行写成了空格/)).toBeTruthy();
   });
 
   it("expands only the newest run, hides old ones and skips the comparison for failed images", () => {
