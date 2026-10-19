@@ -2,7 +2,7 @@ import { Check, Copy, GripVertical, ImageOff, Plus, Trash2, UserRound, X } from 
 import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage, nodePreviewUrl } from "../api/client";
-import type { LibraryNode, MaterialRole, Recipe, RecipeMaterial } from "./api";
+import type { LibraryNode, MaterialRole, MaterialShelf, Recipe, RecipeMaterial } from "./api";
 import { loadNode } from "./libraryNodes";
 import { updateShelf, useMaterialShelf } from "./materialShelf";
 import { MaterialSearch } from "./MaterialSearch";
@@ -61,6 +61,14 @@ function putOnShelf(material: RecipeMaterial) {
 function takeOffShelf(material: RecipeMaterial) {
   updateShelf((shelf) => ({ ...shelf, materials: shelf.materials.filter((item) => !sameMaterial(item, material)) }));
 }
+
+/** 素材架上显示的块：全局素材架加上配方用过、架上没有的；配方在用的块以配方里的筛选为准（它决定了加进去的 tag）。 */
+export function shelfMaterials(shelf: MaterialShelf, draft: Recipe): RecipeMaterial[] {
+  const materials = materialsOf(draft);
+  return [...shelf.materials, ...materials.filter((item) => !shelf.materials.some((other) => sameMaterial(item, other)))].map(
+    (item) => materials.find((used) => sameMaterial(used, item)) ?? item,
+  );
+}
 export function originName(origin: string): string {
   const ref = origin.slice(origin.indexOf(":") + 1);
   return ref.split(/[\\/]/).pop() ?? ref;
@@ -92,11 +100,7 @@ export function LibraryPanel({ draft, translateOn, onChange }: LibraryPanelProps
     materials.filter((item) => !globalShelf.materials.some((other) => sameMaterial(item, other))).forEach(putOnShelf);
   }, [ready, materials, globalShelf.materials]);
 
-  // 配方在用的块以配方里的筛选为准（它决定了加进去的 tag）。
-  const allMaterials = [
-    ...globalShelf.materials,
-    ...materials.filter((item) => !globalShelf.materials.some((other) => sameMaterial(item, other))),
-  ].map((item) => materials.find((used) => sameMaterial(used, item)) ?? item);
+  const allMaterials = shelfMaterials(globalShelf, draft);
   const shelf = allMaterials.filter((item) => item.role === tab);
   // 旧配方直接从卡片加进来、没有素材块的来源：可以放上素材架接着编辑，或一键移除。
   const loose = cardOrigins(draft).filter(

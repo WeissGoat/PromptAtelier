@@ -100,6 +100,7 @@ type RecipeWorkspaceProps = {
   unsaved: Recipe | null;
   onBack: () => void;
   onOpenRecipe: (id: string) => void;
+  onUseArtistInCustom: (artist: ArtistExport) => void | Promise<void>;
   onSaved: () => void;
   onCreated: (recipe: Recipe) => void;
   onDeleted: () => void;
@@ -117,6 +118,7 @@ export function RecipeWorkspace({
   unsaved,
   onBack,
   onOpenRecipe,
+  onUseArtistInCustom,
   onSaved,
   onCreated,
   onDeleted,
@@ -631,12 +633,14 @@ export function RecipeWorkspace({
         {draft.stage === "edit" ? (
           <ArtistTestPanel
             dirty={dirty}
+            draft={draft}
             exports={exports}
             groupImageIds={groupImageIds}
             images={images}
             onCancel={(run) => run.job_id && void cancelJob(run.job_id)}
             onExport={() => void openExport()}
             onStarted={(run) => setTestRuns((items) => [run, ...items])}
+            onUseInCustom={onUseArtistInCustom}
             recipeId={recipeId}
             recipeVersion={saved.version}
             runs={testRuns}

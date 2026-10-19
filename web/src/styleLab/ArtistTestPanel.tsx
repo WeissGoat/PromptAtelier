@@ -1,32 +1,47 @@
-import { ChevronDown, ChevronRight, FolderOutput, Grid3x3, LoaderCircle, Play, Square, Rows3, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, FolderOutput, Grid3x3, LoaderCircle, Play, Square, Rows3 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { errorMessage, nodePreviewUrl } from "../api/client";
+import { errorMessage } from "../api/client";
 import type {
   ArtistExport,
   ArtistTestItem,
   ArtistTestRun,
   ArtistTestSettings,
   ImageRecord,
-  LibraryNodeSummary,
+  MaterialRole,
+  MatrixCell,
+  Recipe,
+  RecipeMaterial,
   SeedMode,
   SizeMode,
 } from "./api";
 import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl, startArtistTest } from "./api";
 import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./DuplicateNotice";
-import { MaterialSearch } from "./MaterialSearch";
 import { formatTime, runStatusLabels } from "./format";
 import { runViewerItem, useImageViewer, type ViewerItem } from "./ImageViewer";
+import { shelfMaterials } from "./LibraryPanel";
+import { loadNode, nodeTags } from "./libraryNodes";
+import { useMaterialShelf } from "./materialShelf";
+import {
+  defaultPlacement,
+  materialOrigin,
+  materialTags,
+  matrixCellRecipe,
+  tokensToText,
+  type MatrixPick,
+  type MatrixPlacement,
+} from "./recipeModel";
 import { CompareView } from "./RunPanel";
 import { Segmented, SIZE_MODE_HINTS, SIZE_PRESETS } from "./RegenPanel";
 
 const MAX_REGRESSION = 12;
 const DEFAULT_REGRESSION = 4;
-const MAX_SIDE = 4;
 const PICKER_LIMIT = 24;
 /** 测试记录默认显示最近几次，更早的点一下再展开。 */
 const RUN_LIMIT = 5;
 const SKIP_FLAGS = new Set(["no_metadata", "inpaint", "img2img"]);
+const MATRIX_ROLES: MaterialRole[] = ["character", "action"];
+const MATRIX_SIDE_LABELS: Record<MaterialRole, string> = { character: "角色（行）", action: "动作（列）" };
 
 type ArtistTestPanelProps = {
   workspaceId: string;
@@ -36,9 +51,12 @@ type ArtistTestPanelProps = {
   images: ImageRecord[];
   groupImageIds: string[] | null;
   sourceImageId: string | null;
+  /** 编辑区当前的配方：泛化矩阵在它的主体、角色提示词上换进角色和动作。 */
+  draft: Recipe;
   exports: ArtistExport[];
   runs: ArtistTestRun[];
   onExport: () => void;
+  onUseInCustom: (artist: ArtistExport) => void | Promise<void>;
   onStarted: (run: ArtistTestRun) => void;
   onCancel: (run: ArtistTestRun) => void;
 };
@@ -70,9 +88,11 @@ export function ArtistTestPanel({
   images,
   groupImageIds,
   sourceImageId,
+  draft,
   exports,
   runs,
   onExport,
+  onUseInCustom,
   onStarted,
   onCancel,
 }: ArtistTestPanelProps) {
@@ -80,8 +100,20 @@ export function ArtistTestPanel({
   const [artist, setArtist] = useState<string | null>(null);
   const [mode, setMode] = useState<"regression" | "matrix">("regression");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
-  const [characters, setCharacters] = useState<LibraryNodeSummary[]>([]);
-  const [actions, setActions] = useState<LibraryNodeSummary[]>([]);
+  // 泛化矩阵直接用右边素材库的已选角色、动作；这里只记取消勾选的和改过的摆放位置。
+  const { shelf } = useMaterialShelf();
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [placementOverride, setPlacementOverride] = useState<Partial<Record<MaterialRole, MatrixPlacement>>>({});
+  const onShelf = shelfMaterials(shelf, draft);
+  const pool = (role: MaterialRole) => onShelf.filter((item) => item.role === role);
+  const chosenOf = (role: MaterialRole) => pool(role).filter((item) => !skipped.includes(materialOrigin(item)));
+  const characters = chosenOf("character");
+  const actions = chosenOf("action");
+  const captionCount = draft.character.captions.length;
+  const placementOf = (role: MaterialRole): MatrixPlacement => {
+    const value = placementOverride[role] ?? defaultPlacement(draft, role);
+    return value === "subject" ? value : Math.min(value, captionCount);
+  };
   const [seedMode, setSeedMode] = useState<SeedMode>("source");
   const [seed, setSeed] = useState<number | null>(null);
   const [size, setSize] = useState<[number, number]>([832, 1216]);
@@ -93,6 +125,8 @@ export function ArtistTestPanel({
   const [dropped, setDropped] = useState<"keep" | "strip">("keep");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openingInCustom, setOpeningInCustom] = useState<string | null>(null);
+  const [openInCustomError, setOpenInCustomError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateRequest | null>(null);
   // 展开看结果的那次测试；没点过时展开最新一次，其余只显示一行。
   const [openRun, setOpenRun] = useState<string | null>(null);
@@ -125,23 +159,33 @@ export function ArtistTestPanel({
 
   const start = async (force = false) => {
     if (!activeArtist) return;
-    const settings: ArtistTestSettings = {
-      kind: mode,
-      artist: activeArtist,
-      image_ids: mode === "regression" ? selectedImages : [],
-      characters: mode === "matrix" ? characters.map((node) => node.ref) : [],
-      actions: mode === "matrix" ? actions.map((node) => node.ref) : [],
-      seed_mode: seedMode,
-      seed: seedMode === "fixed" ? seed : null,
-      size_mode: sizeMode,
-      width: sizeMode === "custom" ? size[0] : null,
-      height: sizeMode === "custom" ? size[1] : null,
-      dropped,
-    };
     setSubmitting(true);
     setError(null);
     setDuplicate(null);
     try {
+      const settings: ArtistTestSettings = {
+        kind: mode,
+        artist: activeArtist,
+        image_ids: mode === "regression" ? selectedImages : [],
+        characters: mode === "matrix" ? characters.map((item) => item.ref) : [],
+        actions: mode === "matrix" ? actions.map((item) => item.ref) : [],
+        seed_mode: seedMode,
+        seed: seedMode === "fixed" ? seed : null,
+        size_mode: sizeMode,
+        width: sizeMode === "custom" ? size[0] : null,
+        height: sizeMode === "custom" ? size[1] : null,
+        dropped,
+      };
+      if (mode === "matrix") {
+        const placement = { character: placementOf("character"), action: placementOf("action") };
+        settings.cells = await matrixCells(draft, characters, actions, placement);
+        settings.placement = Object.fromEntries(
+          MATRIX_ROLES.filter((role) => (role === "character" ? characters : actions).length).map((role) => [
+            role,
+            placementKey(placement[role]),
+          ]),
+        );
+      }
       const { run } = await startArtistTest(workspaceId, recipeId, settings, force);
       onStarted(run);
     } catch (exc) {
@@ -157,6 +201,19 @@ export function ArtistTestPanel({
     setSelectedImages((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : current.length >= MAX_REGRESSION ? current : [...current, id],
     );
+
+  const openInCustom = async (item: ArtistExport) => {
+    setArtist(item.folder);
+    setOpeningInCustom(item.folder);
+    setOpenInCustomError(null);
+    try {
+      await onUseInCustom(item);
+    } catch (exc) {
+      setOpenInCustomError(errorMessage(exc));
+    } finally {
+      setOpeningInCustom(null);
+    }
+  };
 
   return (
     <section className="sl-zone zone-test">
@@ -176,26 +233,43 @@ export function ArtistTestPanel({
             .slice()
             .reverse()
             .map((item) => (
-              <button
-                className={`sl-export-chip ${item.folder === activeArtist ? "on" : ""}`}
-                disabled={!item.exists}
-                key={`${item.folder}-${item.exported_at}`}
-                onClick={() => setArtist(item.folder)}
-                title={item.exists ? item.path : "目录已被删除或改名"}
-                type="button"
-              >
-                <span className="sl-export-chip-name">{item.folder}</span>
-                <span className="sl-muted">
-                  配方 v{item.recipe_version} · {formatTime(item.exported_at)}
-                </span>
-                {!item.exists ? <span className="sl-pill bad">已不存在</span> : null}
-                {item.exists && item.recipe_version < recipeVersion ? <span className="sl-pill warn">配方已更新到 v{recipeVersion}</span> : null}
-              </button>
+              <div className="sl-export-item" key={`${item.folder}-${item.exported_at}`}>
+                <button
+                  className={`sl-export-chip ${item.folder === activeArtist ? "on" : ""}`}
+                  disabled={!item.exists}
+                  onClick={() => setArtist(item.folder)}
+                  title={item.exists ? item.path : "目录已被删除或改名"}
+                  type="button"
+                >
+                  <span className="sl-export-chip-name">{item.folder}</span>
+                  <span className="sl-muted">
+                    配方 v{item.recipe_version} · {formatTime(item.exported_at)}
+                  </span>
+                  {!item.exists ? <span className="sl-pill bad">已不存在</span> : null}
+                  {item.exists && item.recipe_version < recipeVersion ? <span className="sl-pill warn">配方已更新到 v{recipeVersion}</span> : null}
+                </button>
+                <button
+                  aria-label={`在 Custom 使用 ${item.folder}`}
+                  className="sl-mini-btn sl-export-use"
+                  disabled={!item.exists || openingInCustom !== null}
+                  onClick={() => void openInCustom(item)}
+                  title={item.exists ? `跳到 Custom 并选中 ${item.folder}` : "目录已被删除或改名"}
+                  type="button"
+                >
+                  {openingInCustom === item.folder ? (
+                    <LoaderCircle className="sl-spin" size={12} aria-hidden="true" />
+                  ) : (
+                    <ExternalLink size={12} aria-hidden="true" />
+                  )}
+                  {openingInCustom === item.folder ? "读取中…" : "在 Custom 使用"}
+                </button>
+              </div>
             ))}
         </div>
       ) : (
         <p className="sl-muted">还没有导出过。导出后可以用导出的 artist 做回归对照和泛化矩阵。</p>
       )}
+      {openInCustomError ? <p className="sl-error">{openInCustomError}</p> : null}
 
       {activeExport ? (
         <>
@@ -215,7 +289,7 @@ export function ArtistTestPanel({
             <span className="sl-muted">
               {mode === "regression"
                 ? "同组原图去掉画风后，用导出的 artist 按原种子、原尺寸重画，和原图对照"
-                : "提示词库的角色 × 动作，共用一个种子，看画风换了内容还稳不稳"}
+                : "右边素材库已选的角色 × 动作，换进上面配方的主体、角色提示词，共用一个种子，看画风换了内容还稳不稳"}
             </span>
           </div>
 
@@ -248,8 +322,24 @@ export function ArtistTestPanel({
             </div>
           ) : (
             <div className="sl-test-matrix-pick">
-              <NodePicker label="角色（行）" onChange={setCharacters} role="character" selected={characters} />
-              <NodePicker label="动作（列）" onChange={setActions} role="action" selected={actions} />
+              {MATRIX_ROLES.map((role) => (
+                <MatrixSide
+                  captions={draft.character.captions.map((caption) => tokensToText(caption.tokens).trim())}
+                  chosen={role === "character" ? characters : actions}
+                  defaultValue={defaultPlacement(draft, role)}
+                  key={role}
+                  onPlacement={(value) => setPlacementOverride((current) => ({ ...current, [role]: value }))}
+                  onToggle={(item) =>
+                    setSkipped((current) => {
+                      const origin = materialOrigin(item);
+                      return current.includes(origin) ? current.filter((value) => value !== origin) : [...current, origin];
+                    })
+                  }
+                  placement={placementOf(role)}
+                  pool={pool(role)}
+                  role={role}
+                />
+              ))}
             </div>
           )}
 
@@ -351,48 +441,118 @@ export function ArtistTestPanel({
   );
 }
 
-function NodePicker({
-  role,
-  label,
-  selected,
-  onChange,
-}: {
-  role: "character" | "action";
-  label: string;
-  selected: LibraryNodeSummary[];
-  onChange: (nodes: LibraryNodeSummary[]) => void;
-}) {
-  const add = (node: LibraryNodeSummary) => {
-    if (selected.length >= MAX_SIDE || selected.some((item) => item.ref === node.ref)) return;
-    onChange([...selected, node]);
-  };
+/** 矩阵每一格：读出素材块筛过的 tag，在配方上换进这一格的角色和动作。 */
+async function matrixCells(
+  draft: Recipe,
+  characters: RecipeMaterial[],
+  actions: RecipeMaterial[],
+  placement: Record<MaterialRole, MatrixPlacement>,
+): Promise<MatrixCell[]> {
+  const pick = async (material: RecipeMaterial): Promise<MatrixPick> => ({
+    material,
+    tags: materialTags(material, nodeTags(await loadNode(material.ref, material.role))),
+  });
+  const rows: Array<MatrixPick | null> = characters.length ? await Promise.all(characters.map(pick)) : [null];
+  const cols: Array<MatrixPick | null> = actions.length ? await Promise.all(actions.map(pick)) : [null];
+  return rows.flatMap((character) =>
+    cols.map((action) => {
+      const recipe = matrixCellRecipe(draft, { character, action }, placement);
+      return {
+        character: character?.material.ref ?? null,
+        action: action?.material.ref ?? null,
+        subject: recipe.subject,
+        captions: recipe.character,
+      };
+    }),
+  );
+}
 
+function placementKey(value: MatrixPlacement): string {
+  return value === "subject" ? "subject" : `caption:${value}`;
+}
+
+function placementText(key: string | undefined): string | null {
+  if (!key) return null;
+  return key === "subject" ? "主体" : `角色提示词 #${Number(key.slice("caption:".length)) + 1}`;
+}
+
+function MatrixSide({
+  role,
+  pool,
+  chosen,
+  captions,
+  placement,
+  defaultValue,
+  onToggle,
+  onPlacement,
+}: {
+  role: MaterialRole;
+  /** 素材架上这一类的全部块。 */
+  pool: RecipeMaterial[];
+  chosen: RecipeMaterial[];
+  captions: string[];
+  placement: MatrixPlacement;
+  defaultValue: MatrixPlacement;
+  onToggle: (material: RecipeMaterial) => void;
+  onPlacement: (value: MatrixPlacement) => void;
+}) {
+  const label = MATRIX_SIDE_LABELS[role];
+  const verb = role === "character" ? "替换" : "加到";
+  const optionLabel = (value: MatrixPlacement) => {
+    const caption = value === "subject" ? "" : captions[value] ?? "";
+    const text =
+      value === "subject"
+        ? "主体"
+        : value < captions.length
+          ? `${verb}角色提示词 #${value + 1}${caption ? `：${caption.length > 16 ? `${caption.slice(0, 16)}…` : caption}` : "（空）"}`
+          : `新加一条角色提示词 #${value + 1}`;
+    return value === defaultValue ? `${text}（同上方）` : text;
+  };
+  const values: MatrixPlacement[] = ["subject", ...captions.map((_, index) => index), captions.length];
   return (
     <div className="sl-node-picker">
       <div className="sl-node-picker-head">
         <span className="sl-form-label">{label}</span>
         <span className="sl-muted">
-          {selected.length}/{MAX_SIDE}
+          {chosen.length}/{pool.length}
         </span>
       </div>
-      <div className="sl-node-chips">
-        {selected.map((node) => (
-          <span className="sl-node-chip" key={node.ref}>
-            {node.has_preview ? <img alt="" src={nodePreviewUrl(node.ref, 64)} /> : null}
-            {node.name}
-            <button aria-label={`移除 ${node.name}`} className="sl-icon-btn" onClick={() => onChange(selected.filter((item) => item.ref !== node.ref))} type="button">
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <MaterialSearch
-        disabled={selected.length >= MAX_SIDE}
-        isPicked={(ref) => selected.some((item) => item.ref === ref)}
-        onPick={add}
-        placeholder={selected.length >= MAX_SIDE ? "已选满" : `搜索${label}`}
-        role={role}
-      />
+      {pool.length ? (
+        <div className="sl-node-chips">
+          {pool.map((material) => {
+            const on = chosen.includes(material);
+            return (
+              <button
+                aria-pressed={on}
+                className={`sl-mini-btn ${on ? "on" : ""}`}
+                key={materialOrigin(material)}
+                onClick={() => onToggle(material)}
+                title={on ? "点击不用这块" : "点击用这块"}
+                type="button"
+              >
+                {material.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="sl-muted">右边素材库还没有已选{role === "character" ? "角色" : "动作"}。</p>
+      )}
+      <label className="sl-matrix-place">
+        <span className="sl-muted">放到</span>
+        <select
+          aria-label={`${label}放到`}
+          disabled={!chosen.length}
+          onChange={(event) => onPlacement(event.target.value === "subject" ? "subject" : Number(event.target.value))}
+          value={String(placement)}
+        >
+          {values.map((value) => (
+            <option key={String(value)} value={String(value)}>
+              {optionLabel(value)}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -576,6 +736,21 @@ function RegressionGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId:
   );
 }
 
+function matrixLabel(item: ArtistTestItem): string {
+  return [
+    item.character ? nodeName(item.character) : "（无角色）",
+    item.action ? nodeName(item.action) : "（无动作）",
+  ].join(" · ");
+}
+
+function matrixPlacementText(run: ArtistTestRun): string {
+  const placement = run.settings.placement ?? {};
+  return MATRIX_ROLES.map((role) => {
+    const text = placementText(placement[role]);
+    return text ? ` · ${role === "character" ? "角色" : "动作"}放在${text}` : "";
+  }).join("");
+}
+
 function MatrixGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: string }) {
   const open = useOpenTestImage(run);
   const openGenerated = (path: string) => open((file) => "path" in file && file.path === path);
@@ -583,34 +758,75 @@ function MatrixGrid({ run, workspaceId }: { run: ArtistTestRun; workspaceId: str
   const cols = run.settings.actions.length ? run.settings.actions : [null];
   const cell = (character: string | null, action: string | null) =>
     run.items.find((item) => (item.character ?? null) === character && (item.action ?? null) === action);
+  const firstDone = run.items.find((item) => item.image_path)?.index ?? null;
+  const [selected, setSelected] = useState<number | null | undefined>(undefined);
+  const current = run.items.find((item) => item.index === (selected === undefined ? firstDone : selected) && item.image_path) ?? null;
+  const source = run.source;
   return (
-    <div className="sl-matrix-scroll">
-      <table className="sl-matrix">
-        <thead>
-          <tr>
-            <th />
-            {cols.map((action) => (
-              <th key={action ?? "none"} title={action ?? undefined}>
-                <span className="sl-matrix-label">{action ? nodeName(action) : "（无动作）"}</span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((character) => (
-            <tr key={character ?? "none"}>
-              <th title={character ?? undefined}>
-                <span className="sl-matrix-label">{character ? nodeName(character) : "（无角色）"}</span>
-              </th>
-              {cols.map((action) => {
-                const item = cell(character, action);
-                return <td key={action ?? "none"}>{item ? <Generated item={item} onOpen={openGenerated} size={240} workspaceId={workspaceId} /> : null}</td>;
-              })}
+    <>
+      <div className="sl-matrix-scroll">
+        <table className="sl-matrix">
+          <thead>
+            <tr>
+              <th />
+              {cols.map((action) => (
+                <th key={action ?? "none"} title={action ?? undefined}>
+                  <span className="sl-matrix-label">{action ? nodeName(action) : "（无动作）"}</span>
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="sl-muted">种子 {run.items[0]?.seed}</p>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((character) => (
+              <tr key={character ?? "none"}>
+                <th title={character ?? undefined}>
+                  <span className="sl-matrix-label">{character ? nodeName(character) : "（无角色）"}</span>
+                </th>
+                {cols.map((action) => {
+                  const item = cell(character, action);
+                  return (
+                    <td className={item && current?.index === item.index ? "on" : ""} key={action ?? "none"}>
+                      {item ? (
+                        <div className="sl-matrix-cell">
+                          <Generated item={item} onOpen={openGenerated} size={240} workspaceId={workspaceId} />
+                          {source && item.image_path ? (
+                            <button
+                              aria-label={`${current?.index === item.index ? "收起对照" : "与原图对照"} ${matrixLabel(item)}`}
+                              aria-pressed={current?.index === item.index}
+                              className="sl-link-btn"
+                              onClick={() => setSelected(current?.index === item.index ? null : item.index)}
+                              type="button"
+                            >
+                              {current?.index === item.index ? "收起对照" : "与原图对照"}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="sl-muted">
+          种子 {run.items[0]?.seed}
+          {matrixPlacementText(run)}
+        </p>
+      </div>
+      {current && source ? (
+        <div className="sl-matrix-compare">
+          <h4>与原图对照 · {matrixLabel(current)}</h4>
+          <CompareView
+            generatedLabel="泛化"
+            hint={<p className="sl-muted">矩阵会换角色和动作，提示词、种子等差异是预期内的；下面的参数差异仍按源图和这张矩阵图完整对比。</p>}
+            item={current}
+            sourceImageId={source.image_id}
+            sourceViewer={{ file: { imageId: source.image_id }, label: `${matrixLabel(current)} · 原图`, path: source.path }}
+            workspaceId={workspaceId}
+          />
+        </div>
+      ) : null}
+    </>
   );
 }

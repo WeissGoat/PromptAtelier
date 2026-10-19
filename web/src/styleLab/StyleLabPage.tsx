@@ -46,6 +46,7 @@ import { DuplicateNotice, duplicateOf, type DuplicateRequest } from "./Duplicate
 import { defaultRegenSettings, RegenPanel } from "./RegenPanel";
 import { RunPanel } from "./RunPanel";
 import { translationStore } from "./translations";
+import { useOpenArtistInCustom } from "./useOpenArtistInCustom";
 import { suggestGroupName, WorkspaceBar } from "./WorkspaceBar";
 import "./styleLab.css";
 import "./styleLabRecipe.css";
@@ -68,6 +69,11 @@ const ANALYSIS_REFRESH_TICKS = 3;
 const RUN_POLL_MS = 1500;
 const JOB_POLL_MS = 2000;
 
+type StyleLabPageProps = {
+  /** 切到 Custom 页面；由 App 负责同步地址栏和记住页面。 */
+  onOpenCustom?: () => void;
+};
+
 function load<T>(key: string, fallback: T): T {
   try {
     const raw = window.localStorage.getItem(key);
@@ -87,7 +93,8 @@ function save(key: string, value: unknown): void {
 
 type JobSnapshot = { status: string; events?: Array<{ type: string; done?: number; total?: number }> };
 
-export function StyleLabPage() {
+export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
+  const useArtistInCustom = useOpenArtistInCustom(onOpenCustom);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [payload, setPayload] = useState<WorkspacePayload | null>(null);
   const [busy, setBusy] = useState(false);
@@ -555,6 +562,7 @@ export function StyleLabPage() {
           }}
           onOpenRecipe={(id) => openRecipe(id)}
           onSaved={() => void refreshRecipes()}
+          onUseArtistInCustom={useArtistInCustom}
           recipeId={openRecipeId}
           recipes={recipes}
           unsaved={unsavedRecipe}

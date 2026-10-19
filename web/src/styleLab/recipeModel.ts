@@ -751,6 +751,63 @@ export function applyToCharacter(recipe: Recipe, drag: MaterialDrag, index = 0):
   return { ...recipe, character: { ...recipe.character, enabled: true, captions } };
 }
 
+/** 泛化矩阵里角色/动作放在哪：主体，或第几条角色提示词（等于条数时是新加一条）。 */
+export type MatrixPlacement = "subject" | number;
+export type MatrixPick = { material: RecipeMaterial; tags: string[] };
+
+function hasRole(tokens: RecipeToken[], role: RecipeMaterial["role"]): boolean {
+  return tokens.some((token) => token.origins.some((origin) => origin.startsWith(`${role}:`)));
+}
+
+/** 配方现在把这类素材放在哪：先看开着的角色提示词，再看主体；都没有时 null。 */
+export function materialPlacement(recipe: Recipe, role: RecipeMaterial["role"]): MatrixPlacement | null {
+  if (recipe.character.enabled) {
+    const index = recipe.character.captions.findIndex((caption) => hasRole(caption.tokens, role));
+    if (index >= 0) return index;
+  }
+  return hasRole(recipe.subject, role) ? "subject" : null;
+}
+
+/** 矩阵默认和上面的配方一致：配方里这类素材在哪就换到哪；没有时角色替换第 1 条角色提示词（没有就进主体），动作进主体。 */
+export function defaultPlacement(recipe: Recipe, role: RecipeMaterial["role"]): MatrixPlacement {
+  const found = materialPlacement(recipe, role);
+  if (found !== null) return found;
+  return role === "character" && recipe.character.enabled && recipe.character.captions.length ? 0 : "subject";
+}
+
+/**
+ * 泛化矩阵的一格：在配方上换进这一格的角色和动作，做法和素材块的“替换 / 加到”一样。
+ * 配方里原来的同类素材先从主体和角色提示词里都去掉（换角色不留旧角色）；放主体时占旧块的位置，
+ * 放角色提示词时角色替换整条、动作追加到那一条后面。没有这一类时配方里的原样保留。
+ */
+export function matrixCellRecipe(
+  recipe: Recipe,
+  picks: Partial<Record<RecipeMaterial["role"], MatrixPick | null>>,
+  placement: Record<RecipeMaterial["role"], MatrixPlacement>,
+): Recipe {
+  return (["character", "action"] as const).reduce((current, role) => {
+    const pick = picks[role];
+    return pick ? swapMaterial(current, pick, placement[role]) : current;
+  }, recipe);
+}
+
+function swapMaterial(recipe: Recipe, pick: MatrixPick, where: MatrixPlacement): Recipe {
+  const role = pick.material.role;
+  const origin = materialOrigin(pick.material);
+  const old = new Set(
+    [...recipe.subject, ...characterTokens(recipe)].flatMap((token) => token.origins).filter((item) => item.startsWith(`${role}:`)),
+  );
+  const strip = (list: RecipeToken[]) => [...old].reduce((tokens, item) => removeFromList(tokens, item), list);
+  const first = recipe.subject.findIndex((token) => token.origins.some((item) => old.has(item)));
+  const stripped: Recipe = {
+    ...recipe,
+    subject: strip(recipe.subject),
+    character: { ...recipe.character, captions: recipe.character.captions.map((caption) => ({ ...caption, tokens: strip(caption.tokens) })) },
+  };
+  if (where === "subject") return addTokens(stripped, pick.tags, origin, first >= 0 ? strip(recipe.subject.slice(0, first)).length : undefined).recipe;
+  return applyToCharacter(stripped, { origin, role, tags: pick.tags }, where);
+}
+
 /** 素材块筛的 tag 变了：主体和用到它的角色提示词里那一块按新的筛选重写。 */
 function setMaterialExcluded(recipe: Recipe, origin: string, allTags: string[], excluded: string[]): Recipe {
   const material = materialsOf(recipe).find((item) => materialOrigin(item) === origin);

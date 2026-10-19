@@ -14,6 +14,7 @@ from tags_machine_core.llm import translate_tags
 
 from .artist_test import (
     ArtistTestSettings,
+    cell_subject,
     matrix_cells,
     matrix_payload,
     pick_regression_images,
@@ -319,10 +320,14 @@ class StyleLabService:
             seed = plan_seed(settings, record.seed if record else None, shared)
             cells = matrix_cells(settings)
             sizes = plan_sizes(settings.size_mode or "source", len(cells), settings.width, settings.height)
-            for (character, action), size in zip(cells, sizes):
+            contents = settings.cells or [None] * len(cells)
+            for (character, action), size, content in zip(cells, sizes, contents):
                 seeds.append(seed)
-                requests.append(self._plan(matrix_payload(settings, character, action, seed, size)))
-                metas.append({"character": character, "action": action})
+                requests.append(self._plan(matrix_payload(settings, character, action, seed, size, content)))
+                meta: dict[str, Any] = {"character": character, "action": action}
+                if content is not None:
+                    meta["subject"] = cell_subject(content)
+                metas.append(meta)
         return self._start_run(
             info,
             record,
@@ -582,9 +587,10 @@ class StyleLabService:
                 image_path = Path(str(images[0]["path"]))
                 item["image_path"] = str(image_path)
                 item["status"] = "succeeded"
-                # 回归对照每张对照自己的原图；泛化矩阵没有原图可比。
+                # 回归对照、泛化矩阵和其他画风测试都和配方原图用同一套参数对比。
+                # 矩阵的内容本来就不同，所以保留 diffs 但 verdict 用 reference，不下链路结论。
                 item_source = Path(item["source"]["path"]) if item.get("source") else source_path
-                if item_source is not None and run["kind"] != "matrix":
+                if item_source is not None:
                     item["compare"] = compare_with_source(item_source, image_path, expected_keys=expected)
                     if run["kind"] != "regenerate":
                         # 配方出图和原图本来就是不同提示词，只看相似度和提示词差异，不下“链路”结论。

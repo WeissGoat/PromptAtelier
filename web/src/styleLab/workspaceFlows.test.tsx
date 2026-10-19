@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Recipe, WorkspacePayload } from "./api";
+import { CustomWorkspaceProvider } from "../workspace/CustomWorkspaceProvider";
 
 const api = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
@@ -80,6 +81,7 @@ describe("new recipe", () => {
     translateOn: false,
     onBack: vi.fn(),
     onOpenRecipe: vi.fn(),
+    onUseArtistInCustom: vi.fn(),
     onSaved: vi.fn(),
     onDeleted: vi.fn(),
   };
@@ -114,7 +116,7 @@ describe("dropping files", () => {
     });
     api.createImageGroup.mockResolvedValue(payload("g2", "图片组 新"));
     api.uploadImages.mockImplementation((id: string) => Promise.resolve(payload(id, id === "g2" ? "图片组 新" : "旧组")));
-    render(<StyleLabPage />);
+    render(<CustomWorkspaceProvider><StyleLabPage /></CustomWorkspaceProvider>);
 
     const file = new File(["x"], "a.png", { type: "image/png" });
     const dataTransfer = { types: ["Files"], files: [file] };

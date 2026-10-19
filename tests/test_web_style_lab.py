@@ -571,10 +571,38 @@ class WebStyleLabTest(TestCase):
         run = self._wait_run(workspace_id, matrix.json()["run"]["id"])
         self.assertEqual(run["status"], "succeeded", run)
         self.assertEqual(run["items"][0]["character"], str(character))
-        self.assertNotIn("compare", run["items"][0])
+        self.assertEqual(run["items"][0]["compare"]["verdict"], "reference")
+        self.assertTrue(run["items"][0]["compare"]["diffs"])
+
+        # 前端按配方换好内容的矩阵：每格带主体和角色提示词。
+        cell = {
+            "character": str(character),
+            "action": None,
+            "subject": [{"text": "1girl, solo"}],
+            "captions": {"enabled": True, "captions": [{"tokens": [{"text": "girl, akemi homura"}]}]},
+        }
+        swapped = self.client.post(
+            f"{url}/artist-test",
+            json={
+                "settings": {
+                    "kind": "matrix",
+                    "artist": folder,
+                    "characters": [str(character)],
+                    "cells": [cell],
+                    "placement": {"character": "caption:0"},
+                    "seed_mode": "fixed",
+                    "seed": 10,
+                }
+            },
+        )
+        self.assertEqual(swapped.status_code, 200, swapped.text)
+        run = self._wait_run(workspace_id, swapped.json()["run"]["id"])
+        self.assertEqual(run["status"], "succeeded", run)
+        self.assertEqual(run["items"][0]["subject"], "1girl, solo")
+        self.assertEqual(run["settings"]["placement"], {"character": "caption:0"})
 
         runs = self.client.get(f"/api/style-lab/workspaces/{workspace_id}/runs", params={"recipe_id": recipe["id"]}).json()
-        self.assertEqual(sorted(item["kind"] for item in runs["runs"]), ["matrix", "regression"])
+        self.assertEqual(sorted(item["kind"] for item in runs["runs"]), ["matrix", "matrix", "regression"])
 
         missing = self.client.post(f"{url}/artist-test", json={"settings": {"kind": "regression", "artist": "nope"}})
         self.assertEqual(missing.status_code, 400)

@@ -254,10 +254,15 @@ def artist_node(recipe: Recipe, *, source_path: str | None = None) -> dict[str, 
 
 
 def character_prompts_param(recipe: Recipe) -> dict[str, Any] | None:
-    if not recipe.character.enabled:
+    return captions_param(recipe.character)
+
+
+def captions_param(character: RecipeCharacter) -> dict[str, Any] | None:
+    """角色提示词 -> 渲染器的 character_prompts（显式条目）；没开或全是空条目时返回 None。"""
+    if not character.enabled:
         return None
     captions = []
-    for caption in recipe.character.captions:
+    for caption in character.captions:
         positive = tokens_text(caption.tokens).strip(" ,")
         if not positive:
             continue
@@ -270,8 +275,8 @@ def character_prompts_param(recipe: Recipe) -> dict[str, Any] | None:
     return {
         "mode": "explicit",
         "captions": captions,
-        "use_coords": recipe.character.use_coords,
-        "add_male_caption": recipe.character.add_male_caption,
+        "use_coords": character.use_coords,
+        "add_male_caption": character.add_male_caption,
     }
 
 
