@@ -76,7 +76,7 @@ export function RenderParamsPanel({
         />
       </label>
       <label className="field">
-        <span title="每次生成张数 (n_samples)">NT</span>
+        <span title="本轮生成张数 (n_samples)；执行时逐张请求">NT</span>
         <input
           aria-label="NT"
           min={1}

@@ -26,6 +26,27 @@ class WebComposeTest(TestCase):
         self.assertEqual(data["prompt_bundle"]["prompt"]["positive"], "1girl, standing")
         self.assertEqual(data["render_request"]["backend"], "novelai")
 
+    def test_compose_preview_accepts_samples_above_single_request_limit(self):
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/api/compose-preview",
+            json={
+                "compose": {"prompt": "1girl, standing", "negative": "lowres"},
+                "render": {
+                    "backend": "novelai",
+                    "width": 832,
+                    "height": 1216,
+                    "params": {"n_samples": 20},
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "ready")
+        self.assertEqual(data["render_request"]["params"]["n_samples"], 20)
+
     def test_generate_endpoint_creates_job_with_injected_executor(self):
         def executor(request, options):
             return GenerationResult(

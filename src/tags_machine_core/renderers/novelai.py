@@ -29,6 +29,7 @@ NovelAIArtistInput = NovelAIArtist | NodeDocument | dict[str, Any] | None
 _SEED_RANDOM = random.SystemRandom()
 _NOVELAI_SEED_MIN = 0
 _NOVELAI_SEED_MAX = 4294967295
+_NOVELAI_MAX_IMAGE_PIXELS = 1024 * 3072
 
 LEGACY_NAI4_QUALITY_PROMPT = ",::,very aesthetic, masterpiece, no text"
 LEGACY_DEFAULT_NEGATIVE_PROMPT = (
@@ -403,6 +404,12 @@ class NovelAIRenderAdapter:
 
         width = _validate_int_parameter("width", width, minimum=64, maximum=49152)
         height = _validate_int_parameter("height", height, minimum=64, maximum=49152)
+        # 容量为 0 表示该分辨率本身超出 NovelAI 支持范围，即使只出一张也不可用。
+        if _max_samples_per_request(width, height) < 1:
+            raise ValueError(
+                f"NovelAI image size {width}x{height} exceeds "
+                f"{_NOVELAI_MAX_IMAGE_PIXELS} pixels"
+            )
         sampler = params.get("sampler", "k_dpmpp_2s_ancestral" if legacy_artist else "k_euler")
         scheduler = params.get("noise_schedule", params.get("scheduler", "native"))
         is_nai5 = str(model or "").startswith("nai-diffusion-5")
@@ -420,11 +427,12 @@ class NovelAIRenderAdapter:
             maximum=10,
         )
         steps = _validate_int_parameter("steps", params.get("steps", 28), minimum=1, maximum=50)
+        # 这里的 n_samples 是本次 RenderRequest 的总张数；execution 会在实际请求前
+        # 拆成多次 n_samples=1 的 NovelAI 调用，因此不能套用单次 API 的上限。
         n_samples = _validate_int_parameter(
             "n_samples",
             params.get("n_samples", 1),
             minimum=1,
-            maximum=_max_n_samples(width, height),
         )
         cfg_rescale = _validate_number_parameter(
             "cfg_rescale",
@@ -1331,18 +1339,18 @@ def _validate_int_parameter(
     value: Any,
     *,
     minimum: int,
-    maximum: int,
+    maximum: int | None = None,
 ) -> int:
     if isinstance(value, bool):
-        raise ValueError(_range_error(name, value, minimum, maximum))
+        raise ValueError(_parameter_error(name, value, minimum, maximum))
     if isinstance(value, float) and not value.is_integer():
-        raise ValueError(_range_error(name, value, minimum, maximum))
+        raise ValueError(_parameter_error(name, value, minimum, maximum))
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        raise ValueError(_range_error(name, value, minimum, maximum)) from None
-    if parsed < minimum or parsed > maximum:
-        raise ValueError(_range_error(name, value, minimum, maximum))
+        raise ValueError(_parameter_error(name, value, minimum, maximum)) from None
+    if parsed < minimum or (maximum is not None and parsed > maximum):
+        raise ValueError(_parameter_error(name, value, minimum, maximum))
     return parsed
 
 
@@ -1370,13 +1378,25 @@ def _range_error(name: str, value: Any, minimum: int | float, maximum: int | flo
     return f"NovelAI parameter {name} must be between {minimum} and {maximum}, got {value!r}"
 
 
-def _max_n_samples(width: int, height: int) -> int:
+def _parameter_error(
+    name: str,
+    value: Any,
+    minimum: int | float,
+    maximum: int | float | None,
+) -> str:
+    if maximum is None:
+        return f"NovelAI parameter {name} must be at least {minimum}, got {value!r}"
+    return _range_error(name, value, minimum, maximum)
+
+
+def _max_samples_per_request(width: int, height: int) -> int:
+    """NovelAI 单次 HTTP 请求在当前面积下允许的张数；0 表示该分辨率本身不可用。"""
     pixels = width * height
     if pixels <= 512 * 704:
         return 8
     if pixels <= 640 * 640:
         return 6
-    if pixels <= 1024 * 3072:
+    if pixels <= _NOVELAI_MAX_IMAGE_PIXELS:
         return 4
     return 0
 
