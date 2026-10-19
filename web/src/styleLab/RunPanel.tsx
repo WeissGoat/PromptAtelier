@@ -1,7 +1,7 @@
 import { CircleCheck, CircleX, LoaderCircle, Square, TriangleAlert } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { computeTagDiff } from "../compare/tagDiff";
+import { computeTagDiff, normalizeTag, tokenizePrompt } from "../compare/tagDiff";
 import type { CompareVerdict, ImageRecord, ParamDiff, RunItem, StyleLabRun } from "./api";
 import { ACTIVE_RUN_STATUSES, runImageUrl, sourceImageUrl } from "./api";
 import { formatTime, formatValue, runStatusLabels, verdictLabels } from "./format";
@@ -229,7 +229,7 @@ export function CompareView({
         </p>
       ) : null}
       {runError ? <p className="sl-error">{runError}</p> : null}
-      {hint}
+      {hint ?? <PromptSpellingHint item={item} />}
 
       {compare && compare.diffs.length ? (
         <div className="sl-diffs">
@@ -341,8 +341,41 @@ function visibleDiffs(diffs: ParamDiff[], showExpected: boolean): ParamDiff[] {
   );
 }
 
+/**
+ * 提示词的 tag 和顺序都和原图一样、只差写法时说明差在哪：
+ * tags.txt 每段只占一行，原文的换行写成空格；画风走旧版兼容链路，"a, b" 拼成 "a,b"。
+ */
+export function PromptSpellingHint({ item }: { item: RunItem }) {
+  const prompt = item.compare?.diffs.find((diff) => diff.path === "$.parameters.prompt");
+  if (!prompt || typeof prompt.left !== "string" || typeof prompt.right !== "string") return null;
+  const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+  const tags = (text: string) => squash(text).split(/\s*[,，]\s*/).filter(Boolean).join(",");
+  if (tags(prompt.left) !== tags(prompt.right)) return null;
+  const newlines = /[\r\n]/.test(prompt.left) && !/[\r\n]/.test(prompt.right);
+  const commas = squash(prompt.left) !== squash(prompt.right);
+  if (!newlines && !commas) return null;
+  return (
+    <p className="sl-hint">
+      提示词的 tag 和顺序都和原图一样，只差写法。
+      {newlines ? "tags.txt 每段只占一行，原文里的换行写成了空格；NovelAI 的分词本来就把换行当空格，这一处不影响出图。" : null}
+      {commas ? "画风走旧版兼容链路，会把“a, b”拼成“a,b”；NovelAI 对逗号后的空格敏感，种子相同画面也会有些差别。" : null}
+    </p>
+  );
+}
+
+/** NovelAI 的分词把换行当空格：按 tag 比之前先把换行换成空格，多行原文和压成一行的导出不会显示成增删。 */
+function flatPrompt(text: string): string {
+  return text.replace(/\s*[\r\n]+\s*/g, " ");
+}
+
+function sameOrder(left: string, right: string): boolean {
+  const a = tokenizePrompt(left).map(normalizeTag);
+  const b = tokenizePrompt(right).map(normalizeTag);
+  return a.length === b.length && a.every((tag, index) => tag === b[index]);
+}
+
 function PromptDiff({ left, right, generatedLabel }: { left: string; right: string; generatedLabel: string }) {
-  const diff = computeTagDiff(left, right);
+  const diff = computeTagDiff(flatPrompt(left), flatPrompt(right));
   return (
     <div className="sl-prompt-diff">
       {diff.removed.map((tag, index) => (
@@ -356,7 +389,11 @@ function PromptDiff({ left, right, generatedLabel }: { left: string; right: stri
         </span>
       ))}
       <span className="sl-muted">
-        {diff.removed.length || diff.added.length ? `其余 ${diff.unchanged.length} 个相同` : "tag 相同，只有顺序或空格不同"}
+        {diff.removed.length || diff.added.length
+          ? `其余 ${diff.unchanged.length} 个相同`
+          : sameOrder(flatPrompt(left), flatPrompt(right))
+            ? "tag 和顺序都相同，只差换行、逗号后的空格这类写法"
+            : "tag 相同，顺序不同"}
       </span>
     </div>
   );

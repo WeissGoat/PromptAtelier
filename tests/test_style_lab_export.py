@@ -6,7 +6,9 @@ from unittest import TestCase
 from tags_machine_core.nodes.novelai_artist import NovelAIArtistRepository
 from tags_machine_core.style_lab.artist_test import (
     ArtistTestSettings,
+    MatrixCell,
     matrix_cells,
+    matrix_payload,
     pick_regression_images,
     plan_seed,
     strip_style,
@@ -18,6 +20,7 @@ from tags_machine_core.style_lab.export import (
     ArtistExporter,
     ExportError,
     ExportRequest,
+    artist_values,
     diff_artists,
     folder_name,
     free_folder,
@@ -26,7 +29,14 @@ from tags_machine_core.style_lab.export import (
     suggest_author,
 )
 from tags_machine_core.style_lab.metadata import build_image_record
-from tags_machine_core.style_lab.recipe import Recipe, RecipeToken, artist_node, line_text, tokens_from_text
+from tags_machine_core.style_lab.recipe import (
+    Recipe,
+    RecipeToken,
+    artist_node,
+    line_text,
+    recipe_from_image,
+    tokens_from_text,
+)
 from tags_machine_core.style_lab.workspace import WorkspaceInfo
 
 from tests.test_style_lab import write_nai_png
@@ -189,6 +199,20 @@ class ExporterTest(TestCase):
         self.assertEqual(second["compare"]["ref"], "1_Ink_Test")
         self.assertTrue(second["compare"]["diff"]["style"]["same"])
 
+    def test_recipe_from_nai5_source_exports_straight_alpha(self):
+        source = write_nai_png(
+            self.tmp / "nai5" / "1.png",
+            source="NovelAI Diffusion V5 0ADF9AB7",
+            straight_alpha=False,
+        )
+        recipe = recipe_from_image(build_image_record(source, base=self.tmp / "nai5"))
+        values = artist_values(recipe, source_path=str(source))
+
+        self.assertIs(values["params"]["straight_alpha"], False)
+        text = render_tags_txt(values)
+        self.assertIn('"straight_alpha":false', text)
+        self.assertEqual(roundtrip_problems(text, values), [])
+
     def test_export_refuses_when_target_moved_since_preview(self):
         from tags_machine_core.style_lab.export import ExportConflictError
 
@@ -284,8 +308,31 @@ class ArtistTestPlanTest(TestCase):
         self.assertEqual(plan_seed(fixed, 99, 5), 7)
         matrix = ArtistTestSettings(kind="matrix", artist="a", characters=["c1", "c2"], actions=["a1"])
         self.assertEqual(matrix_cells(matrix), [("c1", "a1"), ("c2", "a1")])
+        # 矩阵不限角色、动作个数。
+        wide = ArtistTestSettings(kind="matrix", artist="a", characters=[f"c{i}" for i in range(6)], actions=["x", "y", "z", "w", "v"])
+        self.assertEqual(len(matrix_cells(wide)), 30)
         with self.assertRaises(ValueError):
             ArtistTestSettings(kind="matrix", artist="a")
+
+    def test_matrix_cell_sends_subject_and_character_prompts(self):
+        cell = MatrixCell(
+            character="c1",
+            action="a1",
+            subject=[RecipeToken(text="1girl, solo"), RecipeToken(text="sitting", sep=", ", origins=["action:a1"])],
+            captions={"enabled": True, "captions": [{"tokens": [{"text": "girl, akemi homura", "origins": ["character:c1"]}]}]},
+        )
+        settings = ArtistTestSettings(kind="matrix", artist="a", characters=["c1"], actions=["a1"], cells=[cell])
+        payload = matrix_payload(settings, "c1", "a1", 9, (832, 1216), cell)
+        self.assertEqual(payload["compose"], {"prompt": "1girl, solo, sitting", "negative": ""})
+        captions = payload["render"]["params"]["character_prompts"]
+        self.assertEqual(captions["mode"], "explicit")
+        self.assertEqual(captions["captions"], [{"positive": "girl, akemi homura", "negative": ""}])
+        # 旧请求没有 cells：只用节点拼。
+        old = matrix_payload(settings, "c1", "a1", 9)
+        self.assertEqual(old["compose"], {"nodes": {"character": "c1", "action": "a1"}})
+        self.assertNotIn("character_prompts", old["render"]["params"])
+        with self.assertRaises(ValueError):
+            ArtistTestSettings(kind="matrix", artist="a", characters=["c1", "c2"], cells=[MatrixCell(character="c1")])
 
     def test_size_mode_defaults_follow_old_settings(self):
         self.assertEqual(ArtistTestSettings(kind="regression", artist="a").size_mode, "source")

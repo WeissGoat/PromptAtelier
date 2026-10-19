@@ -2,7 +2,7 @@ import { Check, Copy, GripVertical, ImageOff, Plus, Trash2, UserRound, X } from 
 import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage, nodePreviewUrl } from "../api/client";
-import type { LibraryNode, MaterialRole, Recipe, RecipeMaterial } from "./api";
+import type { LibraryNode, MaterialRole, MaterialShelf, Recipe, RecipeMaterial } from "./api";
 import { loadNode } from "./libraryNodes";
 import { updateShelf, useMaterialShelf } from "./materialShelf";
 import { MaterialSearch } from "./MaterialSearch";
@@ -23,6 +23,7 @@ import {
   removeOrigin,
   setMaterialTags,
   toggleMaterialTag,
+  tokensToText,
   type MaterialDrag,
 } from "./recipeModel";
 import { useTranslations } from "./translations";
@@ -60,6 +61,14 @@ function putOnShelf(material: RecipeMaterial) {
 function takeOffShelf(material: RecipeMaterial) {
   updateShelf((shelf) => ({ ...shelf, materials: shelf.materials.filter((item) => !sameMaterial(item, material)) }));
 }
+
+/** 素材架上显示的块：全局素材架加上配方用过、架上没有的；配方在用的块以配方里的筛选为准（它决定了加进去的 tag）。 */
+export function shelfMaterials(shelf: MaterialShelf, draft: Recipe): RecipeMaterial[] {
+  const materials = materialsOf(draft);
+  return [...shelf.materials, ...materials.filter((item) => !shelf.materials.some((other) => sameMaterial(item, other)))].map(
+    (item) => materials.find((used) => sameMaterial(used, item)) ?? item,
+  );
+}
 export function originName(origin: string): string {
   const ref = origin.slice(origin.indexOf(":") + 1);
   return ref.split(/[\\/]/).pop() ?? ref;
@@ -91,11 +100,7 @@ export function LibraryPanel({ draft, translateOn, onChange }: LibraryPanelProps
     materials.filter((item) => !globalShelf.materials.some((other) => sameMaterial(item, other))).forEach(putOnShelf);
   }, [ready, materials, globalShelf.materials]);
 
-  // 配方在用的块以配方里的筛选为准（它决定了加进去的 tag）。
-  const allMaterials = [
-    ...globalShelf.materials,
-    ...materials.filter((item) => !globalShelf.materials.some((other) => sameMaterial(item, other))),
-  ].map((item) => materials.find((used) => sameMaterial(used, item)) ?? item);
+  const allMaterials = shelfMaterials(globalShelf, draft);
   const shelf = allMaterials.filter((item) => item.role === tab);
   // 旧配方直接从卡片加进来、没有素材块的来源：可以放上素材架接着编辑，或一键移除。
   const loose = cardOrigins(draft).filter(
@@ -221,6 +226,8 @@ function MaterialBlock({
   const inSubject = originCount(draft, origin);
   const inCharacter = characterHasOrigin(draft, origin);
   const drag: MaterialDrag = { origin, role: material.role, tags: included, material };
+  const captions = draft.character.captions.map((caption) => tokensToText(caption.tokens).trim());
+  const applyLabel = material.role === "character" ? "作角色提示词" : "加到角色提示词";
   // 用进配方：先把这块记进配方，再加 tag。
   const used = () => addMaterial(draft, material);
   // 素材架上的筛选全局保存；配方在用这块时同步增删配方里的 tag。
@@ -354,16 +361,39 @@ function MaterialBlock({
               <Trash2 size={13} aria-hidden="true" />
               移出角色提示词
             </button>
+          ) : captions.length ? (
+            // 已经有角色提示词时选放到哪一条，不默认覆盖第 1 条。
+            <select
+              aria-label={`${material.name} ${applyLabel}`}
+              className="sl-mblock-target"
+              disabled={disabled || !included.length}
+              onChange={(event) => {
+                if (event.target.value) onChange(applyToCharacter(used(), drag, Number(event.target.value)));
+              }}
+              title={material.role === "character" ? "替换选中的那条角色提示词，或新加一条" : "追加到选中的那条角色提示词后面，或新加一条"}
+              value=""
+            >
+              <option disabled value="">
+                {applyLabel}…
+              </option>
+              {captions.map((caption, index) => (
+                <option key={index} value={index}>
+                  {material.role === "character" ? "替换" : "加到"} #{index + 1}
+                  {caption ? `：${caption.length > 24 ? `${caption.slice(0, 24)}…` : caption}` : "（空）"}
+                </option>
+              ))}
+              <option value={captions.length}>新加一条 #{captions.length + 1}</option>
+            </select>
           ) : (
             <button
               className="sl-ghost tiny"
               disabled={disabled || !included.length}
               onClick={() => onChange(applyToCharacter(used(), drag))}
-              title={material.role === "character" ? "替换角色提示词 #1" : "追加到角色提示词 #1 后面"}
+              title="新加一条角色提示词"
               type="button"
             >
               <UserRound size={13} aria-hidden="true" />
-              {material.role === "character" ? "作角色提示词" : "加到角色提示词"}
+              {applyLabel}
             </button>
           )}
           <span className="sl-bar-spacer" />

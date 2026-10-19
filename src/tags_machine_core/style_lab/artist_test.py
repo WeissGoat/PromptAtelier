@@ -2,7 +2,8 @@
 
 - 回归对照：挑同组的几张原图，去掉原图里的画风 token 留下内容，用原图的种子、尺寸、角色提示词出图，再和原图对照。
   配方里丢弃的词默认留在内容里（原图里有它们，去掉了就比的不是同一张图），也可以选一起去掉；
-- 泛化矩阵：提示词库的角色 × 动作，固定一个种子，看画风换了内容还稳不稳。
+- 泛化矩阵：素材架上的角色 × 动作，固定一个种子，看画风换了内容还稳不稳。每一格是配方当前的主体、角色提示词
+  换进这一格的角色和动作（前端算好放在 cells 里）；旧请求没有 cells 时只用两个节点拼提示词。
 """
 
 from __future__ import annotations
@@ -15,24 +16,32 @@ from pydantic import BaseModel, Field, model_validator
 
 from .classify import STYLE_CATEGORIES, token_category
 from .metadata import ImageRecord
-from .recipe import Recipe, RecipeToken
+from .recipe import Recipe, RecipeCharacter, RecipeToken, captions_param, tokens_text
 from .regenerate import SizeMode
 from .tokens import SEPARATORS, TokenList, inner_tags, serialize, tokenize
 
 
 MAX_REGRESSION_IMAGES = 12
-MAX_MATRIX_SIDE = 4
 DEFAULT_REGRESSION_COUNT = 4
 DEFAULT_MATRIX_SIZE = (832, 1216)
 _SKIP_FLAGS = {"no_metadata", "inpaint", "img2img"}
+
+
+class MatrixCell(BaseModel):
+    """泛化矩阵的一格：配方的主体、角色提示词换进这一格的角色和动作之后的内容。"""
+
+    character: str | None = None
+    action: str | None = None
+    subject: list[RecipeToken] = Field(default_factory=list)
+    captions: RecipeCharacter = Field(default_factory=RecipeCharacter)
 
 
 class ArtistTestSettings(BaseModel):
     kind: Literal["regression", "matrix"]
     artist: str
     image_ids: list[str] = Field(default_factory=list, max_length=MAX_REGRESSION_IMAGES)
-    characters: list[str] = Field(default_factory=list, max_length=MAX_MATRIX_SIDE)
-    actions: list[str] = Field(default_factory=list, max_length=MAX_MATRIX_SIDE)
+    characters: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
     seed_mode: Literal["source", "random", "fixed"] = "source"
     seed: int | None = Field(default=None, ge=0, le=4294967295)
     width: int | None = Field(default=None, ge=64, le=2048)
@@ -41,6 +50,9 @@ class ArtistTestSettings(BaseModel):
     size_mode: SizeMode | None = None
     # 回归对照时配方里丢弃的词：keep 留在内容里（和原图对齐），strip 一起去掉（只看导出的画风）。
     dropped: Literal["keep", "strip"] = "keep"
+    # 泛化矩阵每一格的内容，顺序和 matrix_cells 一致；placement 记下角色、动作放在哪（subject 或 caption:N）。
+    cells: list[MatrixCell] = Field(default_factory=list)
+    placement: dict[Literal["character", "action"], str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check(self) -> "ArtistTestSettings":
@@ -54,6 +66,8 @@ class ArtistTestSettings(BaseModel):
             raise ValueError("size_mode=custom requires width and height")
         if self.kind == "matrix" and not (self.characters or self.actions):
             raise ValueError("matrix needs at least one character or action")
+        if self.cells and [(cell.character, cell.action) for cell in self.cells] != matrix_cells(self):
+            raise ValueError("matrix cells must follow characters x actions")
         return self
 
 
@@ -209,21 +223,35 @@ def matrix_payload(
     action: str | None,
     seed: int,
     size: tuple[int, int] | None = None,
+    cell: MatrixCell | None = None,
 ) -> dict[str, Any]:
-    nodes = {}
-    if character:
-        nodes["character"] = character
-    if action:
-        nodes["action"] = action
+    params: dict[str, Any] = {"size": "custom", "n_samples": 1}
+    if cell is not None:
+        # 和配方出图一样：主体进正面提示词，角色提示词按显式条目发。
+        compose: dict[str, Any] = {"prompt": cell_subject(cell), "negative": ""}
+        captions = captions_param(cell.captions)
+        if captions:
+            params["character_prompts"] = captions
+    else:
+        nodes = {}
+        if character:
+            nodes["character"] = character
+        if action:
+            nodes["action"] = action
+        compose = {"nodes": nodes}
     width, height = size or ((settings.width, settings.height) if settings.width and settings.height else DEFAULT_MATRIX_SIZE)
     return {
-        "compose": {"nodes": nodes},
+        "compose": compose,
         "render": {
             "backend": "novelai",
             "artist": settings.artist,
             "width": width,
             "height": height,
             "seed": seed,
-            "params": {"size": "custom", "n_samples": 1},
+            "params": params,
         },
     }
+
+
+def cell_subject(cell: MatrixCell) -> str:
+    return tokens_text(cell.subject).strip(" ,")

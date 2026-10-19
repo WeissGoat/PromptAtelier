@@ -367,6 +367,17 @@ class CompareTest(TestCase):
         c = write_nai_png(self.tmp / "c.png", uc="something else")
         self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
 
+    def test_newlines_written_as_spaces_are_benign(self):
+        # 多行原文导出成 tags.txt 一行：换行变成空格，NovelAI 的分词本来就把换行当空格。
+        a = write_nai_png(self.tmp / "a.png", prompt="artist:foo,\nlens flare\nbloom,  1girl")
+        b = write_nai_png(self.tmp / "b.png", prompt="artist:foo, lens flare bloom, 1girl")
+        result = compare_with_source(a, b)
+        self.assertEqual(result["verdict"], "match")
+        self.assertEqual({d["key"] for d in result["diffs"] if d.get("note")}, {"input", "prompt"})
+        # 逗号后少了空格不算：分出来的词不一样。
+        c = write_nai_png(self.tmp / "c.png", prompt="artist:foo,lens flare bloom,1girl")
+        self.assertEqual(compare_with_source(a, c)["verdict"], "param_diff")
+
     def test_random_choices_compare_against_the_source_pick(self):
         source = write_nai_png(self.tmp / "src.png", **RANDOM_PICK)
         resolved = {key: value for key, value in RANDOM_PICK.items() if key != "actual_prompts"}
@@ -658,6 +669,35 @@ class RecipeTest(TestCase):
         self.assertNotIn("seed", recipe.params)
         self.assertTrue(recipe.use_source_vibe)
         self.assertIn("not_quailty_prompts", recipe.flags)
+
+    def test_recipe_from_nai5_image_keeps_straight_alpha(self):
+        from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
+
+        path = write_nai_png(
+            self.tmp / "nai5" / "a.png",
+            source="NovelAI Diffusion V5 0ADF9AB7",
+            straight_alpha=False,
+        )
+        recipe = recipe_from_image(build_image_record(path, base=self.tmp))
+
+        self.assertIs(recipe.params["straight_alpha"], False)
+        node = artist_node(recipe, source_path=str(path))["renderers"]["novelai"]
+        self.assertIs(node["params"]["straight_alpha"], False)
+
+    def test_old_nai5_recipe_backfills_straight_alpha_from_source(self):
+        from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
+
+        path = write_nai_png(
+            self.tmp / "nai5-old" / "a.png",
+            source="NovelAI Diffusion V5 0ADF9AB7",
+            straight_alpha=False,
+        )
+        recipe = recipe_from_image(build_image_record(path, base=self.tmp))
+        # 模拟修复前保存的配方：没有 straight_alpha。
+        recipe.params.pop("straight_alpha")
+
+        node = artist_node(recipe, source_path=str(path))["renderers"]["novelai"]
+        self.assertIs(node["params"]["straight_alpha"], False)
 
     def test_artist_node_matches_tags_txt_shape(self):
         from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image

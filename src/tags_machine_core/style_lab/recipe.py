@@ -35,6 +35,7 @@ STYLE_PARAM_KEYS = (
     "sm",
     "sm_dyn",
     "dynamic_thresholding",
+    "straight_alpha",
     "uncond_scale",
     "skip_cfg_above_sigma",
     "skip_cfg_below_sigma",
@@ -208,14 +209,24 @@ def artist_node(recipe: Recipe, *, source_path: str | None = None) -> dict[str, 
     params.setdefault("add_original_image", False)
     if recipe.model:
         params["model"] = recipe.model
-    if recipe.use_source_vibe and source_path:
+    needs_straight_alpha = (
+        "straight_alpha" not in params
+        and str(recipe.model or "").startswith("nai-diffusion-5")
+        and source_path is not None
+    )
+    source_params: dict[str, Any] | None = None
+    if source_path and (recipe.use_source_vibe or needs_straight_alpha):
         source_params, _ = read_source_parameters(Path(source_path))
-        images = source_params.get(VIBE_IMAGE_KEY) or []
+    if recipe.use_source_vibe and source_path:
+        images = (source_params or {}).get(VIBE_IMAGE_KEY) or []
         if images:
             params[VIBE_IMAGE_KEY] = list(images)
     else:
         params.pop("reference_strength_multiple", None)
         params.pop("reference_information_extracted_multiple", None)
+    # 修复前创建的 NAI5 配方没有 straight_alpha；从源图补一次，避免渲染器把它默认成 true。
+    if needs_straight_alpha and source_params is not None and "straight_alpha" in source_params:
+        params["straight_alpha"] = source_params["straight_alpha"]
     prefix = line_text(recipe.prefix)
     suffix = line_text(recipe.suffix)
     negative = line_text(recipe.negative)
@@ -243,10 +254,15 @@ def artist_node(recipe: Recipe, *, source_path: str | None = None) -> dict[str, 
 
 
 def character_prompts_param(recipe: Recipe) -> dict[str, Any] | None:
-    if not recipe.character.enabled:
+    return captions_param(recipe.character)
+
+
+def captions_param(character: RecipeCharacter) -> dict[str, Any] | None:
+    """角色提示词 -> 渲染器的 character_prompts（显式条目）；没开或全是空条目时返回 None。"""
+    if not character.enabled:
         return None
     captions = []
-    for caption in recipe.character.captions:
+    for caption in character.captions:
         positive = tokens_text(caption.tokens).strip(" ,")
         if not positive:
             continue
@@ -259,8 +275,8 @@ def character_prompts_param(recipe: Recipe) -> dict[str, Any] | None:
     return {
         "mode": "explicit",
         "captions": captions,
-        "use_coords": recipe.character.use_coords,
-        "add_male_caption": recipe.character.add_male_caption,
+        "use_coords": character.use_coords,
+        "add_male_caption": character.add_male_caption,
     }
 
 

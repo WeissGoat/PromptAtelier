@@ -582,6 +582,17 @@ export type ArtistTestSettings = {
   size_mode?: SizeMode;
   /** 回归对照时配方里丢弃的词：keep 留在内容里（默认），strip 一起去掉。 */
   dropped?: "keep" | "strip";
+  /** 泛化矩阵每一格换好角色和动作后的主体、角色提示词，顺序是角色 × 动作；旧记录没有。 */
+  cells?: MatrixCell[];
+  /** 角色、动作放在哪：subject 或 caption:N（N 从 0 起）。 */
+  placement?: Partial<Record<MaterialRole, string>>;
+};
+
+export type MatrixCell = {
+  character: string | null;
+  action: string | null;
+  subject: RecipeToken[];
+  captions: Recipe["character"];
 };
 
 export type ArtistTestItem = RunItem & {

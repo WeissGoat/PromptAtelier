@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ArtistExport, ArtistTestRun, ExportPreview, ImageRecord } from "./api";
+import type { ArtistExport, ArtistTestRun, ExportPreview, ImageRecord, Recipe, RecipeMaterial, RecipeToken } from "./api";
 
 const api = vi.hoisted(() => ({
   getExportDefaults: vi.fn(),
@@ -9,6 +9,9 @@ const api = vi.hoisted(() => ({
   exportArtist: vi.fn(),
   startArtistTest: vi.fn(),
   searchMaterials: vi.fn(),
+  getShelf: vi.fn(),
+  saveShelf: vi.fn(),
+  getLibraryNode: vi.fn(),
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -18,6 +21,8 @@ vi.mock("./api", async (importOriginal) => {
 
 import { ArtistTestPanel, meanSimilarity, regressionCandidates } from "./ArtistTestPanel";
 import { DiffView, ExportDialog } from "./ExportDialog";
+import { resetShelfForTests } from "./materialShelf";
+import { defaultPlacement, matrixCellRecipe, tokensToText } from "./recipeModel";
 
 function image(id: string, overrides: Partial<ImageRecord> = {}): ImageRecord {
   return {
@@ -84,9 +89,55 @@ const exported: ArtistExport = {
   exists: true,
 };
 
+function block(text: string, origin = "source"): RecipeToken {
+  return { id: `${origin}-${text}`, text, sep: "", origins: [origin] };
+}
+
+function recipe(overrides: Partial<Recipe> = {}): Recipe {
+  return {
+    schema: "tags-machine-core.style-lab.recipe/v1",
+    id: "r",
+    name: "r",
+    version: 3,
+    created_at: 0,
+    updated_at: 0,
+    source_image_id: "a",
+    group_id: null,
+    stage: "edit",
+    locked: true,
+    prefix: [block("artist:foo")],
+    subject: [block("1girl"), block("standing", "action:F:/动作/stand"), block("indoors")],
+    suffix: [],
+    dropped: [],
+    character: { enabled: true, captions: [{ tokens: [block("girl, madoka", "character:F:/角色/madoka")], negative: [] }], add_male_caption: false },
+    negative: [],
+    model: null,
+    params: {},
+    use_source_vibe: false,
+    flags: [],
+    notes: "",
+    ...overrides,
+  };
+}
+
+const homura: RecipeMaterial = { role: "character", ref: "F:/角色/homura", name: "homura", excluded: ["ribbon"] };
+const kyoko: RecipeMaterial = { role: "character", ref: "F:/角色/kyoko", name: "kyoko", excluded: [] };
+const sit: RecipeMaterial = { role: "action", ref: "F:/动作/sit", name: "sit", excluded: [] };
+const NODE_TAGS: Record<string, string[]> = {
+  "F:/角色/homura": ["akemi homura", "ribbon"],
+  "F:/角色/kyoko": ["girl", "sakura kyoko"],
+  "F:/动作/sit": ["sitting", "chair"],
+};
+
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  resetShelfForTests();
   api.searchMaterials.mockResolvedValue({ nodes: [], total: 0, has_more: false, facet_options: {} });
+  api.getShelf.mockResolvedValue({ materials: [], facets: {} });
+  api.saveShelf.mockImplementation((shelf) => Promise.resolve(shelf));
+  api.getLibraryNode.mockImplementation((ref: string, role: "character" | "action") =>
+    Promise.resolve({ ref, role, name: ref, has_preview: false, sections: [{ name: "tags", tags: NODE_TAGS[ref] ?? [] }] }),
+  );
 });
 
 afterEach(() => {
@@ -176,6 +227,8 @@ describe("ArtistTestPanel", () => {
     sourceImageId: "a",
     onExport: vi.fn(),
     onCancel: vi.fn(),
+    onUseInCustom: vi.fn(),
+    draft: recipe(),
   };
 
   it("starts a regression run with the default picked images", async () => {
@@ -209,7 +262,7 @@ describe("ArtistTestPanel", () => {
   });
 
   it("compares a regression image with its original below the grid", () => {
-    const original = "artist:foo, 1girl, very aesthetic";
+    const original = "artist:foo,\n1girl, very aesthetic";
     const run: ArtistTestRun = {
       id: "t1",
       kind: "regression",
@@ -247,7 +300,8 @@ describe("ArtistTestPanel", () => {
     expect(screen.getByText("与原图对照 · post-a")).toBeTruthy();
     expect(screen.getByRole("radio", { name: "滑块" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "回归" })).toBeTruthy();
-    expect(screen.getByText(/只是逗号后的空格被去掉了/)).toBeTruthy();
+    expect(screen.getByText(/会把“a, b”拼成“a,b”/)).toBeTruthy();
+    expect(screen.getByText(/原文里的换行写成了空格/)).toBeTruthy();
   });
 
   it("expands only the newest run, hides old ones and skips the comparison for failed images", () => {
@@ -294,12 +348,156 @@ describe("ArtistTestPanel", () => {
   it("needs a character or action before a matrix run", () => {
     render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[]} onStarted={vi.fn()} runs={[]} />);
     fireEvent.click(screen.getByRole("radio", { name: "泛化矩阵" }));
+    expect(screen.getByText("右边素材库还没有已选角色。")).toBeTruthy();
     expect((screen.getByRole("button", { name: /用 1_Ink 生成/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("builds the matrix from the material shelf and swaps it into the recipe like the shelf does", async () => {
+    api.getShelf.mockResolvedValue({ materials: [homura, kyoko, sit], facets: {} });
+    api.startArtistTest.mockResolvedValue({ run: { id: "run" } });
+    const onStarted = vi.fn();
+    render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[]} onStarted={onStarted} runs={[]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "泛化矩阵" }));
+    // 素材架上的都默认用上，不用再选；放到哪默认和上面的配方一致。
+    await screen.findByRole("button", { name: "homura", pressed: true });
+    expect(screen.getByRole("button", { name: "kyoko", pressed: true })).toBeTruthy();
+    const characterPlace = screen.getByRole("combobox", { name: "角色（行）放到" }) as HTMLSelectElement;
+    const actionPlace = screen.getByRole("combobox", { name: "动作（列）放到" }) as HTMLSelectElement;
+    expect(characterPlace.value).toBe("0");
+    expect(characterPlace.selectedOptions[0].textContent).toBe("替换角色提示词 #1：girl, madoka（同上方）");
+    expect(actionPlace.value).toBe("subject");
+
+    fireEvent.click(screen.getByRole("button", { name: "kyoko", pressed: true }));
+    fireEvent.change(actionPlace, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /用 1_Ink 生成 · 1 张/ }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    const settings = api.startArtistTest.mock.calls[0][2];
+    expect(settings).toMatchObject({
+      kind: "matrix",
+      characters: ["F:/角色/homura"],
+      actions: ["F:/动作/sit"],
+      placement: { character: "caption:0", action: "caption:0" },
+    });
+    expect(settings.cells).toHaveLength(1);
+    const [cell] = settings.cells;
+    expect(cell).toMatchObject({ character: "F:/角色/homura", action: "F:/动作/sit" });
+    // 旧动作从主体里去掉；角色替换第 1 条（筛掉的 ribbon 不带，补 girl），动作追加在后面。
+    expect(tokensToText(cell.subject)).toBe("1girl, indoors");
+    expect(cell.captions.captions.map((caption: { tokens: RecipeToken[] }) => tokensToText(caption.tokens))).toEqual([
+      "girl, akemi homura, sitting, chair",
+    ]);
+  });
+
+  it("does not cap how many shelf materials a matrix uses", async () => {
+    const many = ["a", "b", "c", "d", "e"].map((name): RecipeMaterial => ({ role: "character", ref: `F:/角色/${name}`, name, excluded: [] }));
+    api.getShelf.mockResolvedValue({ materials: [...many, sit], facets: {} });
+    render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[]} onStarted={vi.fn()} runs={[]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "泛化矩阵" }));
+    await screen.findByRole("button", { name: "e", pressed: true });
+    expect(screen.getByText("5/5")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /生成 · 5 张/ })).toBeTruthy();
+  });
+
+  it("swaps matrix materials into the subject at the old block's place", () => {
+    const draft = recipe();
+    expect(defaultPlacement(draft, "character")).toBe(0);
+    expect(defaultPlacement(draft, "action")).toBe("subject");
+    const next = matrixCellRecipe(
+      draft,
+      { character: { material: kyoko, tags: ["girl", "sakura kyoko"] }, action: { material: sit, tags: ["sitting"] } },
+      { character: "subject", action: "subject" },
+    );
+    // 换到主体：旧角色也从角色提示词里去掉，不会两个角色同时在。
+    expect(tokensToText(next.subject)).toBe("1girl, sitting, indoors, girl, sakura kyoko");
+    expect(next.character.captions.map((caption) => tokensToText(caption.tokens))).toEqual([""]);
+    // 配方里没有这类素材时：角色替换第 1 条角色提示词，没有角色提示词就进主体。
+    const plain = recipe({ subject: [block("1girl")], character: { enabled: false, captions: [], add_male_caption: false } });
+    expect(defaultPlacement(plain, "character")).toBe("subject");
+  });
+
+  it("compares a matrix cell with the recipe source", () => {
+    const run: ArtistTestRun = {
+      id: "m1",
+      kind: "matrix",
+      status: "succeeded",
+      created_at: 0,
+      finished_at: 1,
+      job_id: null,
+      source: { image_id: "a", path: "F:/x/a.png", rel_path: "a.png" },
+      settings: {
+        kind: "matrix",
+        artist: "1_Ink",
+        image_ids: [],
+        characters: ["characters/homura"],
+        actions: ["actions/standing", "actions/sitting"],
+        seed_mode: "fixed",
+        seed: 7,
+        width: 832,
+        height: 1216,
+        size_mode: "custom",
+      },
+      expected_diff_keys: [],
+      warnings: [],
+      artist: { folder: "1_Ink" },
+      items: [
+        {
+          index: 0,
+          seed: 7,
+          status: "succeeded",
+          image_path: "runs/m1/0.png",
+          character: "characters/homura",
+          action: "actions/standing",
+          compare: {
+            verdict: "reference",
+            similarity: 0.42,
+            dhash_distance: 30,
+            param_diff_count: 1,
+            param_diff_no_resolution_count: 1,
+            diffs: [
+              { path: "$.parameters.steps", key: "steps", kind: "value", left: 28, right: 24, expected: false },
+            ],
+          },
+        },
+        {
+          index: 1,
+          seed: 7,
+          status: "succeeded",
+          image_path: "runs/m1/1.png",
+          character: "characters/homura",
+          action: "actions/sitting",
+        },
+      ],
+    };
+    render(<ArtistTestPanel {...baseProps} exports={[exported]} images={[]} onStarted={vi.fn()} runs={[run]} />);
+
+    expect(screen.getByText(/与原图对照 · homura · standing/)).toBeTruthy();
+    expect(screen.getByText("参数差异")).toBeTruthy();
+    expect(screen.getByText("steps")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "与原图对照 homura · sitting" }));
+    expect(screen.getByText(/与原图对照 · homura · sitting/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "收起对照 homura · sitting" }));
+    expect(screen.queryByText(/与原图对照 · homura · sitting/)).toBeNull();
   });
 
   it("shows only the export button before anything was exported", () => {
     render(<ArtistTestPanel {...baseProps} exports={[]} images={[]} onStarted={vi.fn()} runs={[]} />);
     expect(screen.getByText(/还没有导出过/)).toBeTruthy();
     expect(screen.queryByRole("radio", { name: "回归对照" })).toBeNull();
+  });
+
+  it("hands an exported artist over to Custom", async () => {
+    const onUseInCustom = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ArtistTestPanel
+        {...baseProps}
+        exports={[exported]}
+        images={[]}
+        onStarted={vi.fn()}
+        onUseInCustom={onUseInCustom}
+        runs={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /在 Custom 使用/ }));
+    await waitFor(() => expect(onUseInCustom).toHaveBeenCalledWith(exported));
   });
 });

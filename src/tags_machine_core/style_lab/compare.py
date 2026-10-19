@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,9 @@ def _benign_note(diff: dict[str, Any], source_v4_negative: str | None) -> str | 
         return "原图的出图客户端（如 NAI Smart Studio）在元数据里另存的字段，NovelAI 返回的图里没有，不影响出图"
     if diff["key"].startswith(_CLIENT_HINT_PREFIX) and diff["right"] is None:
         return "客户端的标签提示开关，NovelAI 回写时总是 null"
+    # tags.txt 每段只占一行，导出时提示词里的换行写成空格。
+    if _same_but_whitespace(diff["left"], diff["right"]):
+        return "只差换行或空格：NovelAI 的分词把换行和连续空格都当成一个空格，不影响出图"
     # 网页端 V4 出图 uc 为空、负面只在 v4_negative_prompt；API 出图两处都写同一段负面。
     if (
         diff["key"] == "uc"
@@ -81,6 +85,12 @@ def _benign_note(diff: dict[str, Any], source_v4_negative: str | None) -> str | 
     ):
         return "原图负面只写在 v4_negative_prompt，两种写法等价"
     return None
+
+
+def _same_but_whitespace(left: Any, right: Any) -> bool:
+    if not isinstance(left, str) or not isinstance(right, str) or left == right:
+        return False
+    return re.sub(r"\s+", " ", left).strip() == re.sub(r"\s+", " ", right).strip()
 
 
 def _with_actual_prompts(meta: dict[str, Any]) -> dict[str, Any]:

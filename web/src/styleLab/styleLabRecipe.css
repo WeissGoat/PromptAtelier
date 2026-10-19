@@ -191,6 +191,8 @@
   padding: 2px 7px;
   position: relative;
   text-align: left;
+  /* 按钮默认不换行；一整段的长块要在框里折行。 */
+  white-space: normal;
 }
 
 .sl-chip-en {

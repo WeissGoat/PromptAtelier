@@ -299,6 +299,13 @@
   padding-top: 6px;
 }
 
+/* 选放进哪条角色提示词。 */
+.sl-mblock-target {
+  font-size: 12px;
+  max-width: 220px;
+  padding: 2px 4px;
+}
+
 .sl-card-tag.off {
   background: var(--surface-2);
   border-style: dashed;

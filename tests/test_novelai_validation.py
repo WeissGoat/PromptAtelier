@@ -30,16 +30,26 @@ class NovelAIValidationTest(unittest.TestCase):
         ):
             self.adapter.build_request(self.bundle, seed=123, params={"seed": -1})
 
-    def test_invalid_n_samples_is_rejected(self):
+    def test_n_samples_above_single_request_limit_is_kept_for_batch_split(self):
+        request = self.adapter.build_request(
+            self.bundle,
+            width=1024,
+            height=1024,
+            params={"n_samples": 20},
+        )
+
+        self.assertEqual(request.params["n_samples"], 20)
+
+    def test_zero_n_samples_is_rejected(self):
         with self.assertRaisesRegex(
             ValueError,
-            "NovelAI parameter n_samples must be between 1 and 4, got 5",
+            "NovelAI parameter n_samples must be at least 1, got 0",
         ):
             self.adapter.build_request(
                 self.bundle,
                 width=1024,
                 height=1024,
-                params={"n_samples": 5},
+                params={"n_samples": 0},
             )
 
     def test_fractional_integer_parameter_is_rejected(self):

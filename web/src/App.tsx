@@ -59,7 +59,7 @@ export function App() {
     compare: <CompareStudio />,
     "style-lab": (
       <StyleLabErrorBoundary>
-        <StyleLabPage />
+        <StyleLabPage onOpenCustom={() => handlePageChange("custom")} />
       </StyleLabErrorBoundary>
     ),
   }[page];

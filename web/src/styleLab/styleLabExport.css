@@ -231,6 +231,27 @@
   gap: 6px;
 }
 
+.sl-export-item {
+  align-items: stretch;
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.sl-export-item .sl-export-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sl-export-use {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 .sl-export-chip {
   align-items: center;
   background: var(--surface);
@@ -524,4 +545,33 @@
 .sl-matrix td {
   vertical-align: top;
   width: 180px;
+}
+
+.sl-matrix-cell {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sl-matrix td.on .sl-matrix-cell {
+  border-radius: 6px;
+  outline: 2px solid var(--sl-accent);
+  outline-offset: 3px;
+}
+
+.sl-matrix-compare {
+  margin-top: 10px;
+}
+
+.sl-matrix-place {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sl-matrix-place select {
+  flex: 1 1 auto;
+  min-width: 0;
 }

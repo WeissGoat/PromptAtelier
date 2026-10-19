@@ -22,6 +22,7 @@ from tags_machine_core.execution import (
     execute_render_request,
     execute_sd_generation,
     save_generated_images,
+    split_novelai_samples,
 )
 from tags_machine_core.nodes import NovelAIArtistRepository
 from tags_machine_core.renderers import NovelAIRenderAdapter
@@ -318,6 +319,20 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
             self.assertEqual(result.images[1].meta["split_request_index"], 1)
             self.assertIn("Not a PNG file", result.png_info["images"][0]["error"])
             self.assertEqual(result.png_info["images"][1]["split_request_index"], 1)
+
+    def test_total_samples_above_single_request_limit_split_one_by_one(self):
+        request = NovelAIRenderAdapter().build_request(
+            ScriptComposer().compose_full_prompt(prompt="akemi homura, standing"),
+            width=832,
+            height=1216,
+            params={"n_samples": 20},
+        )
+
+        split = split_novelai_samples(request)
+
+        self.assertEqual(request.params["n_samples"], 20)
+        self.assertEqual(len(split), 20)
+        self.assertEqual([item.params["n_samples"] for item in split], [1] * 20)
 
     def test_execute_novelai_generation_prefers_config_access_token(self):
         with tempfile.TemporaryDirectory() as tmp:
