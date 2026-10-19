@@ -670,6 +670,35 @@ class RecipeTest(TestCase):
         self.assertTrue(recipe.use_source_vibe)
         self.assertIn("not_quailty_prompts", recipe.flags)
 
+    def test_recipe_from_nai5_image_keeps_straight_alpha(self):
+        from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
+
+        path = write_nai_png(
+            self.tmp / "nai5" / "a.png",
+            source="NovelAI Diffusion V5 0ADF9AB7",
+            straight_alpha=False,
+        )
+        recipe = recipe_from_image(build_image_record(path, base=self.tmp))
+
+        self.assertIs(recipe.params["straight_alpha"], False)
+        node = artist_node(recipe, source_path=str(path))["renderers"]["novelai"]
+        self.assertIs(node["params"]["straight_alpha"], False)
+
+    def test_old_nai5_recipe_backfills_straight_alpha_from_source(self):
+        from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
+
+        path = write_nai_png(
+            self.tmp / "nai5-old" / "a.png",
+            source="NovelAI Diffusion V5 0ADF9AB7",
+            straight_alpha=False,
+        )
+        recipe = recipe_from_image(build_image_record(path, base=self.tmp))
+        # 模拟修复前保存的配方：没有 straight_alpha。
+        recipe.params.pop("straight_alpha")
+
+        node = artist_node(recipe, source_path=str(path))["renderers"]["novelai"]
+        self.assertIs(node["params"]["straight_alpha"], False)
+
     def test_artist_node_matches_tags_txt_shape(self):
         from tags_machine_core.style_lab.recipe import artist_node, recipe_from_image
 

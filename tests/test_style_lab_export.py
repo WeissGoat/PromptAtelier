@@ -18,6 +18,7 @@ from tags_machine_core.style_lab.export import (
     ArtistExporter,
     ExportError,
     ExportRequest,
+    artist_values,
     diff_artists,
     folder_name,
     free_folder,
@@ -26,7 +27,14 @@ from tags_machine_core.style_lab.export import (
     suggest_author,
 )
 from tags_machine_core.style_lab.metadata import build_image_record
-from tags_machine_core.style_lab.recipe import Recipe, RecipeToken, artist_node, line_text, tokens_from_text
+from tags_machine_core.style_lab.recipe import (
+    Recipe,
+    RecipeToken,
+    artist_node,
+    line_text,
+    recipe_from_image,
+    tokens_from_text,
+)
 from tags_machine_core.style_lab.workspace import WorkspaceInfo
 
 from tests.test_style_lab import write_nai_png
@@ -188,6 +196,20 @@ class ExporterTest(TestCase):
         self.assertTrue(second["exists"])
         self.assertEqual(second["compare"]["ref"], "1_Ink_Test")
         self.assertTrue(second["compare"]["diff"]["style"]["same"])
+
+    def test_recipe_from_nai5_source_exports_straight_alpha(self):
+        source = write_nai_png(
+            self.tmp / "nai5" / "1.png",
+            source="NovelAI Diffusion V5 0ADF9AB7",
+            straight_alpha=False,
+        )
+        recipe = recipe_from_image(build_image_record(source, base=self.tmp / "nai5"))
+        values = artist_values(recipe, source_path=str(source))
+
+        self.assertIs(values["params"]["straight_alpha"], False)
+        text = render_tags_txt(values)
+        self.assertIn('"straight_alpha":false', text)
+        self.assertEqual(roundtrip_problems(text, values), [])
 
     def test_export_refuses_when_target_moved_since_preview(self):
         from tags_machine_core.style_lab.export import ExportConflictError

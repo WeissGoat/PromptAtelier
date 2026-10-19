@@ -283,6 +283,15 @@ class NAI5ModelSupportTest(unittest.TestCase):
         )
         self.assertTrue(request.params["straight_alpha"])
 
+    def test_nai5_adapter_can_disable_straight_alpha(self):
+        request = NovelAIRenderAdapter().build_request(
+            _simple_bundle(),
+            seed=1,
+            model="nai-diffusion-5-full",
+            params={"straight_alpha": False},
+        )
+        self.assertFalse(request.params["straight_alpha"])
+
     def test_nai5_adapter_includes_normalize_reference_strength(self):
         request = NovelAIRenderAdapter().build_request(
             _simple_bundle(),
