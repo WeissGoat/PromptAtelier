@@ -224,6 +224,18 @@ collections:
           names:
             - "*_st_bad"
 
+    # 与 action_new 同源，仅额外排除 sfw 分类视图（pn_*sfw*），供每日定时批次使用。
+    action_new_nsfw:
+      - selector: folder
+        root: *action_root
+        include:
+          names:
+            - pn_*
+        exclude:
+          names:
+            - "*_st_bad"
+            - "pn_*sfw*"
+
     action_body:
       - collection: action_body_show
       - collection: action_body_ero
