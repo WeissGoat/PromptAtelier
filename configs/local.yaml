@@ -20,7 +20,7 @@ web:
 
 novelai:
   base_url: "https://image.novelai.net"
-  access_token: "pst-ELphm4kgFjhQ6Y8XU33DueifYgg5qUbOLVRgyFWAOMUjB6AvFbseXBB0OznIybeO"
+  access_token: "pst-aZpFq61r044CEDJS9I00Vgul_l9V0X-XGMzOrOinSZiYrT7lOrQ_37Fu9bcUXJlC"
   access_token_env: "NAI_ACCESS_TOKEN"
   timeout: 120
   retry: 3
