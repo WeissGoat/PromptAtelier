@@ -44,6 +44,34 @@ deploy/web/update.sh
 
 `update.sh` 会同步 Python 依赖、重新构建前端、重启服务并等待健康检查通过。服务器上的 `../start.sh`（cron 每天 02:00）在拉取代码后会自动调用它。
 
+## 刷新动作分类视图（pn_* / stn_*）
+
+`pn_*`、`stn_*` 是本地生成的链接视图，**不在 Git 里**。新机器 clone 完直接起服务，动作池会是空的。启动时加参数即可自动补齐：
+
+```bash
+# 推荐：先 git pull 拿最新 manifest，再按 manifest 增量复刻链接（不改 manifest，秒级完成）
+python -m tags_machine_core.web --config configs/server.yaml \
+    --refresh-category-view
+
+# 要重新解析 classify.yaml、重算分桶时（会重写 Git 跟踪的 manifest，仅限本机调规则时用）
+python -m tags_machine_core.web --config configs/server.yaml \
+    --refresh-category-view=rebuild
+
+# 离线 / 不想联网
+    --skip-category-view-pull
+
+# 配置文件里没有 legacy.design_root 时显式指定
+    --category-view-root /root/project/tags_machine/design/动作改2
+```
+
+行为要点：
+
+- 刷新在 uvicorn 启动**之前**同步执行，保证动作池第一次扫描就是完整的。
+- `git pull` 走 `--ff-only`；本地有已跟踪文件改动或有冲突时**跳过拉取**并在报告里写明原因，绝不覆盖本地内容。
+- 刷新失败只打印告警，**不影响 Web 启动**。
+- 与每天 20:30 的重建任务共用 `动作改2/.category_view.lock`，不会互相删链接。
+- 服务器上 `new` 指向 action 仓库；Windows 上必须是 `mklink /J new <action路径>`。
+
 ## 运维
 
 ```bash
