@@ -46,7 +46,16 @@ deploy/web/update.sh
 
 ## 刷新动作分类视图（pn_* / stn_*）
 
-`pn_*`、`stn_*` 是本地生成的链接视图，**不在 Git 里**。新机器 clone 完直接起服务，动作池会是空的。启动时加参数即可自动补齐：
+`pn_*`、`stn_*` 是本地生成的链接视图，**不在 Git 里**。新机器 clone 完直接起服务，动作池会是空的。
+
+两个自带入口已经带上这个参数，不用手动加：
+
+| 入口 | 实际传参 |
+| :--- | :--- |
+| `scripts/dev_web.py`（本地开发） | `--refresh-category-view --skip-category-view-pull`（只补本地链接，不联网） |
+| `deploy/web/promptatelier-web.service`（服务器） | `--refresh-category-view`（先 `git pull --ff-only` 再补链） |
+
+手动起服务时：
 
 ```bash
 # 推荐：先 git pull 拿最新 manifest，再按 manifest 增量复刻链接（不改 manifest，秒级完成）

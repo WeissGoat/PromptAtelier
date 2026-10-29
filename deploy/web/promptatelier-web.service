@@ -14,7 +14,8 @@ ExecStart=/root/project/tags_machine/refactor/.venv/bin/python -m tags_machine_c
     --config configs/server.yaml \
     --host 127.0.0.1 \
     --port 8766 \
-    --static-dir web/dist
+    --static-dir web/dist \
+    --refresh-category-view
 Restart=on-failure
 RestartSec=5
 MemoryMax=2G
