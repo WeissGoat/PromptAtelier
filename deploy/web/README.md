@@ -52,7 +52,7 @@ deploy/web/update.sh
 
 | 入口 | 实际传参 |
 | :--- | :--- |
-| `scripts/dev_web.py`（本地开发） | `--refresh-category-view --skip-category-view-pull`（只补本地链接，不联网） |
+| `scripts/dev_web.py`（本地开发） | `--refresh-category-view`（与服务器一致：先 `git pull --ff-only` 再补链） |
 | `deploy/web/promptatelier-web.service`（服务器） | `--refresh-category-view`（先 `git pull --ff-only` 再补链） |
 
 手动起服务时：

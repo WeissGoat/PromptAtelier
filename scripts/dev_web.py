@@ -64,9 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         args.host,
         "--port",
         str(args.backend_port),
-        # 本地开发：只按 manifest 补本地链接，不联网拉取（拉取交给自己的 git 流程）
+        # 与服务器一致：先 git pull --ff-only 拿最新 manifest，再按 manifest 增量补链
         "--refresh-category-view",
-        "--skip-category-view-pull",
     ]
     if args.config:
         backend_cmd.extend(["--config", args.config])
