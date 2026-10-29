@@ -32,9 +32,11 @@ def _refresh_category_view(args: argparse.Namespace) -> None:
         return
     print("[category-view] " + json.dumps(report, ensure_ascii=False), flush=True)
     if not report.get("ok"):
+        detail = report.get("error") or report.get("skipped") or "see report above"
+        if args.category_view_strict:
+            raise SystemExit(f"[category-view] refresh failed (strict): {detail}")
         print(
-            "[category-view] view may be stale; web will start anyway: "
-            + str(report.get("error") or report.get("skipped") or "see report above"),
+            f"[category-view] view may be stale; web will start anyway: {detail}",
             flush=True,
         )
 
@@ -72,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-category-view-pull",
         action="store_true",
         help="刷新分类视图前不执行 git pull（离线 / 不想联网时使用）",
+    )
+    parser.add_argument(
+        "--category-view-strict",
+        action="store_true",
+        help="分类视图刷新失败时直接退出，而不是带病启动（CI / 部署校验用）",
     )
     return parser
 

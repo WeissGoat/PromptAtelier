@@ -68,9 +68,12 @@ python -m tags_machine_core.web --config configs/server.yaml \
 
 - 刷新在 uvicorn 启动**之前**同步执行，保证动作池第一次扫描就是完整的。
 - `git pull` 走 `--ff-only`；本地有已跟踪文件改动或有冲突时**跳过拉取**并在报告里写明原因，绝不覆盖本地内容。
-- 刷新失败只打印告警，**不影响 Web 启动**。
+- 刷新失败只打印告警，**不影响 Web 启动**；加 `--category-view-strict` 则变为失败即退出（部署校验 / CI 用）。
+- 单个链接失败（权限、Windows 路径超长、junction 被占用）只跳过该条，其余照建，报告里 `partial: true` + `stats.errors` 给出前 10 条原因；下次启动自动补。
+- 锁等待有截止时间（900s），拿不到锁抛 `TimeoutError` 并降级为告警，不会无声挂住启动。
 - 与每天 20:30 的重建任务共用 `动作改2/.category_view.lock`，不会互相删链接。
 - 服务器上 `new` 指向 action 仓库；Windows 上必须是 `mklink /J new <action路径>`。
+- `--refresh-category-view=rebuild` 中途失败可能留下脏 manifest；报告里会给 `dirty_manifest` + `hint`，按提示 `git checkout -- category_view_manifest.json` 回滚。
 
 ## 运维
 

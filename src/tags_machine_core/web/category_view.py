@@ -91,40 +91,49 @@ def git_pull_ff_only(repo: Path, *, timeout: float = 180.0) -> dict[str, Any]:
 
 @contextmanager
 def category_view_lock(root: Path, *, timeout: float = 900.0) -> Iterator[None]:
-    """跨平台排他锁：防止 Web 刷新与定时重建互相删链接。"""
-    handle = (root / LOCK_NAME).open("a+")
-    try:
-        if os.name == "nt":
-            import msvcrt
+    """跨平台排他锁：防止 Web 刷新与定时重建互相删链接。
 
-            deadline = time.monotonic() + timeout
-            while True:
-                try:
+    非阻塞重试 + 截止时间：拿不到锁就抛 TimeoutError，绝不无限阻塞（否则重建卡住时
+    Web 就永远起不来）。POSIX 与 Windows 行为一致。
+    """
+    handle = (root / LOCK_NAME).open("a+")
+    deadline = time.monotonic() + timeout
+    locked = False
+    try:
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    if time.monotonic() > deadline:
-                        raise TimeoutError("category view lock timeout") from None
-                    time.sleep(0.5)
-        else:
-            import fcntl
+                else:
+                    import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"category view lock busy for {timeout:.0f}s: {root / LOCK_NAME}"
+                    ) from None
+                time.sleep(0.5)
         yield
     finally:
-        try:
-            if os.name == "nt":
-                import msvcrt
+        if locked:
+            try:
+                if os.name == "nt":
+                    import msvcrt
 
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
 
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            pass
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
         handle.close()
 
 
@@ -185,8 +194,22 @@ def refresh_category_view(
             report["returncode"] = proc.returncode
             report["ok"] = proc.returncode == 0
             report["stats"] = _last_json_line(proc.stdout)
+            stats = report.get("stats") or {}
+            if stats.get("failed"):
+                report["partial"] = True  # 部分链接失败，其余已建好
             if proc.returncode != 0:
                 report["stderr"] = proc.stderr.strip()[-1500:]
+                if mode == "rebuild":
+                    dirty = _git(
+                        ["status", "--porcelain", "--untracked-files=no", "--", MANIFEST_NAME],
+                        root,
+                        30.0,
+                    )
+                    if dirty.returncode == 0 and dirty.stdout.strip():
+                        report["dirty_manifest"] = True
+                        report["hint"] = (
+                            f"manifest 已被改写但刷新失败；确认后执行 git checkout -- {MANIFEST_NAME}"
+                        )
             elif proc.stderr.strip():
                 report["stderr"] = proc.stderr.strip()[-800:]
     except (OSError, subprocess.SubprocessError, TimeoutError) as exc:
