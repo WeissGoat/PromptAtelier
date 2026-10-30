@@ -73,6 +73,19 @@ python -m tags_machine_core.web --config configs/server.yaml \
     --category-view-root /root/project/tags_machine/design/动作改2
 ```
 
+### 拉取的超时与停滞检测
+
+`git pull` 的超时是**总耗时上限**（每个仓库 300s），不是"多久没响应"。真正的停滞判定交给传输层，用 `git -c` 注入、跟着代码走，换机器无需另配：
+
+| 传输 | 注入参数 | 行为 |
+| :--- | :--- | :--- |
+| HTTPS | `http.lowSpeedLimit=1000` + `http.lowSpeedTime=20` | 速度低于 1KB/s 持续 20s → 中止 |
+| SSH | `core.sshCommand="ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"` | 连不上 10s 放弃；连接静默 45s 放弃；无 TTY 不弹密码 |
+
+已配置 `core.sshCommand` 的机器（如 Windows 用 plink）不会被覆盖，保持用户自己的设置。
+
+慢但在传的拉取会一直传下去；真断流几十秒就退出并降级使用本地 manifest。被强制中止时若 `.git` 下残留 `*.lock`，会上报到报告的 `stale_locks` 字段并给出删除提示，**不会自动删除**（可能有其他 git 进程在操作）。
+
 行为要点：
 
 - 刷新在 uvicorn 启动**之前**同步执行，保证动作池第一次扫描就是完整的。

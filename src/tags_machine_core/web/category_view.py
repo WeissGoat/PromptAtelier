@@ -60,29 +60,78 @@ def _git(args: list[str], cwd: Path, timeout: float) -> subprocess.CompletedProc
     )
 
 
-def git_pull_ff_only(repo: Path, *, timeout: float = 180.0) -> dict[str, Any]:
-    """安全的快进拉取。工作区有已跟踪改动、或无法快进时跳过，绝不覆盖本地内容。"""
+# 传输层停滞检测：git 自己默认不启用（curl_low_speed_limit = -1），断流会一直挂着。
+# 用 `git -c` 注入而不是环境变量 / --global，保证行为跟着代码走，换机器不用重配。
+HTTP_STALL_ARGS = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"]
+# 总耗时兜底：停滞检测已经能在几十秒内止损，这里只防极端情况无限挂着。
+PULL_TIMEOUT = 300.0
+SSH_STALL_COMMAND = (
+    "ssh -o BatchMode=yes -o ConnectTimeout=10"
+    " -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+)
+
+
+def _ssh_stall_args(repo: Path) -> list[str]:
+    """SSH 停滞检测；用户已自定义 core.sshCommand（如 Windows 的 plink）时不覆盖。"""
+    try:
+        existing = _git(["config", "core.sshCommand"], repo, 30.0)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if existing.returncode == 0 and existing.stdout.strip():
+        return []
+    return ["-c", f"core.sshCommand={SSH_STALL_COMMAND}"]
+
+
+def _report_stale_locks(repo: Path, report: dict[str, Any], reason: str) -> None:
+    """超时被杀后 git 可能留下 lock 文件；只报告不自动删（可能有其他 git 进程在跑）。"""
+    report["skipped"] = reason
+    lock_dir = repo / ".git"
+    try:
+        locks = sorted(p.name for p in lock_dir.glob("*.lock"))
+    except OSError:
+        return
+    if locks:
+        report["stale_locks"] = locks
+        report["hint"] = (
+            "确认没有其他 git 进程在操作该仓库后再手动删除: "
+            + ", ".join(f".git/{name}" for name in locks)
+        )
+
+
+def git_pull_ff_only(repo: Path, *, timeout: float = 300.0) -> dict[str, Any]:
+    """安全的快进拉取。工作区有已跟踪改动、或无法快进时跳过，绝不覆盖本地内容。
+
+    timeout 是总耗时上限（墙钟），不是停滞判定；停滞由 HTTP_STALL_ARGS /
+    SSH_STALL_COMMAND 交给传输层处理——真断流几十秒就退出，慢但在传则继续。
+    """
     report: dict[str, Any] = {"repo": str(repo), "pulled": False}
     if not (repo / ".git").exists():
         report["skipped"] = "not a git repo"
         return report
     try:
-        dirty = _git(["status", "--porcelain", "--untracked-files=no"], repo, timeout)
+        dirty = _git(["status", "--porcelain", "--untracked-files=no"], repo, 60.0)
         if dirty.returncode != 0:
             report["skipped"] = f"git status failed: {dirty.stderr.strip()[:200]}"
             return report
         if dirty.stdout.strip():
             report["skipped"] = "tracked files modified locally"
             return report
-        before = _git(["rev-parse", "--short", "HEAD"], repo, timeout).stdout.strip()
-        pulled = _git(["pull", "--ff-only", "--quiet"], repo, timeout)
-        after = _git(["rev-parse", "--short", "HEAD"], repo, timeout).stdout.strip()
+        before = _git(["rev-parse", "--short", "HEAD"], repo, 30.0).stdout.strip()
+        pulled = _git(
+            [*HTTP_STALL_ARGS, *_ssh_stall_args(repo), "pull", "--ff-only", "--quiet"],
+            repo,
+            timeout,
+        )
+        after = _git(["rev-parse", "--short", "HEAD"], repo, 30.0).stdout.strip()
         report.update({"before": before, "after": after})
         if pulled.returncode != 0:
             report["skipped"] = pulled.stderr.strip()[:400] or "pull failed"
             return report
         report["pulled"] = before != after
         report["up_to_date"] = before == after
+        return report
+    except subprocess.TimeoutExpired:
+        _report_stale_locks(repo, report, f"pull exceeded {timeout:.0f}s total, aborted")
         return report
     except (OSError, subprocess.SubprocessError) as exc:
         report["skipped"] = str(exc)[:400]
@@ -167,7 +216,7 @@ def refresh_category_view(
                 report["pull_design_repo"] = git_pull_ff_only(root)
                 new_dir = root / "new"
                 report["pull_action_repo"] = (
-                    git_pull_ff_only(new_dir, timeout=600.0)
+                    git_pull_ff_only(new_dir, timeout=PULL_TIMEOUT)
                     if new_dir.exists()
                     else {"repo": str(new_dir), "pulled": False, "skipped": "new missing"}
                 )
