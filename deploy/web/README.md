@@ -97,6 +97,35 @@ python -m tags_machine_core.web --config configs/server.yaml \
 - 服务器上 `new` 指向 action 仓库；Windows 上必须是 `mklink /J new <action路径>`。
 - `--refresh-category-view=rebuild` 中途失败可能留下脏 manifest；报告里会给 `dirty_manifest` + `hint`，按提示 `git checkout -- category_view_manifest.json` 回滚。
 
+## 本地生成服装节点库（服装）
+
+`design/服装` 是 refactor 里 `role=clothing` 池的数据源（`nodes/role_paths.py` 的
+`"clothing": ("服装", ...)`）。它由 `动作改2/tools/extract_action_clothes.py` 从动作节点
+抽出来，**不入库**——`design/.gitignore` 里已忽略，新机器 clone 完自己生成。
+
+跟分类视图同一个开关：启动时带 `--refresh-category-view` 就会顺带刷新，顺序在
+relink 之后（relink 先保证节点可见，再抽服装）。
+
+判断是否要跑只看时间戳：动作库没有新的 `tags.txt` / `classify.yaml` 就跳过（约 1s），
+有变化才重跑（约 7s，脚本幂等，已有节点全部 skip）。失败只打一行 `[clothing-pool]` 告警，
+Web 照常启动。
+
+| 参数 | 作用 |
+| :--- | :--- |
+| `--skip-clothing-pool` | 本次启动不生成（离线 / 只调前端时用） |
+| `--refresh-clothing-pool` | 忽略时间戳，强制重跑 |
+| `--clothing-pool-dir` | 换生成目录；默认 `动作改2` 的兄弟目录 `服装` |
+
+手动重建：
+
+```bash
+# 在 design/ 目录下执行
+python 动作改2/tools/extract_action_clothes.py --export --export-dir 服装
+```
+
+- 锁是独立的 `动作改2/.clothing_pool.lock`（等待上限 120s），不与分类视图锁互相阻塞。
+- 生成成功但产出 0 个节点时按失败处理（源库可能为空），报告里给 `error`。
+
 ## 运维
 
 ```bash

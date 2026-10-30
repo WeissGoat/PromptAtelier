@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
@@ -12,15 +13,13 @@ if sys.platform == "win32":
 import uvicorn
 
 
-def _refresh_category_view(args: argparse.Namespace) -> None:
+def _refresh_category_view(
+    args: argparse.Namespace, config_path: str | Path | None
+) -> None:
     """启动前刷新分类视图；失败只告警，不阻止 Web 启动。"""
-    import json
-
-    from tags_machine_core.web.app import resolve_web_config_path
     from tags_machine_core.web.category_view import refresh_category_view_at_startup
 
     try:
-        config_path = resolve_web_config_path(args.config)
         report = refresh_category_view_at_startup(
             config_path=config_path,
             explicit_root=args.category_view_root,
@@ -37,6 +36,31 @@ def _refresh_category_view(args: argparse.Namespace) -> None:
             raise SystemExit(f"[category-view] refresh failed (strict): {detail}")
         print(
             f"[category-view] view may be stale; web will start anyway: {detail}",
+            flush=True,
+        )
+
+
+def _refresh_clothing_pool(
+    args: argparse.Namespace, config_path: str | Path | None
+) -> None:
+    """启动前本地生成服装节点库（design/服装）；失败只告警，不阻止 Web 启动。"""
+    from tags_machine_core.web.clothing_pool import refresh_clothing_pool_at_startup
+
+    try:
+        report = refresh_clothing_pool_at_startup(
+            config_path=config_path,
+            explicit_root=args.category_view_root,
+            export_root=args.clothing_pool_dir,
+            force=args.refresh_clothing_pool,
+        )
+    except Exception as exc:  # noqa: BLE001 - 派生库生成失败不应该让 Web 起不来
+        print(f"[clothing-pool] refresh failed: {type(exc).__name__}: {exc}", flush=True)
+        return
+    print("[clothing-pool] " + json.dumps(report, ensure_ascii=False), flush=True)
+    if not report.get("ok"):
+        detail = report.get("error") or report.get("skipped") or "see report above"
+        print(
+            f"[clothing-pool] pool may be stale; web will start anyway: {detail}",
             flush=True,
         )
 
@@ -80,6 +104,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="分类视图刷新失败时直接退出，而不是带病启动（CI / 部署校验用）",
     )
+    parser.add_argument(
+        "--skip-clothing-pool",
+        action="store_true",
+        help="启动时不本地生成服装节点库（design/服装）",
+    )
+    parser.add_argument(
+        "--refresh-clothing-pool",
+        action="store_true",
+        help="忽略时间戳判断，强制重跑服装节点库生成",
+    )
+    parser.add_argument(
+        "--clothing-pool-dir",
+        help="服装节点库目录；默认 design/服装（动作改2 的兄弟目录）",
+    )
     return parser
 
 
@@ -91,7 +129,21 @@ def main(argv: list[str] | None = None) -> None:
         os.environ["PROMPTATELIER_STATIC_DIR"] = args.static_dir
     src_dir = str(Path(__file__).resolve().parents[2])
     if args.refresh_category_view:
-        _refresh_category_view(args)
+        from tags_machine_core.web.app import resolve_web_config_path
+
+        try:
+            config_path = resolve_web_config_path(args.config)
+        except Exception as exc:  # noqa: BLE001 - 定位不到配置就各自降级
+            print(f"[startup] config not resolved: {type(exc).__name__}: {exc}", flush=True)
+            config_path = None
+        _refresh_category_view(args, config_path)
+        if args.skip_clothing_pool:
+            print(
+                "[clothing-pool] " + json.dumps({"ok": True, "skipped": "--skip-clothing-pool"}),
+                flush=True,
+            )
+        else:
+            _refresh_clothing_pool(args, config_path)
     loop_opt = "asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto"
     uvicorn.run(
         "tags_machine_core.web:create_app",

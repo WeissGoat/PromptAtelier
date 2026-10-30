@@ -139,13 +139,14 @@ def git_pull_ff_only(repo: Path, *, timeout: float = 300.0) -> dict[str, Any]:
 
 
 @contextmanager
-def category_view_lock(root: Path, *, timeout: float = 900.0) -> Iterator[None]:
-    """跨平台排他锁：防止 Web 刷新与定时重建互相删链接。
+def file_lock(path: Path, *, timeout: float = 900.0) -> Iterator[None]:
+    """跨平台排他锁：防止多个进程同时改写同一个生成目录。
 
     非阻塞重试 + 截止时间：拿不到锁就抛 TimeoutError，绝不无限阻塞（否则重建卡住时
     Web 就永远起不来）。POSIX 与 Windows 行为一致。
     """
-    handle = (root / LOCK_NAME).open("a+")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+")
     deadline = time.monotonic() + timeout
     locked = False
     try:
@@ -164,9 +165,7 @@ def category_view_lock(root: Path, *, timeout: float = 900.0) -> Iterator[None]:
                 break
             except OSError:
                 if time.monotonic() > deadline:
-                    raise TimeoutError(
-                        f"category view lock busy for {timeout:.0f}s: {root / LOCK_NAME}"
-                    ) from None
+                    raise TimeoutError(f"lock busy for {timeout:.0f}s: {path}") from None
                 time.sleep(0.5)
         yield
     finally:
@@ -184,6 +183,13 @@ def category_view_lock(root: Path, *, timeout: float = 900.0) -> Iterator[None]:
             except OSError:
                 pass
         handle.close()
+
+
+@contextmanager
+def category_view_lock(root: Path, *, timeout: float = 900.0) -> Iterator[None]:
+    """分类视图专用锁：防止 Web 刷新与定时重建互相删链接。"""
+    with file_lock(root / LOCK_NAME, timeout=timeout):
+        yield
 
 
 def _last_json_line(text: str) -> dict[str, Any] | None:
