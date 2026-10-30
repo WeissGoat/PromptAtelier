@@ -98,8 +98,36 @@ def _report_stale_locks(repo: Path, report: dict[str, Any], reason: str) -> None
         )
 
 
+def _dirty_paths(repo: Path, *, limit: int = 10) -> list[str]:
+    """失败时给诊断用：列出已跟踪且被改动的文件（未跟踪文件不计）。"""
+    try:
+        res = _git(["status", "--porcelain", "--untracked-files=no"], repo, 60.0)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if res.returncode != 0:
+        return []
+    paths = [line[3:].strip() for line in res.stdout.splitlines() if line.strip()]
+    return paths[:limit]
+
+
+def _classify_pull_failure(stderr: str) -> str:
+    """把 git 的原始报错归成一句人话，不改变失败判定。"""
+    text = stderr.lower()
+    if "would be overwritten" in text or "local changes" in text:
+        return "local changes overlap incoming commits"
+    if "not possible to fast-forward" in text or "diverg" in text:
+        return "branch diverged; ff-only refused"
+    if "could not read from remote" in text or "permission denied" in text:
+        return "remote unreachable or auth failed"
+    return "pull failed"
+
+
 def git_pull_ff_only(repo: Path, *, timeout: float = 300.0) -> dict[str, Any]:
-    """安全的快进拉取。工作区有已跟踪改动、或无法快进时跳过，绝不覆盖本地内容。
+    """快进拉取，交给 git 自己判断能否安全执行。
+
+    本地有改动但远端没碰这些文件时，``pull --ff-only`` 本来就会成功，本地改动原样保留；
+    只有远端会覆盖本地改动时才由 git 中止。所以不做先验脏判断，失败时再把原因和脏文件
+    列进报告。
 
     timeout 是总耗时上限（墙钟），不是停滞判定；停滞由 HTTP_STALL_ARGS /
     SSH_STALL_COMMAND 交给传输层处理——真断流几十秒就退出，慢但在传则继续。
@@ -109,13 +137,6 @@ def git_pull_ff_only(repo: Path, *, timeout: float = 300.0) -> dict[str, Any]:
         report["skipped"] = "not a git repo"
         return report
     try:
-        dirty = _git(["status", "--porcelain", "--untracked-files=no"], repo, 60.0)
-        if dirty.returncode != 0:
-            report["skipped"] = f"git status failed: {dirty.stderr.strip()[:200]}"
-            return report
-        if dirty.stdout.strip():
-            report["skipped"] = "tracked files modified locally"
-            return report
         before = _git(["rev-parse", "--short", "HEAD"], repo, 30.0).stdout.strip()
         pulled = _git(
             [*HTTP_STALL_ARGS, *_ssh_stall_args(repo), "pull", "--ff-only", "--quiet"],
@@ -125,7 +146,12 @@ def git_pull_ff_only(repo: Path, *, timeout: float = 300.0) -> dict[str, Any]:
         after = _git(["rev-parse", "--short", "HEAD"], repo, 30.0).stdout.strip()
         report.update({"before": before, "after": after})
         if pulled.returncode != 0:
-            report["skipped"] = pulled.stderr.strip()[:400] or "pull failed"
+            stderr = pulled.stderr.strip()
+            report["skipped"] = stderr[-400:] or "pull failed"
+            report["reason"] = _classify_pull_failure(stderr)
+            dirty = _dirty_paths(repo)
+            if dirty:
+                report["dirty"] = dirty
             return report
         report["pulled"] = before != after
         report["up_to_date"] = before == after
