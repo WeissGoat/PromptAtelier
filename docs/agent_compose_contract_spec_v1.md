@@ -106,7 +106,7 @@ nodes:
   background: null
 requirements: |
   背景统一改为夜晚教室，保持服装连续；第 3 帧之后加一个窗边回头的过渡镜头。
-options: { keep_order: true, allow_new_frames: true, max_new_frames: 2, exclude_members: [] }
+options: { keep_order: true, allow_new_frames: true, max_new_frames: 2 }
 author: "<外部 agent / 模型>"       # Agent 选填
 ---
 
@@ -277,7 +277,7 @@ class ContractValidator(Protocol):
 | `duplicate_tags` / `tag_conflict` | 复用现有 policies 规则 |
 | `character_count` | `1girl/2girls/1boy` 与 `characters`、动作 `cast` 一致 |
 | `source_exists` | `source` 属于本动作组；`inspired_by` 存在 |
-| `coverage` | 动作组中没有被任何帧使用的成员（warn）；`options.exclude_members` 中的成员记为「已排除」，不报 |
+| `coverage` | 动作组中没有被任何帧使用的成员（warn） |
 
 ---
 
@@ -323,7 +323,7 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 
 **中栏：契约查看**
 - 头部：标题、格式、校验汇总、来源过期提示。
-- **动作组覆盖提示**（契约头部下方）：「共 N 个动作 · 已覆盖 X · 缺少 Y：#4 …… · 新增 Z 帧（自定义）」，缺少时用警告色；排除的成员显示为「已排除」。数据来自 `coverage` 校验器。旁边是「动作组参考」入口。
+- **动作组覆盖**：契约头部状态标签旁一个紧凑按钮「动作组 N +新增数 −缺少数」（新增绿色、缺少红色）。点击展开详情：缺少的成员（序号、名称、ref）、新增的帧（自定义及参考动作）、已覆盖的对应关系（#1 → f01），以及「动作组参考」入口。数据来自 `coverage` 校验器。
 - 帧列表：每帧显示**来源**：动作 node 名、组内序号，以及**来源动作的预览图**（自定义帧显示参考动作的预览图），点击看大图。预览图取动作节点目录里直接放的图片，复用 `web/services/node_previews.py`；没有图片时显示占位（注意：云端的 action-new 只有文本，图片只在 Drive 上）。生成的图显示在帧下方的「结果」一行。
 - 每帧三种视图（顶部切换）：
   - **标记**：保留 Agent 的换行排版，tag 按 §5.2 着色，悬停显示来源与原文。
