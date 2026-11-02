@@ -277,6 +277,7 @@ class ContractValidator(Protocol):
 | `duplicate_tags` / `tag_conflict` | 复用现有 policies 规则 |
 | `character_count` | `1girl/2girls/1boy` 与 `characters`、动作 `cast` 一致 |
 | `source_exists` | `source` 属于本动作组；`inspired_by` 存在 |
+| `coverage` | 动作组中没有被任何帧使用的成员（warn）；`options.exclude_members` 中的成员记为「已排除」，不报 |
 
 ---
 
@@ -322,14 +323,22 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 
 **中栏：契约查看**
 - 头部：标题、格式、校验汇总、来源过期提示。
-- 帧列表：每帧显示**来源**：动作 node 名、组内序号、缩略图；自定义帧显示「自定义」和参考动作。
-- 每帧两种视图（顶部切换）：
+- **动作组覆盖提示**（契约头部下方）：「共 N 个动作 · 已覆盖 X · 缺少 Y：#4 …… · 新增 Z 帧（自定义）」，缺少时用警告色；排除的成员显示为「已排除」。数据来自 `coverage` 校验器。旁边是「动作组参考」入口。
+- 帧列表：每帧显示**来源**：动作 node 名、组内序号，以及**来源动作的预览图**（自定义帧显示参考动作的预览图），点击看大图。预览图取动作节点目录里直接放的图片，复用 `web/services/node_previews.py`；没有图片时显示占位（注意：云端的 action-new 只有文本，图片只在 Drive 上）。生成的图显示在帧下方的「结果」一行。
+- 每帧三种视图（顶部切换）：
   - **标记**：保留 Agent 的换行排版，tag 按 §5.2 着色，悬停显示来源与原文。
   - **原文**：代码块原文，可复制。
+  - **来源原文**：来源动作 node 的原始正向 / 负面提示词；自定义帧显示参考动作的原始提示词。
 - Diff 不单独占视图，显示在每帧内容下方（§5.3，只含改写 / 删除 / 新增）；顶部「显示 Diff」开关控制，默认打开。
 - 翻译：顶部提供「翻译来源」（谷歌翻译 / AI 翻译）和「译文 开/关」，打开后在标记视图和 Diff 中每个 tag 后显示〔中文〕。直接复用画风工坊的翻译能力：后端 `POST /translate`（`llm/translate.py`、`google_translate`，带缓存），前端 `styleLab/translations.ts` 的 `translationStore` / `useTranslations`（请求合并、失败不重复请求）。实现时把这两个前端模块从 `styleLab/` 挪到公共目录，供两个页面共用。
 - 校验问题标在对应 tag 或帧上。
 - 按帧编辑：直接编辑该帧文本，保存时只替换文件中该帧的代码块并重新校验；如果文件在此期间被外部修改（mtime/hash 变化），提示冲突。
+
+**动作组参考（抽屉）**
+- 从覆盖提示或契约头部打开，覆盖在右侧，不离开当前契约。
+- 按组内顺序列出全部成员：预览图、序号和名称、ref、classify 摘要（phase / cast / pose / environment / clothing / scope）、原始提示词。
+- 每个成员标明「用于 f01」或「未使用」；可筛选「未使用」。可「定位到帧」「复制 ref」「复制原始提示词」。
+- 底部列出自定义帧引用的参考动作（`inspired_by`）。
 
 **右栏：生图**
 - 画风（不进契约）、出图参数（Negative、尺寸、Width/Height、NT、N、Seed、ComfyUI 运行位置，复用 Custom 的组件）。
