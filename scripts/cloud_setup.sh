@@ -4,7 +4,8 @@
 #   2. 选一个带 tkinter 的 Python 做 uv sync（task_tools 的测试会 import tkinter）
 #   3. 装前端依赖
 #   4. 拉 TagsHub 素材库及其子模块（画风 / 角色 / 动作改2 / 背景 / vibe）
-#   5. 生成 configs/cloud.yaml，design_root 指向 TagsHub
+#   5. 拉 action 动作库（action-new），把 动作改2/new 链过去（分类视图需要）
+#   6. 生成 configs/cloud.yaml，design_root 指向 TagsHub
 #
 # 用法：bash scripts/cloud_setup.sh
 # 可重复执行，已经装好的步骤会跳过或增量更新。
@@ -13,6 +14,8 @@
 #   TAGSHUB_DIR     素材库放哪，默认是本仓库同级的 TagsHub 目录
 #   TAGSHUB_URL     素材库地址，默认 https://github.com/WeissGoat/TagsHub
 #   TAGSHUB_PINNED  设为 1 时子模块用 TagsHub 记录的提交；默认拉各子仓库的最新分支
+#   ACTION_DIR      动作库放哪，默认是本仓库同级的 action-new 目录
+#   ACTION_URL      动作库地址，默认 https://github.com/WeissGoat/action-new
 #
 # 素材库子模块是私有仓库，机器上要有能读它们的 GitHub 权限。
 # Claude Code 云会话里拉不下来时，让 Claude 把这几个仓库加到会话里再重跑本脚本。
@@ -25,6 +28,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 TAGSHUB_DIR="${TAGSHUB_DIR:-$(dirname "$ROOT")/TagsHub}"
 TAGSHUB_URL="${TAGSHUB_URL:-https://github.com/WeissGoat/TagsHub}"
+ACTION_DIR="${ACTION_DIR:-$(dirname "$ROOT")/action-new}"
+ACTION_URL="${ACTION_URL:-https://github.com/WeissGoat/action-new}"
 CONFIG_OUT="$ROOT/configs/cloud.yaml"
 WARNINGS=()
 
@@ -93,6 +98,36 @@ for path in "${SUBMODULES[@]}"; do
         warn "素材库子模块 $path 拉取失败（$url），检查是否有该私有仓库的读权限"
     fi
 done
+
+step "action 动作库 -> $ACTION_DIR"
+# 服务器上 动作改2/new 链到 /root/action，Windows 上是 mklink /J 到 Drive；
+# 云端用 action-new 仓库（只有文本，图片只在 Drive 上）。
+# 没有 new 时 Web 启动的分类视图会失败（new does not exist）。
+action_ok=1
+if [ -d "$ACTION_DIR/.git" ]; then
+    GIT_TERMINAL_PROMPT=0 git -C "$ACTION_DIR" pull --ff-only || warn "action-new 更新失败，继续用本地版本"
+elif [ -e "$ACTION_DIR" ]; then
+    warn "$ACTION_DIR 已存在但不是 git 仓库，跳过动作库"
+    action_ok=0
+elif ! GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$ACTION_URL" "$ACTION_DIR"; then
+    warn "action-new 克隆失败（$ACTION_URL），检查是否有该私有仓库的读权限；分类视图会失败"
+    action_ok=0
+fi
+if [ "$action_ok" = 1 ] && [ -d "$TAGSHUB_DIR/动作改2" ]; then
+    NEW_LINK="$TAGSHUB_DIR/动作改2/new"
+    if [ -L "$NEW_LINK" ]; then
+        target="$(readlink -f "$NEW_LINK")"
+        if [ "$target" = "$(readlink -f "$ACTION_DIR")" ]; then
+            echo "动作改2/new 已指向 $ACTION_DIR"
+        else
+            warn "动作改2/new 指向 $target 而不是 $ACTION_DIR，未改动"
+        fi
+    elif [ -e "$NEW_LINK" ]; then
+        warn "动作改2/new 已存在且不是链接，未改动"
+    else
+        ln -s "$ACTION_DIR" "$NEW_LINK" && echo "动作改2/new -> $ACTION_DIR"
+    fi
+fi
 
 step "生成 $CONFIG_OUT"
 # 以 local.example.yaml 为底；本机 local.yaml 里的 comfyui 目标（非密钥）一并带上，NovelAI token 不落盘。
