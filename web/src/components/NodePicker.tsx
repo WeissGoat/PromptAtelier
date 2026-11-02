@@ -8,7 +8,7 @@ import { NodePreviewImage } from "./NodePreviewImage";
 
 type NodePickerProps = {
   label: string;
-  role: NodeRole | "clothing";
+  role: NodeRole | "clothing" | "background";
   value: string;
   displayValue?: string;
   placeholder: string;

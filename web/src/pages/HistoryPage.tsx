@@ -16,6 +16,7 @@ const kindLabels: Record<HistoryRunKind, string> = {
   sequential: "Sequential",
   "sequential-all": "Sequential",
   primary: "Primary",
+  contract: "契约",
   loose: "散图",
   other: "其他",
 };
@@ -25,6 +26,7 @@ const kindFilters: Array<{ key: string; label: string }> = [
   { key: "random", label: "Random" },
   { key: "sequential", label: "Sequential" },
   { key: "primary", label: "Primary" },
+  { key: "contract", label: "契约" },
   { key: "loose", label: "散图" },
   { key: "other", label: "其他" },
 ];

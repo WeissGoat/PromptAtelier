@@ -39,7 +39,7 @@ QUALITY_TAGS = frozenset(
         "location", "no text",
     )
 )
-ARTIST_PREFIX_RE = re.compile(r"^(artist\s*:|by\s+)", re.IGNORECASE)
+ARTIST_PREFIX_RE = re.compile(r"^artist\s*:", re.IGNORECASE)
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]")
 COUNT_TAG_RE = re.compile(r"^(\d+|6\+)(girl|boy|other)s?$")
 CAST_RE = re.compile(r"(\d+)(girl|boy|other)s?")

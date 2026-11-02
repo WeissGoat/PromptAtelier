@@ -1,11 +1,11 @@
-import { FlaskConical, GitCompare, Images, Monitor, Moon, PanelLeft, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
+import { Bot, FlaskConical, GitCompare, Images, Monitor, Moon, PanelLeft, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { type ThemePreference, useThemePreference } from "../theme";
 
 import { NovelAIUsageBadge } from "./NovelAIUsageBadge";
 
-export type PageKey = "custom" | "results" | "compare" | "style-lab";
+export type PageKey = "custom" | "agent" | "results" | "compare" | "style-lab";
 
 type LayoutProps = {
   page: PageKey;
@@ -15,6 +15,7 @@ type LayoutProps = {
 
 const nav = [
   { key: "custom", label: "Custom", hint: "组合节点出图", icon: PanelLeft },
+  { key: "agent", label: "Agent 拼接", hint: "Agent 按契约拼接提示词", icon: Bot },
   { key: "results", label: "出图历史", hint: "按批次浏览", icon: Images },
   { key: "compare", label: "Compare", hint: "提示词对比", icon: GitCompare },
   { key: "style-lab", label: "画风工坊", hint: "整理画风语料", icon: FlaskConical },

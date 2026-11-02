@@ -270,13 +270,15 @@ class ContractSources:
         return self.reader.read(path)
 
     def node_summary(self, role: str, ref: str) -> dict[str, Any]:
-        node = self.load_node(role, ref)
+        path = self.resolve(role, ref)
+        node = self.reader.read(path)
         sections = {key: list(values) for key, values in node.tags.items() if values}
         positive_texts = node.positive_texts()
         if positive_texts and not sections:
             sections["prompt"] = positive_texts
         return {
             "ref": ref,
+            "path": str(path),
             "id": node.id,
             "name": node.name or node.id,
             "character_id": node.character_id,

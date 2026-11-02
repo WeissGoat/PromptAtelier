@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Layout, type PageKey } from "./components/Layout";
+import { AgentStudio } from "./pages/AgentStudio";
 import { CompareStudio } from "./pages/CompareStudio";
 import { CustomStudio } from "./pages/CustomStudio";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -11,7 +12,7 @@ import "./styles.css";
 import "./styles/custom.css";
 
 const PAGE_STORAGE_KEY = "promptatelier.active-page/v1";
-const PAGE_KEYS: readonly PageKey[] = ["custom", "results", "compare", "style-lab"];
+const PAGE_KEYS: readonly PageKey[] = ["custom", "agent", "results", "compare", "style-lab"];
 
 function isPageKey(value: string | null): value is PageKey {
   return value !== null && (PAGE_KEYS as readonly string[]).includes(value);
@@ -55,6 +56,7 @@ export function App() {
 
   const content = {
     custom: <CustomStudio />,
+    agent: <AgentStudio />,
     results: <HistoryPage />,
     compare: <CompareStudio />,
     "style-lab": (

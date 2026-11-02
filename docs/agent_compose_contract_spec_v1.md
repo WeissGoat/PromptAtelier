@@ -1,6 +1,6 @@
 # Agent 拼接契约（Compose Contract）设计 v1
 
-> 状态：方案已确认，待实现（第一期见 §11）。
+> 状态：第一期（P0）已实现，部分 P1 一并完成，实现情况见 §12。
 > UI 原型：https://claude.ai/artifact/3EwBb7NEkrBoeEL9ZSwzuq （主界面、要求 prompt / 导入、按帧编辑、结果故事板、动作组参考）
 > 目标：在 Web 现有「脚本式拼接（Custom）」之外，增加「Agent 式拼接」：
 > 用户在 Web 选素材节点 + 写定制要求 → Agent 自主拼出每一帧的完整提示词，写进契约文件 → Web 加载、解析、可视化、生图。
@@ -404,3 +404,32 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 | P0 | 契约格式与解析、创建、核心校验器、profiles（nai-v4.5、nai-v4、sdxl-danbooru）、CLI、Skill、两种要求 prompt；Web 新建 + 复制 prompt + 导入 + 查看（来源 / 标记 / diff）+ 按帧生图 | 一个 `stn_` 组 + 一个角色：外部 agent 写完契约，Web 来源、着色、diff 正确，校验通过并能出图 |
 | P1 | 历史筛选与索引、来源过期提示、按帧编辑写回、多角色分角色提示词 | — |
 | P2 | 一键执行（claude-cli / api）、更多校验器（tag 词典存在性）、自然语言格式的短语级标记 | — |
+
+---
+
+## 12. 实现情况（P0）
+
+| 部分 | 位置 | 说明 |
+|---|---|---|
+| 契约解析 / 写回 / 创建 / 索引 | `src/tags_machine_core/compose_contracts/`（`parser.py`、`store.py`、`service.py`） | 包名用 `compose_contracts`，因为 `contracts.py` 已是 PromptBundle 等数据模型 |
+| 动作组与来源节点 | `compose_contracts/sources.py` | 沿用 `NodeReader`；成员 ref 取符号链接指向的 `new/...`，也接受 `stn_x/01_...`、成员目录名、`#N` |
+| 格式 profile | `configs/prompt_formats/`（nai-v4.5、nai-v4、sdxl-danbooru） | `contract.formats_dir` 可改目录 |
+| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现；`token_length` 目前是估算（没有接 T5/CLIP 分词器），只报 warn |
+| 要求 prompt | `compose_contracts/prompts.py` | 工具版 / 自包含版 |
+| CLI | `tm-core contract show / context [--member N] / check / prompt` | `check` 有 error 时退出码 1 |
+| Skill | `.agents/skills/compose-contract-author/`（`.claude/skills` 指向它） | |
+| API | `web/routes/contracts.py` | §10 全部接口；另有 `GET /contracts/action-groups`、`/contracts/action-groups/detail`、`PUT /contracts/{id}/fields` |
+| 生图追溯 | `services/json_api.py`、`renderers/common.py`、`renderers/novelai.py`、`execution.py` | compose 请求的 `contract` → `PromptBundle.meta.extra.contract` → render meta → PNG `tags_machine_core.contract` |
+| 结果与采用 | `ContractService.results / update_picks` | 契约批次输出到 `outputs/compares/contract_<时间>_<随机>/<帧id>/`，出图历史里归为「契约」类型 |
+| Web 解析 | `web/src/contracts/analysis.ts`（有单测） | 分词、标记、diff，与后端分词规则一致 |
+| Web 页面 | `web/src/pages/AgentStudio.tsx`、`web/src/contracts/*` | 侧栏「Agent 拼接」 |
+| 配置 | `contract.root`（默认 `<design_root>/动作改2/contracts`）、`contract.formats_dir`、`contract.runner: manual` | |
+
+提前完成的 P1：历史契约按所选节点筛选（完全 / 部分匹配）、来源过期提示、按帧编辑写回（带 hash 冲突检测）、5 秒轮询与 Shift+刷新先 `git pull`。
+
+还没做：
+- 多角色分角色提示词：```` ```positive c2 ```` 能解析、校验，但生图时还只提交主 positive。
+- 结果故事板独立页面、「帧 × 画风」对比、「基于此契约新建」。
+- 右栏的 Policy Rules 开关：第一期保持与 agent composer 一致的默认跳过，没有放开关。
+- 翻译模块仍在 `styleLab/translations.ts`，Agent Studio 直接引用，没有挪到公共目录。
+- 一键执行（P2）。

@@ -256,7 +256,7 @@ source: new/20260101_0001_01_站立
 characters: c1
 
 ```positive
-char_a, 1girl, solo, standing, masterpiece, artist:someone, 教室, (night:1.2), barefoot, socks
+char_a, 1girl, solo, standing, by window, masterpiece, artist:someone, 教室, (night:1.2), barefoot, socks
 ```
 
 ## f02 新增
@@ -282,6 +282,8 @@ inspired_by: new/missing
             ("coverage", "warn"),
         ]:
             self.assertIn(expected, found)
+        artist_issues = [i for i in detail["issues"] if i["validator"] == "forbidden_tags" and i["severity"] == "error"]
+        self.assertEqual([i["tag"] for i in artist_issues], ["artist:someone"])
         self.assertEqual(detail["coverage"]["missing"][0]["ref"], "new/20260101_0001_02_坐下")
         self.assertEqual(detail["frames"][0]["member_index"], 1)
         self.assertTrue(detail["frames"][1]["is_custom"])
