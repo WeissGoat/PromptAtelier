@@ -1,6 +1,7 @@
-# Agent 拼接契约（Compose Contract）设计草案 v1
+# Agent 拼接契约（Compose Contract）设计 v1
 
-> 状态：草案 r4（已按三轮反馈修订）。
+> 状态：方案已确认，待实现（第一期见 §11）。
+> UI 原型：https://claude.ai/artifact/3EwBb7NEkrBoeEL9ZSwzuq （主界面、要求 prompt / 导入、按帧编辑、结果故事板、动作组参考）
 > 目标：在 Web 现有「脚本式拼接（Custom）」之外，增加「Agent 式拼接」：
 > 用户在 Web 选素材节点 + 写定制要求 → Agent 自主拼出每一帧的完整提示词，写进契约文件 → Web 加载、解析、可视化、生图。
 
@@ -20,6 +21,8 @@
 | 动作组 | `st_*` 与 `stn_*` |
 | 契约粒度 | 一份契约对应一个动作组；新增帧可以参考任意动作 |
 | 多角色 | 选了多个角色且要求中有说明时，Agent 可以把角色分配到动作中的不同人物；否则保留动作原词 |
+| 动作内容读取 | 沿用现有 `NodeReader`，不改：`stn_*`（全部有 `meta.yaml`）正面取 `tags.action`、负面取 `negative_prompt`；`st_*`（只有 `tags.txt`）正面取 `=` 之前的行，负面为空，`=` 之后的扩展行（`uc` / `origin_uc` / `origin_clear` / `node_background` 等）不解析 |
+| 采用 | 每帧可采用多张，记录存在 PromptAtelier 出图目录，不写进契约 |
 
 ---
 
@@ -190,7 +193,7 @@ looking back, standing, by window, night, classroom
 
 ### 5.3 Diff：相对来源动作
 
-- 对比对象：本帧最终正向提示词 vs 来源动作 node 的正向词（`tags.action`）。
+- 对比对象：本帧最终正向提示词 vs 来源动作 node 的正向词（按 `NodeReader` 读取：`meta.yaml` 的 `tags.action`，或 `tags.txt` 中 `=` 之前的行）。
 - 只列三类：改写（同词不同写法/权重，显示 from → to）、删除（删除线）、新增（带标记颜色）。保留的词不单独列出。
 - 自定义帧没有来源动作：全部显示为新增；有 `inspired_by` 时可以切换为相对参考动作做 diff。
 - 复用 `compare/tagDiff.ts` 的思路与样式。
@@ -198,8 +201,6 @@ looking back, standing, by window, night, classroom
 ### 5.4 来源过期
 
 front matter 中记录了各节点的 `content_hash`。加载时与当前节点比对，不一致则提示「来源已更新」。此时标记和 diff 用的是当前节点内容。
-
----
 
 ### 5.5 刷新：Agent 写完后 Web 怎么知道
 
@@ -209,6 +210,8 @@ front matter 中记录了各节点的 `content_hash`。加载时与当前节点�
 - **pending → done**：显示「Agent 已完成」提示条，点「打开」再载入，不会打断正在看的内容。如果当前正在看的就是这份 pending 契约，则直接载入。
 - **正在看的契约被外部修改**：显示「文件已更新，重新载入」；如果正在编辑这一帧，保存时按 §9 的冲突检测处理。
 - **手动刷新按钮**：立即重新扫描。Agent 在别的机器上、结果要靠 git 同步时，按住 Shift 点击会先对动作库执行 `git pull --ff-only`，复用 Web 启动时拉取动作库的逻辑。
+
+---
 
 ## 6. 「要求 prompt」与 Agent 执行
 
@@ -252,7 +255,7 @@ forbid:
   quality_tags: renderer
 validators: [frame_structure, weight_syntax, bracket_balance, token_length,
              language, forbidden_tags, duplicate_tags, tag_conflict,
-             character_count, source_exists]
+             character_count, source_exists, coverage]
 ```
 
 起步内置：`nai-v3`、`nai-v4`、`nai-v4.5`、`nai-v5`、`sdxl-danbooru`、`natural-language`。各模型的具体数值只写在 profile 里。
@@ -328,14 +331,14 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 - 每帧三种视图（顶部切换）：
   - **标记**：保留 Agent 的换行排版，tag 按 §5.2 着色，悬停显示来源与原文。
   - **原文**：代码块原文，可复制。
-  - **来源原文**：来源动作 node 的原始正向 / 负面提示词；自定义帧显示参考动作的原始提示词。
+  - **来源原文**：来源动作 node 的原始正向 / 负面提示词，标明读取自哪个文件（`meta.yaml` 或 `tags.txt`）；`st_*` 动作的负面为空。自定义帧显示参考动作的原始提示词。
 - Diff 不单独占视图，显示在每帧内容下方（§5.3，只含改写 / 删除 / 新增）；顶部「显示 Diff」开关控制，默认打开。
 - 翻译：顶部提供「翻译来源」（谷歌翻译 / AI 翻译）和「译文 开/关」，打开后在标记视图和 Diff 中每个 tag 后显示〔中文〕。直接复用画风工坊的翻译能力：后端 `POST /translate`（`llm/translate.py`、`google_translate`，带缓存），前端 `styleLab/translations.ts` 的 `translationStore` / `useTranslations`（请求合并、失败不重复请求）。实现时把这两个前端模块从 `styleLab/` 挪到公共目录，供两个页面共用。
 - 校验问题标在对应 tag 或帧上。
 - 按帧编辑：直接编辑该帧文本，保存时只替换文件中该帧的代码块并重新校验；如果文件在此期间被外部修改（mtime/hash 变化），提示冲突。
 
 **动作组参考（抽屉）**
-- 从覆盖提示或契约头部打开，覆盖在右侧，不离开当前契约。
+- 点击契约头部的「动作组 N +x −y」按钮打开，覆盖在右侧，不离开当前契约。
 - 按组内顺序列出全部成员：预览图、序号和名称、ref、classify 摘要（phase / cast / pose / environment / clothing / scope）、原始提示词。
 - 每个成员标明「用于 f01」或「未使用」；可筛选「未使用」。可「定位到帧」「复制 ref」「复制原始提示词」。
 - 底部列出自定义帧引用的参考动作（`inspired_by`）。
