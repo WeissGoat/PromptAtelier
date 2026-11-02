@@ -320,7 +320,9 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 - 按帧编辑：直接编辑该帧文本，保存时只替换文件中该帧的代码块并重新校验；如果文件在此期间被外部修改（mtime/hash 变化），提示冲突。
 
 **右栏：生图**
-- 画风（不进契约）、出图参数、ComfyUI 目标（复用现有组件）。
+- 画风（不进契约）、出图参数（Negative、尺寸、Width/Height、NT、N、Seed、ComfyUI 运行位置，复用 Custom 的组件）。
+- 提示词行为：Primary / Compare 方案、Character Prompts（Auto / Off + Add male caption）。不提供 Identity Minimal Sections（契约里带哪些角色词由 Agent 决定）。
+- Policy Rules：与 agent composer 一致，默认跳过（`apply_to.agent: false`），区域默认隐藏；勾选「对契约提示词启用 Policy Rules」后才展开规则列表，由用户自己决定。
 - 选帧（全选 / 勾选），可选「帧 × 画风」对比。
 - 提交：每帧构造 `{composer: "agent", agent_result: {positive, negative}, character 节点, artist 节点, contract: {id, frame_id}}`，走现有后台批量任务。
 - 结果按帧回挂；History 页可按契约筛选。
