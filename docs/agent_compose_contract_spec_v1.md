@@ -113,6 +113,7 @@ author: "<外部 agent / 模型>"       # Agent 选填
 ## f01 俯身吐舌
 source: new/20260922_0028_01_俯身吐舌露乳牛仔短裤
 characters: c1
+size: portrait
 
 ```positive
 akemi_homura, mahou_shoujo_madoka_magica,
@@ -147,6 +148,7 @@ looking back, standing, by window, night, classroom
   - `source`：动作 ref，或 `custom`
   - `inspired_by`：可选，多个用逗号分隔
   - `characters`：本帧出现的角色，如 `c1, c2`
+  - `size`：可选，本帧分辨率方向，取 `portrait`（竖）/ `landscape`（横）/ `square`（方）。只写方向，具体像素由所选画风的尺寸预设决定（与 Custom 的尺寸选项一致）；不写表示由生图时决定
 - 提示词：
   - ```` ```positive ```` / ```` ```negative ```` 是本帧主提示词。
   - 多角色且格式支持分角色提示词时，用 ```` ```positive c2 ```` / ```` ```negative c2 ````。
@@ -198,6 +200,15 @@ looking back, standing, by window, night, classroom
 front matter 中记录了各节点的 `content_hash`。加载时与当前节点比对，不一致则提示「来源已更新」。此时标记和 diff 用的是当前节点内容。
 
 ---
+
+### 5.5 刷新：Agent 写完后 Web 怎么知道
+
+不让 Agent 的工具调用直接通知前端：Agent 可能在另一台机器上，通过 git 同步动作库；Web 也不一定在运行。改由 Web 自己发现变化：
+
+- **自动检查**：Agent Studio 页面打开时，每 5 秒请求一次 `GET /contracts/index?since=<上次时间>`。后端只比较 `contracts/` 下文件的修改时间，有变化才重新解析，开销很小。
+- **pending → done**：显示「Agent 已完成」提示条，点「打开」再载入，不会打断正在看的内容。如果当前正在看的就是这份 pending 契约，则直接载入。
+- **正在看的契约被外部修改**：显示「文件已更新，重新载入」；如果正在编辑这一帧，保存时按 §9 的冲突检测处理。
+- **手动刷新按钮**：立即重新扫描。Agent 在别的机器上、结果要靠 git 同步时，按住 Shift 点击会先对动作库执行 `git pull --ff-only`，复用 Web 启动时拉取动作库的逻辑。
 
 ## 6. 「要求 prompt」与 Agent 执行
 
@@ -322,6 +333,7 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 
 **右栏：生图**
 - 画风（不进契约）、出图参数（Negative、尺寸、Width/Height、NT、N、Seed、ComfyUI 运行位置，复用 Custom 的组件）。
+- 尺寸多一个选项「契约默认」，并设为默认值：用每帧的 `size`，帧没写时随机（同 Custom 的随机）；画风没有该方向的预设时也退回随机，并在任务标签中注明。其余选项（随机 / 竖 / 横 / 方 / 自定义）会覆盖所有帧。
 - 提示词行为：Primary / Compare 方案、Character Prompts（Auto / Off + Add male caption）。不提供 Identity Minimal Sections（契约里带哪些角色词由 Agent 决定）。
 - Policy Rules：与 agent composer 一致，默认跳过（`apply_to.agent: false`），区域默认隐藏；勾选「对契约提示词启用 Policy Rules」后才展开规则列表，由用户自己决定。
 - 选帧（全选 / 勾选），可选「帧 × 画风」对比。
@@ -358,6 +370,8 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 - CLI：`contract show / context / check`。
 - API：
   - `GET /contracts?node=&format=&status=`
+  - `GET /contracts/index?since=`：按修改时间返回有变化的契约（§5.5）
+  - `POST /contracts/refresh?pull=1`：重新扫描，可选先 git pull 动作库
   - `GET /contracts/{id}`：解析结果 + 校验结果 + 各帧来源节点内容（供 Web 做标记与 diff）
   - `POST /contracts`：创建
   - `GET /contracts/{id}/prompt?kind=tools|standalone`
