@@ -16,6 +16,7 @@ from tags_machine_core.policies.tokens import parse_prompt_token
 from tags_machine_core.policies.config import PolicyTarget, PromptPolicyConfig
 from tags_machine_core.policies.rendering.novelai import NovelAIRenderPolicyPipeline
 from tags_machine_core.renderers.common import (
+    contract_trace_meta,
     renderer_artist_payload,
     renderer_artist_prompt_parts,
 )
@@ -294,6 +295,7 @@ class NovelAIRenderAdapter:
         trace_meta = self._node_trace_meta(bundle, resolved_nodes)
         if trace_meta:
             meta.update(trace_meta)
+        meta.update(contract_trace_meta(bundle))
         if size_preset is not None:
             meta["size_preset"] = size_preset
         if character_prompt_meta:

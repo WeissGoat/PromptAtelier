@@ -118,6 +118,15 @@ class GenerationJsonApi:
             result=result,
             cache=cache,
         )
+        contract = _optional_mapping(data.get("contract"))
+        if contract is not None:
+            bundle = bundle.model_copy(
+                update={
+                    "meta": bundle.meta.model_copy(
+                        update={"extra": {**bundle.meta.extra, "contract": _contract_trace(contract)}}
+                    )
+                }
+            )
         return to_jsonable(bundle)
 
     def resolve_agent(self, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -340,6 +349,18 @@ class GenerationJsonApi:
         for key in ("character", "action", "background", "artist"):
             if key not in render_request and key in compose_request:
                 render_request[key] = compose_request[key]
+
+
+def _contract_trace(value: Mapping[str, Any]) -> dict[str, str]:
+    """契约追溯字段只保留已知的短字符串，避免把任意内容写进 PNG 元数据。"""
+    trace: dict[str, str] = {}
+    for key in ("id", "frame_id", "prompt_hash", "artist"):
+        item = value.get(key)
+        if item is not None and str(item).strip():
+            trace[key] = str(item).strip()[:300]
+    if "id" not in trace or "frame_id" not in trace:
+        raise ValueError("contract trace requires id and frame_id")
+    return trace
 
 
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:

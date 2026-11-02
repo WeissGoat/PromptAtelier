@@ -73,7 +73,14 @@ def render_meta(bundle: PromptBundle, *, action: str, backend: str) -> dict[str,
             for node in bundle.meta.nodes
         ]
         meta["source_nodes"] = [node.ref for node in bundle.meta.nodes]
+    meta.update(contract_trace_meta(bundle))
     return meta
+
+
+def contract_trace_meta(bundle: PromptBundle) -> dict[str, Any]:
+    """Agent 拼接契约的追溯信息：写进 PNG 元数据，出图结果按帧回挂。"""
+    contract = bundle.meta.extra.get("contract") if isinstance(bundle.meta.extra, dict) else None
+    return {"contract": dict(contract)} if isinstance(contract, dict) else {}
 
 
 def get_setting(

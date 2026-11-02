@@ -95,6 +95,7 @@ def build_core_png_text(
             request.meta.get("novelai_render_policy")
         ),
         "random_nodes": request.meta.get("random_nodes") or [],
+        "contract": request.meta.get("contract"),
         "render": _comfyui_render_info(request) if request.backend == "comfyui" else None,
         # 不放进 render 段：耗时每次都不同，不该算进参数 Diff。
         "timing": timing or None,

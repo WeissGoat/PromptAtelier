@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 
 from tags_machine_core.clients import sanitize_proxy_env
 from tags_machine_core.contracts import GenerationResult, RenderRequest
-from tags_machine_core.config import build_prompt_policy_provider, load_config
+from tags_machine_core.compose_contracts import ContractService
+from tags_machine_core.config import build_prompt_policy_provider, contract_root, load_config
 from tags_machine_core.execution import execute_render_request
 from tags_machine_core.llm import LLMClient
 from tags_machine_core.services import GenerationJsonApi
@@ -24,6 +25,7 @@ from .routes import (
     comfyui,
     compare,
     compose,
+    contracts,
     generate,
     health,
     image_meta,
@@ -125,6 +127,13 @@ def create_app(
         generation_executor=generation_executor
         or _default_generation_executor(config, app.state.comfyui_targets),
     )
+    app.state.contract_service = ContractService(
+        root=contract_root(config),
+        design_root=config.legacy.design_root,
+        output_dir=config.runtime.output_dir,
+        formats_dir=config.contract.formats_dir,
+        config_path=resolved_config_path,
+    )
     app.state.llm_client = llm_client or LLMClient(config.llm)
     app.state.style_lab_store = WorkspaceStore(style_lab_dir)
     app.state.style_lab_service = StyleLabService(
@@ -152,6 +161,7 @@ def create_app(
     app.include_router(results.router, prefix="/api", tags=["results"])
     app.include_router(image_meta.router, prefix="/api", tags=["image-meta"])
     app.include_router(compare.router, prefix="/api", tags=["compare"])
+    app.include_router(contracts.router, prefix="/api", tags=["contracts"])
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
     app.include_router(novelai.router, prefix="/api", tags=["novelai"])
     app.include_router(style_lab.router, prefix="/api", tags=["style-lab"])

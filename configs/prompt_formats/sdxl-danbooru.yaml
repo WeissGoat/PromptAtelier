@@ -1,0 +1,23 @@
+# SDXL 系 danbooru tag 模型（Illustrious / NoobAI / Pony 等），ComfyUI / SD WebUI 使用。
+id: sdxl-danbooru
+version: 1
+label: SDXL（danbooru tag）
+family: sd
+models: []
+separator: ","
+newline: separator
+weight:
+  syntaxes: [paren]                 # paren: (tag:1.2) / (tag)
+  preferred: paren
+  range: [0.0, 2.0]
+language: { allow_cjk: false }
+length:
+  tokenizer: clip
+  max_tokens: 225                   # 3 段 75 token；超过时 WebUI 会继续分段，但效果变差
+multi_character: { supported: false, max: 1 }
+forbid:
+  artist_tags: true
+  quality_tags: renderer
+validators: [frame_structure, weight_syntax, bracket_balance, token_length,
+             language, forbidden_tags, duplicate_tags, tag_conflict,
+             character_count, source_exists, coverage]

@@ -197,6 +197,14 @@ class LLMConfig(BaseModel):
     cache_path: Path = Path("runtime/llm_cache.sqlite")
 
 
+class ContractConfig(BaseModel):
+    """Agent 拼接契约：root 为空时用 <design_root>/动作改2/contracts。"""
+
+    root: Path | None = None
+    runner: Literal["manual"] = "manual"
+    formats_dir: Path | None = None
+
+
 class AppConfig(BaseModel):
     legacy: LegacyConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
@@ -215,6 +223,15 @@ class AppConfig(BaseModel):
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     sd: SDConfig = Field(default_factory=SDConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    contract: ContractConfig = Field(default_factory=ContractConfig)
+
+
+def contract_root(config: AppConfig) -> Path:
+    if config.contract.root:
+        return Path(config.contract.root)
+    from tags_machine_core.nodes.role_paths import primary_role_root
+
+    return primary_role_root(config.legacy.design_root, "action") / "contracts"
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
