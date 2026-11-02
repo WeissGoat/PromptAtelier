@@ -325,7 +325,22 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 - Policy Rules：与 agent composer 一致，默认跳过（`apply_to.agent: false`），区域默认隐藏；勾选「对契约提示词启用 Policy Rules」后才展开规则列表，由用户自己决定。
 - 选帧（全选 / 勾选），可选「帧 × 画风」对比。
 - 提交：每帧构造 `{composer: "agent", agent_result: {positive, negative}, character 节点, artist 节点, contract: {id, frame_id}}`，走现有后台批量任务。
-- 结果按帧回挂；History 页可按契约筛选。
+- 结果按帧回挂（见下）。
+
+**生图结果**
+
+每张图的生成元数据记录 `contract: {id, frame_id, prompt_hash}`。`prompt_hash` 是生成时该帧 positive + negative 的 hash，用来判断图是不是用当前版本的提示词出的。结果在三个地方看：
+
+1. **主界面每帧下方**：缩略图条 + 「N 张 · M 轮」摘要 + 「查看全部」。
+2. **结果故事板**（契约级页面）：
+   - 每帧一行，按帧顺序排，连起来看整组的连贯性；每行左侧是帧信息和提示词摘要，右侧按「画风 · 时间 · seed」分组列出各轮结果。
+   - 用旧版提示词生成的图半透明，并标「提示词已改」；可勾选「只看当前提示词的结果」。
+   - 可按画风筛选。
+   - 每帧可以「采用」一张作为成片（蓝框）；可筛选「只看已采用」。采用结果写进契约 front matter 的 `picks: {f01: <图片路径>}`。
+   - 未出图的帧显示「生成此帧」。
+3. **出图历史**：新增「契约」筛选类型，批次标签显示契约标题 + 帧。
+
+点击任意图片都打开现有的图片详情对话框（大图、生成参数、两张图的提示词对比、卷帘 / 闪烁对比）。
 
 ---
 
@@ -345,6 +360,8 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
   - `POST /contracts`：创建
   - `GET /contracts/{id}/prompt?kind=tools|standalone`
   - `PUT /contracts/{id}/frames/{frame_id}`：带文件 hash 做冲突检测
+  - `GET /contracts/{id}/results`：按帧分组的出图结果（含 prompt_hash 是否为当前版本）
+  - `PUT /contracts/{id}/picks`：设置每帧采用的图片
   - `POST /contracts/{id}/import`
   - `GET /formats`
 - 生图：compose request 增加 `contract` 追溯字段，写入 `PromptBundle.meta.extra.contract` 与结果索引；AgentComposer 核心不改。
