@@ -336,7 +336,8 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
    - 每帧一行，按帧顺序排，连起来看整组的连贯性；每行左侧是帧信息和提示词摘要，右侧按「画风 · 时间 · seed」分组列出各轮结果。
    - 用旧版提示词生成的图半透明，并标「提示词已改」；可勾选「只看当前提示词的结果」。
    - 可按画风筛选。
-   - 每帧可以「采用」一张作为成片（蓝框）；可筛选「只看已采用」。采用结果写进契约 front matter 的 `picks: {f01: <图片路径>}`。
+   - 每帧可以「采用」任意多张（蓝框）；可筛选「只看已采用」。
+   - 采用记录不写进契约文件，存在 PromptAtelier 的出图索引里：`<output_dir>/.contract_picks/<契约 id>.json`，内容为 `{frame_id: [图片路径, ...]}`。与出图结果放在一起、同样不入 git；出图历史扫描会跳过以 `.` 开头的目录。
    - 未出图的帧显示「生成此帧」。
 3. **出图历史**：新增「契约」筛选类型，批次标签显示契约标题 + 帧。
 
@@ -361,7 +362,7 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
   - `GET /contracts/{id}/prompt?kind=tools|standalone`
   - `PUT /contracts/{id}/frames/{frame_id}`：带文件 hash 做冲突检测
   - `GET /contracts/{id}/results`：按帧分组的出图结果（含 prompt_hash 是否为当前版本）
-  - `PUT /contracts/{id}/picks`：设置每帧采用的图片
+  - `PUT /contracts/{id}/picks`：增删某帧的采用图片（每帧可多张）
   - `POST /contracts/{id}/import`
   - `GET /formats`
 - 生图：compose request 增加 `contract` 追溯字段，写入 `PromptBundle.meta.extra.contract` 与结果索引；AgentComposer 核心不改。
