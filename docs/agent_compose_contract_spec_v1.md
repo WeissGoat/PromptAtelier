@@ -247,8 +247,9 @@ weight:
   range: [0.0, 3.0]
 language: { allow_cjk: false }
 length:
-  tokenizer: t5                     # clip | t5 | approx
-  max_tokens: 512                   # 实现前按官方文档/实测核对
+  tokenizer: t5                     # clip | t5 | qwen | approx
+  max_tokens: 512                   # 与 NovelAI 官网一致，见 §12.1
+  shared_with_characters: true      # 主提示词和各角色提示词共用上限
 multi_character: { supported: true, max: 6 }
 forbid:
   artist_tags: true                 # artist 由脚本叠加
@@ -274,7 +275,7 @@ class ContractValidator(Protocol):
 | `frame_structure` | 帧标题、`source`、positive 代码块齐全；帧 id 不重复 |
 | `weight_syntax` | 只允许 profile 声明的权重语法 |
 | `bracket_balance` | `{}` `[]` `()` `::` 配平 |
-| `token_length` | 按 profile tokenizer 计数；多角色时分别计数 |
+| `token_length` | 按 profile tokenizer 计数（与 NovelAI 官网一致）；V4+ 主提示词和角色提示词合计 |
 | `language` | 不允许中文时检出 CJK |
 | `forbidden_tags` | 画师名、质量词等由脚本负责的内容 |
 | `duplicate_tags` / `tag_conflict` | 复用现有 policies 规则 |
@@ -413,8 +414,9 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 |---|---|---|
 | 契约解析 / 写回 / 创建 / 索引 | `src/tags_machine_core/compose_contracts/`（`parser.py`、`store.py`、`service.py`） | 包名用 `compose_contracts`，因为 `contracts.py` 已是 PromptBundle 等数据模型 |
 | 动作组与来源节点 | `compose_contracts/sources.py` | 沿用 `NodeReader`；成员 ref 取符号链接指向的 `new/...`，也接受 `stn_x/01_...`、成员目录名、`#N` |
-| 格式 profile | `configs/prompt_formats/`（nai-v4.5、nai-v4、sdxl-danbooru） | `contract.formats_dir` 可改目录 |
-| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现；`token_length` 目前是估算（没有接 T5/CLIP 分词器），只报 warn |
+| 格式 profile | `configs/prompt_formats/`（nai-v3、nai-v4、nai-v4.5、nai-v5、nai-v5-curated、sdxl-danbooru） | `contract.formats_dir` 可改目录 |
+| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现；`token_length` 用真实分词器，见 §12.1 |
+| token 计数 | `src/tags_machine_core/prompt_tokens.py` | 契约帧、`contract check` 的 `tokens`、`/compose-preview` 的 `token_usage` 共用 |
 | 要求 prompt | `compose_contracts/prompts.py` | 工具版 / 自包含版 |
 | CLI | `tm-core contract show / context [--member N] / check / prompt` | `check` 有 error 时退出码 1 |
 | Skill | `.agents/skills/compose-contract-author/`（`.claude/skills` 指向它） | |
@@ -433,3 +435,34 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 - 右栏的 Policy Rules 开关：第一期保持与 agent composer 一致的默认跳过，没有放开关。
 - 翻译模块仍在 `styleLab/translations.ts`，Agent Studio 直接引用，没有挪到公共目录。
 - 一键执行（P2）。
+
+### 12.1 token 计数
+
+规则取自 NovelAI 官网图片页（novelai.net/image）的前端代码：
+
+| 模型 | 分词器 | 上限 | 角色提示词 |
+|---|---|---|---|
+| V3 及更早（含 Furry V3） | CLIP | 225 | 无 |
+| V4、V4.5（Full / Curated） | T5 | 512 | 和主提示词合计 |
+| V5 Full（含 Medium） | Qwen 3.5 | 1471 | 和主提示词合计 |
+| V5 Curated | Qwen 3.5 | 703 | 和主提示词合计 |
+
+计数前的预处理：
+- CLIP：`[]{}` 换成空格，HTML 实体解码两次，合并空白，转小写；不计开始 / 结束符。
+- T5：删掉 `[]{}` 和 `1.2::` / `::`；不做 Precompiled 归一化；末尾 +1 结束符。
+- Qwen：NFC，字节级 BPE；不删权重记号。
+
+官网的词表文件（`/tokenizer/compressed/*.def`，raw deflate 压缩的 JSON）和公开词表逐项比对过：
+CLIP（`openai/clip-vit-large-patch14`）、T5（`google-t5/t5-base`）完全一致；Qwen 3.5（`Qwen/Qwen3.5-0.8B`）的 vocab 和 merges 一致，只差 26 个特殊符。
+用 TagsHub 里 794 条真实提示词对比三种分词器，结果和用官网词表算的完全相同。
+
+实现：
+- 首次使用时从 Hugging Face 下载公开词表（固定版本），缓存在 `<项目>/cache/tokenizers`，仓库里不放 NovelAI 的文件。
+  - `TM_TOKENIZER_DIR` 改缓存目录。
+  - `HF_ENDPOINT` 指定镜像，例如 `https://hf-mirror.com`。
+  - `TM_TOKENIZER_DOWNLOAD=0` 禁止下载。
+- 下载失败或没装 `tokenizers` 时退回估算，`exact: false`，超限只报 warn。
+- 契约帧：数 Agent 写的正向提示词。超限报 error；`sdxl-danbooru` 的 profile 设了 `over_limit: warn`，只报 warn。
+- 出图前：生图栏的「检查最终长度」逐帧调用 `/compose-preview`，按画风实际用的模型，对拼好画风前后缀和分角色提示词之后的最终文本计数。
+  - 画风模型和契约格式不一致时会提示，例如 `tags.txt` 画风走 `nai-diffusion-3`。
+- Custom 页的 Preview 也显示 Tokens。

@@ -14,6 +14,7 @@ language: { allow_cjk: false }
 length:
   tokenizer: clip
   max_tokens: 225                   # 3 段 75 token；超过时 WebUI 会继续分段，但效果变差
+  over_limit: warn                  # 不会被截断，只给警告
 multi_character: { supported: false, max: 1 }
 forbid:
   artist_tags: true

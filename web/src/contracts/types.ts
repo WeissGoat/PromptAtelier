@@ -1,3 +1,7 @@
+import type { TokenUsage } from "../api/types";
+
+export type { TokenUsage };
+
 export type IssueSeverity = "error" | "warn" | "info";
 
 export type ContractIssue = {
@@ -47,7 +51,10 @@ export type ContractFrame = {
   member_ref: string | null;
   member_index: number | null;
   prompt_hash: string;
+  /** 正向提示词的 token 用量（和 NovelAI 官网同样的分词器）；格式没有上限时为 null。 */
+  token_usage: TokenUsage | null;
 };
+
 
 export type ClassifySummary = Record<string, unknown>;
 
@@ -115,6 +122,9 @@ export type FormatSummary = {
   allow_cjk: boolean;
   tokenizer: string;
   max_tokens: number | null;
+  tokens_shared_with_characters?: boolean;
+  /** 这个格式对应的模型 id（如 nai-diffusion-4-5-full）。 */
+  models?: string[];
   multi_character: { supported: boolean; max: number };
 };
 

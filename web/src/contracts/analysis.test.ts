@@ -59,6 +59,7 @@ const frame: ContractFrame = {
   member_ref: "new/a",
   member_index: 1,
   prompt_hash: "h",
+  token_usage: null,
 };
 
 describe("tokenizePrompt", () => {

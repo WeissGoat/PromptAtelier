@@ -73,6 +73,8 @@ red_glasses
 
 ## 校验器（contract check）
 
-`frame_structure`（帧标题、source、positive 齐全，id 不重复）、`weight_syntax`、`bracket_balance`、`token_length`（估算）、
+`frame_structure`（帧标题、source、positive 齐全，id 不重复）、`weight_syntax`、`bracket_balance`、`token_length`（和 NovelAI 官网同样的分词器和上限，超限是错误）、
 `language`（不允许中文的格式里检出 CJK）、`forbidden_tags`、`duplicate_tags`、`tag_conflict`（如 barefoot 与 socks）、
 `character_count`（人数 tag 与 characters、动作 cast）、`source_exists`、`coverage`（动作组里没被任何帧用到的成员）。
+
+`contract check` 结果里的 `tokens` 给出每帧正向的 token 数和上限（V4+ 是主提示词加各角色提示词的合计）。出图时画风前后缀和质量词还会再占几十个 token，接近上限的帧要精简。

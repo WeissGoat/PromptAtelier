@@ -22,8 +22,12 @@ class LanguageSpec(BaseModel):
 
 
 class LengthSpec(BaseModel):
-    tokenizer: Literal["clip", "t5", "approx"] = "approx"
+    tokenizer: Literal["clip", "t5", "qwen", "approx"] = "approx"
     max_tokens: int | None = None
+    # 主提示词和各角色提示词加起来共用上限（NovelAI V4+ 官网规则）。
+    shared_with_characters: bool = False
+    # 超过上限时：error（会被截断）或 warn（只是效果变差）。估算出的数字一律只给警告。
+    over_limit: Literal["error", "warn"] = "error"
 
 
 class MultiCharacterSpec(BaseModel):
@@ -67,6 +71,7 @@ class FormatProfile(BaseModel):
             "allow_cjk": self.language.allow_cjk,
             "tokenizer": self.length.tokenizer,
             "max_tokens": self.length.max_tokens,
+            "tokens_shared_with_characters": self.length.shared_with_characters,
             "multi_character": self.multi_character.model_dump(),
             "validators": self.validators,
         }

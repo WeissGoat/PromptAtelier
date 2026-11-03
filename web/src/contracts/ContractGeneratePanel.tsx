@@ -1,7 +1,7 @@
-import { Play } from "lucide-react";
+import { Play, Ruler } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { apiGet, errorMessage } from "../api/client";
+import { apiGet, apiPost, errorMessage } from "../api/client";
 import type { NodeSummary } from "../api/types";
 import { ComfyTargetPanel } from "../components/ComfyTargetPanel";
 import { NodePicker } from "../components/NodePicker";
@@ -10,7 +10,8 @@ import { submitBackgroundBatch, type BackgroundRequestItem } from "../generation
 import type { NodeDocument } from "../nodes/types";
 import { artistBackend, artistSizePresets, type ComposeRenderRequest, type RenderBackend } from "../workspace/requestBuilder";
 import type { NodeVariantSlot, SizeOrientation } from "../workspace/types";
-import type { ContractDetail, ContractFrame } from "./types";
+import { TokenBadge } from "./FrameCard";
+import type { ContractDetail, ContractFrame, TokenUsage } from "./types";
 
 export type ContractSizeChoice = "contract" | "random" | SizeOrientation | "custom";
 
@@ -133,6 +134,28 @@ export function buildFrameRequest(
   };
 }
 
+type FinalLength = { frameId: string; usage?: TokenUsage; error?: string };
+
+/** 用 compose-preview 得到每帧最终提交的提示词（含画风前后缀、分角色提示词），按官网规则数 token。 */
+export async function checkFinalLengths(items: { frameId: string; request: ComposeRenderRequest }[]): Promise<FinalLength[]> {
+  return Promise.all(items.map(async ({ frameId, request }) => {
+    try {
+      const result = await apiPost<{ token_usage?: TokenUsage }>("/compose-preview", request);
+      return result.token_usage ? { frameId, usage: result.token_usage } : { frameId, error: "这个后端不限长度" };
+    } catch (err) {
+      return { frameId, error: errorMessage(err) };
+    }
+  }));
+}
+
+/** 画风实际用的模型和契约的目标格式不一致时提示（例如契约按 V4.5 写，画风是 V3 的 tags.txt 画风）。 */
+export function formatMismatch(detail: ContractDetail | null, lengths: FinalLength[]): string {
+  const profile = detail?.profile;
+  const model = lengths.find((item) => item.usage?.model)?.usage?.model;
+  if (!profile || !model || !profile.models?.length || profile.models.includes(model)) return "";
+  return `画风用的是 ${model}，契约按 ${profile.label || profile.id} 写；权重写法、长度上限可能不适用`;
+}
+
 type Props = {
   detail: ContractDetail | null;
   selected: Set<string>;
@@ -149,7 +172,39 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
   const info = useArtistInfo(settings.artist);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const update = (patch: Partial<GenerateSettings>) => onChange({ ...settings, ...patch });
+  const [lengths, setLengths] = useState<FinalLength[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const update = (patch: Partial<GenerateSettings>) => {
+    setLengths(null);
+    onChange({ ...settings, ...patch });
+  };
+
+  // 帧内容或所选帧变了，上一次的检查结果就不准了。
+  useEffect(() => setLengths(null), [detail, selected]);
+
+  async function checkLengths() {
+    setError("");
+    if (!detail) return;
+    if (!settings.artist || !info) {
+      setError("先选择画风：最终长度包含画风的前后缀");
+      return;
+    }
+    const frames = detail.frames.filter((frame) => selected.has(frame.id) && (frame.submit.positive ?? "").trim());
+    if (!frames.length) {
+      setError("所选帧没有可用的正向提示词");
+      return;
+    }
+    setChecking(true);
+    try {
+      const items = frames.map((frame) => ({
+        frameId: frame.id,
+        request: buildFrameRequest(detail, frame, settings, info, "preview").compose_request as ComposeRenderRequest,
+      }));
+      setLengths(await checkFinalLengths(items));
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function submit(frameIds: string[]) {
     setError("");
@@ -272,9 +327,33 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
         <button className="btn-sm" disabled={!selected.size} onClick={() => onSelectAll(false)} type="button">清空</button>
         <span className="muted">已选 {selected.size} / {frameCount} 帧</span>
       </div>
-      <button className="primary" disabled={busy || !detail || !selected.size} onClick={() => void submit([...selected])} type="button">
-        <Play size={14} /> 生成所选帧
-      </button>
+      <div className="ct-row">
+        <button className="primary" disabled={busy || !detail || !selected.size} onClick={() => void submit([...selected])} type="button">
+          <Play size={14} /> 生成所选帧
+        </button>
+        <button
+          className="btn-sm"
+          disabled={checking || !detail || !selected.size}
+          onClick={() => void checkLengths()}
+          title="按所选画风拼出最终提示词（含画风前后缀、分角色提示词），用和 NovelAI 官网相同的分词器数 token"
+          type="button"
+        >
+          <Ruler size={13} /> {checking ? "检查中…" : "检查最终长度"}
+        </button>
+      </div>
+      {lengths ? (
+        <ul className="ct-lengths" aria-label="最终长度">
+          {formatMismatch(detail, lengths) ? <li className="field-error">{formatMismatch(detail, lengths)}</li> : null}
+          {lengths.map((item) => (
+            <li key={item.frameId}>
+              <span className="mono">{item.frameId}</span>
+              {item.usage ? <TokenBadge usage={item.usage} /> : <small className="muted">{item.error}</small>}
+              {item.usage?.model ? <small className="muted mono">{item.usage.model}</small> : null}
+              {item.usage?.over ? <small className="field-error">超出部分会被截断</small> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {error ? <p className="field-error">{error}</p> : null}
     </section>
   );

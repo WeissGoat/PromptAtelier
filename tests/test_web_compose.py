@@ -25,6 +25,12 @@ class WebComposeTest(TestCase):
         self.assertEqual(data["status"], "ready")
         self.assertEqual(data["prompt_bundle"]["prompt"]["positive"], "1girl, standing")
         self.assertEqual(data["render_request"]["backend"], "novelai")
+        # 最终提示词按官网规则数 token（模型决定分词器和上限）。
+        usage = data["token_usage"]
+        self.assertEqual(usage["model"], data["render_request"]["model"])
+        self.assertIn(usage["tokenizer"], {"clip", "t5", "qwen"})
+        self.assertGreater(usage["total"], 0)
+        self.assertFalse(usage["over"])
 
     def test_compose_preview_accepts_samples_above_single_request_limit(self):
         client = TestClient(create_app())

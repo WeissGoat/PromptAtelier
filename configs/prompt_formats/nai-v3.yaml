@@ -1,0 +1,23 @@
+# NovelAI V3（Anime V3 / Furry V3）。具体数值只写在 profile 里，校验器按这里的声明工作。
+id: nai-v3
+version: 1
+label: NovelAI V3
+family: novelai
+models: [nai-diffusion-3, nai-diffusion-furry-3]
+separator: ","
+newline: separator                  # separator：换行视为分隔符；keep：原样保留换行
+weight:
+  syntaxes: [brace]                 # brace: {tag}/[tag]；V3 按传统花括号 / 方括号写权重
+  preferred: brace
+  range: [0.0, 3.0]
+language: { allow_cjk: false }
+length:
+  tokenizer: clip                   # 官网 V3 用 CLIP 分词器
+  max_tokens: 225                   # 官网 V3 的上限
+multi_character: { supported: false, max: 1 }   # V3 没有分角色提示词
+forbid:
+  artist_tags: true                 # artist 由脚本叠加
+  quality_tags: renderer            # 质量词由画风 / renderer 叠加
+validators: [frame_structure, weight_syntax, bracket_balance, token_length,
+             language, forbidden_tags, duplicate_tags, tag_conflict,
+             character_count, source_exists, coverage]

@@ -24,7 +24,7 @@ from .profiles import FormatProfile, load_format_profiles
 from .prompts import render_standalone_prompt, render_tools_prompt
 from .sources import ActionGroup, ActionMember, ContractSources
 from .store import ContractConflictError, ContractStore, contract_summary
-from .validators import ValidationContext, coverage_report, load_conflict_rules, run_validators
+from .validators import ValidationContext, coverage_report, frame_token_usage, load_conflict_rules, run_validators
 
 
 DEFAULT_FORMAT = "nai-v4.5"
@@ -222,6 +222,7 @@ class ContractService:
             "member_ref": member.ref if member else None,
             "member_index": member.index if member else None,
             "prompt_hash": prompt_hash(frame.positive, frame.negative),
+            "token_usage": frame_token_usage(frame, profile),
         }
 
     def _load_sources(self, contract: ParsedContract) -> dict[str, Any]:
@@ -287,6 +288,7 @@ class ContractService:
             "issue_counts": detail["issue_counts"],
             "coverage": _compact_coverage(detail.get("coverage")),
             "stale": detail["stale"],
+            "tokens": _compact_tokens(detail["frames"]),
             "issues": detail["issues"],
         }
 
@@ -557,6 +559,22 @@ def _q(value: str) -> str:
 
 def _b(value: bool) -> str:
     return "true" if value else "false"
+
+
+def _compact_tokens(frames: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """每帧正向 token 用量，供 Agent 自检：{"limit", "exact", "frames": {"F01": 123, ...}}。"""
+    usages = [(frame["id"], frame.get("token_usage")) for frame in frames]
+    usages = [(frame_id, usage) for frame_id, usage in usages if usage]
+    if not usages:
+        return None
+    first = usages[0][1]
+    return {
+        "tokenizer": first["tokenizer"],
+        "limit": first["limit"],
+        "shared_with_characters": first["shared"],
+        "exact": all(usage["exact"] for _, usage in usages),
+        "frames": {frame_id: usage["total"] for frame_id, usage in usages},
+    }
 
 
 def _issue_counts(issues: list[ContractIssue]) -> dict[str, int]:

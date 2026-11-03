@@ -1,0 +1,24 @@
+# NovelAI V5 Curated。具体数值只写在 profile 里，校验器按这里的声明工作。
+id: nai-v5-curated
+version: 1
+label: NovelAI V5 Curated
+family: novelai
+models: [nai-diffusion-5-curated]
+separator: ","
+newline: separator                  # separator：换行视为分隔符；keep：原样保留换行
+weight:
+  syntaxes: [brace, numeric]        # brace: {tag}/[tag]；numeric: 1.2::tag::
+  preferred: numeric
+  range: [-3.0, 3.0]                # 负数权重可用于“反向”强调
+language: { allow_cjk: false }
+length:
+  tokenizer: qwen                   # 官网 V5 用 Qwen 3.5 分词器；不删权重记号，按原文计数
+  max_tokens: 703                   # 官网 V5 Curated 的上限（不到 Full 的一半）
+  shared_with_characters: true      # 主提示词和各角色提示词加起来共用上限（官网规则）
+multi_character: { supported: true, max: 6 }
+forbid:
+  artist_tags: true                 # artist 由脚本叠加
+  quality_tags: renderer            # 质量词由画风 / renderer 叠加
+validators: [frame_structure, weight_syntax, bracket_balance, token_length,
+             language, forbidden_tags, duplicate_tags, tag_conflict,
+             character_count, source_exists, coverage]

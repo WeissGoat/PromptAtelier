@@ -14,7 +14,7 @@ import {
   segmentText,
   type MarkedTag,
 } from "./analysis";
-import type { ContractFrame, ContractIssue, ContractResultImage, ContractSources } from "./types";
+import type { ContractFrame, ContractIssue, ContractResultImage, ContractSources, TokenUsage } from "./types";
 
 export type FrameView = "marked" | "raw" | "source";
 
@@ -76,6 +76,24 @@ function MarkedText({ text, tags, lookup }: { text: string; tags: MarkedTag[]; l
 
 function issueClass(issue: ContractIssue): string {
   return `ct-issue ct-issue-${issue.severity}`;
+}
+
+/** 「n / 上限」：估算时带 ≈；超限红色，超过 90% 黄色。 */
+export function TokenBadge({ usage, label = "" }: { usage: TokenUsage | null | undefined; label?: string }) {
+  if (!usage || !usage.limit) return null;
+  const ratio = usage.total / usage.limit;
+  const tone = usage.over ? "ct-pill-err" : ratio > 0.9 ? "ct-pill-warn" : "ct-pill-ok";
+  const parts = usage.blocks ? Object.entries(usage.blocks).map(([key, count]) => `${key}: ${count}`) : [];
+  const title = [
+    `${usage.tokenizer.toUpperCase()} 分词${usage.exact ? "，和 NovelAI 官网计数一致" : "不可用，当前是估算"}`,
+    usage.shared && usage.characters.length ? `主提示词 ${usage.base} + 角色提示词 ${usage.characters.join(" + ")}，共用上限 ${usage.limit}` : `上限 ${usage.limit}`,
+    ...parts,
+  ].join("\n");
+  return (
+    <span className={`ct-pill ct-tokens ${tone}`} title={title}>
+      {label}{usage.exact ? "" : "≈"}{usage.total} / {usage.limit}
+    </span>
+  );
 }
 
 export function FrameCard(props: Props) {
@@ -145,6 +163,7 @@ export function FrameCard(props: Props) {
             <strong className="mono">{frame.id}</strong> <strong>{frame.title}</strong>
             {frame.size ? <span className="chip">{SIZE_LABELS[frame.size] ?? frame.size}</span> : null}
             {frame.characters.map((id) => <span className={`chip ct-char origin-${id}`} key={id}>{id}</span>)}
+            <TokenBadge usage={frame.token_usage} />
           </div>
           <small className={frame.is_custom ? "ct-source ct-source-custom" : "ct-source"} title={member?.ref ?? frame.source ?? ""}>
             {sourceLabel}

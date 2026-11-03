@@ -12,8 +12,9 @@ weight:
   range: [-3.0, 3.0]                # 负数权重可用于“反向”强调
 language: { allow_cjk: false }
 length:
-  tokenizer: t5                     # 本地没有 T5 分词器时按 approx 估算
-  max_tokens: 512                   # V4/V4.5 的 T5 上限
+  tokenizer: t5                     # 和官网一致的 T5 计数；分词器不可用时退回估算
+  max_tokens: 512                   # 官网 V4/V4.5 的上限
+  shared_with_characters: true      # 主提示词和各角色提示词加起来共用上限（官网规则）
 multi_character: { supported: true, max: 6 }
 forbid:
   artist_tags: true                 # artist 由脚本叠加

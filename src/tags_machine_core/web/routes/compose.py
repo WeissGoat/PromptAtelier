@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
+from tags_machine_core.prompt_tokens import render_request_token_usage
 from tags_machine_core.web.errors import ApiError
-
 
 router = APIRouter()
 
@@ -16,13 +16,20 @@ def compose_preview(payload: dict[str, Any], request: Request) -> dict[str, Any]
     api = request.app.state.generation_api
     try:
         _validate_prompt_policy_override(payload)
-        return api.resolve_compose_render_plan(payload)
+        result = api.resolve_compose_render_plan(payload)
     except (FileNotFoundError, ValueError, ValidationError) as exc:
         raise ApiError(
             code="compose_preview_failed",
             message=str(exc),
             status_code=400,
         ) from exc
+    render_request = result.get("render_request")
+    if result.get("status") == "ready" and isinstance(render_request, dict):
+        # 最终提示词（含画风前后缀、分角色提示词）按官网规则数 token；只有 NovelAI 有。
+        usage = render_request_token_usage(render_request)
+        if usage is not None:
+            result["token_usage"] = usage
+    return result
 
 
 def _validate_prompt_policy_override(payload: dict[str, Any]) -> None:

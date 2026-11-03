@@ -191,6 +191,25 @@ export type ComposePreviewResponse = {
   };
   render_request?: Record<string, unknown>;
   agent_task?: Record<string, unknown>;
+  /** NovelAI 最终提示词的 token 用量（和官网同样的分词器和上限）。 */
+  token_usage?: TokenUsage;
+};
+
+/** 提示词 token 用量，规则和 NovelAI 官网图片页一致。 */
+export type TokenUsage = {
+  tokenizer: string;
+  limit: number | null;
+  /** false 表示分词器不可用，数字是估算。 */
+  exact: boolean;
+  /** 主提示词和各角色提示词是否共用上限（NovelAI V4+）。 */
+  shared: boolean;
+  base: number;
+  characters: number[];
+  total: number;
+  over: boolean;
+  /** 按代码块的数量：positive / positive c2 …（只有契约帧有）。 */
+  blocks?: Record<string, number>;
+  model?: string | null;
 };
 
 export type JobRecord = {

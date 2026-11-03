@@ -1,17 +1,25 @@
-import type { ComposePreviewResponse } from "../api/types";
+import type { ComposePreviewResponse, TokenUsage } from "../api/types";
 
 type PromptPreviewProps = {
   prompt: string;
   negative: string;
   renderRequest: unknown;
   promptBundle?: ComposePreviewResponse["prompt_bundle"];
+  tokenUsage?: TokenUsage;
 };
+
+/** 「123 / 512 · T5」；估算带 ≈，超限注明会被截断。 */
+export function formatTokenUsage(usage: TokenUsage): string {
+  const count = `${usage.exact ? "" : "≈"}${usage.total}${usage.limit ? ` / ${usage.limit}` : ""}`;
+  const detail = usage.shared && usage.characters.length ? `（主 ${usage.base} + 角色 ${usage.characters.join(" + ")}）` : "";
+  return `${count} · ${usage.tokenizer.toUpperCase()}${detail}${usage.over ? " · 超限，超出部分会被截断" : ""}`;
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-export function PromptPreview({ prompt, negative, renderRequest, promptBundle }: PromptPreviewProps) {
+export function PromptPreview({ prompt, negative, renderRequest, promptBundle, tokenUsage }: PromptPreviewProps) {
   const request = record(renderRequest);
   const parameters = record(request.parameters);
   // compose-preview 返回的是 core RenderRequest：尺寸在 size 里，采样参数在 params 里。
@@ -29,6 +37,7 @@ export function PromptPreview({ prompt, negative, renderRequest, promptBundle }:
     ["Steps", request.steps ?? parameters.steps ?? params.steps],
     ["Scale", request.scale ?? parameters.scale ?? params.scale ?? params.cfg],
     ["Seed", request.seed ?? parameters.seed],
+    ["Tokens", tokenUsage ? formatTokenUsage(tokenUsage) : undefined],
   ].filter((item): item is [string, unknown] => item[1] !== undefined && item[1] !== null);
   // ComfyUI 收到的是换算过权重的提示词；和 NovelAI 写法不同时单独列出来。
   const comfyuiPositive = comfyui && typeof params.positive_prompt === "string" && params.positive_prompt !== request.prompt

@@ -409,6 +409,7 @@ export function CustomGeneratePanel() {
         prompt={displayPreview?.prompt_bundle?.prompt.positive ?? ""}
         promptBundle={displayPreview?.prompt_bundle}
         renderRequest={displayPreview?.render_request}
+        tokenUsage={displayPreview?.token_usage}
       />
       <div className="button-row ordinary-generate-actions">
         <button disabled={busy} onClick={() => void runPreview()} type="button"><Eye size={16} /> Preview</button>

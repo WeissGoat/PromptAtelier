@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -15,9 +14,9 @@ from typing import Protocol
 
 from tags_machine_core.policies.rules.tag_conflict import DEFAULT_CONFLICTS, _load_legacy_masks
 from tags_machine_core.policies.tokens import canonicalize_tag
+from tags_machine_core.prompt_tokens import prompt_token_usage
 
 from .models import (
-    CUSTOM_SOURCE,
     SIZE_CHOICES,
     ContractIssue,
     ParsedContract,
@@ -28,7 +27,6 @@ from .parser import FRAME_ID_RE
 from .profiles import FormatProfile
 from .sources import ActionGroup, ActionMember
 from .tokens import tokenize_prompt
-
 
 QUALITY_TAGS = frozenset(
     canonicalize_tag(tag)
@@ -222,17 +220,38 @@ class BracketBalance(_Base):
         return issues
 
 
-def estimate_tokens(text: str, tokenizer: str) -> int:
-    """没有真实分词器时的估算：英文词按 ~4 字符一个 token，标点各 1 个；CJK 每字 1~2 个。"""
-    count = 0
-    for word in re.findall(r"[A-Za-z0-9']+|[^\sA-Za-z0-9']", text):
-        if word[0].isalnum() or word[0] == "'":
-            count += max(1, math.ceil(len(word) / (4 if tokenizer == "t5" else 5)))
-        elif CJK_RE.match(word):
-            count += 2
-        else:
-            count += 1
-    return count
+_PAREN_WEIGHT_RE = re.compile(r":\s*-?\d+(?:\.\d+)?\s*\)")
+
+
+def _text_for_count(text: str, profile: FormatProfile) -> str:
+    submitted = profile.prompt_for_submit(text)
+    if "paren" in profile.weight.syntaxes:
+        # WebUI 数 token 前会去掉 (tag:1.2) 的括号和数值。
+        submitted = re.sub(r"(?<!\\)[()]", "", _PAREN_WEIGHT_RE.sub(")", submitted))
+    return submitted
+
+
+def frame_token_usage(frame: ParsedFrame, profile: FormatProfile) -> dict | None:
+    """一帧正向提示词的 token 用量：主提示词 + 各角色提示词（共用上限时加总）。"""
+    if profile.length.tokenizer == "approx" and not profile.length.max_tokens:
+        return None
+    blocks = prompt_blocks(frame, "positive")
+    if not blocks:
+        return None
+    main = next((block for block in blocks if not block.character), None)
+    characters = [block for block in blocks if block.character]
+    usage = prompt_token_usage(
+        _text_for_count(main.text, profile) if main else "",
+        [_text_for_count(block.text, profile) for block in characters],
+        tokenizer=profile.length.tokenizer,
+        limit=profile.length.max_tokens,
+        shared=profile.length.shared_with_characters,
+    )
+    usage["blocks"] = {
+        **({"positive": usage["base"]} if main else {}),
+        **{block.key: count for block, count in zip(characters, usage["characters"])},
+    }
+    return usage
 
 
 @register
@@ -241,19 +260,19 @@ class TokenLength(_Base):
 
     def validate_frame(self, frame, profile, ctx):
         limit = profile.length.max_tokens
-        if not limit:
+        usage = frame_token_usage(frame, profile)
+        if not limit or not usage or not usage["over"]:
             return []
-        issues = []
-        for block in prompt_blocks(frame, "positive"):
-            submitted = profile.prompt_for_submit(block.text)
-            tokens = estimate_tokens(submitted, profile.length.tokenizer)
-            if tokens > limit:
-                issues.append(self.issue(
-                    "warn",
-                    f"约 {tokens} token（估算），超过 {profile.id} 的上限 {limit}；超出部分可能被截断",
-                    frame, block=block.key,
-                ))
-        return issues
+        exact = usage["exact"]
+        severity = profile.length.over_limit if exact else "warn"
+        amount = f"{usage['total']} token" if exact else f"约 {usage['total']} token（估算）"
+        scope = "主提示词和角色提示词合计" if usage["shared"] and usage["characters"] else "正向提示词"
+        tail = "；超出部分会被截断" if severity == "error" else "；可能被截断或效果变差"
+        return [self.issue(
+            severity,
+            f"{scope} {amount}，超过 {profile.id} 的上限 {limit}{tail}。画风和质量词还会再占一部分",
+            frame, block="positive",
+        )]
 
 
 @register

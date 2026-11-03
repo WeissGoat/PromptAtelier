@@ -53,7 +53,11 @@ def _format_notes(profile: FormatProfile | None, target_format: str) -> str:
         f"- 中文：{'可以' if profile.language.allow_cjk else '不要在提示词里写中文'}",
     ]
     if profile.length.max_tokens:
-        lines.append(f"- 长度：每帧正向约 {profile.length.max_tokens} token 以内（{profile.length.tokenizer}）")
+        scope = "主提示词加各角色提示词合计" if profile.length.shared_with_characters else "每帧正向"
+        lines.append(
+            f"- 长度：{scope}不超过 {profile.length.max_tokens} token（{profile.length.tokenizer} 分词，和官网计数一致）；"
+            "画风和质量词出图时还会再加，最好留出余量。contract check 的 tokens 字段给出每帧的实际数"
+        )
     if profile.multi_character.supported:
         lines.append(f"- 分角色提示词：支持，最多 {profile.multi_character.max} 个；用 ```positive c2 / ```negative c2 写")
     else:
