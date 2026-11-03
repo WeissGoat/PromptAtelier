@@ -463,6 +463,6 @@ CLIP（`openai/clip-vit-large-patch14`）、T5（`google-t5/t5-base`）完全一
   - `TM_TOKENIZER_DOWNLOAD=0` 禁止下载。
 - 下载失败或没装 `tokenizers` 时退回估算，`exact: false`，超限只报 warn。
 - 契约帧：数 Agent 写的正向提示词。超限报 error；`sdxl-danbooru` 的 profile 设了 `over_limit: warn`，只报 warn。
-- 出图前：生图栏的「检查最终长度」逐帧调用 `/compose-preview`，按画风实际用的模型，对拼好画风前后缀和分角色提示词之后的最终文本计数。
+- 出图前：点「生成所选帧」或「生成此帧」时先逐帧调用 `/compose-preview`，按画风实际用的模型，对拼好画风前后缀和分角色提示词之后的最终文本计数；有帧超限时弹窗列出，确认后才提交（ComfyUI 不检查）。「检查最终长度」按钮只做检查、不提交。
   - 画风模型和契约格式不一致时会提示，例如 `tags.txt` 画风走 `nai-diffusion-3`。
 - Custom 页的 Preview 也显示 Tokens。

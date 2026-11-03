@@ -148,6 +148,15 @@ export async function checkFinalLengths(items: { frameId: string; request: Compo
   }));
 }
 
+/** 提交前的超限确认：没有超限直接通过；有超限时列出各帧，交给 confirm 决定是否仍然提交。 */
+export function confirmOverLimit(lengths: FinalLength[], confirm: (message: string) => boolean = (message) => window.confirm(message)): boolean {
+  const over = lengths.filter((item) => item.usage?.over);
+  if (!over.length) return true;
+  const lines = over.map(({ frameId, usage }) => `${frameId}：${usage!.exact ? "" : "≈"}${usage!.total} / ${usage!.limit}`);
+  const model = over[0].usage?.model ? `（${over[0].usage.model}）` : "";
+  return confirm(`以下帧的最终提示词超过 token 上限${model}，超出部分会被截断：\n${lines.join("\n")}\n\n仍然提交？`);
+}
+
 /** 画风实际用的模型和契约的目标格式不一致时提示（例如契约按 V4.5 写，画风是 V3 的 tags.txt 画风）。 */
 export function formatMismatch(detail: ContractDetail | null, lengths: FinalLength[]): string {
   const profile = detail?.profile;
@@ -174,6 +183,7 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
   const [error, setError] = useState("");
   const [lengths, setLengths] = useState<FinalLength[] | null>(null);
   const [checking, setChecking] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "checking" | "submitting">("idle");
   const update = (patch: Partial<GenerateSettings>) => {
     setLengths(null);
     onChange({ ...settings, ...patch });
@@ -226,6 +236,20 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
     try {
       const outputDir = createCompareOutputDir("contract");
       const items = frames.map((frame) => buildFrameRequest(detail, frame, settings, info, outputDir));
+      if (info.backend === "novelai") {
+        // 提交前按最终提示词（含画风前后缀、分角色提示词）检查长度，超限时确认。
+        setPhase("checking");
+        const checked = await checkFinalLengths(items.map((item, index) => ({
+          frameId: frames[index].id,
+          request: item.compose_request as ComposeRenderRequest,
+        })));
+        setLengths(checked);
+        if (!confirmOverLimit(checked)) {
+          setError("已取消：先精简超限的帧，或换用上限更高的画风模型");
+          return;
+        }
+      }
+      setPhase("submitting");
       await submitBackgroundBatch({
         label: `契约 · ${detail.request.title || detail.id} · ${frames.length} 帧`,
         kind: "primary",
@@ -237,6 +261,7 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
       setError(errorMessage(err));
     } finally {
       setBusy(false);
+      setPhase("idle");
     }
   }
 
@@ -329,11 +354,11 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
       </div>
       <div className="ct-row">
         <button className="primary" disabled={busy || !detail || !selected.size} onClick={() => void submit([...selected])} type="button">
-          <Play size={14} /> 生成所选帧
+          <Play size={14} /> {phase === "checking" ? "检查长度…" : phase === "submitting" ? "提交中…" : "生成所选帧"}
         </button>
         <button
           className="btn-sm"
-          disabled={checking || !detail || !selected.size}
+          disabled={checking || busy || !detail || !selected.size}
           onClick={() => void checkLengths()}
           title="按所选画风拼出最终提示词（含画风前后缀、分角色提示词），用和 NovelAI 官网相同的分词器数 token"
           type="button"

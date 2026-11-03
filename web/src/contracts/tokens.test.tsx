@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TokenUsage } from "../api/types";
 import { formatTokenUsage } from "../components/PromptPreview";
-import { checkFinalLengths, formatMismatch } from "./ContractGeneratePanel";
+import { checkFinalLengths, confirmOverLimit, formatMismatch } from "./ContractGeneratePanel";
 import type { ContractDetail } from "./types";
 import { TokenBadge } from "./FrameCard";
 
@@ -60,5 +60,22 @@ describe("token usage display", () => {
     expect(formatMismatch(detail, [{ frameId: "f01", usage: usage({ model: "nai-diffusion-4-5-full" }) }])).toBe("");
     expect(formatMismatch(detail, [{ frameId: "f01", usage: usage({ model: "nai-diffusion-3" }) }])).toContain("nai-diffusion-3");
     expect(formatMismatch(detail, [{ frameId: "f01", error: "x" }])).toBe("");
+  });
+
+  it("asks for confirmation only when a frame is over the limit", () => {
+    const confirm = vi.fn(() => false);
+    expect(confirmOverLimit([{ frameId: "f01", usage: usage() }, { frameId: "f02", error: "x" }], confirm)).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    const over = [
+      { frameId: "f01", usage: usage() },
+      { frameId: "f02", usage: usage({ total: 530, over: true, model: "nai-diffusion-4-5-full" }) },
+    ];
+    expect(confirmOverLimit(over, confirm)).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const message = (confirm.mock.calls[0] as unknown as [string])[0];
+    expect(message).toContain("f02：530 / 512");
+    expect(message).not.toContain("f01");
+    expect(message).toContain("nai-diffusion-4-5-full");
+    expect(confirmOverLimit(over, () => true)).toBe(true);
   });
 });
