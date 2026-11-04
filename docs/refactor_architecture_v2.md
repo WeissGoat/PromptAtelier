@@ -405,6 +405,10 @@ characters[index].selected_keys
 > identity_minimal
 ```
 
+`run-prompt-prompt.md` 的顶层 `selected_keys` 是单角色简写，读取时会归一化为
+`characters[0].selected_keys`。同时存在 `characters` 时，顶层值填充未显式声明
+`selected_keys` 的角色条目，条目内显式值优先。
+
 `character_scope` 现在是兼容 fallback，不再作为新规则扩展入口。
 `identity_minimal` 是最后兜底，默认只取 `character` 和 `role`；如果 character `meta.yaml` 显式配置了 `identity_minimal`，则以节点配置为准。ScriptComposer 不再在兜底时取角色全部 tags。
 AgentComposer 不经过该规则，避免影响当前稳定的 agent prompt cache 和外部 agent 拼接链路。

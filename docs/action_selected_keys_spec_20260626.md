@@ -37,7 +37,9 @@ character_selection:
 
 ## run-prompt-prompt.md 兼容
 
-短期兼容读取 `run-prompt-prompt.md` 的 YAML front matter：
+`run-prompt-prompt.md` 的 YAML front matter 支持两种写法。
+
+多角色或需要按 index 指定时使用正式写法：
 
 ```yaml
 ---
@@ -49,7 +51,20 @@ characters:
 ---
 ```
 
-该兼容入口只读取 `characters[].selected_keys`，正文不参与拼接规则。
+单角色可以使用顶层 `selected_keys` 简写：
+
+```yaml
+---
+selected_keys:
+  - character
+  - copyright
+  - hair
+---
+```
+
+读取器会把顶层简写归一化为 `characters[0].selected_keys`。如果同时存在
+`characters`，顶层值作为缺少 `selected_keys` 的条目的兼容值，条目内显式写出的
+`selected_keys` 优先。正文不参与拼接规则。
 
 ## 优先级
 

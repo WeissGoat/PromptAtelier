@@ -73,5 +73,75 @@ characters:
     ]
 
 
+def test_load_action_profile_accepts_single_character_selected_keys_shorthand(
+    tmp_path: Path,
+):
+    action_dir = tmp_path / "action"
+    action_dir.mkdir()
+    (action_dir / "run-prompt-prompt.md").write_text(
+        """
+---
+schema_version: 1
+selected_keys:
+  - character
+  - copyright
+  - hair
+---
+""".strip(),
+        encoding="utf-8",
+    )
+
+    profile = load_action_profile(action_dir)
+
+    assert profile is not None
+    assert profile.character_selection.default_selected_keys == [
+        "character",
+        "copyright",
+        "hair",
+    ]
+    assert profile.character_selection.characters[0].selected_keys == [
+        "character",
+        "copyright",
+        "hair",
+    ]
+
+
+def test_run_prompt_top_level_keys_fill_characters_without_explicit_keys(
+    tmp_path: Path,
+):
+    action_dir = tmp_path / "action"
+    action_dir.mkdir()
+    (action_dir / "run-prompt-prompt.md").write_text(
+        """
+---
+schema_version: 1
+selected_keys:
+  - character
+  - copyright
+  - hair
+characters:
+  - id: homura
+  - selected_keys:
+      - character
+      - feet
+---
+""".strip(),
+        encoding="utf-8",
+    )
+
+    profile = load_action_profile(action_dir)
+
+    assert profile is not None
+    assert profile.character_selection.characters[0].selected_keys == [
+        "character",
+        "copyright",
+        "hair",
+    ]
+    assert profile.character_selection.characters[1].selected_keys == [
+        "character",
+        "feet",
+    ]
+
+
 def test_load_action_profile_returns_none_when_missing(tmp_path: Path):
     assert load_action_profile(tmp_path) is None

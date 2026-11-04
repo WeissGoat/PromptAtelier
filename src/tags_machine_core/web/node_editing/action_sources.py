@@ -162,6 +162,7 @@ class ActionSourcesAdapter:
         raw = yaml.safe_load("\n".join(lines[1:end])) or {}
         if not isinstance(raw, dict):
             raise ValueError("run-prompt-prompt.md front matter must be a mapping")
+        raw.pop("selected_keys", None)
         raw["characters"] = selected
         front = yaml.safe_dump(raw, allow_unicode=True, sort_keys=False).rstrip()
         body = "\n".join(lines[end + 1 :])

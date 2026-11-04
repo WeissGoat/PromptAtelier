@@ -74,22 +74,41 @@ def load_action_profile(node_dir: str | Path) -> ActionProfile | None:
         data = _read_markdown_front_matter(prompt_md)
         if data is None:
             return None
-        characters = data.get("characters") or []
-        if not isinstance(characters, list):
-            characters = []
+        selection_data = _run_prompt_selection_data(data)
         return ActionProfile(
             character_selection=CharacterSelectionProfile(
                 source=prompt_md.name,
-                characters=[
-                    CharacterSelectionEntry.model_validate(item)
-                    for item in characters
-                    if isinstance(item, dict)
-                ],
+                default_selected_keys=selection_data.get("default_selected_keys") or [],
+                characters=selection_data.get("characters") or [],
             ),
             raw=data,
         )
 
     return None
+
+
+def _run_prompt_selection_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the supported single-character shorthand into character entries."""
+    top_level_keys = CharacterSelectionEntry.normalize_selected_keys(
+        data.get("selected_keys")
+    )
+    raw_characters = data.get("characters")
+    characters = raw_characters if isinstance(raw_characters, list) else []
+    normalized_characters: list[CharacterSelectionEntry] = []
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        if "selected_keys" not in item and top_level_keys:
+            item = {**item, "selected_keys": top_level_keys}
+        normalized_characters.append(CharacterSelectionEntry.model_validate(item))
+    if not normalized_characters and top_level_keys:
+        normalized_characters.append(
+            CharacterSelectionEntry(selected_keys=top_level_keys)
+        )
+    return {
+        "default_selected_keys": top_level_keys,
+        "characters": normalized_characters,
+    }
 
 
 def _read_yaml_mapping(path: Path) -> dict[str, Any]:

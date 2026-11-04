@@ -116,6 +116,62 @@ class WebNodeSaveTest(TestCase):
             self.assertEqual(changed, {"tags.txt", "meta.yaml", "run-prompt-prompt.md"})
             self.assertEqual((action / "classify.yaml").read_text(encoding="utf-8"), classify)
 
+    def test_action_editor_reads_and_canonicalizes_top_level_selected_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design"
+            action = design / "动作改2" / "new" / "action-a"
+            action.mkdir(parents=True)
+            (action / "tags.txt").write_text("standing, smile\n", encoding="utf-8")
+            (action / "meta.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "schema": "tags-machine.action/v1",
+                        "kind": "action",
+                        "id": "action-a",
+                        "name": "action-a",
+                        "tags": {"action": ["standing", "smile"]},
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            (action / "run-prompt-prompt.md").write_text(
+                """
+---
+schema_version: 1
+selected_keys:
+  - character
+  - hair
+---
+
+body
+""".strip(),
+                encoding="utf-8",
+            )
+            client = TestClient(create_app(node_workspace=NodeWorkspace(design_root=design)))
+
+            loaded = client.get("/api/nodes/read", params={"ref": str(action), "role": "action"}).json()
+            values = loaded["editor"]["values"]
+            self.assertEqual(values["selected_keys"], [["character", "hair"]])
+            response = client.post(
+                "/api/nodes/save-preview",
+                json={"ref": str(action), "role": "action", "values": values},
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            profile = next(
+                item
+                for item in response.json()["files"]
+                if item["relative"] == "run-prompt-prompt.md"
+            )
+            front = yaml.safe_load(profile["after_text"].split("---", 2)[1])
+            self.assertNotIn("selected_keys", front)
+            self.assertEqual(
+                front["characters"],
+                [{"selected_keys": ["character", "hair"]}],
+            )
+
     def test_character_save_writes_source_fields_without_runtime_snapshots(self):
         with tempfile.TemporaryDirectory() as tmp:
             design = Path(tmp) / "design"

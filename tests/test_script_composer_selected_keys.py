@@ -1,5 +1,6 @@
 from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.nodes.models import NodeDocument
+from tags_machine_core.nodes.reader import NodeReader
 from tags_machine_core.nodes.resolved import ResolvedNode, ResolvedNodeSet
 
 
@@ -238,6 +239,64 @@ def test_character_scope_still_applies_without_selected_keys():
     assert "black shoes" in bundle.prompt.positive
     assert "black hair" not in bundle.prompt.positive
     assert "purple eyes" not in bundle.prompt.positive
+
+
+def test_run_prompt_single_character_shorthand_overrides_upper_body_scope(
+    tmp_path,
+):
+    action_dir = tmp_path / "upper_body_action"
+    action_dir.mkdir()
+    (action_dir / "tags.txt").write_text("standing\n", encoding="utf-8")
+    (action_dir / "meta.yaml").write_text(
+        """
+schema: tags-machine.action/v1
+kind: action
+id: upper_body_action
+character_scope: upper_body
+""".strip(),
+        encoding="utf-8",
+    )
+    (action_dir / "run-prompt-prompt.md").write_text(
+        """
+---
+schema_version: 1
+selected_keys:
+  - character
+  - hair
+---
+""".strip(),
+        encoding="utf-8",
+    )
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        tags={
+            "character": ["akemi_homura"],
+            "hair": ["black_hair"],
+            "headwear": ["red_ribbon"],
+            "hands": ["soul_gem"],
+            "accessories": ["neck_ribbon"],
+            "weapons": ["shield", "gun"],
+            "legwear": ["black_pantyhose"],
+            "feet": ["high_heels"],
+        },
+    )
+    action = NodeReader().read(action_dir)
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert "akemi_homura" in bundle.prompt.positive
+    assert "black_hair" in bundle.prompt.positive
+    for unexpected in (
+        "red_ribbon",
+        "soul_gem",
+        "neck_ribbon",
+        "shield",
+        "gun",
+        "black_pantyhose",
+        "high_heels",
+    ):
+        assert unexpected not in bundle.prompt.positive
 
 
 def test_default_scope_uses_identity_minimal_instead_of_all_character_tags():
