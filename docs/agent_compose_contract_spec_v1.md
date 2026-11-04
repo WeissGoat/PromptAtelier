@@ -154,9 +154,27 @@ looking back, standing, by window, night, classroom
   - `size`：可选，本帧分辨率方向，取 `portrait`（竖）/ `landscape`（横）/ `square`（方）。只写方向，具体像素由所选画风的尺寸预设决定（与 Custom 的尺寸选项一致）；不写表示由生图时决定
 - 提示词：
   - ```` ```positive ```` / ```` ```negative ```` 是本帧主提示词。
-  - 多角色且格式支持分角色提示词时，用 ```` ```positive c2 ```` / ```` ```negative c2 ````。
+  - 多角色且格式支持分角色提示词时，用 ```` ```positive c1 ```` / ```` ```positive c2 ````（及可选的 ```` ```negative cN ````）。分工见 §4.4。
 - 其他文字：都视为该帧备注，Web 原样展示。
 - 换行和空行：Agent 可以随意用来分组排版。提交生图时如何处理由格式 profile 决定（`newline: separator`：换行视为分隔符，默认值；或 `newline: keep`）。
+
+### 4.4 多角色
+
+契约里多角色只用一种写法：分角色代码块。
+
+| 代码块 | 内容 |
+|---|---|
+| ```` ```positive ```` | 画面共用：人数 tag、互动、构图镜头、背景环境 |
+| ```` ```positive cN ```` | 角色 cN 自己的全部内容：性别词、身份词、服装、动作里属于这个人的部分 |
+| ```` ```negative cN ```` | 可选，只对 cN 生效的负面词 |
+
+- 帧的 `characters:` 中每个角色都应有 ```` ```positive cN ````；单人帧可以只写主提示词。
+- 动作库里的行内写法 `::character A: … ::` 由 Agent 转写成 cN 块（默认 A→c1、B→c2，定制要求优先），不与 cN 块混用。只有行内块、没有 cN 块的帧仍可出图（走 Character Prompts 的 Auto 拆分），校验器给 info 提示改写。
+- 出图：
+  - NovelAI 画风、Character Prompts 开着：cN 块按 c1、c2… 的顺序作为角色提示词提交（`character_prompts: {mode: explicit}`），主提示词不拆分；没有 cN 块的帧仍用 Auto。
+  - 画风模型不支持分角色（V3）：renderer 把 cN 块并进主提示词（`unsupported: merge`）。
+  - ComfyUI 画风或关掉 Character Prompts：前端把 cN 块并进主提示词。
+- `prompt_hash` 包含各 cN 块；没有 cN 块时与只算主提示词的结果相同。
 
 ---
 
@@ -279,7 +297,8 @@ class ContractValidator(Protocol):
 | `language` | 不允许中文时检出 CJK |
 | `forbidden_tags` | 画师名、质量词等由脚本负责的内容 |
 | `duplicate_tags` / `tag_conflict` | 复用现有 policies 规则 |
-| `character_count` | `1girl/2girls/1boy` 与 `characters`、动作 `cast` 一致 |
+| `character_count` | `1girl/2girls/1boy` 与 `characters`、动作 `cast` 一致（主提示词没写人数 tag 时按各角色块加总） |
+| `character_blocks` | 分角色（§4.4）：`characters` 中的角色都有 cN 块；行内 `::character X:` 与 cN 块混用（error）；cN 块里写了其他角色的词、分角色时角色词留在主提示词（warn）。作品名、role 分区不参与判断 |
 | `source_exists` | `source` 属于本动作组；`inspired_by` 存在 |
 | `coverage` | 动作组中没有被任何帧使用的成员（warn） |
 
@@ -306,7 +325,7 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 - 每帧自主拼出完整提示词。角色的身份词通常保留；服装、发型、配饰等结合动作的裸露状态、镜头范围、构图和要求来取舍。
 - 动作的核心（姿势、构图、表情、互动）优先保留；与要求冲突的环境词、混入的角色/画风词去掉。
 - 尽量沿用素材里的原词写法（便于 Web 标记来源）；需要调整时可以改权重或替换。
-- 多角色：只有选了多个角色且要求中说明了分配方式时，才替换动作中的人物。
+- 多角色：按 §4.4 分块写；动作中的人物怎么对应以要求为准，默认行内块 A→c1、B→c2。
 - 连续性：同一组中的服装和场景保持一致，除非要求变化。
 - 新增帧：用 `kb search` 找参考、`kb show` 读内容；`source: custom`，参考过的写进 `inspired_by`。
 - 排版自由，可以换行分组；备注写在帧的代码块之外。
@@ -415,7 +434,7 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 | 契约解析 / 写回 / 创建 / 索引 | `src/tags_machine_core/compose_contracts/`（`parser.py`、`store.py`、`service.py`） | 包名用 `compose_contracts`，因为 `contracts.py` 已是 PromptBundle 等数据模型 |
 | 动作组与来源节点 | `compose_contracts/sources.py` | 沿用 `NodeReader`；成员 ref 取符号链接指向的 `new/...`，也接受 `stn_x/01_...`、成员目录名、`#N` |
 | 格式 profile | `configs/prompt_formats/`（nai-v3、nai-v4、nai-v4.5、nai-v5、nai-v5-curated、sdxl-danbooru） | `contract.formats_dir` 可改目录 |
-| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现；`token_length` 用真实分词器，见 §12.1 |
+| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现，另加 `character_blocks`（§4.4）；`token_length` 用真实分词器，见 §12.1 |
 | token 计数 | `src/tags_machine_core/prompt_tokens.py` | 契约帧、`contract check` 的 `tokens`、`/compose-preview` 的 `token_usage` 共用 |
 | 要求 prompt | `compose_contracts/prompts.py` | 工具版 / 自包含版 |
 | CLI | `tm-core contract show / context [--member N] / check / prompt` | `check` 有 error 时退出码 1 |
@@ -427,10 +446,9 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 | Web 页面 | `web/src/pages/AgentStudio.tsx`、`web/src/contracts/*` | 侧栏「Agent 拼接」 |
 | 配置 | `contract.root`（默认 `<design_root>/动作改2/contracts`）、`contract.formats_dir`、`contract.runner: manual` | |
 
-提前完成的 P1：历史契约按所选节点筛选（完全 / 部分匹配）、来源过期提示、按帧编辑写回（带 hash 冲突检测）、5 秒轮询与 Shift+刷新先 `git pull`。
+提前完成的 P1：历史契约按所选节点筛选（完全 / 部分匹配）、来源过期提示、按帧编辑写回（带 hash 冲突检测）、5 秒轮询与 Shift+刷新先 `git pull`、多角色分角色提示词（§4.4：生图按角色提交；帧卡片按 主→c1→c2 排列并标角色色，角色词写错块时波浪线标出，Diff 合并各角色块对比，编辑时可添加角色块）。
 
 还没做：
-- 多角色分角色提示词：```` ```positive c2 ```` 能解析、校验，但生图时还只提交主 positive。
 - 结果故事板独立页面、「帧 × 画风」对比、「基于此契约新建」。
 - 右栏的 Policy Rules 开关：第一期保持与 agent composer 一致的默认跳过，没有放开关。
 - 翻译模块仍在 `styleLab/translations.ts`，Agent Studio 直接引用，没有挪到公共目录。

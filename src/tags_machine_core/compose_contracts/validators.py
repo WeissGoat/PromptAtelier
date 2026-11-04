@@ -26,7 +26,7 @@ from .models import (
 from .parser import FRAME_ID_RE
 from .profiles import FormatProfile
 from .sources import ActionGroup, ActionMember
-from .tokens import tokenize_prompt
+from .tokens import tag_keys, tokenize_prompt
 
 QUALITY_TAGS = frozenset(
     canonicalize_tag(tag)
@@ -41,6 +41,10 @@ ARTIST_PREFIX_RE = re.compile(r"^artist\s*:", re.IGNORECASE)
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]")
 COUNT_TAG_RE = re.compile(r"^(\d+|6\+)(girl|boy|other)s?$")
 CAST_RE = re.compile(r"(\d+)(girl|boy|other)s?")
+# 动作库里的行内分角色写法 `::character A: … ::`（renderer 的 Auto 模式会拆出来）。
+INLINE_CHARACTER_RE = re.compile(r"::character\s*([A-Za-z0-9_]+)\s*:", re.IGNORECASE)
+# 这些分区多个角色常常共用（同一部作品），不用来判断「词属于哪个角色」。
+SHARED_CHARACTER_SECTIONS = frozenset({"copyright", "role"})
 
 
 @dataclass
@@ -50,6 +54,8 @@ class ValidationContext:
     character_ids: list[str] = field(default_factory=list)
     references: dict[str, ActionMember | None] = field(default_factory=dict)
     conflict_rules: list[dict[str, list[str]]] = field(default_factory=lambda: list(DEFAULT_CONFLICTS))
+    # 角色 id → 角色节点的词（归一化后），用来发现写错块的角色词。
+    character_tags: dict[str, set[str]] = field(default_factory=dict)
 
     def member_for(self, frame: ParsedFrame) -> ActionMember | None:
         if self.action_group is None or frame.is_custom:
@@ -340,6 +346,16 @@ class TagConflict(_Base):
         return issues
 
 
+def _count_tags(text: str, separator: str) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for tag in tokenize_prompt(text, separator):
+        match = COUNT_TAG_RE.match(tag.key)
+        if match:
+            number = 6 if match.group(1) == "6+" else int(match.group(1))
+            counts[match.group(2)] += number
+    return counts
+
+
 @register
 class CharacterCount(_Base):
     id = "character_count"
@@ -348,12 +364,12 @@ class CharacterCount(_Base):
         positive = frame.positive
         if not positive:
             return []
-        counts: Counter[str] = Counter()
-        for tag in tokenize_prompt(positive, profile.separator):
-            match = COUNT_TAG_RE.match(tag.key)
-            if match:
-                number = 6 if match.group(1) == "6+" else int(match.group(1))
-                counts[match.group(2)] += number
+        # 人数 tag 一般写在主提示词；主提示词没写时，按各角色块里的人数 tag 加总。
+        counts = _count_tags(positive, profile.separator)
+        if not counts:
+            for block in prompt_blocks(frame, "positive"):
+                if block.character:
+                    counts.update(_count_tags(block.text, profile.separator))
         issues = []
         total = sum(counts.values())
         declared = len(frame.characters)
@@ -375,6 +391,91 @@ class CharacterCount(_Base):
 
 def _format_counts(counts: Counter[str]) -> str:
     return " ".join(f"{n}{kind}" for kind, n in sorted(counts.items()))
+
+
+def character_tag_keys(characters: dict[str, dict]) -> dict[str, set[str]]:
+    """角色 id → 角色节点各分区的词（归一化），不含作品名等多个角色共用的分区。"""
+    result: dict[str, set[str]] = {}
+    for cid, summary in characters.items():
+        keys: set[str] = set()
+        for section, tags in (summary.get("sections") or {}).items():
+            if section in SHARED_CHARACTER_SECTIONS:
+                continue
+            keys.update(tag_keys(", ".join(tags)))
+        result[cid] = keys
+    return result
+
+
+@register
+class CharacterBlocks(_Base):
+    """分角色提示词（```positive cN）：主提示词写画面共用的部分，每个 cN 块写这个角色自己的全部内容。"""
+
+    id = "character_blocks"
+
+    def validate_frame(self, frame, profile, ctx):
+        if not profile.multi_character.supported:
+            return []
+        issues = []
+        blocks = [block for block in prompt_blocks(frame, "positive") if block.character]
+        inline = sorted({match.group(1) for match in INLINE_CHARACTER_RE.finditer(frame.positive)})
+        if inline and blocks:
+            issues.append(self.issue(
+                "error",
+                f"主提示词里还有行内角色块（::character {'/'.join(inline)}: … ::），同时又写了 ```positive cN；行内块不会被拆出来，会原样提交",
+                frame, block="positive",
+                fix_hint="把行内块的内容挪进对应的 ```positive cN，主提示词里删掉 ::character …:: 这一段",
+            ))
+        elif inline:
+            issues.append(self.issue(
+                "info",
+                f"主提示词里有行内角色块（::character {'/'.join(inline)}: … ::），出图时靠 Character Prompts 的 Auto 模式拆分",
+                frame, block="positive",
+                fix_hint="建议改写成 ```positive c1 / ```positive c2，分配更明确，Web 也能按角色显示",
+            ))
+        if not blocks:
+            return issues
+
+        if len(blocks) > profile.multi_character.max:
+            issues.append(self.issue("error", f"角色块有 {len(blocks)} 个，超过 {profile.id} 的上限 {profile.multi_character.max}", frame))
+        written = {block.character for block in blocks}
+        for cid in frame.characters:
+            if cid not in written:
+                issues.append(self.issue("warn", f"本帧 characters 里有 {cid}，但没有 ```positive {cid}；这个角色只能靠主提示词描述", frame))
+        if frame.characters:
+            for cid in sorted(written - set(frame.characters)):
+                issues.append(self.issue("warn", f"写了 ```positive {cid}，但本帧 characters 里没有 {cid}", frame, block=f"positive {cid}"))
+        for block in prompt_blocks(frame, "negative"):
+            if block.character and block.character not in written:
+                issues.append(self.issue("warn", f"有 ```{block.key}，但没有 ```positive {block.character}", frame, block=block.key))
+
+        tags = ctx.character_tags
+        if not tags:
+            return issues
+        for block in blocks:
+            own = tags.get(block.character or "", set())
+            reported: set[str] = set()
+            for tag in tokenize_prompt(block.text, profile.separator):
+                if tag.key in own or tag.key in reported:
+                    continue
+                owner = next((cid for cid in sorted(tags) if cid != block.character and tag.key in tags[cid]), None)
+                if owner:
+                    reported.add(tag.key)
+                    issues.append(self.issue(
+                        "warn", f"「{tag.raw}」是 {owner} 的角色词，写在了 {block.character} 的块里", frame,
+                        block=block.key, tag=tag.raw,
+                    ))
+        reported = set()
+        for tag in tokenize_prompt(frame.positive, profile.separator):
+            if tag.key in reported:
+                continue
+            owners = [cid for cid in sorted(written) if tag.key in tags.get(cid, set())]
+            if len(owners) == 1 and not any(tag.key in tags.get(cid, set()) for cid in tags if cid != owners[0]):
+                reported.add(tag.key)
+                issues.append(self.issue(
+                    "warn", f"「{tag.raw}」是 {owners[0]} 的角色词，写在了主提示词里；分角色时应写进 ```positive {owners[0]}", frame,
+                    block="positive", tag=tag.raw,
+                ))
+        return issues
 
 
 @register

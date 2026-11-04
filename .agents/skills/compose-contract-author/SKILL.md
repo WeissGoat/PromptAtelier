@@ -56,8 +56,40 @@ red_glasses
 - 帧 id：`f01`、`f02`…，插入的新帧用 `f02b`。id 用来回挂出图结果，写好后不要改。
 - `source`：动作组成员的 `ref`（也接受 `#2` 这种组内序号）；自定义帧写 `custom`，参考过的动作写进 `inspired_by`（逗号分隔）。
 - `characters`：本帧出现的角色 id。`size`：可选，`portrait` / `landscape` / `square`，只写方向。
-- 多角色、且目标格式支持分角色提示词时，用 ```` ```positive c2 ```` / ```` ```negative c2 ```` 写第二个角色。
 - 代码块里可以随意换行、空行分组；提交生图时按格式 profile 把换行当分隔符。
+
+## 多角色
+
+契约选了多个角色（c1、c2…）、目标格式支持分角色提示词（`contract show` 的 format 段）时，画面里有两个及以上角色的帧这样写：
+
+| 代码块 | 写什么 |
+|---|---|
+| ```` ```positive ```` | 画面共用的部分：人数 tag（`2girls` 等）、互动、构图镜头、背景环境。不写某个角色专属的词 |
+| ```` ```positive c1 ```` / ```` ```positive c2 ```` | 这个角色自己的全部内容：性别词（`girl` / `boy`）、身份词（角色名、发色瞳色）、服装，以及动作里属于这个人的部分（姿势、表情、谁对谁做什么） |
+| ```` ```negative c1 ```` | 可选，只对这个角色生效的负面词 |
+
+````markdown
+## f01 坐在腿上
+source: #1
+characters: c1, c2
+
+```positive
+2girls, yuri, sitting on lap, night, classroom, window
+```
+
+```positive c1
+girl, akemi_homura, black_hair, long_hair, purple_eyes, sitting behind, hands on another's waist, smile
+```
+
+```positive c2
+girl, kaname_madoka, pink_hair, twintails, pink_eyes, sitting on lap, open mouth, blush
+```
+````
+
+- `characters:` 列出的每个角色都要有自己的 ```` ```positive cN ````。
+- 动作素材里的行内写法 `::character A: … ::` / `::character B: … ::`：把 A、B 里的词挪进对应的 cN 块，主提示词里删掉这一段，**不要两种写法混用**（混用时行内块会原样提交，`contract check` 报 error）。默认 A→c1、B→c2；定制要求说明了谁做什么时按要求对应。块里原来的角色名、发色等换成该角色自己的身份词。
+- 只出现一个角色的帧（单人特写等）可以只写 ```` ```positive ````。
+- 出图时：NovelAI V4+ 画风把 cN 块作为角色提示词提交；V3 画风、ComfyUI 画风或关掉 Character Prompts 时，cN 块并进主提示词。
 
 ## 原则
 
@@ -65,7 +97,7 @@ red_glasses
 - 角色身份词（角色名、作品名、发色瞳色等）通常保留；服装、发型、配饰结合动作的 `clothing_state`（裸露状态）、`character_scope`（镜头范围）、构图和要求取舍。
 - 动作的核心（姿势、构图、表情、互动）优先保留；与要求冲突的环境词（如 `white background`、`simple background`）、混进动作里的角色/画风词去掉。
 - 尽量沿用素材里的原词写法：Web 按字面匹配给每个词标来源，改了写法会显示成「改写」或「新增」。需要强调时改权重。
-- 多角色：只有选了多个角色、且要求说明了分配方式时，才把动作里的人物换成 c2 等；否则保留动作原词。
+- 多角色：按上面「多角色」一节分块写；人物怎么对应以定制要求为准。
 - 连续性：同一组的服装、场景保持一致，除非要求变化。
 - 权重写法按目标格式（`contract show` 的 format 段）：NovelAI 用 `{tag}` / `[tag]` / `1.2::tag::`，SDXL 用 `(tag:1.2)`。
 - 不要写：画师名（`artist:xxx`）、质量前缀（`masterpiece`、`best quality` 等，由画风叠加）、生图参数。
@@ -75,6 +107,7 @@ red_glasses
 
 `frame_structure`（帧标题、source、positive 齐全，id 不重复）、`weight_syntax`、`bracket_balance`、`token_length`（和 NovelAI 官网同样的分词器和上限，超限是错误）、
 `language`（不允许中文的格式里检出 CJK）、`forbidden_tags`、`duplicate_tags`、`tag_conflict`（如 barefoot 与 socks）、
-`character_count`（人数 tag 与 characters、动作 cast）、`source_exists`、`coverage`（动作组里没被任何帧用到的成员）。
+`character_count`（人数 tag 与 characters、动作 cast）、`character_blocks`（角色块齐全、行内块与 cN 块混用、角色词写错块）、
+`source_exists`、`coverage`（动作组里没被任何帧用到的成员）。
 
 `contract check` 结果里的 `tokens` 给出每帧正向的 token 数和上限（V4+ 是主提示词加各角色提示词的合计）。出图时画风前后缀和质量词还会再占几十个 token，接近上限的帧要精简。

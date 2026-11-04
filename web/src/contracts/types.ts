@@ -34,6 +34,8 @@ export type ContractRequest = {
   author: string;
 };
 
+export type CharacterPrompt = { id: string; positive: string; negative: string };
+
 export type ContractFrame = {
   id: string;
   title: string;
@@ -48,6 +50,8 @@ export type ContractFrame = {
   prompts: Record<string, string>;
   /** 提交生图用的文本：按格式 profile 处理过换行。 */
   submit: Record<string, string>;
+  /** 提交生图用的分角色提示词（```positive cN），按 c1、c2… 排列；没有角色块时为空。 */
+  character_prompts?: CharacterPrompt[];
   member_ref: string | null;
   member_index: number | null;
   prompt_hash: string;

@@ -5,12 +5,16 @@ import { thumbUrl } from "../api/client";
 import { NodePreviewImage } from "../components/NodePreviewImage";
 import { useTranslations } from "../styleLab/translations";
 import {
+  blockCharacters,
   buildOriginIndex,
   diffAgainstSource,
+  flattenInlineCharacters,
   frameMember,
   markPrompt,
+  orderBlockKeys,
   originClass,
   originLabel,
+  parseBlockKey,
   segmentText,
   type MarkedTag,
 } from "./analysis";
@@ -41,7 +45,23 @@ function tagTitle(tag: MarkedTag): string {
   if (tag.added) return "新增：来源中没有这个词";
   const lines = tag.origins.map((origin) => `${originLabel(origin)}：${origin.raw}${origin.weight !== 1 ? `（权重 ${origin.weight}）` : ""}`);
   if (tag.rewritten) lines.unshift("改写：与来源写法或权重不同");
+  if (tag.misplaced) lines.unshift(`写错了块：这是 ${tag.misplaced} 的角色词，应写进 ${tag.misplaced} 的块`);
   return lines.join("\n");
+}
+
+/** 角色的短名：优先用节点的 character_id（如 kaname_madoka）。 */
+export function characterName(sources: ContractSources, id: string): string {
+  const node = sources.characters[id];
+  return node ? node.character_id || node.name || node.ref : "";
+}
+
+/** 代码块标题：正向 / 负面，角色块带角色 id 和名字。 */
+export function blockLabel(key: string, sources: ContractSources): string {
+  const { kind, character } = parseBlockKey(key);
+  const kindLabel = kind === "positive" ? "正向" : "负面";
+  if (!character) return kind === "positive" ? "主提示词 · 正向" : "主提示词 · 负面";
+  const name = characterName(sources, character);
+  return `${character}${name ? ` · ${name}` : ""} · ${kindLabel}`;
 }
 
 function TagChip({ tag, text, zh }: { tag: MarkedTag; text: string; zh?: string }) {
@@ -50,6 +70,7 @@ function TagChip({ tag, text, zh }: { tag: MarkedTag; text: string; zh?: string 
   else if (tag.origins.length === 1) classes.push(originClass(tag.origins[0]));
   else classes.push("origin-multi");
   if (tag.rewritten) classes.push("is-rewritten");
+  if (tag.misplaced) classes.push("is-misplaced");
   const stripes = tag.origins.length > 1 ? (
     <span aria-hidden="true" className="ct-tag-stripes">
       {tag.origins.map((origin, index) => <i className={originClass(origin)} key={index} />)}
@@ -103,21 +124,26 @@ export function FrameCard(props: Props) {
   const [diffBase, setDiffBase] = useState<"member" | "reference">("member");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const blockKeys = Object.keys(frame.prompts).sort((a, b) => (a === "positive" ? -1 : b === "positive" ? 1 : a.localeCompare(b)));
+  const characterOrder = Object.keys(sources.characters);
+  const blockKeys = orderBlockKeys(Object.keys(frame.prompts), characterOrder);
+  const splitCharacters = blockCharacters(frame.prompts, characterOrder);
 
   const marked = useMemo(() => {
     const result: Record<string, MarkedTag[]> = {};
     for (const key of blockKeys) {
-      const index = buildOriginIndex(frame, sources, key.startsWith("negative") ? "negative" : "positive");
-      result[key] = markPrompt(frame.prompts[key], index);
+      const { kind, character } = parseBlockKey(key);
+      const index = buildOriginIndex(frame, sources, kind);
+      result[key] = markPrompt(frame.prompts[key], index, { character, splitCharacters });
     }
     return result;
   }, [frame, sources, blockKeys.join("|")]);
 
+  // Diff 比较本帧全部正向（主提示词 + 各角色块）和来源动作（行内角色块展开），词挪进角色块不算删除。
+  const finalPositive = [frame.prompts.positive ?? "", ...splitCharacters.map((id) => frame.prompts[`positive ${id}`] ?? "")].join(",\n");
   const diffSource = diffBase === "reference" || !member ? reference : member;
   const diff = useMemo(
-    () => (diffSource ? diffAgainstSource(frame.prompts.positive ?? "", diffSource.positive) : []),
-    [frame.prompts.positive, diffSource],
+    () => (diffSource ? diffAgainstSource(finalPositive, flattenInlineCharacters(diffSource.positive)) : []),
+    [finalPositive, diffSource],
   );
   const allTags = useMemo(() => {
     const tags = new Set<string>();
@@ -141,6 +167,14 @@ export function FrameCard(props: Props) {
   function startEdit() {
     setDraft({ positive: "", negative: "", ...frame.prompts });
     setEditing(true);
+  }
+
+  // 编辑时可以给本帧的角色（没有 characters 时用契约全部角色）补上角色块。
+  const draftCharacters = blockCharacters(draft, characterOrder);
+  const addableCharacters = (frame.characters.length ? frame.characters : characterOrder).filter((id) => !draftCharacters.includes(id));
+
+  function addCharacterBlock(id: string) {
+    setDraft((current) => ({ ...current, [`positive ${id}`]: "", [`negative ${id}`]: current[`negative ${id}`] ?? "" }));
   }
 
   async function save() {
@@ -188,16 +222,29 @@ export function FrameCard(props: Props) {
 
       {editing ? (
         <div className="ct-edit">
-          {Object.keys(draft).map((key) => (
-            <label className="field" key={key}>
-              <span>{key}</span>
-              <textarea
-                onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
-                rows={key.startsWith("positive") ? 6 : 2}
-                value={draft[key]}
-              />
-            </label>
-          ))}
+          {orderBlockKeys(Object.keys(draft), characterOrder).map((key) => {
+            const { kind, character } = parseBlockKey(key);
+            return (
+              <label className={character ? `field ct-block-char origin-${character}` : "field"} key={key}>
+                <span>{blockLabel(key, sources)}</span>
+                <textarea
+                  onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
+                  rows={kind === "positive" ? (character ? 3 : 6) : 2}
+                  value={draft[key]}
+                />
+              </label>
+            );
+          })}
+          {addableCharacters.length ? (
+            <div className="ct-row">
+              {addableCharacters.map((id) => (
+                <button className="btn-sm" key={id} onClick={() => addCharacterBlock(id)} type="button">
+                  + 添加 {id}{characterName(sources, id) ? ` · ${characterName(sources, id)}` : ""} 角色块
+                </button>
+              ))}
+              <small className="muted">角色块写这个角色自己的身份、服装和动作部分；主提示词写画面共用的内容。留空的块保存时会被删掉。</small>
+            </div>
+          ) : null}
           <div className="ct-row">
             <button className="btn-sm primary" disabled={props.saving} onClick={() => void save()} type="button"><Check size={13} /> 保存到契约</button>
             <button className="btn-sm" onClick={() => setEditing(false)} type="button">取消</button>
@@ -219,9 +266,9 @@ export function FrameCard(props: Props) {
             ) : <p className="muted">自定义帧没有引用参考动作。</p>
           ) : (
             blockKeys.map((key) => (
-              <div className="ct-block" key={key}>
+              <div className={parseBlockKey(key).character ? `ct-block ct-block-char origin-${parseBlockKey(key).character}` : "ct-block"} key={key}>
                 <div className="ct-block-label">
-                  {key}
+                  {blockLabel(key, sources)}
                   <button
                     aria-label={`复制 ${key}`}
                     className="icon-button btn-ghost btn-sm"

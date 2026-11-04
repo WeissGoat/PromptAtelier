@@ -71,6 +71,10 @@ function useArtistInfo(artist: NodeSummary | null): ArtistInfo | null {
   return info;
 }
 
+function joinPrompt(parts: string[]): string {
+  return parts.map((text) => text.trim().replace(/^,+|,+$/g, "").trim()).filter(Boolean).join(", ");
+}
+
 /** 一帧的出图请求：composer=agent，提示词是契约里 Agent 写好的完整提示词，画风由脚本叠加。 */
 export function buildFrameRequest(
   detail: ContractDetail,
@@ -99,9 +103,26 @@ export function buildFrameRequest(
       note = `画风没有${ORIENTATION_LABELS[frame.size]}图预设，随机`;
     }
   }
-  const negative = [frame.submit.negative ?? "", settings.negative].map((text) => text.trim()).filter(Boolean).join(", ");
+  const characterPrompts = frame.character_prompts ?? [];
+  const useCharacterPrompts = info.backend === "novelai" && settings.characterPrompts === "auto";
+  // 分角色提示词按契约原样提交；不分角色时（ComfyUI、关掉 Character Prompts）并进主提示词，不丢内容。
+  const merge = characterPrompts.length > 0 && !useCharacterPrompts;
+  const positive = joinPrompt([frame.submit.positive ?? "", ...(merge ? characterPrompts.map((item) => item.positive) : [])]);
+  const negative = joinPrompt([
+    frame.submit.negative ?? "",
+    ...(merge ? characterPrompts.map((item) => item.negative) : []),
+    settings.negative,
+  ]);
   const renderParams: Record<string, unknown> = { n_samples: Math.max(1, Math.trunc(settings.nt || 1)), size };
-  if (info.backend === "novelai" && settings.characterPrompts === "auto") {
+  if (useCharacterPrompts && characterPrompts.length) {
+    renderParams.character_prompts = {
+      mode: "explicit",
+      captions: characterPrompts.map((item) => ({ positive: item.positive, negative: item.negative })),
+      add_male_caption: settings.addMaleCaption,
+      // 画风模型不支持分角色（V3）时，由 renderer 并进主提示词。
+      unsupported: "merge",
+    };
+  } else if (useCharacterPrompts) {
     renderParams.character_prompts = { mode: "auto", add_male_caption: settings.addMaleCaption };
   }
   const parsedSeed = Number(settings.seed);
@@ -109,7 +130,7 @@ export function buildFrameRequest(
     composer: "agent",
     nodes,
     negative: "",
-    agent_result: { positive: frame.submit.positive ?? "", negative },
+    agent_result: { positive, negative },
     contract: { id: detail.id, frame_id: frame.id, prompt_hash: frame.prompt_hash, artist: artist.name },
   };
   const request = {
@@ -345,7 +366,10 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
           />
           Add male caption
         </label>
-        <small className="muted">与 agent composer 一致，契约提示词默认不走 Policy Rules；契约里带哪些角色词由 Agent 决定。</small>
+        <small className="muted">
+          写了 c1/c2 角色块的帧按契约的分配提交角色提示词，其余帧自动拆分；关掉时角色块并进主提示词。
+          与 agent composer 一致，契约提示词默认不走 Policy Rules；契约里带哪些角色词由 Agent 决定。
+        </small>
       </fieldset>
       <div className="ct-row">
         <button className="btn-sm" disabled={!frameCount} onClick={() => onSelectAll(true)} type="button">全选</button>

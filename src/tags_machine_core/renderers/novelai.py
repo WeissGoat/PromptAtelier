@@ -561,6 +561,10 @@ class NovelAIRenderAdapter:
         if not isinstance(config, dict) or config.get("mode") not in {"auto", "explicit"}:
             return positive, negative, [], [], None
         if not self._supports_character_prompts(model):
+            if config["mode"] == "explicit" and config.get("unsupported") == "merge":
+                # 契约的分角色提示词：模型不支持时并进主提示词，不丢内容。
+                positive, negative = _merge_explicit_captions(config, positive=positive, negative=negative)
+                return positive, negative, [], [], {"mode": "explicit", "status": "merged_unsupported_model"}
             return (
                 positive,
                 negative,
@@ -1274,6 +1278,14 @@ def _pad_negative_character_captions(
             }
         )
     return result
+
+
+def _merge_explicit_captions(config: dict[str, Any], *, positive: str, negative: str) -> tuple[str, str]:
+    """explicit 角色提示词并进 base 提示词（模型不支持分角色时用）。"""
+    captions = [item for item in config.get("captions") or [] if isinstance(item, dict)]
+    merged_positive = _join_prompt_parts(positive, [str(item.get("positive") or "") for item in captions])
+    merged_negative = _join_prompt_parts(negative, [str(item.get("negative") or "") for item in captions])
+    return merged_positive, merged_negative
 
 
 def _caption_centers(center: Any) -> list[dict[str, float]]:

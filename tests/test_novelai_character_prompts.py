@@ -33,6 +33,24 @@ class NovelAICharacterPromptsTest(unittest.TestCase):
         )
         self.assertEqual(request.meta["character_prompts"], {"mode": "explicit", "count": 2, "male_caption_added": True})
 
+    def test_explicit_character_prompts_merge_into_base_on_unsupported_model(self):
+        bundle = ScriptComposer().compose_full_prompt(prompt="2girls, sitting")
+        params = {
+            "character_prompts": {
+                "mode": "explicit",
+                "unsupported": "merge",
+                "captions": [{"positive": "girl, black hair", "negative": "glasses"}, {"positive": "girl, pink hair"}],
+            }
+        }
+        request = NovelAIRenderAdapter().build_request(bundle, seed=1, model="nai-diffusion-3", params=params)
+        self.assertEqual(request.prompt, "2girls, sitting, girl, black hair, girl, pink hair")
+        self.assertEqual(request.params["negative_prompt"], "glasses")
+        self.assertEqual(request.meta["character_prompts"], {"mode": "explicit", "status": "merged_unsupported_model"})
+        # 没有 unsupported: merge（Style Lab 的用法）时保持原行为：不支持就不提交角色提示词。
+        del params["character_prompts"]["unsupported"]
+        request = NovelAIRenderAdapter().build_request(bundle, seed=1, model="nai-diffusion-3", params=params)
+        self.assertEqual(request.prompt, "2girls, sitting")
+
     def test_explicit_character_prompts_without_male_caption(self):
         bundle = ScriptComposer().compose_full_prompt(prompt="1girl, 1boy")
         request = NovelAIRenderAdapter().build_request(

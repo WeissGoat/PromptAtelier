@@ -21,4 +21,4 @@ forbid:
   quality_tags: renderer            # 质量词由画风 / renderer 叠加
 validators: [frame_structure, weight_syntax, bracket_balance, token_length,
              language, forbidden_tags, duplicate_tags, tag_conflict,
-             character_count, source_exists, coverage]
+             character_count, character_blocks, source_exists, coverage]

@@ -434,6 +434,23 @@
   background: color-mix(in srgb, var(--origin) 26%, transparent);
 }
 
+/* 写错块的角色词：红色波浪下划线 */
+.ct-tag.is-misplaced {
+  text-decoration: underline wavy var(--danger-text, #dc2626);
+  text-underline-offset: 3px;
+}
+
+/* 角色块：左侧用角色色条区分 c1 / c2 */
+.ct-block-char {
+  border-left: 3px solid var(--origin, #3b82f6);
+  padding-left: 8px;
+}
+
+.ct-block-char > .ct-block-label,
+.ct-block-char > span {
+  color: var(--origin, #3b82f6);
+}
+
 .ct-tag-stripes {
   bottom: -2px;
   display: flex;

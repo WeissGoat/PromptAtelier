@@ -115,7 +115,53 @@ export type MarkedTag = PromptTag & {
   added: boolean;
   /** 有来源，但写法或权重和所有来源都不同。 */
   rewritten: boolean;
+  /** 写错了块的角色词：值为这个词所属的角色 id（例如 c1 的发色写进了 c2 的块，或分角色时留在主提示词里）。 */
+  misplaced?: string;
 };
+
+/** 代码块的键：positive / negative / positive c2 … */
+export type BlockKey = { kind: "positive" | "negative"; character: string | null };
+
+export function parseBlockKey(key: string): BlockKey {
+  const [kind, character] = key.trim().split(/\s+/, 2);
+  return { kind: kind === "negative" ? "negative" : "positive", character: character || null };
+}
+
+/** 块的显示顺序：主提示词 → c1 → c2 …，每组正向在前、负面在后。 */
+export function orderBlockKeys(keys: string[], characterOrder: string[]): string[] {
+  const rank = (key: string) => {
+    const { kind, character } = parseBlockKey(key);
+    const group = character == null ? -1 : characterOrder.includes(character) ? characterOrder.indexOf(character) : characterOrder.length;
+    return [group, character ?? "", kind === "positive" ? 0 : 1] as const;
+  };
+  return [...keys].sort((a, b) => {
+    const [ga, ca, ka] = rank(a);
+    const [gb, cb, kb] = rank(b);
+    return ga - gb || ca.localeCompare(cb) || ka - kb;
+  });
+}
+
+/** 本帧写了 ```positive cN 的角色，按契约角色顺序。 */
+export function blockCharacters(prompts: Record<string, string>, characterOrder: string[]): string[] {
+  const ids = Object.keys(prompts)
+    .map(parseBlockKey)
+    .filter((block) => block.kind === "positive" && block.character)
+    .map((block) => block.character as string);
+  return orderBlockKeys(ids.map((id) => `positive ${id}`), characterOrder).map((key) => parseBlockKey(key).character as string);
+}
+
+// 多个角色常常共用的分区（同一部作品），不用来判断词属于哪个角色；与后端 character_blocks 校验器一致。
+const SHARED_CHARACTER_SECTIONS = new Set(["copyright", "role"]);
+
+const INLINE_CHARACTER_OPEN_RE = /::character\s*[A-Za-z0-9_]+\s*:/gi;
+// 行内角色块的闭合 `::`：前面是空白或逗号、后面是逗号或串尾；`1.2::tag::` 的结尾紧贴 tag，不受影响。
+const INLINE_CHARACTER_CLOSE_RE = /(^|[\s,])::(?=\s*(,|$))/gm;
+
+/** 去掉动作库行内分角色写法 `::character A: … ::` 的外壳，只留里面的词（用于标记和 diff）。 */
+export function flattenInlineCharacters(text: string): string {
+  if (!/::character/i.test(text)) return text;
+  return text.replace(INLINE_CHARACTER_OPEN_RE, ", ").replace(INLINE_CHARACTER_CLOSE_RE, "$1");
+}
 
 type OriginIndex = Map<string, Origin[]>;
 
@@ -153,21 +199,41 @@ export function buildOriginIndex(frame: ContractFrame, sources: ContractSources,
   const characterIds = frame.characters.length ? frame.characters : Object.keys(sources.characters);
   for (const id of characterIds) addNode(index, sources.characters[id], "character", id, negative);
   const member = frameMember(frame, sources);
-  if (member) addOrigins(index, negative ? member.negative : member.positive, { kind: "action" });
+  if (member) addOrigins(index, flattenInlineCharacters(negative ? member.negative : member.positive), { kind: "action" });
   addNode(index, sources.clothing, "clothing", undefined, negative);
   addNode(index, sources.background, "background", undefined, negative);
   for (const ref of frame.inspired_by) {
     const reference = sources.references[ref];
-    if (reference) addOrigins(index, negative ? reference.negative : reference.positive, { kind: "reference", id: ref });
+    if (reference) addOrigins(index, flattenInlineCharacters(negative ? reference.negative : reference.positive), { kind: "reference", id: ref });
   }
   return index;
 }
 
-export function markPrompt(text: string, index: OriginIndex): MarkedTag[] {
+/**
+ * 标记一个代码块里每个词的来源。
+ * block 给出时检查角色词是否写对了块：cN 块里只属于其他角色的词、分角色时留在主提示词里的角色词，标为 misplaced。
+ */
+export function markPrompt(
+  text: string,
+  index: OriginIndex,
+  block?: { character: string | null; splitCharacters: string[] },
+): MarkedTag[] {
   return tokenizePrompt(text).map((tag) => {
     const origins = index.get(tag.key) ?? [];
     const rewritten = origins.length > 0 && origins.every((origin) => origin.raw !== tag.raw || origin.weight !== tag.weight);
-    return { ...tag, origins, added: origins.length === 0, rewritten };
+    const marked: MarkedTag = { ...tag, origins, added: origins.length === 0, rewritten };
+    const owners = [
+      ...new Set(
+        origins
+          .filter((origin) => origin.kind === "character" && origin.id && !SHARED_CHARACTER_SECTIONS.has(origin.section ?? ""))
+          .map((origin) => origin.id as string),
+      ),
+    ];
+    if (block && owners.length) {
+      if (block.character && !owners.includes(block.character)) marked.misplaced = owners[0];
+      else if (!block.character && owners.length === 1 && block.splitCharacters.includes(owners[0])) marked.misplaced = owners[0];
+    }
+    return marked;
   });
 }
 

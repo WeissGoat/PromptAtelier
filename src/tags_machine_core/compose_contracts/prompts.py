@@ -31,10 +31,44 @@ PRINCIPLES = """\
 - 每帧自己拼出完整提示词：角色身份词通常保留；服装、发型、配饰结合动作的裸露状态（clothing_state）、镜头范围（character_scope）、构图和要求取舍。
 - 动作的核心（姿势、构图、表情、互动）优先保留；与要求冲突的环境词、混入的角色/画风词去掉。
 - 尽量沿用素材里的原词写法（Web 按字面匹配标记来源）；需要调整时可以改权重或替换。
-- 多角色：只有选了多个角色、且定制要求说明了分配方式时，才替换动作中的人物；否则保留动作原词。
+- 多角色：选了多个角色时，按下面「多角色」一节用分角色代码块写；人物怎么对应以定制要求为准。
 - 连续性：同一组里服装和场景保持一致，除非要求变化。
 - 新增帧写 source: custom，参考过的动作写进 inspired_by。
 - 不要写：画师名、质量前缀（masterpiece 等）、生图参数；不要改素材库的源节点；不要改 front matter 的请求部分。"""
+
+
+MULTI_CHARACTER_GUIDE = """\
+本契约有多个角色（c1、c2…）。画面里有两个及以上角色的帧，用分角色代码块写：
+
+- ```positive：画面共用的部分——人数 tag（2girls 等）、互动、构图镜头、背景环境。不写某一个角色专属的词。
+- ```positive c1 / ```positive c2：这个角色自己的全部内容——性别词（girl / boy）、身份词（角色名、发色瞳色）、服装，以及动作里属于这个人的那部分（姿势、表情、谁对谁做什么）。
+- ```negative c1 / ```negative c2：可选，只对这个角色生效的负面词。
+- 帧的 characters: 列出本帧出现的角色，每个都要有自己的 ```positive cN。
+- 动作素材里的行内写法 `::character A: … ::`、`::character B: … ::`：把 A、B 里的词挪进对应的 cN 块，主提示词里删掉这一段，不要两种写法混用。
+  默认 A→c1、B→c2…；定制要求说明了谁做什么时，按要求对应。块里原来的角色名、发色等换成该角色自己的身份词。
+- 只有一个角色出现的帧（如单人特写），可以只写 ```positive，不用分块。
+
+示例：
+
+```positive
+2girls, yuri, sitting on lap, night, classroom, window
+```
+
+```positive c1
+girl, akemi_homura, black_hair, long_hair, purple_eyes, sitting behind, hands on another's waist, smile
+```
+
+```positive c2
+girl, kaname_madoka, pink_hair, twintails, pink_eyes, sitting on lap, open mouth, blush
+```"""
+
+
+def multi_character_guide(detail: dict[str, Any], profile: FormatProfile | None) -> list[str]:
+    """契约有多个角色、且格式支持分角色提示词时，给出「多角色」一节。"""
+    characters = (detail.get("request") or {}).get("nodes", {}).get("characters") or {}
+    if len(characters) < 2 or profile is None or not profile.multi_character.supported:
+        return []
+    return ["## 多角色", MULTI_CHARACTER_GUIDE, ""]
 
 
 def _format_notes(profile: FormatProfile | None, target_format: str) -> str:
@@ -59,7 +93,9 @@ def _format_notes(profile: FormatProfile | None, target_format: str) -> str:
             "画风和质量词出图时还会再加，最好留出余量。contract check 的 tokens 字段给出每帧的实际数"
         )
     if profile.multi_character.supported:
-        lines.append(f"- 分角色提示词：支持，最多 {profile.multi_character.max} 个；用 ```positive c2 / ```negative c2 写")
+        lines.append(
+            f"- 分角色提示词：支持，最多 {profile.multi_character.max} 个；每个角色一个 ```positive cN（c1、c2…），主提示词只写画面共用的部分"
+        )
     else:
         lines.append("- 分角色提示词：不支持，所有角色写在同一个 positive 里")
     return "\n".join(lines)
@@ -127,6 +163,7 @@ def render_tools_prompt(
             "## 帧格式",
             FRAME_FORMAT_GUIDE,
             "",
+            *multi_character_guide(detail, profile),
             "## 原则",
             PRINCIPLES,
             "",
@@ -190,6 +227,7 @@ def render_standalone_prompt(detail: dict[str, Any], profile: FormatProfile | No
             "",
             "source 写上面动作组成员的 ref；新增帧写 source: custom（这种情况下没有工具检索参考动作，inspired_by 可省略）。",
             "",
+            *multi_character_guide(detail, profile),
             "## 原则",
             PRINCIPLES,
             "",

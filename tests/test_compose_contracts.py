@@ -346,6 +346,103 @@ inspired_by: new/missing
         self.assertEqual(prompt_hash("1girl", ""), frame["prompt_hash"])
 
 
+TWO_CHARACTER_FRAME = """## f01 并排
+source: custom
+characters: c1, c2
+
+```positive
+2girls, sitting,
+night
+```
+
+```positive c2
+girl, char_b, pink_hair
+```
+
+```negative c2
+glasses
+```
+
+```positive c1
+girl, char_a,
+black_hair
+```
+"""
+
+
+class MultiCharacterContractTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        base = Path(self.temp.name)
+        self.design = make_design_root(base)
+        _write(
+            self.design / "角色" / "series" / "char_b" / "meta.yaml",
+            yaml.safe_dump({"kind": "character", "id": "char_b", "tags": {"character": ["char_b"], "hair": ["pink_hair"]}}),
+        )
+        self.service = ContractService(root=self.design / "动作改2" / "contracts", design_root=self.design, output_dir=base / "out")
+        self.contract_id = self.service.create(
+            {"action_group": "stn_20260101_0001", "characters": ["series/char_a", "series/char_b"], "requirements": "r"}
+        )["id"]
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _import(self, body: str) -> dict:
+        return self.service.import_frames(self.contract_id, body)
+
+    def _issues(self, detail: dict, validator: str = "character_blocks") -> list[tuple[str, str]]:
+        return [(item["severity"], item["message"]) for item in detail["issues"] if item["validator"] == validator]
+
+    def test_character_prompts_follow_contract_order_and_enter_prompt_hash(self):
+        detail = self._import(TWO_CHARACTER_FRAME)
+        frame = detail["frames"][0]
+        self.assertEqual(
+            frame["character_prompts"],
+            [
+                {"id": "c1", "positive": "girl, char_a, black_hair", "negative": ""},
+                {"id": "c2", "positive": "girl, char_b, pink_hair", "negative": "glasses"},
+            ],
+        )
+        self.assertNotEqual(frame["prompt_hash"], prompt_hash("2girls, sitting,\nnight", ""))
+        self.assertEqual(self._issues(detail), [])
+        changed = self._import(TWO_CHARACTER_FRAME.replace("pink_hair", "pink_hair, twintails"))
+        self.assertNotEqual(changed["frames"][0]["prompt_hash"], frame["prompt_hash"])
+
+    def test_single_block_frames_keep_previous_hash(self):
+        detail = self._import("## f01 x\nsource: custom\ncharacters: c1\n\n```positive\n1girl\n```\n")
+        frame = detail["frames"][0]
+        self.assertEqual(frame["character_prompts"], [])
+        self.assertEqual(frame["prompt_hash"], prompt_hash("1girl", ""))
+
+    def test_inline_character_blocks_mixed_with_code_blocks_is_an_error(self):
+        body = TWO_CHARACTER_FRAME.replace("night\n", "night, ::character A: girl, smile ::\n", 1)
+        issues = self._issues(self._import(body))
+        self.assertEqual([severity for severity, _ in issues], ["error"])
+        only_inline = "## f01 x\nsource: custom\ncharacters: c1, c2\n\n```positive\n2girls, ::character A: girl, char_a ::, ::character B: girl, char_b ::\n```\n"
+        self.assertEqual([severity for severity, _ in self._issues(self._import(only_inline))], ["info"])
+
+    def test_misplaced_character_tags_and_missing_blocks_warn(self):
+        body = (
+            "## f01 x\nsource: custom\ncharacters: c1, c2\n\n"
+            "```positive\n2girls, pink_hair\n```\n\n"
+            "```positive c1\ngirl, char_a, black_hair, char_b\n```\n"
+        )
+        messages = [message for _, message in self._issues(self._import(body))]
+        self.assertTrue(any("没有 ```positive c2" in message for message in messages), messages)
+        self.assertTrue(any("「char_b」是 c2 的角色词，写在了 c1 的块里" in message for message in messages), messages)
+        # pink_hair 属于 c2，但本帧没有 c2 的块，主提示词里写它不算错。
+        self.assertFalse(any("pink_hair" in message for message in messages), messages)
+        with_c2 = body + "\n```positive c2\ngirl, char_b\n```\n"
+        messages = [message for _, message in self._issues(self._import(with_c2))]
+        self.assertTrue(any("「pink_hair」是 c2 的角色词，写在了主提示词里" in message for message in messages), messages)
+
+    def test_requirement_prompts_explain_character_blocks(self):
+        for kind in ("tools", "standalone"):
+            text = self.service.prompt(self.contract_id, kind)["text"]
+            self.assertIn("## 多角色", text)
+            self.assertIn("```positive c1", text)
+
+
 class ContractCliAndRouteTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

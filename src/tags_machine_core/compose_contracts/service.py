@@ -24,7 +24,14 @@ from .profiles import FormatProfile, load_format_profiles
 from .prompts import render_standalone_prompt, render_tools_prompt
 from .sources import ActionGroup, ActionMember, ContractSources
 from .store import ContractConflictError, ContractStore, contract_summary
-from .validators import ValidationContext, coverage_report, frame_token_usage, load_conflict_rules, run_validators
+from .validators import (
+    ValidationContext,
+    character_tag_keys,
+    coverage_report,
+    frame_token_usage,
+    load_conflict_rules,
+    run_validators,
+)
 
 
 DEFAULT_FORMAT = "nai-v4.5"
@@ -34,10 +41,33 @@ SKILL_PATH = ".agents/skills/compose-contract-author/SKILL.md"
 PNG_INFO_KEY = "tags_machine_core"
 
 
-def prompt_hash(positive: str, negative: str) -> str:
-    """生成时该帧 positive + negative 的 hash，用来判断图是否用当前版本的提示词出的。"""
-    text = json.dumps([positive.strip(), negative.strip()], ensure_ascii=False)
+def prompt_hash(positive: str, negative: str, characters: list[dict[str, str]] | None = None) -> str:
+    """生成时该帧 positive + negative（+ 各角色提示词）的 hash，用来判断图是否用当前版本的提示词出的。
+
+    没有角色块时和只按 positive + negative 算的结果相同，已有的图不会被误标成「提示词已改」。
+    """
+    payload: list[Any] = [positive.strip(), negative.strip()]
+    if characters:
+        payload.append([[item["id"], item["positive"].strip(), item["negative"].strip()] for item in characters])
+    text = json.dumps(payload, ensure_ascii=False)
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def frame_character_prompts(frame: ParsedFrame, character_order: list[str], profile: FormatProfile | None = None) -> list[dict[str, str]]:
+    """本帧的分角色提示词，按契约角色顺序（c1、c2…）排列；只列有 ```positive cN 的角色。"""
+    ids = [block.character for block in frame.blocks if block.character and block.kind == "positive"]
+    ordered = [cid for cid in character_order if cid in ids] + [cid for cid in ids if cid not in character_order]
+    convert = profile.prompt_for_submit if profile else (lambda text: text)
+    result = []
+    for cid in dict.fromkeys(ordered):
+        positive = frame.block("positive", cid)
+        negative = frame.block("negative", cid)
+        result.append({
+            "id": cid,
+            "positive": convert(positive.text if positive else ""),
+            "negative": convert(negative.text if negative else ""),
+        })
+    return result
 
 
 class ContractService:
@@ -175,6 +205,7 @@ class ContractService:
             character_ids=list(contract.request.nodes.characters),
             references=loaded["reference_members"],
             conflict_rules=self.conflict_rules,
+            character_tags=character_tag_keys(loaded["payload"]["characters"]),
         )
         issues.extend(run_validators(profile, ctx))
         group: ActionGroup | None = loaded["group"]
@@ -194,7 +225,10 @@ class ContractService:
             "summary": contract_summary(contract_id, contract, file.mtime),
             "request": contract.request.model_dump(mode="json", by_alias=True),
             "preamble": contract.preamble,
-            "frames": [self._frame_payload(frame, group, profile) for frame in contract.frames],
+            "frames": [
+                self._frame_payload(frame, group, profile, list(contract.request.nodes.characters))
+                for frame in contract.frames
+            ],
             "sources": loaded["payload"],
             "stale": loaded["stale"],
             "coverage": coverage,
@@ -203,10 +237,17 @@ class ContractService:
             "profile": profile.summary(),
         }
 
-    def _frame_payload(self, frame: ParsedFrame, group: ActionGroup | None, profile: FormatProfile) -> dict[str, Any]:
+    def _frame_payload(
+        self,
+        frame: ParsedFrame,
+        group: ActionGroup | None,
+        profile: FormatProfile,
+        character_order: list[str],
+    ) -> dict[str, Any]:
         member = group.find_member(frame.source) if group is not None and not frame.is_custom else None
         prompts = frame.prompts()
         submit = {key: profile.prompt_for_submit(value) for key, value in prompts.items()}
+        character_prompts = frame_character_prompts(frame, character_order, profile)
         return {
             "id": frame.id,
             "title": frame.title,
@@ -219,9 +260,15 @@ class ContractService:
             "notes": frame.notes,
             "prompts": prompts,
             "submit": submit,
+            # 提交生图用的分角色提示词（已按 profile 处理换行），按 c1、c2… 排列。
+            "character_prompts": character_prompts,
             "member_ref": member.ref if member else None,
             "member_index": member.index if member else None,
-            "prompt_hash": prompt_hash(frame.positive, frame.negative),
+            "prompt_hash": prompt_hash(
+                frame.positive,
+                frame.negative,
+                frame_character_prompts(frame, character_order),
+            ),
             "token_usage": frame_token_usage(frame, profile),
         }
 
