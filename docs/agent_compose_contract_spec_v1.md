@@ -432,7 +432,7 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 | 部分 | 位置 | 说明 |
 |---|---|---|
 | 契约解析 / 写回 / 创建 / 索引 | `src/tags_machine_core/compose_contracts/`（`parser.py`、`store.py`、`service.py`） | 包名用 `compose_contracts`，因为 `contracts.py` 已是 PromptBundle 等数据模型 |
-| 动作组与来源节点 | `compose_contracts/sources.py` | 沿用 `NodeReader`；成员 ref 取符号链接指向的 `new/...`，也接受 `stn_x/01_...`、成员目录名、`#N` |
+| 动作组与来源节点 | `compose_contracts/sources.py` | 沿用 `NodeReader`；成员 ref 取链接指向的 `new/<id>`：Linux 是相对符号链接 `../new/<id>`，Windows 上成员和 `new` 都是指向同一外部目录（如 `G:/GoogleDrive/action`）的 junction，按 `new` 的指向换算，两边得到同样的 ref 和组 hash。也接受 `stn_x/01_...`、成员目录名、`#N`；本机换算不出 `new/` 时按最后一段（链接目标目录名）匹配 |
 | 格式 profile | `configs/prompt_formats/`（nai-v3、nai-v4、nai-v4.5、nai-v5、nai-v5-curated、sdxl-danbooru） | `contract.formats_dir` 可改目录 |
 | 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现，另加 `character_blocks`（§4.4）；`token_length` 用真实分词器，见 §12.1 |
 | token 计数 | `src/tags_machine_core/prompt_tokens.py` | 契约帧、`contract check` 的 `tokens`、`/compose-preview` 的 `token_usage` 共用 |

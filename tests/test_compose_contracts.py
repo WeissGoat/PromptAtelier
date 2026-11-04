@@ -72,11 +72,14 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def make_design_root(base: Path) -> Path:
+def make_design_root(base: Path, *, external_store: bool = False) -> Path:
+    """external_store=True 模拟 Windows 的布局：动作放在外部目录（如 G:/GoogleDrive/action），
+    `new` 和组成员都是指向它的绝对链接（Windows 上实际是 junction）。"""
     design = base / "design"
     actions = design / "动作改2"
+    store = base / "drive" / "action" if external_store else actions / "new"
     _write(
-        actions / "new" / "20260101_0001_01_站立" / "meta.yaml",
+        store / "20260101_0001_01_站立" / "meta.yaml",
         yaml.safe_dump(
             {
                 "kind": "action",
@@ -89,15 +92,18 @@ def make_design_root(base: Path) -> Path:
             allow_unicode=True,
         ),
     )
-    _write(actions / "new" / "20260101_0001_01_站立" / "classify.yaml", "phase: start\ncast: solo\npose: [standing]\n")
+    _write(store / "20260101_0001_01_站立" / "classify.yaml", "phase: start\ncast: solo\npose: [standing]\n")
     _write(
-        actions / "new" / "20260101_0001_02_坐下" / "meta.yaml",
+        store / "20260101_0001_02_坐下" / "meta.yaml",
         yaml.safe_dump({"kind": "action", "id": "20260101_0001_02_坐下", "tags": {"action": ["1girl", "sitting"]}}, allow_unicode=True),
     )
     group = actions / "stn_20260101_0001"
     group.mkdir(parents=True)
-    os.symlink("../new/20260101_0001_01_站立", group / "01_站立")
-    os.symlink("../new/20260101_0001_02_坐下", group / "02_坐下")
+    if external_store:
+        os.symlink(store, actions / "new", target_is_directory=True)
+    for name, member in (("20260101_0001_01_站立", "01_站立"), ("20260101_0001_02_坐下", "02_坐下")):
+        target = store / name if external_store else Path("..") / "new" / name
+        os.symlink(target, group / member, target_is_directory=True)
     _write(actions / "st_demo" / "2_second" / "tags.txt", "2girls, kiss\n=uc, bad\n")
     _write(actions / "st_demo" / "10_tenth" / "tags.txt", "1girl\n")
     _write(
@@ -237,6 +243,24 @@ class ContractServiceTest(unittest.TestCase):
         self.assertEqual(st_group["members"][0]["source_file"], "tags.txt")
         refs = [group["ref"] for group in self.service.action_groups()]
         self.assertEqual(sorted(refs), ["st_demo", "stn_20260101_0001"])
+
+    def test_member_refs_and_hash_match_across_link_layouts(self):
+        # Linux 用相对符号链接 ../new/<id>，Windows 是指向外部目录的 junction；两边的 ref 和组 hash 要一致，
+        # 否则在一台机器写的契约到另一台找不到成员、显示「来源已更新」。
+        with tempfile.TemporaryDirectory() as other:
+            external = ContractService(
+                root=Path(other) / "contracts",
+                design_root=make_design_root(Path(other), external_store=True),
+                output_dir=Path(other) / "outputs",
+            )
+            linux = self.service.action_group("stn_20260101_0001")
+            windows = external.action_group("stn_20260101_0001")
+            self.assertEqual([m["ref"] for m in windows["members"]], [m["ref"] for m in linux["members"]])
+            self.assertEqual(windows["content_hash"], linux["content_hash"])
+            group = external.sources.load_action_group("stn_20260101_0001")
+            self.assertEqual(group.find_member("new/20260101_0001_02_坐下").index, 2)
+            # 本机换算不出 new/ 时（例如没有 new 目录），按链接目标的目录名也能找到。
+            self.assertEqual(group.find_member("elsewhere/20260101_0001_02_坐下").index, 2)
 
     def test_create_writes_pending_contract_with_relative_refs(self):
         detail = self._create()

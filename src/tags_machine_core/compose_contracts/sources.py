@@ -67,6 +67,8 @@ class ActionMember:
     negative: str
     source_file: str
     classify: dict[str, Any] = field(default_factory=dict)
+    # 成员链接指向的目录名（new/<id> 的 <id>），机器上没有 new/ 时也能按它找到成员。
+    link_name: str | None = None
 
     @property
     def title(self) -> str:
@@ -88,6 +90,8 @@ class ActionMember:
 
     def aliases(self) -> set[str]:
         values = {self.ref, self.name, self.ref.rsplit("/", 1)[-1], f"#{self.index}", str(self.index)}
+        if self.link_name:
+            values.add(self.link_name)
         if self.group_ref:
             values.add(self.group_ref)
         return {_normalize_ref(value) for value in values if value}
@@ -123,7 +127,12 @@ class ActionGroup:
         if not value:
             return None
         key = _normalize_ref(value)
-        return next((member for member in self.members if key in member.aliases()), None)
+        found = next((member for member in self.members if key in member.aliases()), None)
+        if found is None and "/" in key:
+            # 别的机器写的 ref（如 new/<id>）在本机换算不出来时，按最后一段再找一次。
+            tail = key.rsplit("/", 1)[-1]
+            found = next((member for member in self.members if tail in member.aliases()), None)
+        return found
 
     def content_hash(self) -> str:
         return content_hash([[m.ref, m.positive, m.negative] for m in self.members])
@@ -149,12 +158,30 @@ def _normalize_ref(value: str) -> str:
     return text.rstrip("/")
 
 
+def link_target(path: Path) -> Path | None:
+    """符号链接或 Windows 目录联接（junction）指向的路径；不是链接时返回 None。"""
+    try:
+        target = os.readlink(path)
+    except (OSError, ValueError):
+        return None
+    if target.startswith("\\\\?\\UNC\\"):
+        target = "\\\\" + target[8:]
+    elif target.startswith("\\\\?\\"):
+        target = target[4:]
+    return Path(target) if os.path.isabs(target) else Path(os.path.normpath(path.parent / target))
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
 class ContractSources:
     """按设计库目录读取契约用到的节点。ref 可以是相对角色根目录的路径或绝对路径。"""
 
     def __init__(self, design_root: str | Path, reader: NodeReader | None = None):
         self.design_root = Path(design_root)
         self.reader = reader or NodeReader()
+        self._linked_action_dirs: dict[str, str] | None = None
 
     # ---- 路径 ----
 
@@ -240,12 +267,39 @@ class ContractSources:
             return []
         return sorted(entries, key=lambda item: _natural_key(item.name))
 
+    def _action_link_dirs(self) -> dict[str, str]:
+        """动作根目录下本身是链接的普通目录（如 Windows 上 `new` → G:/GoogleDrive/action）：目标路径 → 目录名。"""
+        if self._linked_action_dirs is None:
+            self._linked_action_dirs = {}
+            try:
+                entries = list(self.action_root.iterdir())
+            except OSError:
+                entries = []
+            for entry in entries:
+                if is_action_group_name(entry.name):
+                    continue
+                target = link_target(entry)
+                if target is not None:
+                    self._linked_action_dirs.setdefault(_path_key(target), entry.name)
+        return self._linked_action_dirs
+
+    def canonical_action_ref(self, path: Path) -> str:
+        """动作节点的 ref，与机器上用相对符号链接还是绝对链接 / junction 无关。
+
+        Linux：成员 → ../new/<id>，直接得到 new/<id>。
+        Windows：成员和 new 都是指向同一个外部目录（如 G:/GoogleDrive/action）的 junction，
+        按 new 指向的目录换算回 new/<id>。
+        """
+        ref = self.relative_ref("action", path)
+        if not Path(ref).is_absolute():
+            return ref
+        name = self._action_link_dirs().get(_path_key(path.parent))
+        return f"{name}/{path.name}" if name else ref
+
     def _load_member(self, entry: Path, *, index: int, group_dir: Path | None) -> ActionMember:
-        canonical = entry
-        if entry.is_symlink():
-            target = os.readlink(entry)
-            canonical = Path(target) if os.path.isabs(target) else Path(os.path.normpath(entry.parent / target))
-        ref = self.relative_ref("action", canonical)
+        target = link_target(entry)
+        canonical = target or entry
+        ref = self.canonical_action_ref(canonical)
         if Path(ref).is_absolute() and group_dir is not None:
             ref = f"{group_dir.name}/{entry.name}"
         node = self.reader.read(entry)
@@ -261,6 +315,7 @@ class ContractSources:
             negative=negative,
             source_file=source_file,
             classify=_classify_summary(entry),
+            link_name=target.name if target is not None else None,
         )
 
     # ---- 角色 / 服装 / 背景 ----
