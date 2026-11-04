@@ -136,6 +136,8 @@ def _batch_defaults_patch(shorthand: dict[str, Any]) -> dict[str, Any]:
         "nt": "nt",
         "resolution": "resolution",
         "model": "model",
+        "character_prompts": "character_prompts",
+        "add_male_caption": "add_male_caption",
     }
     return {target: shorthand[source] for source, target in mapping.items() if source in shorthand}
 
