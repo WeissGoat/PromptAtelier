@@ -131,6 +131,8 @@ class ContractService:
         if not group_ref:
             raise ValueError("新建契约需要选择一个动作组（st_* / stn_*）")
         group = self.sources.load_action_group(group_ref)
+        if not group.members:
+            raise ValueError(f"动作组 {group.name} 里没有动作节点（子目录里要有 meta.yaml / node.yaml / tags.txt）")
         character_refs = [str(ref).strip() for ref in payload.get("characters") or [] if str(ref).strip()]
         if not character_refs:
             raise ValueError("新建契约至少需要一个角色")

@@ -244,6 +244,22 @@ class ContractServiceTest(unittest.TestCase):
         refs = [group["ref"] for group in self.service.action_groups()]
         self.assertEqual(sorted(refs), ["st_demo", "stn_20260101_0001"])
 
+    def test_groups_without_action_nodes_are_not_offered(self):
+        _write(self.design / "动作改2" / "st_album_plan" / "AlbumPlan.yaml", "frames: []\n")
+        self.assertNotIn("st_album_plan", [group["ref"] for group in self.service.action_groups()])
+        with self.assertRaisesRegex(ValueError, "没有动作节点"):
+            self._create(action_group="st_album_plan")
+
+    def test_contract_ids_keep_cjk_group_names(self):
+        group = self.design / "动作改2" / "stn_铃兰x忍冬"
+        group.mkdir()
+        os.symlink(Path("..") / "new" / "20260101_0001_01_站立", group / "01_站立", target_is_directory=True)
+        detail = self._create(action_group="stn_铃兰x忍冬")
+        self.assertTrue(detail["id"].endswith("_stn_铃兰x忍冬"))
+        self.assertEqual(self.service.detail(detail["id"])["id"], detail["id"])
+        with self.assertRaises(ValueError):
+            self.service.detail("../stn_铃兰x忍冬")
+
     def test_member_refs_and_hash_match_across_link_layouts(self):
         # Linux 用相对符号链接 ../new/<id>，Windows 是指向外部目录的 junction；两边的 ref 和组 hash 要一致，
         # 否则在一台机器写的契约到另一台找不到成员、显示「来源已更新」。

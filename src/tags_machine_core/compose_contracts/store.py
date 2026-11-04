@@ -13,7 +13,8 @@ from .models import ParsedContract
 from .parser import ContractParseError, parse_contract
 
 
-CONTRACT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")
+# 允许中日文等 Unicode 字母数字（动作组名常带中文，如 stn_铃兰x忍冬），不允许路径分隔符。
+CONTRACT_ID_RE = re.compile(r"^[^\W_][\w.\-]*$")
 
 
 class ContractConflictError(RuntimeError):
@@ -86,7 +87,7 @@ class ContractStore:
         return self.read(contract_id)
 
     def unique_id(self, base: str) -> str:
-        base = re.sub(r"[^A-Za-z0-9_.\-]+", "_", base).strip("_.-") or "contract"
+        base = re.sub(r"[^\w.\-]+", "_", base).strip("_.-") or "contract"
         candidate = base
         suffix = 2
         while self.path_for(candidate).exists():

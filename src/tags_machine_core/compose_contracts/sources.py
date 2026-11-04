@@ -229,6 +229,9 @@ class ContractSources:
             if needle and needle not in entry.name.lower():
                 continue
             members = self._member_entries(entry)
+            if not members:
+                # 没有动作节点的 st_/stn_ 目录（如只放了 AlbumPlan.yaml 的相册方案）不能当契约来源。
+                continue
             groups.append(
                 {
                     "ref": entry.name,

@@ -74,7 +74,7 @@ TagsHub/动作改2/contracts/            # config: contract.root
 PromptAtelier/cache/contract_index.json   # 可重建索引：按节点筛选、列表展示
 ```
 
-- 文件名即 `id`：Web 创建时按「创建时间 + 动作组 ref」生成，重名时加短后缀。人可读的名称放在 `title` 中，由 Agent 选填。
+- 文件名即 `id`：Web 创建时按「创建时间 + 动作组 ref」生成，重名时加短后缀。保留中日文等字母数字（如 `20261104-0238_stn_铃兰x忍冬`），空格、斜杠等其他字符换成 `_`。人可读的名称放在 `title` 中，由 Agent 选填。
 - 一个任务一个文件，请求信息和产物在同一个文件里；「要求 prompt」由 Web 按需生成，不落盘。
 - 历史与回滚依赖动作库仓库（`tags_machine_node_story`）的 git。
 - 不影响现有工具：KB 只扫描 `new/` 与 `st_*`，分类视图只管理 `pn_*` / `stn_*`。
