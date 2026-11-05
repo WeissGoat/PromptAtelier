@@ -12,7 +12,7 @@ batch:
   action_groups: action_new
   artist: "114425243_Luminous_Soft_Anime"
   composer: script
-  character_prompts: false
+  character_prompts: auto
   nt: 3
 
 archive:
