@@ -76,7 +76,6 @@ SLOTS: dict[str, ExtensionSlot] = {
         triggers=(
             "armored shoes",
             "armored_boots",
-            "barefoot",
             "boots",
             "footwear",
             "high heels",
@@ -561,6 +560,18 @@ def _parse_character_extensions(
                 legacy_name=name,
                 legacy_triggers=tuple(_split_pipe(parts[1] if len(parts) > 1 else "")),
                 operations=operations,
+            )
+        )
+    # 兼容旧 formula.py 的 default_ext: 若角色未定义 extend_func_barefoot，追加全局默认规则
+    if not any(r.legacy_name == "extend_func_barefoot" for r in rules):
+        rules.append(
+            ExtensionRuleLine(
+                slot="barefoot",
+                legacy_name="extend_func_barefoot",
+                legacy_triggers=("barefoot",),
+                operations=(
+                    ExtensionOperation(name="add_after", args=("bare_legs", "barefoot")),
+                ),
             )
         )
     return ParsedCharacterExtensions(declarations=declarations, rules=rules)

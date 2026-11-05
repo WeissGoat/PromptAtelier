@@ -56,7 +56,7 @@ class PromptPolicyPipelineTest(unittest.TestCase):
         service = GenerationService()
 
         bundle = service.compose_full_prompt(
-            "bare feet, high heels, socks, toeless legwear",
+            "bare feet, high heels, socks, toeless legwear, red_mary_janes, sneakers",
             prompt_policy={
                 "enabled": True,
                 "profile": "balanced",
@@ -67,6 +67,8 @@ class PromptPolicyPipelineTest(unittest.TestCase):
         self.assertIn("bare_feet", bundle.prompt.positive)
         self.assertNotIn("high_heels", bundle.prompt.positive)
         self.assertNotIn("socks", bundle.prompt.positive)
+        self.assertNotIn("red_mary_janes", bundle.prompt.positive)
+        self.assertNotIn("sneakers", bundle.prompt.positive)
         self.assertIn("toeless_legwear", bundle.prompt.positive)
 
     def test_character_count_uses_resolved_character_nodes(self):
