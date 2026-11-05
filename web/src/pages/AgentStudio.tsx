@@ -1,4 +1,4 @@
-import { AlertTriangle, ClipboardCopy, Download, FileText, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ClipboardCopy, Download, FileText, LayoutGrid, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { errorMessage } from "../api/client";
@@ -12,9 +12,12 @@ import {
   type GenerateSettings,
 } from "../contracts/ContractGeneratePanel";
 import { ContractRequestPanel, EMPTY_DRAFT, type ContractDraft } from "../contracts/ContractRequestPanel";
+import { ContractStoryboard, DEFAULT_BOARD_FILTERS, type BoardFilters } from "../contracts/ContractStoryboard";
 import { FrameCard, type FrameView } from "../contracts/FrameCard";
-import type { ContractDetail, ContractResultImage, ContractResults, ContractSummary, FormatSummary } from "../contracts/types";
+import { readSelectedFrames, readStored, STORAGE_KEYS, writeSelectedFrames, writeStored } from "../contracts/persist";
+import type { ContractDetail, ContractFrame, ContractResultImage, ContractResults, ContractSummary, FormatSummary } from "../contracts/types";
 import { BACKGROUND_RUNS_CHANGED } from "../generation/backgroundRun";
+import { loadTileSize, type TileSize } from "../generation/tileSize";
 import type { TranslateProvider } from "../styleLab/api";
 import { translationStore } from "../styleLab/translations";
 import "../styles/contracts.css";
@@ -33,10 +36,19 @@ function readActive(): string | null {
 
 type PromptModal = { kind: "tools" | "standalone"; text: string } | null;
 
+type ViewPrefs = { view: FrameView; showDiff: boolean; translate: boolean; board: boolean; boardFilters: BoardFilters };
+const DEFAULT_VIEW: ViewPrefs = { view: "marked", showDiff: true, translate: false, board: false, boardFilters: DEFAULT_BOARD_FILTERS };
+
+/** 上次勾选的帧里还在契约中的那些；没记录时全选。 */
+function restoreSelection(contractId: string, frameIds: string[]): Set<string> {
+  const saved = readSelectedFrames(contractId);
+  return new Set(saved ? frameIds.filter((id) => saved.includes(id)) : frameIds);
+}
+
 export function AgentStudio() {
   const [formats, setFormats] = useState<FormatSummary[]>([]);
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
-  const [draft, setDraft] = useState<ContractDraft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<ContractDraft>(() => readStored(STORAGE_KEYS.draft, EMPTY_DRAFT));
   const [activeId, setActiveId] = useState<string | null>(readActive);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
   const [results, setResults] = useState<ContractResults | null>(null);
@@ -50,16 +62,22 @@ export function AgentStudio() {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [view, setView] = useState<FrameView>("marked");
-  const [showDiff, setShowDiff] = useState(true);
-  const [translate, setTranslate] = useState(false);
+  const [initialView] = useState(() => readStored(STORAGE_KEYS.view, DEFAULT_VIEW));
+  const [view, setView] = useState<FrameView>(initialView.view);
+  const [showDiff, setShowDiff] = useState(initialView.showDiff);
+  const [translate, setTranslate] = useState(initialView.translate);
+  const [board, setBoard] = useState(initialView.board);
+  const [boardFilters, setBoardFilters] = useState<BoardFilters>({ ...DEFAULT_BOARD_FILTERS, ...initialView.boardFilters });
+  const [boardFocus, setBoardFocus] = useState<string | null>(null);
+  const [tileSize, setTileSize] = useState<TileSize>(loadTileSize);
   const [provider, setProvider] = useState<TranslateProvider>(translationStore.provider);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [settings, setSettings] = useState<GenerateSettings>(DEFAULT_GENERATE_SETTINGS);
+  const [settings, setSettings] = useState<GenerateSettings>(() => readStored(STORAGE_KEYS.settings, DEFAULT_GENERATE_SETTINGS));
   const [pendingFrame, setPendingFrame] = useState<string | null>(null);
   const [openImages, setOpenImages] = useState<{ items: ImageDetailItem[]; index: number } | null>(null);
   const sinceRef = useRef(0);
   const statusRef = useRef<Map<string, string>>(new Map());
+  const restoredRef = useRef<string | null>(null);
   const detailRef = useRef<ContractDetail | null>(null);
   detailRef.current = detail;
 
@@ -110,14 +128,28 @@ export function AgentStudio() {
     setSelected(new Set());
     setResults(null);
     if (activeId) {
+      restoredRef.current = null;
       void loadDetail(activeId).then((data) => {
-        if (data?.frames) setSelected(new Set(data.frames.map((frame) => frame.id)));
+        if (!data?.frames) return;
+        setSelected(restoreSelection(activeId, data.frames.map((frame) => frame.id)));
+        restoredRef.current = activeId;
       });
       void loadResults(activeId);
     } else {
       setDetail(null);
     }
   }, [activeId, loadDetail, loadResults]);
+
+  useEffect(() => writeStored(STORAGE_KEYS.draft, draft), [draft]);
+  useEffect(() => writeStored(STORAGE_KEYS.settings, settings), [settings]);
+  useEffect(
+    () => writeStored(STORAGE_KEYS.view, { view, showDiff, translate, board, boardFilters }),
+    [view, showDiff, translate, board, boardFilters],
+  );
+  // 切换契约时勾选会先清空再恢复；恢复完之前不写，免得把记录覆盖成空。
+  useEffect(() => {
+    if (activeId && restoredRef.current === activeId) writeSelectedFrames(activeId, [...selected]);
+  }, [activeId, selected]);
 
   // §5.5：每 5 秒问一次哪些契约变了；pending → done 时提示，正在看的契约被改时提示重新载入。
   useEffect(() => {
@@ -244,6 +276,19 @@ export function AgentStudio() {
     }
   }
 
+  function openFrameImages(frame: ContractFrame, images: ContractResultImage[], index: number) {
+    setOpenImages({
+      items: images.map((image) => ({
+        path: image.path,
+        label: `${frame.id} · ${image.artist ?? ""}${image.seed !== undefined && image.seed !== null ? ` · seed ${image.seed}` : ""}`,
+        badge: image.current ? (image.picked ? "已采用" : undefined) : "提示词已改",
+      })),
+      index,
+    });
+  }
+
+  const handleBoardFocus = useCallback(() => setBoardFocus(null), []);
+
   function locateFrame(frameId: string) {
     document.getElementById(`frame-${frameId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -260,8 +305,27 @@ export function AgentStudio() {
   const coverage = detail?.coverage;
   const contractIssues = issuesByFrame.get("") ?? [];
 
+  const showBoard = board && detail !== null && !detail.parse_error;
+
   return (
-    <main className="studio-grid agent-studio">
+    <main className={showBoard ? "studio-grid agent-studio is-board" : "studio-grid agent-studio"}>
+      {showBoard && detail ? (
+        <ContractStoryboard
+          detail={detail}
+          filters={boardFilters}
+          focusFrame={boardFocus}
+          onBack={() => setBoard(false)}
+          onFiltersChange={setBoardFilters}
+          onFocusHandled={handleBoardFocus}
+          onGenerate={setPendingFrame}
+          onOpenImage={openFrameImages}
+          onTileSizeChange={setTileSize}
+          onTogglePick={(image) => void togglePick(image)}
+          results={results}
+          tileSize={tileSize}
+        />
+      ) : (
+      <>
       <ContractRequestPanel
         activeId={activeId}
         contracts={contracts}
@@ -334,6 +398,7 @@ export function AgentStudio() {
                 <small className="mono ct-wrap" title={detail.file.path}>{detail.id}</small>
               </div>
               <div className="ct-row ct-head-actions">
+                <button className="btn-sm" onClick={() => setBoard(true)} title="每帧一行，看整组的全部出图结果" type="button"><LayoutGrid size={13} /> 结果故事板</button>
                 <button className="btn-sm" onClick={() => void showPrompt(detail.id, "tools")} type="button"><ClipboardCopy size={13} /> 工具版 prompt</button>
                 <button className="btn-sm" onClick={() => void showPrompt(detail.id, "standalone")} type="button"><ClipboardCopy size={13} /> 自包含版 prompt</button>
                 <button className="btn-sm" onClick={() => setImportOpen(true)} type="button"><Download size={13} /> 导入</button>
@@ -411,16 +476,13 @@ export function AgentStudio() {
                     issues={issuesByFrame.get(frame.id) ?? []}
                     key={frame.id}
                     onGenerate={() => setPendingFrame(frame.id)}
-                    onOpenImage={(images, index) => setOpenImages({
-                      items: images.map((image) => ({
-                        path: image.path,
-                        label: `${frame.id} · ${image.artist ?? ""}`,
-                        badge: image.current ? (image.picked ? "已采用" : undefined) : "提示词已改",
-                      })),
-                      index,
-                    })}
+                    onOpenImage={(images, index) => openFrameImages(frame, images, index)}
                     onSave={(prompts) => saveFrame(frame.id, prompts)}
                     onTogglePick={(image) => void togglePick(image)}
+                    onViewAll={() => {
+                      setBoardFocus(frame.id);
+                      setBoard(true);
+                    }}
                     onToggleSelect={() => setSelected((current) => {
                       const next = new Set(current);
                       if (next.has(frame.id)) next.delete(frame.id);
@@ -441,6 +503,8 @@ export function AgentStudio() {
           </>
         )}
       </section>
+      </>
+      )}
 
       <div className="ct-right-column">
         <ContractGeneratePanel

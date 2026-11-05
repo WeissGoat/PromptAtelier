@@ -18,6 +18,7 @@ import {
   segmentText,
   type MarkedTag,
 } from "./analysis";
+import { roundCount } from "./ContractStoryboard";
 import type { ContractFrame, ContractIssue, ContractResultImage, ContractSources, TokenUsage } from "./types";
 
 export type FrameView = "marked" | "raw" | "source";
@@ -39,6 +40,8 @@ type Props = {
   onSave(prompts: Record<string, string>): Promise<boolean>;
   onOpenImage(images: ContractResultImage[], index: number): void;
   onTogglePick(image: ContractResultImage): void;
+  /** 打开结果故事板并定位到本帧。 */
+  onViewAll(): void;
 };
 
 function tagTitle(tag: MarkedTag): string {
@@ -324,9 +327,18 @@ export function FrameCard(props: Props) {
       {frame.notes ? <p className="ct-notes">{frame.notes}</p> : null}
 
       <div className="ct-results">
-        <span className="ct-results-summary">
-          {results.length ? `${results.length} 张 · 当前提示词 ${currentImages.length} 张${picked ? ` · 已采用 ${picked}` : ""}` : "还没有出图"}
-        </span>
+        <div className="ct-results-head">
+          <span className="ct-results-summary">
+            {results.length
+              ? `${results.length} 张 · ${roundCount(results)} 轮 · 当前提示词 ${currentImages.length} 张${picked ? ` · 已采用 ${picked}` : ""}`
+              : "还没有出图"}
+          </span>
+          {results.length ? (
+            <button className="btn-sm btn-ghost" onClick={props.onViewAll} title="在结果故事板里看这一帧的全部结果" type="button">
+              查看全部
+            </button>
+          ) : null}
+        </div>
         <div className="ct-results-strip">
           {results.slice(0, 12).map((image, index) => (
             <figure className={`ct-result${image.current ? "" : " is-old"}${image.picked ? " is-picked" : ""}`} key={image.path}>

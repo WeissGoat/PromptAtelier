@@ -179,6 +179,7 @@ describe("multi-character blocks", () => {
       onSave: async () => true,
       onOpenImage: noop,
       onTogglePick: noop,
+      onViewAll: noop,
     };
     const { container, unmount } = render(<FrameCard frame={frame} {...props} />);
     const labels = [...container.querySelectorAll(".ct-blocks .ct-block-label")].map((node) => node.textContent);

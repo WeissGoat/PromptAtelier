@@ -791,3 +791,137 @@
 .ct-lengths .ct-tokens {
   margin-left: 0;
 }
+
+/* 结果故事板 */
+.studio-grid.agent-studio.is-board {
+  grid-template-columns: minmax(520px, 1fr) minmax(300px, 360px);
+}
+
+.ct-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: calc(100vh - 24px);
+  min-width: 0;
+}
+
+.ct-board-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.ct-board-head h2 {
+  margin: 0;
+}
+
+.ct-board-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  padding: 6px 0;
+}
+
+.ct-board-spacer {
+  flex: 1;
+}
+
+.ct-board-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ct-board-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  padding: 10px 12px;
+  scroll-margin-top: 56px;
+}
+
+.ct-board-info {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ct-board-info-head {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ct-board-prompt {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ct-board-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ct-board-results > .muted {
+  margin: 0;
+}
+
+.ct-round-head {
+  font-size: 12px;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+
+.ct-round-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ct-result-image.ct-board-image {
+  width: auto;
+}
+
+.ct-result-image.ct-board-image img {
+  object-fit: contain;
+  width: auto;
+}
+
+.ct-board-caption {
+  align-items: center;
+  color: var(--text-3);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.ct-old-tag {
+  color: var(--warning);
+}
+
+.ct-results-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .studio-grid.agent-studio.is-board {
+    grid-template-columns: 1fr;
+  }
+
+  .ct-board-row {
+    grid-template-columns: 1fr;
+  }
+}
