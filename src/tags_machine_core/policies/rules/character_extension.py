@@ -562,18 +562,6 @@ def _parse_character_extensions(
                 operations=operations,
             )
         )
-    # 兼容旧 formula.py 的 default_ext: 若角色未定义 extend_func_barefoot，追加全局默认规则
-    if not any(r.legacy_name == "extend_func_barefoot" for r in rules):
-        rules.append(
-            ExtensionRuleLine(
-                slot="barefoot",
-                legacy_name="extend_func_barefoot",
-                legacy_triggers=("barefoot",),
-                operations=(
-                    ExtensionOperation(name="add_after", args=("bare_legs", "barefoot")),
-                ),
-            )
-        )
     return ParsedCharacterExtensions(declarations=declarations, rules=rules)
 
 

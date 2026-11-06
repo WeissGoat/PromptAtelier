@@ -12,6 +12,19 @@ rules:
     options:
       blocked_sections:
         - copyright
+  tag_inference:
+    enabled: true
+    options:
+      rules:
+        - id: barefoot_to_bare_legs
+          when_any:
+            - barefoot
+            - bare_feet
+            - bare_foot
+            - barefeet
+          add:
+            - bare_legs
+          position: after_trigger
   tag_conflict:
     enabled: true
   character_count:
