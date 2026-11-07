@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:TM_COMFYUI_MODAL_TOKEN = [Environment]::GetEnvironmentVariable('TM_COMFYUI_MODAL_TOKEN', 'User'); uv run python scripts/dev_web.py --no-reload-backend"
+      ],
+      "port": 53173
+    },
+    {
+      "name": "verify-api",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:PYTHONPATH = 'src'; .venv/Scripts/python.exe -m tags_machine_core.web --port 53221"
+      ],
+      "port": 53221
+    },
+    {
+      "name": "verify-web",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:VITE_API_ROOT = 'http://127.0.0.1:53221/api'; Set-Location web; npx vite --port 53184 --strictPort"
+      ],
+      "port": 53184
+    }
+  ]
+}

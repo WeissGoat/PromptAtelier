@@ -58,3 +58,14 @@ comfyui:
 sd:
   base_url: "http://127.0.0.1:7860"
   timeout: 120
+
+# Style Lab 等功能用的 LLM（自建 CLIProxyAPI，OpenAI 兼容）。密钥直接读 Codex 的 auth.json，不在这里重复保存。
+llm:
+  base_url: "https://cpa.whitesgoat.xyz/v1"
+  api_key_file: "C:/Users/WhiteSheep/.codex/auth.json"
+  api_key_field: "OPENAI_API_KEY"
+  models:
+    text: "deepseek-4.1-flash"
+    fallback: "gemini-3.8-flash-high"
+    vision: "gemini-3.8-flash-high"
+  timeout: 90
