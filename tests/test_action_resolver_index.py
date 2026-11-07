@@ -52,3 +52,20 @@ def test_category_candidates_accept_numeric_prefix(tmp_path: Path) -> None:
     assert index.category_candidates("st_old", "20240720_1721464255") == {
         category.resolve()
     }
+
+
+def test_relative_to_design_root_with_external_new_root(tmp_path: Path) -> None:
+    design = tmp_path / "design"
+    action_root = design / "动作改2"
+    action_root.mkdir(parents=True)
+    external_new = tmp_path / "external_action_store"
+    external_node = external_new / "深插交尾"
+    external_node.mkdir(parents=True)
+
+    index = ActionNodeIndex.__new__(ActionNodeIndex)
+    index.design_root = design.resolve()
+    index.action_root = action_root.resolve()
+    index.new_root = external_new.resolve()
+
+    rel_path = index.relative_to_design_root(external_node)
+    assert rel_path == "动作改2/new/深插交尾"

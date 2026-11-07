@@ -81,8 +81,24 @@ class ActionNodeIndex:
         return None
 
     def relative_to_design_root(self, path: str | Path) -> str:
+        p = Path(path)
+        # 1. 优先尝试字面路径（避免分类视图 pn_* 等目录联接跟随到外部原始目录）
+        for candidate in (Path(os.path.abspath(p)), p):
+            try:
+                return candidate.relative_to(self.design_root).as_posix()
+            except (OSError, ValueError):
+                pass
+
+        # 2. 若在 new_root 目录下（支持 Windows 下 new 作为跨盘符目录联接，例如指向 G:\GoogleDrive\action）
         try:
-            return Path(path).resolve().relative_to(self.design_root).as_posix()
+            rel = p.resolve().relative_to(self.new_root)
+            return (self.action_root.relative_to(self.design_root) / "new" / rel).as_posix()
+        except (OSError, ValueError):
+            pass
+
+        # 3. 尝试完全解析后的路径
+        try:
+            return p.resolve().relative_to(self.design_root).as_posix()
         except (OSError, ValueError) as exc:
             raise ActionIndexError(f"Action 路径不在 design_root 下：{path}") from exc
 
