@@ -340,6 +340,9 @@ export type HistoryRunImagesResponse = {
 export type NovelAIUsageInfo = {
   configured: boolean;
   token_masked: string;
+  /** 多 token 管理里的 id 和自定义名称（老后端没有这两个字段）。 */
+  token_id?: string;
+  token_name?: string;
   active: boolean;
   tier: number;
   tier_name: string;
@@ -350,4 +353,37 @@ export type NovelAIUsageInfo = {
   time_until_next_percent: number;
   unlimited_v5_eligible: boolean;
   error?: string | null;
+};
+
+/** Web 里保存的一个 NovelAI token；明文 token 永远不会返回给前端。 */
+export type NovelAITokenEntry = {
+  id: string;
+  name: string;
+  token_masked: string;
+  /** config：configs/local.yaml 或环境变量里的 token，只能改名不能删除；saved：网页添加的。 */
+  source: "config" | "saved";
+  /** token：直接保存的 token；account：保存账号密码，用时登录换 token（token_masked 为空，看 account）。 */
+  kind?: "token" | "account";
+  account?: string | null;
+  /** 账号：pending 后台排队登录 / ok 已登录 / failed 登录失败（login_error 是原因或限流等待说明）。 */
+  login_status?: "pending" | "ok" | "failed" | null;
+  login_error?: string | null;
+  active: boolean;
+  created_at?: number | null;
+};
+
+export type NovelAITokenList = {
+  schema: "tags-machine-core.web.novelai-tokens/v1";
+  active_id: string | null;
+  tokens: NovelAITokenEntry[];
+};
+
+export type NovelAITokenImportResult = NovelAITokenList & {
+  added: NovelAITokenEntry[];
+  /** 账号导入：之前登录失败、这次重新排队的。 */
+  requeued?: NovelAITokenEntry[];
+  /** 在 Token 页签粘贴了账号密码列表时，后端自动按账号导入，返回 "accounts"。 */
+  imported_as?: "accounts";
+  /** line 从 1 开始；reason: duplicate 已存在或同批重复，invalid 格式不对。 */
+  skipped: { line: number; reason: "duplicate" | "invalid" | "login_failed"; message: string }[];
 };

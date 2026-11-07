@@ -5,6 +5,7 @@ description = "Clean prompt composition and render planning core for Tags Machin
 requires-python = ">=3.11"
 dependencies = [
     "ai-image-gateway",
+    "argon2-cffi>=23.1",
     "fastapi>=0.115",
     "Pillow>=10.0",
     "pydantic>=2.6",

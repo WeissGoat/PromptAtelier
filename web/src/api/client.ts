@@ -95,6 +95,63 @@ export async function refreshNovelAIUsage(): Promise<import("./types").NovelAIUs
   return apiPost<import("./types").NovelAIUsageInfo>("/novelai/usage/refresh", {});
 }
 
+type NovelAITokenList = import("./types").NovelAITokenList;
+
+export async function listNovelAITokens(): Promise<NovelAITokenList> {
+  return apiGet<NovelAITokenList>("/novelai/tokens");
+}
+
+export async function addNovelAIToken(body: {
+  name: string;
+  token: string;
+  activate?: boolean;
+}): Promise<NovelAITokenList> {
+  return apiPost<NovelAITokenList>("/novelai/tokens", body);
+}
+
+/** 批量导入，每行一个 token（可写「名称 token」）；已存在和同批重复的跳过。 */
+export async function importNovelAITokens(
+  text: string,
+): Promise<import("./types").NovelAITokenImportResult> {
+  return apiPost<import("./types").NovelAITokenImportResult>("/novelai/tokens/import", { text });
+}
+
+/** 某个 token 的订阅和点数；refresh=true 时绕过后端 60s 缓存。 */
+export async function getNovelAITokenUsage(
+  id: string,
+  refresh = false,
+): Promise<import("./types").NovelAIUsageInfo> {
+  return apiGet(
+    `/novelai/tokens/${encodeURIComponent(id)}/usage${refresh ? "?refresh=true" : ""}`,
+  );
+}
+
+/** 批量导入账号密码（每行「邮箱 密码」或旧 NAI_ACCOUNT 列表），逐个登录验证，重复的跳过。 */
+export async function importNovelAIAccounts(
+  text: string,
+): Promise<import("./types").NovelAITokenImportResult> {
+  return apiPost<import("./types").NovelAITokenImportResult>("/novelai/tokens/import-accounts", {
+    text,
+  });
+}
+
+/** 把登录失败的账号放回后台登录队列。 */
+export async function reloginNovelAIAccount(id: string): Promise<NovelAITokenList> {
+  return apiPost<NovelAITokenList>(`/novelai/tokens/${encodeURIComponent(id)}/relogin`, {});
+}
+
+export async function renameNovelAIToken(id: string, name: string): Promise<NovelAITokenList> {
+  return apiPut<NovelAITokenList>(`/novelai/tokens/${encodeURIComponent(id)}`, { name });
+}
+
+export async function deleteNovelAIToken(id: string): Promise<NovelAITokenList> {
+  return apiDelete<NovelAITokenList>(`/novelai/tokens/${encodeURIComponent(id)}`);
+}
+
+export async function activateNovelAIToken(id: string): Promise<NovelAITokenList> {
+  return apiPost<NovelAITokenList>(`/novelai/tokens/${encodeURIComponent(id)}/activate`, {});
+}
+
 async function toApiError(response: Response): Promise<ApiClientError> {
   const text = await response.text();
   try {

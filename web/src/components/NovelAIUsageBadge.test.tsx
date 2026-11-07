@@ -22,6 +22,20 @@ describe("NovelAIUsageBadge", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(apiClient, "getNovelAITokenUsage").mockRejectedValue(new Error("offline"));
+    vi.spyOn(apiClient, "listNovelAITokens").mockResolvedValue({
+      schema: "tags-machine-core.web.novelai-tokens/v1",
+      active_id: "config",
+      tokens: [
+        {
+          id: "config",
+          name: "配置文件",
+          token_masked: "pst-...abcd",
+          source: "config",
+          active: true,
+        },
+      ],
+    });
   });
 
   afterEach(() => {
@@ -59,7 +73,7 @@ describe("NovelAIUsageBadge", () => {
     fireEvent.click(button);
 
     expect(screen.getByText(/Opus/)).toBeDefined();
-    expect(screen.getByText(/pst-...abcd/)).toBeDefined();
+    expect(screen.getAllByText(/pst-...abcd/).length).toBeGreaterThan(0);
     expect(screen.getByText(/约 30 分钟/)).toBeDefined();
 
     // 点击刷新按钮
@@ -93,5 +107,21 @@ describe("NovelAIUsageBadge", () => {
     await waitFor(() => {
       expect(screen.getByText(/未配置/)).toBeDefined();
     });
+
+    // 未配置时也能打开弹层添加 token
+    fireEvent.click(screen.getByRole("button", { name: /NovelAI/i }));
+    expect(await screen.findByRole("button", { name: /添加/ })).toBeDefined();
+  });
+
+  it("shows the active token name on the badge", async () => {
+    vi.spyOn(apiClient, "getNovelAIUsage").mockResolvedValue({
+      ...sampleUsage,
+      token_id: "abc",
+      token_name: "主力号",
+    });
+
+    render(<NovelAIUsageBadge />);
+
+    expect(await screen.findByText(/主力号/)).toBeDefined();
   });
 });

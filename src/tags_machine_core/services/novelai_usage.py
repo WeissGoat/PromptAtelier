@@ -29,6 +29,9 @@ def mask_token(token: str | None) -> str:
 class NovelAIUsageInfo(BaseModel):
     configured: bool = True
     token_masked: str = ""
+    # Web 多 token 管理里这个 token 的 id 和自定义名称；命令行查询时为空
+    token_id: str = ""
+    token_name: str = ""
     active: bool = False
     tier: int = 0
     tier_name: str = "None"

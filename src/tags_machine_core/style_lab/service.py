@@ -630,10 +630,10 @@ class StyleLabService:
 _JOB_NAMES = {"regenerate": REGENERATE_JOB, "recipe": RECIPE_JOB, "swap": PROBE_JOB, "ablation": PROBE_JOB}
 
 _KNOWN_ERRORS = (
-    ("HTTP 401", "NovelAI token 无效或已过期（HTTP 401），请更新 configs/local.yaml 里的 novelai.access_token。"),
+    ("HTTP 401", "NovelAI token 无效或已过期（HTTP 401），请在侧栏 NovelAI 面板切换或添加 token，或更新 configs/local.yaml 里的 novelai.access_token。"),
     ("HTTP 402", "NovelAI 拒绝了请求（HTTP 402）：Anlas 不足，或当前订阅不支持这组参数。"),
     ("HTTP 429", "NovelAI 限流（HTTP 429），稍后再试。"),
-    ("Missing NovelAI token", "没有配置 NovelAI token：在 configs/local.yaml 填写 novelai.access_token。"),
+    ("Missing NovelAI token", "没有配置 NovelAI token：在侧栏 NovelAI 面板添加 token，或在 configs/local.yaml 填写 novelai.access_token。"),
 )
 
 

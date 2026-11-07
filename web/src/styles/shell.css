@@ -21,7 +21,7 @@
   flex-direction: column;
   gap: 18px;
   height: 100vh;
-  overflow: hidden;
+  overflow: visible;
   padding: 14px 10px;
   position: sticky;
   top: 0;

@@ -40,6 +40,7 @@ from .services.comfyui_targets import ComfyUITargetService
 from .services.generate_batch import GENERATE_BATCH_JOB, recover_interrupted_batch
 from .services.job_manager import JobManager
 from .services.node_workspace import NodeWorkspace
+from .services.novelai_tokens import NovelAITokenStore
 from .services.output_history import OutputHistory
 from .services.node_pool_service import NodePoolService
 from .services.node_save_preview_store import NodeSavePreviewStore
@@ -74,6 +75,7 @@ def create_app(
     llm_client: LLMClient | None = None,
     style_lab_dir: str | Path = Path("runtime") / "stylelab",
     static_dir: str | Path | None = None,
+    novelai_token_store: NovelAITokenStore | None = None,
 ) -> FastAPI:
     sanitize_proxy_env()
     resolved_config_path = resolve_web_config_path(config_path)
@@ -113,6 +115,13 @@ def create_app(
     app.state.result_index = result_index or ResultIndex(roots=roots, thumb_dir=web_data_dir / "thumbs")
     app.state.output_history = OutputHistory(config.runtime.output_dir, extra_roots=config.web.history_roots)
     app.state.comfyui_targets = ComfyUITargetService(config.comfyui)
+    app.state.novelai_tokens = novelai_token_store or NovelAITokenStore(
+        web_data_dir / "novelai_tokens.json",
+        config_token=lambda: novelai.resolve_config_token(config),
+    )
+    # 上次关掉时还没登录完的账号，服务启动后继续在后台登录。放在启动钩子里：
+    # 测试直接 TestClient(app) 不触发启动钩子，不会拿真实账号去登录。
+    app.router.on_startup.append(app.state.novelai_tokens.kick_login_queue)
     policy_provider = build_prompt_policy_provider(
         config,
         config_path=resolved_config_path,
@@ -125,7 +134,11 @@ def create_app(
         ),
         artist_loader=app.state.node_workspace.read_artist_node,
         generation_executor=generation_executor
-        or _default_generation_executor(config, app.state.comfyui_targets),
+        or _default_generation_executor(
+            config,
+            app.state.comfyui_targets,
+            app.state.novelai_tokens,
+        ),
     )
     app.state.contract_service = ContractService(
         root=contract_root(config),
@@ -198,6 +211,7 @@ def _resolve_static_dir(static_dir: str | Path | None) -> Path | None:
 def _default_generation_executor(
     config,
     comfyui_targets: ComfyUITargetService | None = None,
+    novelai_tokens: NovelAITokenStore | None = None,
 ) -> GenerationExecutor:
     def executor(
         request: RenderRequest,
@@ -208,7 +222,7 @@ def _default_generation_executor(
         tracking = comfyui_targets.track(target) if is_comfyui and comfyui_targets else nullcontext()
         with tracking:
             return execute_render_request(
-                config,
+                _with_active_novelai_token(config, novelai_tokens) if not is_comfyui else config,
                 request,
                 output_dir=options.get("output_dir"),
                 image_format=str(options.get("image_format") or config.defaults.image_format),
@@ -217,3 +231,15 @@ def _default_generation_executor(
             )
 
     return executor
+
+
+def _with_active_novelai_token(config, novelai_tokens: NovelAITokenStore | None):
+    """每次出图时读取网页里选中的 token，切换后下一张图就生效。"""
+    if novelai_tokens is None:
+        return config
+    token = novelai_tokens.active_token()
+    if not token or token == config.novelai.access_token:
+        return config
+    return config.model_copy(
+        update={"novelai": config.novelai.model_copy(update={"access_token": token})}
+    )
