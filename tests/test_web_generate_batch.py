@@ -1,5 +1,6 @@
 import tempfile
 import threading
+from pathlib import Path
 from unittest import TestCase
 
 from fastapi.testclient import TestClient
@@ -156,6 +157,26 @@ class GenerateBatchHttpTest(TestCase):
         bad = client.post("/api/generate/batch", json={"items": []})
         self.assertEqual(bad.status_code, 400)
         self.assertEqual(bad.json()["error"]["code"], "invalid_generate_batch")
+
+    def test_relative_output_dirs_go_under_the_configured_output_root(self):
+        manager = JobManager()
+        app = create_app(job_manager=manager)
+        api = FakeApi()
+        app.state.generation_api = api
+        root = Path(app.state.config.runtime.output_dir).resolve()
+        client = TestClient(app)
+
+        item = _item(5, generate={"output_dir": "compares/primary_x/group_001_seed_5"})
+        # 旧前端带 outputs/ 前缀的目录也按输出根目录处理
+        response = client.post("/api/generate/batch", json={"output_dir": "outputs/compares/primary_x", "items": [item]})
+        job_id = response.json()["id"]
+        manager.wait(job_id, timeout=5)
+
+        self.assertEqual(manager.get(job_id).result["output_dir"], str(root / "compares" / "primary_x"))
+        self.assertEqual(api.generated[0]["output_dir"], str(root / "compares" / "primary_x" / "group_001_seed_5"))
+
+        escaped = client.post("/api/generate/batch", json={"output_dir": "../elsewhere", "items": [_item(6)]})
+        self.assertEqual(escaped.status_code, 400)
 
     def test_resume_keeps_succeeded_items_and_reruns_the_rest(self):
         with tempfile.TemporaryDirectory() as tmp:

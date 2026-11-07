@@ -18,6 +18,7 @@ const kindLabels: Record<HistoryRunKind, string> = {
   "sequential-all": "Sequential",
   primary: "Primary",
   contract: "契约",
+  studio: "Compare Studio",
   loose: "散图",
   other: "其他",
 };
@@ -28,6 +29,7 @@ const kindFilters: Array<{ key: string; label: string }> = [
   { key: "sequential", label: "Sequential" },
   { key: "primary", label: "Primary" },
   { key: "contract", label: "契约" },
+  { key: "studio", label: "Compare Studio" },
   { key: "loose", label: "散图" },
   { key: "other", label: "其他" },
 ];
@@ -219,7 +221,7 @@ export function HistoryPage({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom
           ))}
         </div>
         {runsError ? <div className="alert error-alert">{runsError}</div> : null}
-        <small className="field-hint">按创建时间从新到旧；outputs 根目录的散图按日期归组，只读不动。</small>
+        <small className="field-hint">按创建时间从新到旧；输出根目录的散图按日期归组，只读不动。</small>
         <div className="history-run-list">
           {visibleRuns.map((run) => (
             <button

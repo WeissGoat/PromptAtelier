@@ -25,7 +25,7 @@ from tags_machine_core.verification.image_params import read_image_parameters
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 LOOSE_PREFIX = "loose/"
 EXTRA_PREFIX = "@"
-_RUN_KIND = re.compile(r"^(compare|random|sequential-all|sequential|primary|contract)_")
+_RUN_KIND = re.compile(r"^(compare|random|sequential-all|sequential|primary|contract|studio)_")
 _MAX_DEPTH = 3
 
 

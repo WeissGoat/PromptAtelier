@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react";
 import { apiGet, apiPost, apiUrl, errorMessage } from "../api/client";
 import type { JobRecord } from "../api/types";
 import type { BaseTemplate, PromptVariant } from "./types";
+import { createCompareOutputDir } from "./useCompareRunController";
 
 const terminalJobStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
 
@@ -51,6 +52,8 @@ export type RoundRunTask = {
 
 type RunnerOptions = {
   concurrency?: number;
+  /** 每次点击出图建一个独立文件夹（相对输出根目录），默认 compares/studio_<时间>_<id>。 */
+  outputDirFactory?: () => string;
   pollIntervalMs?: number;
   post?: (path: string, body: unknown) => Promise<unknown>;
   get?: (path: string) => Promise<unknown>;
@@ -64,12 +67,14 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
   const post = options.post ?? apiPost;
   const get = options.get ?? apiGet;
   const pollIntervalMs = options.pollIntervalMs ?? 500;
+  const outputDirFactory = options.outputDirFactory ?? studioOutputDir;
 
   const runVariant = useCallback(
     async (
       variant: PromptVariant,
       template: BaseTemplate,
       onUpdate: (patch: Partial<PromptVariant>) => void,
+      outputDir: string = outputDirFactory(),
     ) => {
       onUpdate({ status: "queued", error: undefined });
 
@@ -98,6 +103,7 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
       }
 
       const requestBody = {
+        output_dir: outputDir,
         render_request: {
           backend: "novelai",
           prompt: variant.prompt,
@@ -180,7 +186,7 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
         });
       }
     },
-    [get, pollIntervalMs, post],
+    [get, outputDirFactory, pollIntervalMs, post],
   );
 
   const runRound = useCallback(
@@ -192,16 +198,17 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
       setIsBusy(true);
       abortRef.current = false;
 
+      const outputDir = outputDirFactory();
       try {
         for (const variant of variants) {
           if (abortRef.current) break;
-          await runVariant(variant, template, (patch) => onUpdate(variant.id, patch));
+          await runVariant(variant, template, (patch) => onUpdate(variant.id, patch), outputDir);
         }
       } finally {
         setIsBusy(false);
       }
     },
-    [runVariant],
+    [outputDirFactory, runVariant],
   );
 
   const runRoundsSequence = useCallback(
@@ -211,11 +218,13 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
     ) => {
       setIsBusy(true);
       abortRef.current = false;
+      const outputDir = outputDirFactory();
 
       try {
         for (let rIdx = 0; rIdx < tasks.length; rIdx++) {
           if (abortRef.current) break;
           const task = tasks[rIdx];
+          const roundDir = tasks.length > 1 ? `${outputDir}/round_${String(rIdx + 1).padStart(3, "0")}` : outputDir;
           for (let vIdx = 0; vIdx < task.variants.length; vIdx++) {
             if (abortRef.current) break;
             const variant = task.variants[vIdx];
@@ -229,7 +238,7 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
             });
             await runVariant(variant, task.template, (patch) => {
               onUpdateVariant(task.roundId, variant.id, patch);
-            });
+            }, roundDir);
           }
         }
       } finally {
@@ -237,7 +246,7 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
         setQueueProgress(null);
       }
     },
-    [runVariant],
+    [outputDirFactory, runVariant],
   );
 
   const stop = useCallback(() => {
@@ -254,4 +263,8 @@ export function useCompareBatchRunner(options: RunnerOptions = {}) {
     isBusy,
     stop,
   };
+}
+
+function studioOutputDir(): string {
+  return createCompareOutputDir("studio");
 }

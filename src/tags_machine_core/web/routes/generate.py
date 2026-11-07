@@ -13,9 +13,14 @@ from tags_machine_core.web.services.generate_batch import (
     run_generate_batch,
     validate_generate_batch,
 )
+from tags_machine_core.web.services.output_paths import resolve_batch_output_dirs, resolve_output_dir
 
 
 router = APIRouter()
+
+
+def _output_root(request: Request):
+    return request.app.state.config.runtime.output_dir
 
 
 @router.post("/generate")
@@ -30,6 +35,12 @@ def generate(payload: dict[str, Any], request: Request) -> dict[str, Any]:
             message=str(exc),
             status_code=400,
         ) from exc
+    try:
+        output_dir = resolve_output_dir(_output_root(request), prepared.get("output_dir"))
+    except ValueError as exc:
+        raise ApiError(code="invalid_output_dir", message=str(exc), status_code=400) from exc
+    if output_dir is not None:
+        prepared = {**prepared, "output_dir": output_dir}
 
     def worker(ctx):
         return run_generate(api, prepared, ctx.emit)
@@ -51,7 +62,7 @@ def generate_batch(payload: dict[str, Any], request: Request) -> dict[str, Any]:
     manager = request.app.state.job_manager
     api = request.app.state.generation_api
     try:
-        batch = validate_generate_batch(payload)
+        batch = resolve_batch_output_dirs(_output_root(request), validate_generate_batch(payload))
         for item in batch["items"]:
             _validate_prompt_policy_override(item["compose_request"])
     except ValueError as exc:

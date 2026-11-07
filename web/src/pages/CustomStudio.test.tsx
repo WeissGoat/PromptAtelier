@@ -151,8 +151,8 @@ describe("CustomStudio", () => {
     expect(body.items).toHaveLength(1);
     expect(body.items[0].compose_request.compose.nodes.map((item: { ref: string }) => item.ref)).toEqual(["artists/a", "characters/homura", "actions/standing"]);
     expect(body.items[0].compose_request.render.params.n_samples).toBe(3);
-    // 每次出图一个独立文件夹：outputs/compares/primary_<时间>_<id>/group_001_seed_<seed>
-    expect(body.output_dir).toMatch(/^outputs\/compares\/primary_\d{14}_[0-9a-f]{8}$/);
+    // 每次出图一个独立文件夹：<输出根目录>/compares/primary_<时间>_<id>/group_001_seed_<seed>
+    expect(body.output_dir).toMatch(/^compares\/primary_\d{14}_[0-9a-f]{8}$/);
     expect(body.items[0].generate.output_dir).toBe(`${body.output_dir}/group_001_seed_${body.items[0].seed}`);
 
     expect(await screen.findByText(/已提交：Primary · 1 轮/)).toBeTruthy();

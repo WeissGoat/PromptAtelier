@@ -10,7 +10,8 @@ dist/
 web/dist/
 build/
 *.egg-info/
-outputs/
+# outputs 可能是指向输出根目录的目录链接，不带斜杠才能忽略链接本身
+outputs
 output/
 runtime/
 cache/

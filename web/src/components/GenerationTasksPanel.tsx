@@ -308,7 +308,7 @@ function TaskCard({ job, open, tileSize, onToggle, onCancel, onResume, onOpenIma
 
 /**
  * 出图任务：所有出图都交给 Web 后端排队跑，这里只看任务。
- * 任务记录存在后端（outputs/.web/jobs），刷新网页、关掉网页、重启后端都还在。
+ * 任务记录存在后端（输出根目录/.web/jobs），刷新网页、关掉网页、重启后端都还在。
  */
 export function GenerationTasksPanel({ onOpenImage, pollIntervalMs = 1500 }: Props) {
   const [jobs, setJobs] = useState<BackgroundBatchJob[]>([]);

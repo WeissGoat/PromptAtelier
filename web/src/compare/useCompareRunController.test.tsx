@@ -302,10 +302,10 @@ describe("useCompareRunController", () => {
     expect(charNode2?.clothing_ref).toBe("clothing/swimsuit");
   });
 
-  it("creates compare output directories under outputs/compares/", () => {
+  it("creates compare output directories under compares/ relative to the output root", () => {
     const defaultDir = createCompareOutputDir();
-    expect(defaultDir).toMatch(/^outputs\/compares\/compare_\d{14}_[a-f0-9]+$/);
+    expect(defaultDir).toMatch(/^compares\/compare_\d{14}_[a-f0-9]+$/);
     const randomDir = createCompareOutputDir("random");
-    expect(randomDir).toMatch(/^outputs\/compares\/random_\d{14}_[a-f0-9]+$/);
+    expect(randomDir).toMatch(/^compares\/random_\d{14}_[a-f0-9]+$/);
   });
 });

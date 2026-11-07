@@ -248,4 +248,39 @@ describe("useCompareBatchRunner", () => {
     expect(result.current.queueProgress).toBeNull();
     expect(result.current.isBusy).toBe(false);
   });
+
+  it("puts each run in its own folder with one subfolder per round", async () => {
+    const mockPost = vi.fn().mockResolvedValue({ id: "job-1", status: "succeeded", result: { images: [] } });
+    const mockGet = vi.fn();
+    let created = 0;
+    const { result } = renderHook(() =>
+      useCompareBatchRunner({
+        post: mockPost,
+        get: mockGet,
+        pollIntervalMs: 1,
+        outputDirFactory: () => `compares/studio_run${++created}`,
+      }),
+    );
+    const variantB = { ...sampleVariant, id: "var-b" };
+    await act(async () => {
+      await result.current.runRoundsSequence(
+        [
+          { roundId: "r1", template: sampleTemplate, variants: [sampleVariant, variantB] },
+          { roundId: "r2", template: sampleTemplate, variants: [sampleVariant] },
+        ],
+        vi.fn(),
+      );
+    });
+    const dirs = mockPost.mock.calls.map(([, body]) => (body as { output_dir: string }).output_dir);
+    expect(dirs).toEqual([
+      "compares/studio_run1/round_001",
+      "compares/studio_run1/round_001",
+      "compares/studio_run1/round_002",
+    ]);
+
+    await act(async () => {
+      await result.current.runVariant(sampleVariant, sampleTemplate, vi.fn());
+    });
+    expect((mockPost.mock.calls[3][1] as { output_dir: string }).output_dir).toBe("compares/studio_run2");
+  });
 });

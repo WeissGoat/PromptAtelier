@@ -54,12 +54,13 @@ type ControllerDependencies = {
 
 const terminalStatuses = new Set<JobRecord["status"]>(["succeeded", "failed", "cancelled"]);
 
+/** 本次出图的目录，相对后端配置的输出根目录（runtime.output_dir），由后端拼成绝对路径。 */
 export function createCompareOutputDir(prefix: string = "compare"): string {
   const timestamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
   const suffix = globalThis.crypto?.randomUUID
     ? globalThis.crypto.randomUUID().slice(0, 8)
     : Math.random().toString(16).slice(2, 10).padEnd(8, "0");
-  return `outputs/compares/${prefix}_${timestamp}_${suffix}`;
+  return `compares/${prefix}_${timestamp}_${suffix}`;
 }
 
 export function createCompareGroupOutputDir(parent: string, groupIndex: number, seed: number): string {

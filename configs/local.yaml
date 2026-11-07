@@ -4,7 +4,8 @@ legacy:
 
 runtime:
   cache_dir: "cache"
-  output_dir: "outputs"
+  # 出图根目录（网页、CLI 共用）。仓库里的 outputs 是指向这里的目录链接，旧记录里的 outputs/... 路径照样能打开。
+  output_dir: "G:/ai_auto/output"
 
 defaults:
   backend: "novelai"

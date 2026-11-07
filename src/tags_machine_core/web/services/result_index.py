@@ -72,7 +72,8 @@ def _random_generation_nodes(core_info: Any) -> list[dict[str, Any]]:
 
 class ResultIndex:
     def __init__(self, *, roots: list[str | Path], thumb_dir: str | Path | None = None):
-        self.roots = [Path(root).resolve() for root in roots]
+        # 去重：旧的 outputs 目录可能是指向新输出根目录的链接，解析后是同一处。
+        self.roots = list(dict.fromkeys(Path(root).resolve() for root in roots))
         self.thumb_dir = Path(thumb_dir) if thumb_dir else None
         self._thumb_lock = threading.Lock()
 

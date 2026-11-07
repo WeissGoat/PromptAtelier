@@ -294,7 +294,7 @@ export type ImageParameterDiffResponse = {
   current_normalized: Record<string, unknown>;
 };
 
-export type HistoryRunKind = "compare" | "random" | "sequential" | "sequential-all" | "primary" | "contract" | "loose" | "other";
+export type HistoryRunKind = "compare" | "random" | "sequential" | "sequential-all" | "primary" | "contract" | "studio" | "loose" | "other";
 
 export type HistoryRun = {
   id: string;

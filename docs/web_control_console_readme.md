@@ -156,10 +156,30 @@ Prompt Behavior 方案也遵循同一规则：同一 Group 内不同 Behavior �
 每次点击 `Compare Generate` 都会创建一个独立父目录，并按 Group 建立子目录：
 
 ```text
-outputs/compare_<timestamp>_<id>/
+<输出根目录>/compares/compare_<timestamp>_<id>/
   group_001_seed_123456/
   group_002_seed_123457/
 ```
+
+### 出图目录
+
+输出根目录只在配置里写一处：`runtime.output_dir`（本机 `configs/local.yaml` 现为 `G:/ai_auto/output`）。前端只提交相对目录，后端拼到根目录下；任务记录里存的是绝对路径。
+
+| 入口 | 目录 |
+|---|---|
+| Custom Studio（Primary / Random / Sequential / Compare） | `compares/<primary\|random\|sequential\|sequential-all\|compare>_<时间>_<id>/group_<NNN>_seed_<seed>/` |
+| Compare Studio | `compares/studio_<时间>_<id>/`，一次跑多轮时每轮一个 `round_<NNN>/` |
+| 契约 | `compares/contract_<时间>_<id>/<帧 id>/` |
+| Style Lab | 工作区的 `.stylelab/runs/<run id>/`（不在输出根目录） |
+| 任务记录 / 缩略图 / NovelAI token | `.web/jobs/`、`.web/thumbs/`、`.web/novelai_tokens.json` |
+
+搬输出根目录：先停后端、等出图任务跑完，再运行
+
+```powershell
+uv run python tools/migrate_output_root.py all --src outputs --dst <新目录>
+```
+
+它会复制（保留创建时间）、核对文件数、改写 JSON 里的旧路径（原文件备份到 `.web/migration-<时间>/`），最后删除旧目录并在原处建目录链接指向新目录，文档、PNG 元数据、浏览器缓存里的旧 `outputs/...` 路径照样能打开。改完把 `runtime.output_dir` 指到新目录。
 
 图片详情的左右切换顺序先遍历当前 Group 的 Matrix，再进入下一 Group。节点类型右侧的加号会镜像当前 Primary 节点；随后对 Compare 节点的临时修改不会改变 Primary。
 
