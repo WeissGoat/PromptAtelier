@@ -70,8 +70,18 @@ describe("NodePicker", () => {
     expect(screen.getAllByRole("option")).toHaveLength(8);
     expect(String(fetchMock.mock.calls[0][0])).toContain("limit=20");
     expect(String(fetchMock.mock.calls[0][0])).toContain("offset=0");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("dedupe=true");
     expect(screen.queryByText("group/node-0")).toBeNull();
     expect(screen.queryByText("F:/path/0")).toBeNull();
+  });
+
+  it("keeps artist searches undeduped because workflows may differ outside node.yaml", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(response([]));
+    render(<NodePicker label="Artist" onClear={vi.fn()} onSelect={vi.fn()} placeholder="搜索" role="artist" value="" />);
+    fireEvent.focus(screen.getByRole("combobox", { name: "Artist" }));
+    await runSearchDebounce();
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("dedupe=true");
   });
 
   it("loads and deduplicates the next page when the bottom sentinel becomes visible", async () => {

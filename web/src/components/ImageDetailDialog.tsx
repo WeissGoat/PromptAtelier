@@ -1,10 +1,13 @@
 import {
+  ArrowUpRight,
   ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   Columns,
+  Dices,
   Eye,
   FolderOpen,
+  LoaderCircle,
   MoveHorizontal,
   Sparkles,
   X,
@@ -18,6 +21,7 @@ import type {
   ImageParameterDiffResponse,
 } from "../api/types";
 import { formatImageTiming } from "../generation/timing";
+import type { OpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
 
 export type ImageDetailItem = {
   path: string;
@@ -32,11 +36,112 @@ type ImageDetailDialogProps = {
   items?: ImageDetailItem[];
   initialIndex: number;
   onClose(): void;
+  onOpenNode?: OpenImageNodeInCustom;
 };
 
 type DiffCategory = "changed" | "added" | "removed";
 
 const missingValue = "<missing>";
+
+const nodeRoleLabels: Record<string, string> = {
+  artist: "画风 Artist",
+  character: "角色 Character",
+  action: "动作 Action",
+  clothing: "服装 Clothing",
+  background: "背景 Background",
+  vibe: "氛围 Vibe",
+  reference: "参考 Reference",
+  prop: "道具 Prop",
+  camera: "镜头 Camera",
+  lighting: "光照 Lighting",
+};
+
+const nodeRoleOrder: Record<string, number> = {
+  character: 0,
+  action: 1,
+  clothing: 2,
+  background: 3,
+  artist: 4,
+};
+
+type DisplayGenerationNode = {
+  key: string;
+  role: string;
+  name: string;
+  ref: string | null;
+  index: number | null;
+  random: boolean;
+  slotId: string | null;
+  drawIndex: number | null;
+  deckCycle: number | null;
+};
+
+function nodePathName(value: string | null | undefined): string {
+  const trimmed = (value ?? "").trim().replace(/[\\/]+$/, "");
+  if (!trimmed) return "";
+  return trimmed.split(/[\\/]/).pop() || trimmed;
+}
+
+function nodeKey(role: string, value: string): string {
+  return `${role}\u0000${value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()}`;
+}
+
+function displayGenerationNodes(metadata: ImageMetadataResponse | null): DisplayGenerationNode[] {
+  if (!metadata) return [];
+  const nodes: DisplayGenerationNode[] = [];
+  const byKey = new Map<string, DisplayGenerationNode>();
+
+  function addNode(node: DisplayGenerationNode) {
+    const existing = byKey.get(node.key);
+    if (existing) {
+      existing.random = existing.random || node.random;
+      existing.slotId = node.slotId ?? existing.slotId;
+      existing.drawIndex = node.drawIndex ?? existing.drawIndex;
+      existing.deckCycle = node.deckCycle ?? existing.deckCycle;
+      return existing;
+    }
+    nodes.push(node);
+    byKey.set(node.key, node);
+    return node;
+  }
+
+  for (const node of metadata.nodes ?? []) {
+    const ref = node.ref?.trim() || null;
+    const name = nodePathName(node.id) || nodePathName(ref) || "未命名节点";
+    addNode({
+      key: nodeKey(node.role || "node", ref || name),
+      role: node.role || "node",
+      name,
+      ref,
+      index: typeof node.index === "number" ? node.index : null,
+      random: false,
+      slotId: null,
+      drawIndex: null,
+      deckCycle: null,
+    });
+  }
+
+  for (const node of metadata.random_nodes ?? []) {
+    const ref = node.ref?.trim() || node.relative?.trim() || null;
+    const name = nodePathName(node.name) || nodePathName(ref) || "未命名节点";
+    addNode({
+      key: nodeKey(node.role || "node", ref || name),
+      role: node.role || "node",
+      name,
+      ref,
+      index: null,
+      random: true,
+      slotId: node.slot_id,
+      drawIndex: node.draw_index,
+      deckCycle: node.deck_cycle,
+    });
+  }
+
+  return nodes.sort((left, right) => {
+    const roleDelta = (nodeRoleOrder[left.role] ?? 99) - (nodeRoleOrder[right.role] ?? 99);
+    return roleDelta || (left.index ?? 0) - (right.index ?? 0);
+  });
+}
 
 function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
@@ -217,7 +322,7 @@ function DiffGroup({
   );
 }
 
-export function ImageDetailDialog({ paths, items, initialIndex, onClose }: ImageDetailDialogProps) {
+export function ImageDetailDialog({ paths, items, initialIndex, onClose, onOpenNode }: ImageDetailDialogProps) {
   const resolvedItems: ImageDetailItem[] = useMemo(() => {
     if (items && items.length > 0) return items;
     if (paths && paths.length > 0) {
@@ -259,6 +364,8 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
   const [diffExpanded, setDiffExpanded] = useState(false);
   const [folderStatus, setFolderStatus] = useState("");
   const [openingFolder, setOpeningFolder] = useState(false);
+  const [openingNodeKey, setOpeningNodeKey] = useState("");
+  const [nodeOpenError, setNodeOpenError] = useState("");
 
   const currentItem = resolvedItems[currentIndex];
   const currentPath = currentItem?.path ?? "";
@@ -293,6 +400,8 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
     setError("");
     setMetadata(null);
     setFolderStatus("");
+    setOpeningNodeKey("");
+    setNodeOpenError("");
     if (!currentPath) {
       setLoading(false);
       return () => { active = false; };
@@ -420,10 +529,31 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
     }
   }
 
+  async function openGenerationNode(node: DisplayGenerationNode) {
+    if (!onOpenNode || !node.ref) return;
+    setOpeningNodeKey(node.key);
+    setNodeOpenError("");
+    try {
+      await onOpenNode({
+        role: node.role,
+        name: node.name,
+        ref: node.ref,
+        slotId: node.slotId,
+        random: node.random,
+      });
+      onClose();
+    } catch (requestError) {
+      setNodeOpenError(errorMessage(requestError));
+    } finally {
+      setOpeningNodeKey("");
+    }
+  }
+
   const prompt = parameter(metadata, "prompt");
   const negative = parameter(metadata, "uc") ?? parameter(metadata, "negative_prompt");
   const comfyuiPrompt = comfyui ? parameter(metadata, "comfyui_prompt") : undefined;
   const visibleDiffCount = groupedDiffs.changed.length + groupedDiffs.added.length + groupedDiffs.removed.length;
+  const generationNodes = useMemo(() => displayGenerationNodes(metadata), [metadata]);
 
   return (
     <div className="image-detail-backdrop" onMouseDown={(event) => {
@@ -695,6 +825,57 @@ export function ImageDetailDialog({ paths, items, initialIndex, onClose }: Image
                 <dl className="image-parameter-summary">
                   {commonParameters.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}
                 </dl>
+
+                {generationNodes.length ? (
+                  <section aria-label="生成使用的节点" className="image-node-summary">
+                    <header className="image-node-summary-title">
+                      <h3>生成节点</h3>
+                      <span>{generationNodes.length}</span>
+                    </header>
+                    {nodeOpenError ? <div className="alert error-alert" role="alert">{nodeOpenError}</div> : null}
+                    <div className="image-node-list">
+                      {generationNodes.map((node) => {
+                        const randomTitle = node.random
+                          ? [
+                            node.slotId ? `节点组: ${node.slotId}` : "随机节点组",
+                            node.drawIndex !== null ? `第 ${node.drawIndex + 1} 次抽取` : null,
+                            node.deckCycle !== null ? `第 ${node.deckCycle} 轮牌堆` : null,
+                          ].filter(Boolean).join(" · ")
+                          : undefined;
+                        const roleLabel = nodeRoleLabels[node.role] ?? node.role;
+                        const clickable = Boolean(onOpenNode && node.ref);
+                        const opening = openingNodeKey === node.key;
+                        const title = [randomTitle, clickable ? "点击在 Custom 中打开此节点" : null]
+                          .filter(Boolean).join(" · ") || undefined;
+                        return (
+                          <button
+                            aria-busy={opening || undefined}
+                            aria-label={clickable ? `在 Custom 中打开${roleLabel}节点 ${node.name}` : undefined}
+                            className={`image-node-row${clickable ? " is-clickable" : ""}`}
+                            disabled={!clickable || Boolean(openingNodeKey)}
+                            key={node.key}
+                            onClick={() => void openGenerationNode(node)}
+                            title={title}
+                            type="button"
+                          >
+                            <span className="image-node-role">{roleLabel}</span>
+                            <div className="image-node-content">
+                              <div className="image-node-name-row">
+                                <strong>{node.name}</strong>
+                                {node.index !== null && node.index > 0 ? <small>#{node.index + 1}</small> : null}
+                                {node.random ? <span className="image-node-random"><Dices size={11} /> 随机</span> : null}
+                              </div>
+                              {node.ref && node.ref !== node.name ? <code>{node.ref}</code> : null}
+                            </div>
+                            <span className="image-node-open-indicator" aria-hidden="true">
+                              {opening ? <LoaderCircle className="spin" size={13} /> : clickable ? <ArrowUpRight size={13} /> : null}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
 
                 {prompt !== undefined ? <label className="field"><span>Prompt</span><textarea readOnly value={String(prompt)} /></label> : null}
                 {negative !== undefined ? <label className="field compact"><span>Negative</span><textarea readOnly value={String(negative)} /></label> : null}

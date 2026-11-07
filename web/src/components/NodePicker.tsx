@@ -17,6 +17,7 @@ type NodePickerProps = {
 };
 
 const PAGE_SIZE = 20;
+const DEDUPE_ROLES = new Set(["character", "action", "background", "clothing"]);
 
 export function NodePicker({ label, role, value, displayValue, placeholder, onSelect, onClear }: NodePickerProps) {
   const pickerId = useId().replace(/:/g, "");
@@ -88,6 +89,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
       offset: String(offset),
     });
     if (query) search.set("q", query);
+    if (DEDUPE_ROLES.has(role)) search.set("dedupe", "true");
     return search;
   }
 

@@ -155,6 +155,10 @@ outputs/compare_<timestamp>_<id>/
 
 普通 Generate 和 Compare Generate 成功后，点击任意缩略图会打开共享的图片详情窗口。左侧显示可缩放的大图，右侧显示尺寸、文件大小、修改时间、seed、模型、采样器、steps、scale、Prompt、Negative，以及可展开的完整 PNG Parameters 和 PNG Text。
 
+右侧的“生成节点”从 PNG 的 `tags_machine_core.nodes` 和 `tags_machine_core.random_nodes` 读取：显示角色、动作、服装、画风等节点的名称和完整 ref；随机节点组抽中的成员会标为“随机”，悬停可看节点组与抽签轮次。旧图没有节点元数据时不显示该区域。
+
+点击节点行会切到 Custom 并打开对应节点：当前工作区已有该固定节点时直接打开原槽位；随机抽中的成员会回到原节点组并打开成员编辑器；找不到时才读取节点并新增一个 Compare 槽位，不会覆盖现有 Primary 或临时修改。
+
 详情中的元数据由后端在打开窗口时重新读取实际 PNG 文件，不使用前端生成请求或内存中的 `GenerationResult` 推断。点击 `打开所在文件夹` 会在 Windows 资源管理器中打开输出目录并选中当前图片；按 `Escape`、点击遮罩或右上角关闭按钮可退出详情窗口。
 
 同一普通 Job 或同一轮 Compare 的图片会组成一个详情序列。使用左右箭头按钮或键盘 `←` / `→` 切换图片，首尾位置停住且不会循环。第二张开始会显示“当前 PNG 相对上一张 PNG”的参数 Diff，包括变更、新增和移除项；reference/vibe 图片只展示 hash 与大小摘要，不展示原始 base64。

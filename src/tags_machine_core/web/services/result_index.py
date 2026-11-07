@@ -21,6 +21,55 @@ from tags_machine_core.verification.render_params import (
 THUMBNAIL_SIZES = (160, 240, 320, 480, 640)
 
 
+def _generation_nodes(core_info: Any) -> list[dict[str, Any]]:
+    """从 core PNG 信息中提取实际参与生成的节点，忽略旧图里的异常条目。"""
+    if not isinstance(core_info, dict) or not isinstance(core_info.get("nodes"), list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in core_info["nodes"]:
+        if not isinstance(item, dict):
+            continue
+        node: dict[str, Any] = {}
+        for key in ("role", "id", "kind", "ref", "content_hash"):
+            value = item.get(key)
+            if value is not None and str(value).strip():
+                node[key] = str(value)
+        index = item.get("index")
+        if isinstance(index, int):
+            node["index"] = index
+        if node.get("role") or node.get("id") or node.get("ref"):
+            result.append(node)
+    return result
+
+
+def _random_generation_nodes(core_info: Any) -> list[dict[str, Any]]:
+    """随机节点组抽到的成员；clothing 等覆盖节点不一定出现在 nodes 里。"""
+    if not isinstance(core_info, dict) or not isinstance(core_info.get("random_nodes"), list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in core_info["random_nodes"]:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("candidate")
+        candidate = candidate if isinstance(candidate, dict) else item
+        role = str(item.get("role") or candidate.get("role") or "").strip()
+        ref = str(candidate.get("ref") or "").strip()
+        name = str(candidate.get("name") or "").strip()
+        if not (role or ref or name):
+            continue
+        node: dict[str, Any] = {
+            "role": role,
+            "name": name or None,
+            "ref": ref or None,
+            "slot_id": str(item.get("slot_id") or "").strip() or None,
+            "relative": str(candidate.get("relative") or "").strip() or None,
+            "draw_index": item.get("draw_index") if isinstance(item.get("draw_index"), int) else None,
+            "deck_cycle": item.get("deck_cycle") if isinstance(item.get("deck_cycle"), int) else None,
+        }
+        result.append(node)
+    return result
+
+
 class ResultIndex:
     def __init__(self, *, roots: list[str | Path], thumb_dir: str | Path | None = None):
         self.roots = [Path(root).resolve() for root in roots]
@@ -140,6 +189,8 @@ class ResultIndex:
             "parameters": {},
             "model": None,
             "timing": None,
+            "nodes": [],
+            "random_nodes": [],
         }
         # 按文件头认 PNG：存成 .jpg 的 PNG 也读。
         if not is_png(target):
@@ -158,6 +209,8 @@ class ResultIndex:
             parameters=parameters,
             model=parameters.get("model") or png_text.get("Source"),
             timing=timing if isinstance(timing, dict) else None,
+            nodes=_generation_nodes(core_info),
+            random_nodes=_random_generation_nodes(core_info),
         )
         return result
 

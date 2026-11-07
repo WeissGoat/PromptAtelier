@@ -7,6 +7,7 @@ import { ImageDetailDialog, type ImageDetailItem } from "../components/ImageDeta
 import { TileSizeToggle } from "../components/TileSizeToggle";
 import { formatImageTiming } from "../generation/timing";
 import { loadTileSize, tileGridStyle, tileSizes, type TileSize } from "../generation/tileSize";
+import type { OpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
 
 const PAGE_SIZE = 300;
 const SELECTED_RUN_KEY = "promptatelier.history-run/v1";
@@ -98,7 +99,7 @@ function matchesQuery(image: HistoryImage, query: string): boolean {
   return query.toLowerCase().split(/\s+/).filter(Boolean).every((part) => haystack.includes(part));
 }
 
-export function HistoryPage() {
+export function HistoryPage({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom }) {
   const [runs, setRuns] = useState<HistoryRun[]>([]);
   const [runsError, setRunsError] = useState("");
   const [loadingRuns, setLoadingRuns] = useState(false);
@@ -324,7 +325,7 @@ export function HistoryPage() {
           <div className="task-empty">{loadingRuns ? "加载中…" : "选择左侧的一个批次。"}</div>
         )}
       </section>
-      {detail ? <ImageDetailDialog initialIndex={detail.index} items={detail.items} onClose={() => setDetail(null)} /> : null}
+      {detail ? <ImageDetailDialog initialIndex={detail.index} items={detail.items} onClose={() => setDetail(null)} onOpenNode={onOpenNode} /> : null}
     </main>
   );
 }

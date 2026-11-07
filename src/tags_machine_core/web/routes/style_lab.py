@@ -24,8 +24,8 @@ from tags_machine_core.style_lab.service import DuplicateRequestError
 from tags_machine_core.style_lab.shelf import SHELF_SCHEMA, MaterialShelf, ShelfStore
 from tags_machine_core.style_lab.tokens import tokenize
 from tags_machine_core.style_lab.metadata import IMAGE_SUFFIXES, read_source_parameters
-from tags_machine_core.nodes.role_paths import role_roots
 from tags_machine_core.web.errors import ApiError
+from tags_machine_core.web.services.node_library import node_library_index
 
 
 router = APIRouter(prefix="/style-lab")
@@ -517,15 +517,10 @@ def library_search(
 
 def _library(request: Request) -> LibraryIndex:
     state = request.app.state
-    index = getattr(state, "style_lab_library", None)
-    if index is None:
-        workspace = state.node_workspace
-        index = LibraryIndex(
-            lambda role: role_roots(workspace.design_root, role),
-            lambda path: workspace.previews.preview_for(path) is not None,
-            cache_path=_service(request).store.runtime_dir / "library_index.json",
-        )
-        state.style_lab_library = index
+    index = getattr(state, "node_library_index", None)
+    created = index is None
+    index = node_library_index(request)
+    if created:
         # 动作库第一次建索引要十几秒：打开配方页先搜角色时，后台把动作也建好。
         threading.Thread(target=index.entries, args=("action",), daemon=True, name="style-lab-library-warm").start()
     return index

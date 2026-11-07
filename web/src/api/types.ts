@@ -250,9 +250,30 @@ export type ImageMetadataResponse = {
   dimensions: { width: number; height: number } | null;
   png_text: Record<string, unknown>;
   parameters: Record<string, unknown>;
+  nodes: ImageMetadataNode[];
+  random_nodes: ImageMetadataRandomNode[];
   /** 本项目出的图才有；旧图和外部图为 null。 */
   timing?: ImageTiming | null;
   metadata_error?: string;
+};
+
+export type ImageMetadataNode = {
+  role: string;
+  id?: string;
+  kind?: string;
+  ref?: string;
+  index?: number;
+  content_hash?: string;
+};
+
+export type ImageMetadataRandomNode = {
+  role: string;
+  name: string | null;
+  ref: string | null;
+  slot_id: string | null;
+  relative: string | null;
+  draw_index: number | null;
+  deck_cycle: number | null;
 };
 
 export type ImageParameterDiffItem = {

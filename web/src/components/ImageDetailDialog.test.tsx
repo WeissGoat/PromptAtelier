@@ -20,6 +20,8 @@ function metadata() {
     model: "nai-diffusion-4-5-full",
     dimensions: { width: 832, height: 1216 },
     png_text: { Source: "NovelAI V4.5" },
+    nodes: [],
+    random_nodes: [],
     parameters: {
       seed: 998877,
       model: "nai-diffusion-4-5-full",
@@ -87,6 +89,103 @@ describe("ImageDetailDialog", () => {
     expect(screen.getByText("cunyfunky")).toBeTruthy();
     expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe("{{1girl}}, smile");
     expect((screen.getByLabelText("ComfyUI Prompt（权重已换算）") as HTMLTextAreaElement).value).toBe("(1girl:1.1025), smile");
+  });
+
+  it("shows the generation nodes recorded in PNG metadata, including random selections", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      ...metadata(),
+      nodes: [
+        {
+          role: "character",
+          id: "danbooru_akemi_homura",
+          kind: "character",
+          ref: "F:\\design\\角色\\danbooru_akemi_homura",
+          index: 0,
+          content_hash: "sha256:character",
+        },
+        {
+          role: "action",
+          id: "standing",
+          kind: "action",
+          ref: "F:\\design\\动作改2\\standing",
+          index: 0,
+        },
+        {
+          role: "artist",
+          id: "F:\\design\\画风\\style_a",
+          kind: "artist",
+          ref: "F:\\design\\画风\\style_a",
+          index: 0,
+        },
+      ],
+      random_nodes: [
+        {
+          role: "action",
+          name: "standing",
+          ref: "F:\\design\\动作改2\\standing",
+          slot_id: "primary-action",
+          relative: "standing",
+          draw_index: 0,
+          deck_cycle: 1,
+        },
+        {
+          role: "clothing",
+          name: "summer_outfit",
+          ref: "F:\\design\\服装\\summer_outfit",
+          slot_id: "clothing-primary-character",
+          relative: "summer_outfit",
+          draw_index: 0,
+          deck_cycle: 1,
+        },
+      ],
+    }));
+
+    render(<ImageDetailDialog initialIndex={0} onClose={vi.fn()} paths={["outputs/generated.png"]} />);
+
+    expect(await screen.findByText("生成节点")).toBeTruthy();
+    expect(screen.getByText("角色 Character")).toBeTruthy();
+    expect(screen.getByText("动作 Action")).toBeTruthy();
+    expect(screen.getByText("服装 Clothing")).toBeTruthy();
+    expect(screen.getByText("画风 Artist")).toBeTruthy();
+    expect(screen.getByText("danbooru_akemi_homura")).toBeTruthy();
+    expect(screen.getByText("summer_outfit")).toBeTruthy();
+    expect(screen.getByText("F:\\design\\动作改2\\standing")).toBeTruthy();
+    expect(screen.getAllByText("随机")).toHaveLength(2);
+  });
+
+  it("opens a generation node in Custom and closes the detail dialog", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      ...metadata(),
+      nodes: [{
+        role: "character",
+        id: "homura",
+        kind: "character",
+        ref: "F:\\design\\角色\\homura",
+        index: 0,
+      }],
+    }));
+    const onClose = vi.fn();
+    const onOpenNode = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ImageDetailDialog
+        initialIndex={0}
+        onClose={onClose}
+        onOpenNode={onOpenNode}
+        paths={["outputs/generated.png"]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /在 Custom 中打开角色 Character节点 homura/ }));
+
+    await waitFor(() => expect(onOpenNode).toHaveBeenCalledWith({
+      role: "character",
+      name: "homura",
+      ref: "F:\\design\\角色\\homura",
+      slotId: null,
+      random: false,
+    }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("closes with Escape or by clicking the backdrop", async () => {

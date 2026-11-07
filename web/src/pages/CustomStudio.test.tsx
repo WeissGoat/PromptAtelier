@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NodeDocument, NodeRole } from "../nodes/types";
 import { CustomWorkspaceProvider, useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
+import { useOpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
 import { CustomStudio } from "./CustomStudio";
 
 function node(role: NodeRole, id: string): NodeDocument {
@@ -11,6 +12,7 @@ function node(role: NodeRole, id: string): NodeDocument {
 
 function Harness() {
   const workspace = useCustomWorkspace();
+  const openNode = useOpenImageNodeInCustom();
   function configurePrimary() {
     workspace.selectNode("primary-artist", "artists/a", node("artist", "artist-a"));
     workspace.selectNode("primary-character", "characters/homura", node("character", "homura"));
@@ -31,7 +33,7 @@ function Harness() {
       characterPrompts: { mode: "off", addMaleCaption: false },
     });
   }
-  return <><button onClick={configurePrimary}>configure primary</button><button onClick={configureMatrix}>configure matrix</button><button onClick={configureBehaviorCompare}>configure behavior compare</button><CustomStudio /></>;
+  return <><button onClick={configurePrimary}>configure primary</button><button onClick={configureMatrix}>configure matrix</button><button onClick={configureBehaviorCompare}>configure behavior compare</button><CustomStudio onOpenNode={openNode} /></>;
 }
 
 function renderStudio() {
@@ -105,6 +107,14 @@ function mockGeneration() {
         dimensions: { width: 832, height: 1216 },
         png_text: {},
         parameters: { seed: 123456, model: "nai-diffusion-4-5-full" },
+        nodes: [{
+          role: "character",
+          id: "homura",
+          kind: "character",
+          ref: "characters/homura",
+          index: 0,
+        }],
+        random_nodes: [],
       });
     }
     if (url.includes("/results/open-image-folder")) return response({ opened: true });
@@ -148,8 +158,15 @@ describe("CustomStudio", () => {
     expect(await screen.findByText(/已提交：Primary · 1 轮/)).toBeTruthy();
     expect(await screen.findByText("成功 1 / 1")).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /^打开 Primary · Seed \d+ 大图$/ }));
-    expect(await screen.findByRole("dialog", { name: "图片详情" })).toBeTruthy();
+    const detailDialog = await screen.findByRole("dialog", { name: "图片详情" });
     expect(screen.getByText("123456")).toBeTruthy();
+    expect(screen.getByText("生成节点")).toBeTruthy();
+    expect(screen.getByText("角色 Character")).toBeTruthy();
+    expect(within(detailDialog).getByText("homura")).toBeTruthy();
+
+    fireEvent.click(within(detailDialog).getByRole("button", { name: /在 Custom 中打开角色 Character节点 homura/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "图片详情" })).toBeNull());
+    expect(screen.getByLabelText("关闭节点编辑器")).toBeTruthy();
   });
 
   it("Generate Primary plans N rounds with consecutive seeds in one job", async () => {

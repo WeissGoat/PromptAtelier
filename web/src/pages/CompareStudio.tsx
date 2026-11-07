@@ -11,8 +11,9 @@ import { CompareRoundSection } from "../components/CompareRoundSection";
 import { CompareTemplateBar } from "../components/CompareTemplateBar";
 import { DeepCompareModal } from "../components/DeepCompareModal";
 import { ImageDetailDialog, type ImageDetailItem } from "../components/ImageDetailDialog";
+import type { OpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
 
-function CompareStudioContent() {
+function CompareStudioContent({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom }) {
   const {
     state,
     updateVariant,
@@ -294,6 +295,7 @@ function CompareStudioContent() {
           initialIndex={selectedDetailImage.index}
           items={selectedDetailImage.items}
           onClose={() => setSelectedDetailImage(null)}
+          onOpenNode={onOpenNode}
           paths={selectedDetailImage.paths}
         />
       ) : null}
@@ -301,10 +303,10 @@ function CompareStudioContent() {
   );
 }
 
-export function CompareStudio() {
+export function CompareStudio({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom }) {
   return (
     <CompareWorkspaceProvider>
-      <CompareStudioContent />
+      <CompareStudioContent onOpenNode={onOpenNode} />
     </CompareWorkspaceProvider>
   );
 }

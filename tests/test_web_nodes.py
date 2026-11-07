@@ -179,6 +179,44 @@ class WebNodesTest(TestCase):
             second_refs = {node["ref"] for node in second_body["nodes"]}
             self.assertFalse(first_refs & second_refs)
 
+    def test_nodes_http_merges_content_copies_when_dedupe_is_requested(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design = root / "design"
+            _write_meta(
+                design / "角色" / "vocaloid" / "miku",
+                kind="character",
+                node_id="miku",
+                prompt="hatsune_miku",
+            )
+            _write_meta(
+                design / "角色" / "特殊" / "miku - 快捷方式",
+                kind="character",
+                node_id="miku - 快捷方式",
+                prompt="hatsune_miku",
+            )
+            client = TestClient(
+                create_app(
+                    node_workspace=NodeWorkspace(design_root=design),
+                    style_lab_dir=root / "stylelab",
+                )
+            )
+
+            raw = client.get("/api/nodes", params={"role": "character", "q": "miku"})
+            deduped = client.get("/api/nodes", params={"role": "character", "q": "miku", "dedupe": "true"})
+
+            self.assertEqual(raw.status_code, 200)
+            self.assertEqual(len(raw.json()["nodes"]), 2)
+            self.assertEqual(deduped.status_code, 200)
+            nodes = deduped.json()["nodes"]
+            self.assertEqual(len(nodes), 1)
+            self.assertEqual(nodes[0]["name"], "miku")
+            self.assertEqual(nodes[0]["relative"], "vocaloid/miku")
+            self.assertEqual(nodes[0]["copies"], 1)
+            self.assertEqual(nodes[0]["copy_paths"], ["特殊/miku - 快捷方式"])
+
     def test_nodes_http_uses_role_specific_artist_reader(self):
         import tempfile
 

@@ -12,7 +12,7 @@ from tags_machine_core.web.services.result_index import ResultIndex
 
 
 class WebResultsTest(TestCase):
-    def _write_png(self, path, *, seed: int) -> None:
+    def _write_png(self, path, *, seed: int, core_info: dict | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         png_info = PngInfo()
         png_info.add_text(
@@ -27,6 +27,8 @@ class WebResultsTest(TestCase):
             ),
         )
         png_info.add_text("Source", "NovelAI V4.5")
+        if core_info is not None:
+            png_info.add_text("tags_machine_core", json.dumps(core_info))
         Image.new("RGB", (64, 96), "white").save(path, pnginfo=png_info)
 
     def test_result_index_lists_runs_and_task_files(self):
@@ -118,6 +120,67 @@ class WebResultsTest(TestCase):
         self.assertEqual(second.json()["model"], "nai-diffusion-4-5-full")
         self.assertEqual(second.json()["dimensions"], {"width": 64, "height": 96})
         self.assertEqual(second.json()["png_text"]["Source"], "NovelAI V4.5")
+
+    def test_image_metadata_exposes_fixed_and_random_generation_nodes(self):
+        root = self.tmp_path / "outputs"
+        image = root / "generated.png"
+        self._write_png(
+            image,
+            seed=111,
+            core_info={
+                "nodes": [
+                    {
+                        "role": "character",
+                        "id": "homura",
+                        "kind": "character",
+                        "ref": "F:\\design\\角色\\homura",
+                        "index": 0,
+                        "content_hash": "sha256:abc",
+                    },
+                    "old malformed node",
+                ],
+                "random_nodes": [
+                    {
+                        "slot_id": "primary-action",
+                        "role": "action",
+                        "candidate": {
+                            "role": "action",
+                            "name": "standing",
+                            "ref": "F:\\design\\动作\\standing",
+                            "relative": "standing",
+                        },
+                        "draw_index": 2,
+                        "deck_cycle": 1,
+                    }
+                ],
+            },
+        )
+        client = TestClient(create_app(result_index=ResultIndex(roots=[root])))
+
+        response = client.get(
+            "/api/results/image-metadata",
+            params={"path": "generated.png"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["nodes"], [{
+            "role": "character",
+            "id": "homura",
+            "kind": "character",
+            "ref": "F:\\design\\角色\\homura",
+            "index": 0,
+            "content_hash": "sha256:abc",
+        }])
+        self.assertEqual(data["random_nodes"], [{
+            "role": "action",
+            "name": "standing",
+            "ref": "F:\\design\\动作\\standing",
+            "slot_id": "primary-action",
+            "relative": "standing",
+            "draw_index": 2,
+            "deck_cycle": 1,
+        }])
 
     def test_image_metadata_rejects_paths_outside_result_roots(self):
         root = self.tmp_path / "outputs"

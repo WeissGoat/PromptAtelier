@@ -8,6 +8,7 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { StyleLabErrorBoundary } from "./styleLab/StyleLabErrorBoundary";
 import { StyleLabPage } from "./styleLab/StyleLabPage";
 import { CustomWorkspaceProvider } from "./workspace/CustomWorkspaceProvider";
+import { useOpenImageNodeInCustom } from "./workspace/useOpenImageNodeInCustom";
 import "./styles.css";
 import "./styles/custom.css";
 
@@ -32,7 +33,7 @@ function getInitialPage(): PageKey {
   return "custom";
 }
 
-export function App() {
+function AppContent() {
   const [page, setPage] = useState<PageKey>(getInitialPage);
 
   const handlePageChange = (nextPage: PageKey) => {
@@ -42,6 +43,8 @@ export function App() {
       window.localStorage?.setItem(PAGE_STORAGE_KEY, nextPage);
     }
   };
+
+  const openImageNodeInCustom = useOpenImageNodeInCustom(() => handlePageChange("custom"));
 
   useEffect(() => {
     function onHashChange() {
@@ -55,10 +58,10 @@ export function App() {
   }, []);
 
   const content = {
-    custom: <CustomStudio />,
     agent: <AgentStudio />,
-    results: <HistoryPage />,
-    compare: <CompareStudio />,
+    custom: <CustomStudio onOpenNode={openImageNodeInCustom} />,
+    results: <HistoryPage onOpenNode={openImageNodeInCustom} />,
+    compare: <CompareStudio onOpenNode={openImageNodeInCustom} />,
     "style-lab": (
       <StyleLabErrorBoundary>
         <StyleLabPage onOpenCustom={() => handlePageChange("custom")} />
@@ -67,10 +70,16 @@ export function App() {
   }[page];
 
   return (
+    <Layout onPageChange={handlePageChange} page={page}>
+      {content}
+    </Layout>
+  );
+}
+
+export function App() {
+  return (
     <CustomWorkspaceProvider>
-      <Layout onPageChange={handlePageChange} page={page}>
-        {content}
-      </Layout>
+      <AppContent />
     </CustomWorkspaceProvider>
   );
 }

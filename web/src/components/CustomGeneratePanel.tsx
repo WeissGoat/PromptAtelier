@@ -16,6 +16,7 @@ import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import { buildComposeRenderRequest } from "../workspace/requestBuilder";
 import { notifyComfyTargetsChanged } from "../comfyui/targetStatus";
 import type { NodeVariantSlot, RenderWorkspaceParams } from "../workspace/types";
+import type { OpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
 import {
   backgroundGenerateOptions,
   randomSelectionLabel,
@@ -115,7 +116,7 @@ function validateSelected(slots: Partial<Record<NodeRole, NodeVariantSlot | null
 
 type ImageSelection = { items: ImageDetailItem[]; index: number };
 
-export function CustomGeneratePanel() {
+export function CustomGeneratePanel({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom }) {
   const workspace = useCustomWorkspace();
   const groups = workspace.state.groups;
   const params = workspace.state.params;
@@ -422,7 +423,7 @@ export function CustomGeneratePanel() {
       <small className="compare-formula">Artist {dimensions.artist} × Character {dimensions.character} × Action {dimensions.action} × Behavior {dimensions.behavior} × Groups {rounds}{samplesPerRound > 1 ? ` × NT ${samplesPerRound}` : ""} = {compareTotal}</small>
 
       <GenerationTasksPanel onOpenImage={setSelectedImage} />
-      {selectedImage ? <ImageDetailDialog initialIndex={selectedImage.index} items={selectedImage.items} onClose={() => setSelectedImage(null)} /> : null}
+      {selectedImage ? <ImageDetailDialog initialIndex={selectedImage.index} items={selectedImage.items} onClose={() => setSelectedImage(null)} onOpenNode={onOpenNode} /> : null}
     </section>
   );
 }

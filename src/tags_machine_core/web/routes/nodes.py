@@ -10,6 +10,7 @@ from tags_machine_core.web.services.node_save_preview_store import (
     SavePreviewExpiredError,
     SourceChangedError,
 )
+from tags_machine_core.web.services.node_library import DEDUPE_ROLES, node_library_index
 
 
 router = APIRouter()
@@ -30,15 +31,26 @@ def list_nodes(
     q: str | None = None,
     offset: int = 0,
     limit: int = 20,
+    dedupe: bool = False,
 ) -> dict:
     offset = max(0, offset)
     limit = max(1, min(limit, 500))
-    nodes, has_more = _workspace(request).list_nodes_page(
-        role,
-        query=q,
-        offset=offset,
-        limit=limit,
-    )
+    if dedupe and role in DEDUPE_ROLES:
+        result = node_library_index(request).search(
+            role,
+            q or "",
+            offset=offset,
+            limit=limit,
+        )
+        nodes = result["nodes"]
+        has_more = result["has_more"]
+    else:
+        nodes, has_more = _workspace(request).list_nodes_page(
+            role,
+            query=q,
+            offset=offset,
+            limit=limit,
+        )
     return {
         "schema": "tags-machine-core.web.node-list/v1",
         "role": role,

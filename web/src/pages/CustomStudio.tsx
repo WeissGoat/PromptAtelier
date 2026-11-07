@@ -9,6 +9,7 @@ import { PromptBehaviorGroupPanel } from "../components/PromptBehaviorGroupPanel
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
 import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
+import type { OpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
 import { artistSizePresets, workspaceMayUseComfyUI } from "../workspace/requestBuilder";
 
 function nodeSections(node: NodeDocument | null): string[] {
@@ -37,7 +38,7 @@ function RecipeSection({ title, hint, defaultOpen = true, children }: { title: s
   );
 }
 
-export function CustomStudio() {
+export function CustomStudio({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom }) {
   const workspace = useCustomWorkspace();
   const params = workspace.state.params;
   const groups = workspace.state.groups;
@@ -109,7 +110,7 @@ export function CustomStudio() {
         </RecipeSection>
       </section>
       <NodeWorkspaceEditor />
-      <CustomGeneratePanel />
+      <CustomGeneratePanel onOpenNode={onOpenNode} />
     </main>
   );
 }
