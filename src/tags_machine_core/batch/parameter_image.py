@@ -106,6 +106,7 @@ def write_parameter_details_image(
     png_info = PngInfo()
     png_info.add_text("Software", "tags_machine_core batch parameter details")
     png_info.add_text("Task ID", task.id)
+    png_info.add_itxt("Action Group", _action_group_name(task))
     png_info.add_itxt("Render Request", json.dumps(request, ensure_ascii=False))
     png_info.add_itxt("Generation Result", json.dumps(result, ensure_ascii=False))
     image.save(target, "PNG", pnginfo=png_info)
@@ -186,19 +187,35 @@ def _render_lines(*, task: BatchTask, request: dict[str, Any], params: dict[str,
         f"backend: {task.render.backend}",
         f"artist: {task.render.artist or '-'}",
         f"model: {request.get('model') or params.get('model') or task.render.model or '-'}",
+        f"action_group: {_action_group_name(task)}",
         f"action: {_action_node_name(task)}",
     ]
 
 
+def _action_group_name(task: BatchTask) -> str:
+    explicit = str(task.source.get("action_group") or "").strip()
+    if explicit:
+        return Path(explicit).name
+
+    for ref in _action_node_refs(task):
+        group = Path(ref).parent.name
+        if group.startswith(("st_", "stn_")):
+            return group
+    return "-"
+
+
 def _action_node_name(task: BatchTask) -> str:
+    refs = _action_node_refs(task)
+    return Path(refs[0]).name if refs else "-"
+
+
+def _action_node_refs(task: BatchTask) -> list[str]:
+    refs: list[str] = []
     source_action = task.source.get("action")
     if source_action:
-        return Path(str(source_action)).name
-
-    for node in task.nodes:
-        if node.role == "action":
-            return Path(node.ref).name
-    return "-"
+        refs.append(str(source_action))
+    refs.extend(str(node.ref) for node in task.nodes if node.role == "action")
+    return refs
 
 
 def _parameter_lines(*, params: dict[str, Any], request: dict[str, Any]) -> list[str]:

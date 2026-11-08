@@ -1806,6 +1806,42 @@ expand:
         self.assertIn("2. prompt: boy, ", lines)
         self.assertFalse(any(line.startswith("seed:") for line in lines))
 
+    def test_parameter_details_shows_action_group(self):
+        from tags_machine_core.batch.parameter_image import _action_group_name, _render_lines
+
+        action = r"F:\project\actions\st_ft_bare\01_stand"
+        task = BatchTask(
+            id="action_group_param_img_task",
+            index=0,
+            composer="full",
+            prompt="akemi_homura",
+            nodes=[{"role": "action", "ref": action}],
+            source={"action": action, "action_group": "st_ft_bare"},
+            render={},
+            output={"task_dir": "unused"},
+        )
+        self.assertEqual(_action_group_name(task), "st_ft_bare")
+        self.assertIn(
+            "action_group: st_ft_bare",
+            _render_lines(task=task, request={"backend": "novelai"}, params={}),
+        )
+
+        task.source = {"action": action}
+        self.assertEqual(_action_group_name(task), "st_ft_bare")
+
+        loose_action = r"F:\project\actions\loose_action"
+        loose_task = BatchTask(
+            id="loose_action_param_img_task",
+            index=0,
+            composer="full",
+            prompt="akemi_homura",
+            nodes=[{"role": "action", "ref": loose_action}],
+            source={"action": loose_action},
+            render={},
+            output={"task_dir": "unused"},
+        )
+        self.assertEqual(_action_group_name(loose_task), "-")
+
     def test_archive_parameter_details_image_disabled_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
