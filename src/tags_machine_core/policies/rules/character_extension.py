@@ -76,7 +76,6 @@ SLOTS: dict[str, ExtensionSlot] = {
         triggers=(
             "armored shoes",
             "armored_boots",
-            "barefoot",
             "boots",
             "footwear",
             "high heels",

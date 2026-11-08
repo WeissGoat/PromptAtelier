@@ -9,6 +9,7 @@ from .clothing import ClothingPolicyRule
 from .character_weight import CharacterWeightOptions, CharacterWeightPolicyRule
 from .dedupe import DedupeRule
 from .tag_conflict import TagConflictRule
+from .tag_inference import TagInferenceRule, TagInferenceSpec
 from .tag_normalize import TagNormalizeRule
 from .visibility import VisibilityPolicyRule
 
@@ -17,6 +18,7 @@ DEFAULT_RULES: list[PromptRule] = [
     DedupeRule(),
     CharacterExtensionPolicyRule(),
     CharacterSectionFilterPolicyRule(),
+    TagInferenceRule(),
     TagConflictRule(),
     CharacterCountRule(),
     ClothingPolicyRule(),
@@ -37,6 +39,8 @@ __all__ = [
     "PromptRule",
     "RulePhase",
     "TagConflictRule",
+    "TagInferenceRule",
+    "TagInferenceSpec",
     "TagNormalizeRule",
     "VisibilityPolicyRule",
 ]

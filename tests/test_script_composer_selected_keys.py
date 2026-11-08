@@ -241,6 +241,37 @@ def test_character_scope_still_applies_without_selected_keys():
     assert "purple eyes" not in bundle.prompt.positive
 
 
+def test_upper_body_scope_minimal_activation_excludes_weapons_and_props():
+    character = NodeDocument(
+        kind="character",
+        id="homura",
+        tags={
+            "character": ["akemi homura"],
+            "hair": ["black hair"],
+            "upper_clothes": ["white shirt"],
+            "hands": ["soul gem"],
+            "weapons": ["shield", "gun"],
+            "props": ["magic wand"],
+        },
+    )
+    action = NodeDocument(
+        kind="action",
+        id="upper_action",
+        character_scope="upper_body",
+        tags={"action": ["upper body, lying on back"]},
+    )
+
+    bundle = ScriptComposer().compose_nodes(character=character, action=action)
+
+    assert "akemi homura" in bundle.prompt.positive
+    assert "black hair" in bundle.prompt.positive
+    assert "white shirt" in bundle.prompt.positive
+    assert "shield" not in bundle.prompt.positive
+    assert "gun" not in bundle.prompt.positive
+    assert "magic wand" not in bundle.prompt.positive
+    assert "soul gem" not in bundle.prompt.positive
+
+
 def test_run_prompt_single_character_shorthand_overrides_upper_body_scope(
     tmp_path,
 ):
