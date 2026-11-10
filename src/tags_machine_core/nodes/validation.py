@@ -244,7 +244,10 @@ def _validate_node_yaml(path: Path, source_root: Path) -> dict[str, Any]:
             details={"field": key_path},
         )
 
-    _validate_required_tag_sections(issues, data, kind)
+    tag_data = data
+    if kind == "action" and (path.parent / "tags.txt").is_file():
+        tag_data = {**data, "tags": node.tags}
+    _validate_required_tag_sections(issues, tag_data, kind)
 
     if kind == "action" and not str(data.get("character_scope") or "").strip():
         _append_issue(issues, "action_missing_character_scope", "action 节点缺少 character_scope。")

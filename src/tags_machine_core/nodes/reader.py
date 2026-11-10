@@ -6,7 +6,8 @@ from typing import Any
 import yaml
 
 from .action_profile import load_action_profile
-from .models import LegacyNodeMeta, NodeDocument
+from .models import LegacyNodeMeta, NodeDocument, NodePrompt
+from .tags_text import negative_tags, prompt_tags, split_tags_text
 
 LEGACY_EXTENSION_PREFIXES = (
     "after_uc",
@@ -27,7 +28,14 @@ class NodeReader:
         if path.is_file():
             if path.suffix.lower() in {".yaml", ".yml"}:
                 return self._read_yaml(path)
-            path = self._preferred_tags_path(path)
+            if path.name == "tags.txt":
+                for name in self.yaml_names:
+                    candidate = path.with_name(name)
+                    if candidate.is_file():
+                        node = self._read_yaml(candidate)
+                        if node.kind == "action":
+                            return node
+                        break
             return self._read_tags_txt(path)
 
         for name in self.yaml_names:
@@ -35,7 +43,7 @@ class NodeReader:
             if candidate.exists():
                 return self._read_yaml(candidate, node_dir=path)
 
-        tags_txt = self._preferred_tags_path(path / "tags.txt")
+        tags_txt = path / "tags.txt"
         if tags_txt.exists():
             return self._read_tags_txt(tags_txt, node_dir=path)
 
@@ -52,6 +60,15 @@ class NodeReader:
         data.setdefault("id", node_dir.name)
         data.setdefault("path", node_dir)
         node = NodeDocument.model_validate(data)
+        if node.kind == "action" and (node_dir / "tags.txt").is_file():
+            source = self._read_tags_txt(node_dir / "tags.txt", node_dir=node_dir)
+            node = node.model_copy(update={
+                "tags": {"action": prompt_tags(source.positive_texts())},
+                "prompt": NodePrompt(positive=source.positive_texts()),
+                "negative_prompt": source.negative_prompt,
+                "legacy": source.legacy,
+            })
+            return self._attach_action_profile(node, node_dir)
         node = self._attach_legacy_tags_txt(node, node_dir)
         return self._attach_action_profile(node, node_dir)
 
@@ -72,10 +89,10 @@ class NodeReader:
         node_dir = node_dir or path.parent
         lines = [
             line.strip()
-            for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            for line in path.read_text(encoding="utf-8-sig").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        prompt_lines, type_lines, ext_lines = self._split_legacy_cnode_lines(lines)
+        prompt_lines, type_lines, ext_lines = split_tags_text("\n".join(lines))
         raw_sections: dict[str, list[str]] = {
             "prompt": prompt_lines,
         }
@@ -90,6 +107,7 @@ class NodeReader:
             path=node_dir,
             tags={"legacy": prompt_lines},
             prompt={"positive": prompt_lines},
+            negative_prompt=negative_tags(ext_lines),
             legacy=LegacyNodeMeta(
                 source_file=str(path),
                 raw_lines=lines,
@@ -99,7 +117,7 @@ class NodeReader:
         return self._attach_action_profile(node, node_dir)
 
     def _attach_legacy_tags_txt(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
-        tags_txt = self._preferred_tags_path(node_dir / "tags.txt")
+        tags_txt = node_dir / "tags.txt"
         if not tags_txt.exists():
             return node
         lines = [
@@ -122,12 +140,6 @@ class NodeReader:
             }
         )
         return node.model_copy(update={"legacy": legacy})
-
-    def _preferred_tags_path(self, tags_txt: Path) -> Path:
-        if tags_txt.name.lower() != "tags.txt":
-            return tags_txt
-        compiled = tags_txt.with_name("tags.compiled.txt")
-        return compiled if compiled.is_file() else tags_txt
 
     def _attach_action_profile(self, node: NodeDocument, node_dir: Path) -> NodeDocument:
         profile = load_action_profile(node_dir)

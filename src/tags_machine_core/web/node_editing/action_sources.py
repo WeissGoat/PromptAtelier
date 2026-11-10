@@ -8,9 +8,12 @@ import yaml
 from tags_machine_core.nodes.action_profile import load_action_profile
 from tags_machine_core.nodes.models import NodeDocument
 from tags_machine_core.nodes.reader import NodeReader
+from tags_machine_core.nodes.tags_text import (
+    EXTENSION_KEYS, NEGATIVE_KEYS, negative_tags, prompt_tags, split_tags_text,
+)
 
 from .models import FileMutation, NodeEditorDocument, NodeEditorSource
-from .text_utils import preserve_trailing_newline, read_text, source_hash, split_prompt_tags
+from .text_utils import preserve_trailing_newline, read_text, source_hash
 
 
 class ActionSourcesAdapter:
@@ -62,7 +65,7 @@ class ActionSourcesAdapter:
                 "description": values.get("description"),
                 "prompt": {"positive": prompt_lines},
                 "negative_prompt": self._strings(values.get("negative")),
-                "tags": {**base.tags, "action": split_prompt_tags(prompt_lines)},
+                "tags": {"action": prompt_tags(prompt_lines)},
             }
         )
         composition = dict(base.composition)
@@ -89,13 +92,33 @@ class ActionSourcesAdapter:
         path = node_dir / "tags.txt"
         before = read_text(path)
         lines = before.splitlines()
-        suffix_start = len(lines)
-        for index, line in enumerate(lines):
+        suffix = []
+        in_extension = False
+        for line in lines:
             stripped = line.strip()
-            if stripped[:4] == "type" or stripped.startswith("="):
-                suffix_start = index
-                break
-        after_lines = [*self._strings(values.get("prompt_lines")), *lines[suffix_start:]]
+            key = stripped.partition(",")[0].strip()
+            if key in EXTENSION_KEYS or stripped.startswith("="):
+                in_extension = True
+            if in_extension or key == "type" or stripped.startswith("#"):
+                suffix.append(line)
+        old_negative = negative_tags(split_tags_text(before)[2])
+        new_negative = self._strings(values.get("negative"))
+        if old_negative != new_negative:
+            kept = []
+            for line in suffix:
+                stripped = line.strip()
+                directive = stripped[1:].strip(" ,") if stripped.startswith("=") else stripped
+                if directive.partition(",")[0].strip() in NEGATIVE_KEYS:
+                    if stripped.startswith("="):
+                        kept.append("=")
+                else:
+                    kept.append(line)
+            suffix = kept
+            if new_negative:
+                if not any(line.strip().startswith("=") for line in suffix):
+                    suffix.append("=")
+                suffix.extend(f"uc, {text}" for text in new_negative)
+        after_lines = [*self._strings(values.get("prompt_lines")), *suffix]
         return FileMutation(
             path=path,
             format="tags.txt",
@@ -110,19 +133,21 @@ class ActionSourcesAdapter:
         raw = yaml.safe_load(before) or {}
         if not isinstance(raw, dict):
             raise ValueError(f"Expected YAML mapping: {path}")
-        prompt_lines = self._strings(values.get("prompt_lines"))
-        raw.update(
-            {
-                "schema": raw.get("schema") or "tags-machine.action/v1",
-                "kind": "action",
-                "id": str(values.get("id") or node_dir.name),
-                "name": values.get("name"),
-                "description": values.get("description"),
-                "tags": {**dict(raw.get("tags") or {}), "action": split_prompt_tags(prompt_lines)},
-                "negative_prompt": self._strings(values.get("negative")),
-            }
-        )
-        after = yaml.safe_dump(raw, allow_unicode=True, sort_keys=False)
+        baseline = {
+            "id": str(raw.get("id") or node_dir.name),
+            "name": raw.get("name") if path.exists() else node_dir.name,
+            "description": raw.get("description"),
+        }
+        updates = {key: values[key] for key in baseline if key in values and values[key] != baseline[key]}
+        if "id" in updates:
+            updates["id"] = str(updates["id"] or node_dir.name)
+        after = before
+        if updates:
+            raw.setdefault("schema", "tags-machine.action/v1")
+            raw.setdefault("kind", "action")
+            raw.setdefault("id", node_dir.name)
+            raw.update(updates)
+            after = yaml.safe_dump(raw, allow_unicode=True, sort_keys=False)
         return FileMutation(path=path, format="meta.yaml", before_text=before, after_text=after, before_sha256=source_hash(path))
 
     def _profile_mutation(self, node_dir: Path, values: dict[str, Any]) -> FileMutation | None:
@@ -170,15 +195,7 @@ class ActionSourcesAdapter:
         return result + ("\n" if source.endswith(("\n", "\r")) else "")
 
     def _prompt_lines(self, path: Path) -> list[str]:
-        lines: list[str] = []
-        for line in read_text(path).splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if stripped[:4] == "type" or stripped.startswith("="):
-                break
-            lines.append(stripped)
-        return lines
+        return split_tags_text(read_text(path))[0]
 
     def _profile_path(self, node_dir: Path, source: str | None) -> Path | None:
         if source:

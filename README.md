@@ -262,12 +262,14 @@ uv run --frozen python -m tools.legacy_migration sync-action-meta `
 
 同步行为：
 
-- 缺少 `meta.yaml` 且存在 `tags.txt`：生成基础 action `meta.yaml`，即使没有 Clothing 信号也会生成。
+- 缺少 `meta.yaml` 且存在 `tags.txt`：生成基础 action 元数据，即使没有 Clothing 信号也会生成；不复制正负面提示词及其原文快照。
 - 已有 `meta.yaml`：保留人工和 Agent 字段，只更新工具负责的 `clothing` 与旧 `type` 指令归档。
 - 缺少 `meta.yaml` 和 `tags.txt`：记录为 error，不生成残缺节点。
 - 写入使用同目录临时文件原子替换；如果源文件在处理期间发生变化，本节点报错并放弃覆盖。
 - `--write` 默认使用根目录 `.action-meta-sync.lock` 防止定时任务重叠；只有明确处理遗留锁时才使用 `--no-lock`。
 - 同一目录可以每天重复执行；没有变化的节点记录为 `unchanged`。
+
+动作节点只要存在 `tags.txt`，正负面提示词就实时读取该文件，忽略 YAML 中的旧提示词；删除文本中的负面词也会立即清空动作负面词。负面支持 `uc`、`origin_uc`、`after_uc`、`negative_prompt`、`after_negative_prompt`，其他旧扩展指令不执行。没有 `tags.txt` 才回退到 YAML。`tags.compiled.txt` 不再隐式覆盖 `tags.txt`。Web 动作编辑、批量生图、契约素材与知识库重建采用同一来源规则；既有契约成品提示词和已生成的知识库仍需显式更新。
 
 `audit-legacy-tags` 用于迁移前预检，可以扫描单个 `tags.txt`、单个旧节点目录或一个旧节点根目录；它只读源目录，不会生成 `meta.yaml` / `node.yaml`。报告里的 `summary` 会统计 `ok`、`needs_review`、`errors` 和 issue code 数量；`items` 会列出每个旧节点的迁移风险，例如 character 的 `unclassified`、action 的默认 `character_scope`、疑似混入角色外观词、旧扩展字段是否只归档不执行。
 

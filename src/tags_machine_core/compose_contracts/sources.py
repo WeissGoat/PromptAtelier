@@ -1,8 +1,7 @@
 """契约的来源节点：动作组（st_* / stn_*）及其成员、角色、服装、背景。
 
-动作内容沿用 NodeReader 读取，不改读取规则（§0）：
-- `stn_*` 成员（有 meta.yaml）：正面取 `tags.action`，负面取 `negative_prompt`；
-- `st_*` 成员（只有 tags.txt）：正面取 `=` 之前的行，负面为空，`=` 之后的扩展行不解析。
+动作内容统一由 NodeReader 读取：有 tags.txt 时正负面均以文本为准，
+没有文本时回退 YAML；名称、角色范围等元数据仍来自 YAML。
 """
 
 from __future__ import annotations
@@ -351,14 +350,15 @@ def action_prompt(node: NodeDocument, node_dir: Path) -> tuple[str, str, str]:
     """动作节点的原始正向 / 负面提示词，以及读取自哪个文件。"""
     yaml_file = next((name for name in ("node.yaml", "meta.yaml") if (node_dir / name).exists()), None)
     negative = ", ".join([*node.negative_prompt, *node.negative_texts()])
+    if (node_dir / "tags.txt").is_file() and node.kind in {"action", "unknown"}:
+        return "\n".join(node.positive_texts()), negative, "tags.txt"
     if yaml_file:
         action_tags = node.tags.get("action")
         if action_tags:
             return ", ".join(action_tags), negative, yaml_file
         texts = node.all_tags() + node.positive_texts()
         return ", ".join(texts), negative, yaml_file
-    tags_file = "tags.compiled.txt" if (node_dir / "tags.compiled.txt").is_file() else "tags.txt"
-    return "\n".join(node.positive_texts()), negative, tags_file
+    return "\n".join(node.positive_texts()), negative, "tags.txt"
 
 
 def _classify_summary(node_dir: Path) -> dict[str, Any]:

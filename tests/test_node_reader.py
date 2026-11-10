@@ -33,7 +33,7 @@ class NodeReaderTest(unittest.TestCase):
             self.assertEqual(node.tags["legacy"], ["tag one", "tag two"])
             self.assertEqual(node.positive_texts(), ["tag one", "tag two"])
 
-    def test_read_tags_txt_prefers_compiled_sidecar(self):
+    def test_read_tags_txt_ignores_compiled_sidecar(self):
         with tempfile.TemporaryDirectory() as tmp:
             node_dir = Path(tmp) / "sample_action"
             node_dir.mkdir()
@@ -48,9 +48,9 @@ class NodeReaderTest(unittest.TestCase):
             from_tags_path = NodeReader().read(tags_txt)
 
             for node in (from_directory, from_tags_path):
-                self.assertEqual(node.tags["legacy"], ["compiled prompt"])
-                self.assertEqual(node.positive_texts(), ["compiled prompt"])
-                self.assertTrue(node.legacy.source_file.endswith("tags.compiled.txt"))
+                self.assertEqual(node.tags["legacy"], ["legacy prompt"])
+                self.assertEqual(node.positive_texts(), ["legacy prompt"])
+                self.assertTrue(node.legacy.source_file.endswith("tags.txt"))
 
     def test_read_node_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:

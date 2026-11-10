@@ -239,7 +239,7 @@ class ContractServiceTest(unittest.TestCase):
         st_group = self.service.action_group("st_demo")
         self.assertEqual([m["name"] for m in st_group["members"]], ["2_second", "10_tenth"])
         self.assertEqual(st_group["members"][0]["positive"], "2girls, kiss")
-        self.assertEqual(st_group["members"][0]["negative"], "")
+        self.assertEqual(st_group["members"][0]["negative"], "bad")
         self.assertEqual(st_group["members"][0]["source_file"], "tags.txt")
         refs = [group["ref"] for group in self.service.action_groups()]
         self.assertEqual(sorted(refs), ["st_demo", "stn_20260101_0001"])

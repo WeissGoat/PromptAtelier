@@ -259,7 +259,12 @@ def _load_or_create_meta(node_dir: Path, *, meta_path: Path, tags_path: Path) ->
         data.setdefault("id", node_dir.name)
         return data
     if tags_path.exists():
-        return migrate_legacy_action_tags(tags_path, node_id=node_dir.name, name=node_dir.name)
+        meta = migrate_legacy_action_tags(tags_path, node_id=node_dir.name, name=node_dir.name)
+        # Prompt text is read live from tags.txt, never stored as a second copy.
+        meta.pop("tags", None)
+        meta.pop("negative_prompt", None)
+        meta["legacy"] = {"source_file": str(tags_path)}
+        return meta
     return {
         "schema": "tags-machine.action/v1",
         "kind": "action",

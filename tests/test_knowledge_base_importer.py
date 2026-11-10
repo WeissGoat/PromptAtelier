@@ -40,4 +40,20 @@ def test_missing_meta_warns_without_stopping_import(tmp_path: Path) -> None:
     catalog = CatalogStore.from_config(config).load_current()
 
     assert result.record_count == 1
-    assert {warning.code for warning in catalog.warnings} >= {"missing_file", "empty_action_prompt"}
+    assert "missing_file" in {warning.code for warning in catalog.warnings}
+    assert "empty_action_prompt" not in {warning.code for warning in catalog.warnings}
+    assert catalog.items[0].action.positive_terms == ["foot focus", "barefoot"]
+
+
+def test_import_uses_edited_tags_instead_of_stale_meta(tmp_path: Path) -> None:
+    action_root = tmp_path / "actions"
+    (action_root / "new").mkdir(parents=True)
+    node = write_action(action_root, "new/a")
+    config = load_knowledge_base_config(write_config(tmp_path, action_root))
+    first = import_catalog(config)
+    (node / "tags.txt").write_text("sitting\n=uc, new negative\n", encoding="utf-8")
+    second = import_catalog(config)
+    catalog = CatalogStore.from_config(config).load_current()
+    assert second.catalog_hash != first.catalog_hash
+    assert catalog.items[0].action.positive_terms == ["sitting"]
+    assert catalog.items[0].action.negative_terms_count == 1

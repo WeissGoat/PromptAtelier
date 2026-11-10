@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from tags_machine_core.logging_config import get_logger
+from tags_machine_core.nodes.tags_text import negative_tags, split_tags_text
 
 from .catalog import CatalogStore
 from .config import KnowledgeBaseConfig
@@ -190,6 +191,19 @@ def _read_catalog_item(
 
     classify_raw = _load_yaml(file_bytes["classify.yaml"], ref, "classify.yaml", warnings)
     meta_raw = _load_yaml(file_bytes["meta.yaml"], ref, "meta.yaml", warnings)
+    if file_bytes["tags.txt"] is not None:
+        try:
+            positive, _, extensions = split_tags_text(file_bytes["tags.txt"].decode("utf-8-sig"))
+        except UnicodeDecodeError:
+            positive, extensions = [], []
+            warnings.append(CatalogWarning(
+                ref=ref, file="tags.txt", code="parse_error", message="tags.txt 不是有效 UTF-8 文本",
+            ))
+        meta_raw = {
+            **(meta_raw if isinstance(meta_raw, dict) else {}),
+            "tags": {"action": positive},
+            "negative_prompt": negative_tags(extensions),
+        }
     classification, classify_warnings = normalize_classification(classify_raw, ref=ref)
     meta, meta_warnings = normalize_meta(meta_raw, ref=ref)
     warnings.extend(classify_warnings)
@@ -263,9 +277,9 @@ def _read_catalog_item(
         warnings.append(
             CatalogWarning(
                 ref=ref,
-                file="meta.yaml",
+                file="tags.txt" if file_exists["tags.txt"] else "meta.yaml",
                 code="empty_action_prompt",
-                message="动作节点没有可用的 tags.action",
+                message="动作节点没有可用的正向提示词",
             )
         )
 

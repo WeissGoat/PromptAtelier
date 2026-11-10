@@ -21,7 +21,7 @@
 | 动作组 | `st_*` 与 `stn_*` |
 | 契约粒度 | 一份契约对应一个动作组；新增帧可以参考任意动作 |
 | 多角色 | 选了多个角色且要求中有说明时，Agent 可以把角色分配到动作中的不同人物；否则保留动作原词 |
-| 动作内容读取 | 沿用现有 `NodeReader`，不改：`stn_*`（全部有 `meta.yaml`）正面取 `tags.action`、负面取 `negative_prompt`；`st_*`（只有 `tags.txt`）正面取 `=` 之前的行，负面为空，`=` 之后的扩展行（`uc` / `origin_uc` / `origin_clear` / `node_background` 等）不解析 |
+| 动作内容读取 | 使用统一 `NodeReader`：有 `tags.txt` 时正负面都从文本读取（正向排除注释、type 和扩展指令；负面解析 uc / origin_uc / after_uc / negative_prompt / after_negative_prompt）；没有文本时才读取 YAML 提示词。meta.yaml 中其余结构化元数据仍保留，tags.compiled.txt 不隐式优先 |
 | 采用 | 每帧可采用多张，记录存在 PromptAtelier 出图目录，不写进契约 |
 
 ---
@@ -211,7 +211,7 @@ looking back, standing, by window, night, classroom
 
 ### 5.3 Diff：相对来源动作
 
-- 对比对象：本帧最终正向提示词 vs 来源动作 node 的正向词（按 `NodeReader` 读取：`meta.yaml` 的 `tags.action`，或 `tags.txt` 中 `=` 之前的行）。
+- 对比对象：本帧最终正向提示词 vs 来源动作 node 的正向词（按 `NodeReader` 优先读取 `tags.txt`；没有文本时回退 YAML）。
 - 只列三类：改写（同词不同写法/权重，显示 from → to）、删除（删除线）、新增（带标记颜色）。保留的词不单独列出。
 - 自定义帧没有来源动作：全部显示为新增；有 `inspired_by` 时可以切换为相对参考动作做 diff。
 - 复用 `compare/tagDiff.ts` 的思路与样式。

@@ -105,6 +105,7 @@ class WebNodeSaveTest(TestCase):
             loaded = client.get("/api/nodes/read", params={"ref": str(action), "role": "action"}).json()
             values = loaded["editor"]["values"]
             values["prompt_lines"] = ["sitting, smile"]
+            values["name"] = "renamed action"
             values["selected_keys"] = [["character", "hair"]]
             response = client.post(
                 "/api/nodes/save-preview",

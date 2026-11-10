@@ -24,6 +24,10 @@ character_scope: foot_detail
 
 ## 文件约定
 
+- 动作正负面提示词以同目录 `tags.txt` 为主来源；`meta.yaml` 保存名称、描述、`character_scope`、`clothing` 等元数据。有文本时忽略 YAML 的 `tags`、`prompt`、`negative_prompt`，即使文本为空也不回退旧词。
+- 文本正向部分排除注释、`type` 和扩展指令；负面读取 `uc`、`origin_uc`、`after_uc`、`negative_prompt`、`after_negative_prompt`。`tags.compiled.txt` 不自动优先；不执行生成参数等旧扩展。
+- 以下 YAML 提示词结构用于没有 `tags.txt` 的独立节点。有 `tags.txt` 时 YAML 可以不含 `tags` 和 `negative_prompt`，校验器改为检查文本中的正向内容。
+
 - 文件名固定为 `meta.yaml`。
 - schema 固定为 `tags-machine.action/v1`。
 - `kind` 固定为 `action`。
@@ -59,8 +63,7 @@ character_scope: foot_detail
 最小结构必须满足：
 
 - `schema`、`kind`、`id` 存在且匹配 v1。
-- `tags` 是 mapping。
-- `tags.action` 非空。
+- 没有 `tags.txt` 时，`tags` 是 mapping，`tags.action` 非空；有文本时检查文本正向内容非空。
 - `character_scope` 非空；不需要特殊裁剪时写 `default`。
 
 ## 推荐完整结构
@@ -545,7 +548,7 @@ uv run python -m tools.legacy_migration sync-action-meta F:\my_project\new\tags_
 uv run python -m tools.legacy_migration sync-action-meta F:\my_project\new\tags_machine\design\动作改2\new --write --backup --report outputs\action_meta_sync.json
 ```
 
-该命令可重复执行。已有 `meta.yaml` 不重新迁移，只更新 `clothing` 和旧 `type` 指令归档；缺少 `tags.txt` 的新节点记录为错误。写模式默认使用 `.action-meta-sync.lock`，并在源文件处理期间发生变化时放弃覆盖。
+该命令可重复执行。新建 `meta.yaml` 只写元数据，不复制正负面提示词或原文快照。已有 `meta.yaml` 不重新迁移，只更新 `clothing` 和旧 `type` 指令归档，旧提示词字段保留但运行时忽略；缺少 `tags.txt` 的新节点记录为错误。写模式默认使用 `.action-meta-sync.lock`，并在源文件处理期间发生变化时放弃覆盖。
 
 仅补齐 Clothing 的底层命令：
 
