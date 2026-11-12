@@ -1,6 +1,7 @@
 # Agent 拼接契约（Compose Contract）设计 v1
 
 > 状态：第一期（P0）已实现，部分 P1 一并完成，实现情况见 §12。
+> Agent 直接出图、需求例图与跨契约复用见 §12.2。
 > UI 原型：https://claude.ai/artifact/3EwBb7NEkrBoeEL9ZSwzuq （主界面、要求 prompt / 导入、按帧编辑、结果故事板、动作组参考）
 > 目标：在 Web 现有「脚本式拼接（Custom）」之外，增加「Agent 式拼接」：
 > 用户在 Web 选素材节点 + 写定制要求 → Agent 自主拼出每一帧的完整提示词，写进契约文件 → Web 加载、解析、可视化、生图。
@@ -301,6 +302,8 @@ class ContractValidator(Protocol):
 | `character_blocks` | 分角色（§4.4）：`characters` 中的角色都有 cN 块；行内 `::character X:` 与 cN 块混用（error）；cN 块里写了其他角色的词、分角色时角色词留在主提示词（warn）。作品名、role 分区不参与判断 |
 | `source_exists` | `source` 属于本动作组；`inspired_by` 存在 |
 | `coverage` | 动作组中没有被任何帧使用的成员（warn） |
+| `identity_anchor` | 帧的 `characters` 里有某角色，但提示词（有 cN 块时看 cN 块）里没有这个角色的任何身份词（角色节点的 character / hair / eyes 等分区），特写最常见，出图会换人（warn） |
+| `frame_novelty` | 相邻两帧去掉全组共用的词（出现在 60% 以上帧里的身份、服装、场景词）后只差一个词或完全相同（warn）；换了画幅或出场人物的不比较 |
 
 ---
 
@@ -312,25 +315,44 @@ class ContractValidator(Protocol):
 
 | 命令 | 作用 |
 |---|---|
-| `contract show <id>` | 契约的请求部分、目标格式摘要、已写的帧 |
-| `contract context <id> [--member N]` | 角色分区词表、动作组各成员内容、服装、背景；可以只取单个成员，控制上下文长度 |
+| `contract create --action-group … --character … [--requirements …]` | 新建契约（同 Web 新建） |
+| `contract clone <id> [--requirements …] [--with-frames]` | 基于此契约新建：复制请求部分，可替换要求和选项；`--with-frames` 连帧一起复制 |
+| `contract show <id> [--summary] [--frames f01-f30]` | 契约的请求部分、目标格式摘要、已写的帧；`--summary` 不含提示词 |
+| `contract context <id> [--summary] [--members 1-20] [--member N]` | 角色分区词表、动作组各成员内容、服装、背景；先 `--summary` 看结构，再分段取，控制上下文长度 |
 | `contract check <id>` | 解析 + 校验，输出 issues（JSON） |
+| `contract results <id> [--frames] [--artist] [--current-only] [--all]` | 每帧出图状态（有图 / 缺图 / 只有旧图 / 最近一次失败 / 排队）、最新一轮的图、轮次、失败原因 |
+| `contract review <id> [--sheets]` | 出图复核：代表图、PNG 元数据检查、连续性校验结果、待办；`--sheets` 生成联系表 |
 | `kb facets/search/show` | 已有，新增场景时检索 |
 
-Agent 直接编辑契约文件，不需要额外的写入命令。
+Agent 直接编辑契约文件，不需要额外的写入命令。命令输出统一 UTF-8（设了 `PYTHONIOENCODING` 时按它）。
+出图后的复核由单独的 Skill `compose-contract-review` 负责，见 §8.3。
 
 ### 8.2 给 Agent 的指引（原则，不是硬规则）
 
 - 理解要求，区分全局改动（背景、服装、语气）和逐帧改动。
-- 每帧自主拼出完整提示词。角色的身份词通常保留；服装、发型、配饰等结合动作的裸露状态、镜头范围、构图和要求来取舍。
+- 要求里有叙事或状态变化时先规划：动作组当素材池，按叙事阶段分组、合并、（`keep_order: false` 时）重排，状态变化没有承载帧时补过渡帧，再写帧。没有要求时一个成员一帧。
+- 每帧自主拼出完整提示词。服装、发型、配饰等结合动作的裸露状态、镜头范围、构图和要求来取舍。
+- 身份锚点：出现的角色至少保留角色名或发色瞳色之一，特写也一样。
+- 来源冲突：素材里的状态词（站 / 躺、穿着 / 裸露、口塞、绳索等）只在和本帧状态一致时保留。
 - 动作的核心（姿势、构图、表情、互动）优先保留；与要求冲突的环境词、混入的角色/画风词去掉。
 - 尽量沿用素材里的原词写法（便于 Web 标记来源）；需要调整时可以改权重或替换。
 - 多角色：按 §4.4 分块写；动作中的人物怎么对应以要求为准，默认行内块 A→c1、B→c2。
-- 连续性：同一组中的服装和场景保持一致，除非要求变化。
+- 连续性是状态链：时间场景、服装阶段、姿势位置、道具与痕迹、人物关系、镜头 / POV 前后衔接，进入新状态后不无故回退；相邻帧至少改变一项。写完按帧顺序复查一遍。
 - 新增帧：用 `kb search` 找参考、`kb show` 读内容；`source: custom`，参考过的写进 `inspired_by`。
 - 排版自由，可以换行分组；备注写在帧的代码块之外。
 - 完成后 `contract check` 无 error，再把 `status` 改为 `done`。
 - 禁止：写画师名、质量前缀、生图参数；修改素材库源节点；修改 front matter 中的请求部分。
+
+### 8.3 Skill：`compose-contract-review`
+
+出图后的复核，放在 `.agents/skills/compose-contract-review/`。`contract review --sheets` 输出：
+
+- 每帧状态和代表图（已采用 > 当前提示词 > 其他）；失败原因来自 Web 出图任务记录 `<output_dir>/.web/jobs`；
+- `audit`：读 PNG 元数据，列出每个画风实际用的模型、步数、CFG、采样器、尺寸；画幅与帧 `size` 不符、正负面词打架、成人契约的负面词里有 `nsfw`、分角色块没生效时报出；
+- `prompt_issues`：`identity_anchor`、`frame_novelty` 等校验结果；`todo`：汇总成待办；
+- 联系表写到 `<output_dir>/.contract_review/<id>/`：`overview_NN.jpg`（每帧代表图，看故事线）、`frames_NN.jpg`（每帧全部候选）。
+
+Agent 看联系表判断换人、服装道具回退、相邻帧雷同，给出逐帧建议，用户同意后改契约，由用户在 Web 重出。Agent 不直接提交生图。
 
 ---
 
@@ -434,11 +456,12 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 | 契约解析 / 写回 / 创建 / 索引 | `src/tags_machine_core/compose_contracts/`（`parser.py`、`store.py`、`service.py`） | 包名用 `compose_contracts`，因为 `contracts.py` 已是 PromptBundle 等数据模型 |
 | 动作组与来源节点 | `compose_contracts/sources.py` | 沿用 `NodeReader`；成员 ref 取链接指向的 `new/<id>`：Linux 是相对符号链接 `../new/<id>`，Windows 上成员和 `new` 都是指向同一外部目录（如 `G:/GoogleDrive/action`）的 junction，按 `new` 的指向换算，两边得到同样的 ref 和组 hash。也接受 `stn_x/01_...`、成员目录名、`#N`；本机换算不出 `new/` 时按最后一段（链接目标目录名）匹配 |
 | 格式 profile | `configs/prompt_formats/`（nai-v3、nai-v4、nai-v4.5、nai-v5、nai-v5-curated、sdxl-danbooru） | `contract.formats_dir` 可改目录 |
-| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现，另加 `character_blocks`（§4.4）；`token_length` 用真实分词器，见 §12.1 |
+| 校验器 | `compose_contracts/validators.py` | §7 的 11 个全部实现，另加 `character_blocks`（§4.4）、`identity_anchor`、`frame_novelty`；`token_length` 用真实分词器，见 §12.1 |
 | token 计数 | `src/tags_machine_core/prompt_tokens.py` | 契约帧、`contract check` 的 `tokens`、`/compose-preview` 的 `token_usage` 共用 |
 | 要求 prompt | `compose_contracts/prompts.py` | 工具版 / 自包含版 |
-| CLI | `tm-core contract show / context [--member N] / check / prompt` | `check` 有 error 时退出码 1 |
-| Skill | `.agents/skills/compose-contract-author/`（`.claude/skills` 指向它） | |
+| CLI | `tm-core contract create / clone / show / context / check / prompt / results / review` | `check` 有 error 时退出码 1；分段读取 `--frames` / `--members` / `--summary` 在 `compose_contracts/selection.py` |
+| 出图复核 | `compose_contracts/review.py` | `results`、`review`、PNG 元数据检查、联系表（Pillow，优先用系统中文字体） |
+| Skill | `.agents/skills/compose-contract-author/`、`compose-contract-review/`（`.claude/skills` 指向它们） | |
 | API | `web/routes/contracts.py` | §10 全部接口；另有 `GET /contracts/action-groups`、`/contracts/action-groups/detail`、`PUT /contracts/{id}/fields` |
 | 生图追溯 | `services/json_api.py`、`renderers/common.py`、`renderers/novelai.py`、`execution.py` | compose 请求的 `contract` → `PromptBundle.meta.extra.contract` → render meta → PNG `tags_machine_core.contract` |
 | 结果与采用 | `ContractService.results / update_picks` | 契约批次输出到 `outputs/compares/contract_<时间>_<随机>/<帧id>/`，出图历史里归为「契约」类型 |
@@ -448,8 +471,11 @@ Agent 直接编辑契约文件，不需要额外的写入命令。
 
 提前完成的 P1：历史契约按所选节点筛选（完全 / 部分匹配）、来源过期提示、按帧编辑写回（带 hash 冲突检测）、5 秒轮询与 Shift+刷新先 `git pull`、多角色分角色提示词（§4.4：生图按角色提交；帧卡片按 主→c1→c2 排列并标角色色，角色词写错块时波浪线标出，Diff 合并各角色块对比，编辑时可添加角色块）、结果故事板（契约头部「结果故事板」或帧下方「查看全部」进入，不是单独路由，而是契约页的一个视图：左栏让给故事板，右栏生图面板保留，「生成此帧」可直接用；每帧一行，按「结果目录 + 画风」分轮，可按画风、当前提示词、已采用筛选）、刷新后保留页面状态（左栏请求、生图设置含画风、视图开关、故事板与筛选、每份契约勾选的帧，存在浏览器 localStorage，`web/src/contracts/persist.ts`）。
 
+Agent 侧（CLI + Skill）另外补了：`contract create / clone`（「基于此契约新建」目前只有 CLI，Web 还没有按钮）、分段读取、出图结果与复核、联系表，以及要求 prompt 里的「先规划」和状态链原则。
+
 还没做：
-- 「帧 × 画风」对比、「基于此契约新建」。
+- 「帧 × 画风」对比；Web 上的「基于此契约新建」按钮（后端 `ContractService.clone` 已有）。
+- 让 Agent 通过 CLI 重出失败帧（`retry-failed`）：会花额度，和一键执行（P2）一起考虑。
 - 右栏的 Policy Rules 开关：第一期保持与 agent composer 一致的默认跳过，没有放开关。
 - 翻译模块仍在 `styleLab/translations.ts`，Agent Studio 直接引用，没有挪到公共目录。
 - 一键执行（P2）。
@@ -484,3 +510,16 @@ CLIP（`openai/clip-vit-large-patch14`）、T5（`google-t5/t5-base`）完全一
 - 出图前：点「生成所选帧」或「生成此帧」时先逐帧调用 `/compose-preview`，按画风实际用的模型，对拼好画风前后缀和分角色提示词之后的最终文本计数；有帧超限时弹窗列出，确认后才提交（ComfyUI 不检查）。「检查最终长度」按钮只做检查、不提交。
   - 画风模型和契约格式不一致时会提示，例如 `tags.txt` 画风走 `nai-diffusion-3`。
 - Custom 页的 Preview 也显示 Tokens。
+
+### 12.2 Agent 出图与跨契约复用
+
+- `contract artists [--query …]` 列出后台可用画风；Agent 生图前先询问用户指定画风，已有指定则沿用。画风不写进契约请求。
+- `contract generate <id> --artist <ref> [--frames f01,f05] [--nt 1] [--seed 42] [--dry-run] [--wait]`：新接口 `POST /api/contracts/{id}/generate`，解析契约、检查所选帧、按画风拼最终请求并检查 token；实际生成复用 Web 的持久后台任务。`pending` 草稿也能指定少量帧出需求例图。
+- `--dry-run` 返回最终提示词、参数和 token，不调用生图后端。随机值在预检时只作示意，实际生成时重新抽取。超限需精简，或明确 `--allow-over-limit`。
+- `contract job <任务id> [--wait] [--timeout 600]`：返回状态与图片路径；超时返回非零退出码，任务继续在后台运行，不重复提交。部分失败也返回非零退出码。
+- 以上远程命令自动读 `runtime/dev_web.json` 的后台端口；可用 `--server` 或环境变量 `PROMPTATELIER_URL` 指定。使用该后台的应用配置和契约目录，不使用本地命令的 `--config / --root`。
+- Python 适配在 `compose_contracts/generation.py`，CLI 客户端在 `generation_client.py`。Web 现有帧请求和 Agent 请求都经过 `run_generate_batch`，不另建生图执行器。
+- Web Agent 拼接页默认勾选「跳过相同参数」，请求字段为 `generate.skip_duplicates`；Agent 对应 `--force` 可强制生成新候选。契约批量请求未传字段时也默认复用；其他工作区保持原有行为，可显式启用该字段。
+- 复用键取渲染后的正负面词、角色提示词、模型、采样器、步数、CFG、张数、尺寸、seed、画风有效配置、ComfyUI 工作流与运行位置等；排除契约 id、帧 id、标题、输出目录和追踪元数据。随机 seed／随机尺寸按相同随机设置复用首轮结果；强制生成可重新抽取。
+- 成功结果索引存在 `<output>/.web/generation_cache/`，重启保留；单个后台进程内同参数并发提交按键串行，后到的复用先完成的结果。失败、空结果、不足请求张数或图片丢失不写成功缓存。上线前没有索引的旧图不猜测匹配，首次仍生成并建立索引。
+- 复用保留原 PNG，在新任务帧目录写 `generation.reuse.json` 关联当前 `contract_id / frame_id / prompt_hash`；故事板、results、review、采用均能读到图片，原契约的 PNG 元数据不改。后台任务项 `cache_hit` 标记复用，任务面板显示复用项数。

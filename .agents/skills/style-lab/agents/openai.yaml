@@ -1,0 +1,4 @@
+interface:
+  display_name: "Style Lab 画风复刻"
+  short_description: "指定图片或文件夹，创建工作区和配方，原参重生并测试当前角色与动作"
+  default_prompt: "使用 $style-lab 处理我指定的图片或文件夹，创建工作区和画风配方，先原参重生，再以原图种子和尺寸测试配方原图及当前素材架的角色、动作。"

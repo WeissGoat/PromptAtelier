@@ -5,7 +5,7 @@ import { errorMessage } from "../api/client";
 import type { NodeSummary } from "../api/types";
 import { NodePicker } from "../components/NodePicker";
 import { contractsApi } from "./api";
-import type { ActionGroupSummary, ContractSummary, FormatSummary } from "./types";
+import type { ActionGroupSummary, ContractDetail, ContractSummary, FormatSummary, NodeRefEntry } from "./types";
 
 export type NodeChoice = { ref: string; name: string };
 
@@ -32,6 +32,29 @@ export const EMPTY_DRAFT: ContractDraft = {
   allowNewFrames: true,
   maxNewFrames: 2,
 };
+
+export function draftFromContract(detail: ContractDetail): ContractDraft {
+  const { request, sources } = detail;
+  const choice = (entry: NodeRefEntry | null, source?: { path: string; name: string } | null): NodeChoice | null =>
+    entry ? {
+      ref: source?.path || entry.ref,
+      name: source?.name || entry.ref.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || entry.ref,
+    } : null;
+
+  return {
+    characters: Object.entries(request.nodes.characters)
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(([id, entry]) => choice(entry, sources.characters[id])!),
+    actionGroup: choice(request.nodes.action_group, sources.action_group),
+    clothing: choice(request.nodes.clothing, sources.clothing),
+    background: choice(request.nodes.background, sources.background),
+    requirements: request.requirements,
+    targetFormat: request.target_format,
+    keepOrder: request.options.keep_order,
+    allowNewFrames: request.options.allow_new_frames,
+    maxNewFrames: request.options.max_new_frames,
+  };
+}
 
 type Props = {
   draft: ContractDraft;
@@ -231,6 +254,7 @@ export function ContractRequestPanel(props: Props) {
           </button>
         </div>
       </div>
+      <p className="muted">选择历史契约后自动填充上方请求，可修改后新建。</p>
       <ul className="ct-history">
         {history.map(({ contract, level }) => (
           <li key={contract.id}>

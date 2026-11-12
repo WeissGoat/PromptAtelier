@@ -3011,7 +3011,23 @@ def _add_agent_arguments(parser: argparse.ArgumentParser, *, result: bool) -> No
         parser.add_argument("--cache-dir", help="PromptBundle cache directory")
 
 
+def _use_utf8_stdio() -> None:
+    """输出统一用 UTF-8：Windows 上输出被管道接走时 Python 默认用 GBK，Agent 按 UTF-8 读就是乱码。
+    设了 PYTHONIOENCODING 时尊重它。"""
+    if os.environ.get("PYTHONIOENCODING"):
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None or (getattr(stream, "encoding", "") or "").lower().replace("-", "") == "utf8":
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            continue
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
     configure_logging(getattr(args, "log_level", None))

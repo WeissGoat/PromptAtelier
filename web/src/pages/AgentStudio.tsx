@@ -11,7 +11,7 @@ import {
   DEFAULT_GENERATE_SETTINGS,
   type GenerateSettings,
 } from "../contracts/ContractGeneratePanel";
-import { ContractRequestPanel, EMPTY_DRAFT, type ContractDraft } from "../contracts/ContractRequestPanel";
+import { ContractRequestPanel, draftFromContract, EMPTY_DRAFT, type ContractDraft } from "../contracts/ContractRequestPanel";
 import { ContractStoryboard, DEFAULT_BOARD_FILTERS, type BoardFilters } from "../contracts/ContractStoryboard";
 import { FrameCard, type FrameView } from "../contracts/FrameCard";
 import { readSelectedFrames, readStored, STORAGE_KEYS, writeSelectedFrames, writeStored } from "../contracts/persist";
@@ -50,6 +50,7 @@ export function AgentStudio() {
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
   const [draft, setDraft] = useState<ContractDraft>(() => readStored(STORAGE_KEYS.draft, EMPTY_DRAFT));
   const [activeId, setActiveId] = useState<string | null>(readActive);
+  const [requestSourceId, setRequestSourceId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
   const [results, setResults] = useState<ContractResults | null>(null);
   const [error, setError] = useState("");
@@ -80,6 +81,8 @@ export function AgentStudio() {
   const restoredRef = useRef<string | null>(null);
   const detailRef = useRef<ContractDetail | null>(null);
   detailRef.current = detail;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   const rememberStatuses = useCallback((items: ContractSummary[]) => {
     items.forEach((item) => statusRef.current.set(item.id, item.status));
@@ -95,20 +98,24 @@ export function AgentStudio() {
   const loadDetail = useCallback(async (id: string) => {
     try {
       const data = await contractsApi.get(id);
+      if (activeIdRef.current !== id) return null;
       setDetail(data);
       setFileChanged(false);
       setError("");
       return data;
     } catch (err) {
+      if (activeIdRef.current !== id) return null;
       setError(errorMessage(err));
       setDetail(null);
+      setRequestSourceId((current) => current === id ? null : current);
       return null;
     }
   }, []);
 
   const loadResults = useCallback(async (id: string) => {
     try {
-      setResults(await contractsApi.results(id));
+      const data = await contractsApi.results(id);
+      if (activeIdRef.current === id) setResults(data);
     } catch {
       // 结果读取失败不影响查看契约。
     }
@@ -139,6 +146,17 @@ export function AgentStudio() {
       setDetail(null);
     }
   }, [activeId, loadDetail, loadResults]);
+
+  useEffect(() => {
+    if (!requestSourceId || detail?.id !== requestSourceId) return;
+    setRequestSourceId(null);
+    if (!detail.parse_error) setDraft(draftFromContract(detail));
+  }, [detail, requestSourceId]);
+
+  function openContract(id: string) {
+    setRequestSourceId(id);
+    setActiveId(id);
+  }
 
   useEffect(() => writeStored(STORAGE_KEYS.draft, draft), [draft]);
   useEffect(() => writeStored(STORAGE_KEYS.settings, settings), [settings]);
@@ -335,7 +353,7 @@ export function AgentStudio() {
         onChange={setDraft}
         onCreate={() => void createContract()}
         onImportNew={() => setImportOpen(true)}
-        onOpen={setActiveId}
+        onOpen={openContract}
         onRefresh={(pull) => void refreshList(pull)}
       />
 
@@ -343,7 +361,7 @@ export function AgentStudio() {
         {finished ? (
           <div className="ct-banner ct-banner-ok">
             Agent 已完成：{finished.title || finished.id}
-            <button className="btn-sm" onClick={() => { setActiveId(finished.id); setFinished(null); }} type="button">打开</button>
+            <button className="btn-sm" onClick={() => { openContract(finished.id); setFinished(null); }} type="button">打开</button>
             <button aria-label="关闭提示" className="icon-button btn-ghost btn-sm" onClick={() => setFinished(null)} type="button"><X size={13} /></button>
           </div>
         ) : null}

@@ -73,7 +73,7 @@ def generate_batch(payload: dict[str, Any], request: Request) -> dict[str, Any]:
         ) from exc
 
     def worker(ctx):
-        return run_generate_batch(api, batch, ctx)
+        return run_generate_batch(api, batch, ctx, reuse=request.app.state.generation_reuse)
 
     return manager.submit(GENERATE_BATCH_JOB, worker, request=batch).to_dict()
 
@@ -100,7 +100,7 @@ def resume_generate_batch(job_id: str, request: Request) -> dict[str, Any]:
         raise ApiError(code="job_not_resumable", message="这个任务的每一项都已经成功。", status_code=409)
 
     def worker(ctx):
-        return run_generate_batch(api, batch, ctx, previous=previous)
+        return run_generate_batch(api, batch, ctx, previous=previous, reuse=request.app.state.generation_reuse)
 
     try:
         return manager.resume(job_id, worker).to_dict()

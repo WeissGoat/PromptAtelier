@@ -67,7 +67,10 @@ class CatalogStore:
     def load_current(self) -> LoadedCatalog:
         pointer_path = self.catalog_dir / "current.json"
         if not pointer_path.is_file():
-            raise FileNotFoundError(f"knowledge base current catalog not found: {pointer_path}")
+            raise FileNotFoundError(
+                f"knowledge base current catalog not found: {pointer_path}; "
+                "动作库还没有构建，先运行 `uv run tm-core kb import --config <知识库配置>`"
+            )
         pointer = CatalogPointer.model_validate(_read_json(pointer_path))
         build_dir = (self.catalog_dir / pointer.build).resolve()
         _ensure_within(build_dir, self.catalog_dir)

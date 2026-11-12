@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from tags_machine_core.verification.image_params import read_png_text_chunks
+from tags_machine_core.services.generation_reuse import REUSE_MANIFEST
 
 from .models import CONTRACT_SCHEMA, ContractIssue, ParsedContract, ParsedFrame
 from .parser import (
@@ -19,13 +20,16 @@ from .parser import (
     replace_body,
     replace_frame_prompts,
     set_front_matter_fields,
+    split_front_matter,
 )
 from .profiles import FormatProfile, load_format_profiles
 from .prompts import render_standalone_prompt, render_tools_prompt
 from .sources import ActionGroup, ActionMember, ContractSources
 from .store import ContractConflictError, ContractStore, contract_summary
+from .selection import select_frames, select_indexes
 from .validators import (
     ValidationContext,
+    character_identity_keys,
     character_tag_keys,
     coverage_report,
     frame_token_usage,
@@ -80,6 +84,7 @@ class ContractService:
         formats_dir: str | Path | None = None,
         cli: str = "uv run tm-core",
         config_path: str | Path | None = None,
+        root_arg: str = "",
         project_root: str | Path | None = None,
     ):
         self.store = ContractStore(root)
@@ -89,6 +94,7 @@ class ContractService:
         self.profiles = load_format_profiles(formats_dir)
         self.cli = cli
         self.config_arg = f" --config {config_path}" if config_path else ""
+        self.root_arg = root_arg
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.conflict_rules = load_conflict_rules(design_root)
         self._png_cache: dict[tuple[str, int, int], dict | None] = {}
@@ -180,6 +186,39 @@ class ContractService:
         self.store.write(contract_id, text, create=True)
         return self.detail(contract_id)
 
+    def clone(self, contract_id: str, overrides: dict[str, Any] | None = None, *, with_frames: bool = False) -> dict[str, Any]:
+        """基于已有契约新建（§9「基于此契约新建」）：复制请求部分，来源 hash 重新计算；
+        overrides 可替换 requirements、target_format、options 和各节点；with_frames 时连帧内容一起复制。"""
+        file = self.store.read(contract_id)
+        contract = parse_contract(file.text)
+        request = contract.request
+        nodes = request.nodes
+        payload: dict[str, Any] = {
+            "action_group": nodes.action_group.ref if nodes.action_group else "",
+            "characters": [entry.ref for entry in nodes.characters.values()],
+            "clothing": nodes.clothing.ref if nodes.clothing else "",
+            "background": nodes.background.ref if nodes.background else "",
+            "target_format": request.target_format,
+            "requirements": request.requirements,
+            "options": request.options.model_dump(),
+        }
+        for key, value in (overrides or {}).items():
+            if value is None:
+                continue
+            if key == "options":
+                payload["options"] = {**payload["options"], **value}
+            else:
+                payload[key] = value
+        detail = self.create(payload)
+        if with_frames:
+            _, lines, body_start = split_front_matter(file.text)
+            body = "\n".join(lines[body_start:]).strip()
+            if body:
+                new_file = self.store.read(detail["id"])
+                self.store.write(detail["id"], replace_body(new_file.text, body), expected_hash=new_file.hash)
+                detail = self.detail(detail["id"])
+        return detail
+
     # ---- 读取 ----
 
     def detail(self, contract_id: str) -> dict[str, Any]:
@@ -208,6 +247,7 @@ class ContractService:
             references=loaded["reference_members"],
             conflict_rules=self.conflict_rules,
             character_tags=character_tag_keys(loaded["payload"]["characters"]),
+            identity_tags=character_identity_keys(loaded["payload"]["characters"]),
         )
         issues.extend(run_validators(profile, ctx))
         group: ActionGroup | None = loaded["group"]
@@ -341,35 +381,52 @@ class ContractService:
             "issues": detail["issues"],
         }
 
-    def show(self, contract_id: str) -> dict[str, Any]:
+    def show(self, contract_id: str, *, frames: str | None = None, summary: bool = False) -> dict[str, Any]:
+        """frames：只列这些帧（`f01-f30`、`f01,f05`）；summary：每帧只给标题、来源、角色和 token 数，不给提示词。"""
         detail = self.detail(contract_id)
         if "parse_error" in detail:
             return detail
+        selected = select_frames(detail["frames"], frames)
+        if summary:
+            items = [_frame_summary(frame) for frame in selected]
+        else:
+            items = [
+                {key: frame[key] for key in ("id", "title", "source", "inspired_by", "characters", "size", "prompts", "notes")}
+                for frame in selected
+            ]
         return {
             "id": contract_id,
             "path": detail["file"]["path"],
             "request": detail["request"],
             "format": detail["profile"],
-            "frames": [
-                {key: frame[key] for key in ("id", "title", "source", "inspired_by", "characters", "size", "prompts", "notes")}
-                for frame in detail["frames"]
-            ],
+            "frame_count": len(detail["frames"]),
+            "frames": items,
             "issue_counts": detail["issue_counts"],
         }
 
-    def context(self, contract_id: str, *, member: int | None = None) -> dict[str, Any]:
+    def context(
+        self,
+        contract_id: str,
+        *,
+        member: int | None = None,
+        members: str | None = None,
+        summary: bool = False,
+    ) -> dict[str, Any]:
+        """members：只取这些成员（`1-20`、`3,5,8-10`，从 1 开始）；summary：成员只给序号、标题、ref 和分类，不给提示词。"""
         detail = self.detail(contract_id)
         if "parse_error" in detail:
             raise ValueError(detail["parse_error"])
         sources = detail["sources"]
         group = sources.get("action_group")
-        if group and member is not None:
-            members = [item for item in group["members"] if item["index"] == member]
-            if not members:
-                raise ValueError(f"动作组没有第 {member} 个成员（共 {group['member_count']} 个）")
-            group = {**group, "members": members}
+        if group and (member is not None or members):
+            wanted = {member} if member is not None else select_indexes(members, group["member_count"])
+            picked = [item for item in group["members"] if item["index"] in wanted]
+            if not picked:
+                raise ValueError(f"动作组没有第 {members or member} 个成员（共 {group['member_count']} 个）")
+            group = {**group, "members": picked}
         if group:
-            group = {**group, "members": [_member_for_agent(item) for item in group["members"]]}
+            shape = _member_summary if summary else _member_for_agent
+            group = {**group, "members": [shape(item) for item in group["members"]]}
         return {
             "id": contract_id,
             "target_format": detail["request"]["target_format"],
@@ -394,7 +451,7 @@ class ContractService:
                 profile,
                 contract_path=detail["file"]["path"],
                 cli=self.cli,
-                config_arg=self.config_arg,
+                config_arg=self.config_arg + self.root_arg,
                 skill_path=str(self.project_root / SKILL_PATH),
                 project_root=str(self.project_root),
             )
@@ -440,8 +497,8 @@ class ContractService:
 
     # ---- 出图结果与采用 ----
 
-    def results(self, contract_id: str) -> dict[str, Any]:
-        detail = self.detail(contract_id)
+    def results(self, contract_id: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:
+        detail = detail or self.detail(contract_id)
         current = {frame["id"]: frame["prompt_hash"] for frame in detail.get("frames", [])}
         picks = self.picks(contract_id)
         frames: dict[str, list[dict[str, Any]]] = {}
@@ -467,6 +524,24 @@ class ContractService:
             for run in root.iterdir():
                 if not run.is_dir() or not run.name.startswith(RESULT_DIR_PREFIX):
                     continue
+                for manifest in run.rglob(REUSE_MANIFEST):
+                    try:
+                        reused = json.loads(manifest.read_text(encoding="utf-8"))
+                        trace = reused.get("contract") or {}
+                        if trace.get("id") != contract_id or not trace.get("frame_id"):
+                            continue
+                        for image in reused.get("images") or []:
+                            path = Path(image["path"])
+                            if path.is_file():
+                                original = self._png_contract_info(path) or {}
+                                images.append({
+                                    "path": str(path.resolve()), "run": run.name,
+                                    "frame_id": str(trace["frame_id"]), "prompt_hash": trace.get("prompt_hash"),
+                                    "artist": trace.get("artist"), "seed": original.get("seed"),
+                                    "created_at": reused["created_at"], "reused": True,
+                                })
+                    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                        continue
                 for path in sorted(run.rglob("*.png")):
                     info = self._png_contract_info(path)
                     if not info or info.get("id") != contract_id or not info.get("frame_id"):
@@ -641,6 +716,24 @@ def _compact_coverage(coverage: dict | None) -> dict | None:
         "used": len(coverage["used"]),
         "missing": [f"#{m['index']} {m['title']}" for m in coverage["missing"]],
         "custom_frames": coverage["custom_frames"],
+    }
+
+
+def _frame_summary(frame: dict[str, Any]) -> dict[str, Any]:
+    usage = frame.get("token_usage") or {}
+    item = {key: frame[key] for key in ("id", "title", "source", "member_index", "characters", "size") if frame.get(key) not in (None, "", [])}
+    if usage:
+        item["tokens"] = usage.get("total")
+    if frame.get("character_prompts"):
+        item["character_blocks"] = [block["id"] for block in frame["character_prompts"]]
+    return item
+
+
+def _member_summary(member: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: member[key]
+        for key in ("index", "title", "ref", "classify", "character_scope", "clothing_state")
+        if member.get(key) not in (None, "", {}, [])
     }
 
 

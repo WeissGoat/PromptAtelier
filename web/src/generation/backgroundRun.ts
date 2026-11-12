@@ -18,6 +18,7 @@ export type BackgroundRequestItem = {
   compose_request: ComposeRenderRequest;
   generate: {
     output_dir?: string;
+    skip_duplicates?: boolean;
     comfyui_target?: string;
     random_selections?: RandomSelectionRecord[];
   };
@@ -41,6 +42,7 @@ export type BackgroundBatchItem = {
   error: string | null;
   started_at?: number;
   finished_at?: number;
+  cache_hit?: boolean;
 };
 
 export type BackgroundBatchResult = {

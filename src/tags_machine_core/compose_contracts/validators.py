@@ -45,6 +45,10 @@ CAST_RE = re.compile(r"(\d+)(girl|boy|other)s?")
 INLINE_CHARACTER_RE = re.compile(r"::character\s*([A-Za-z0-9_]+)\s*:", re.IGNORECASE)
 # 这些分区多个角色常常共用（同一部作品），不用来判断「词属于哪个角色」。
 SHARED_CHARACTER_SECTIONS = frozenset({"copyright", "role"})
+# 能认出「是这个人」的分区：角色名、发型发色、瞳色、脸和体型；服装、配饰不算（会随帧变化）。
+IDENTITY_SECTIONS = frozenset({"character", "hair", "eyes", "face", "skin", "body", "species", "ears", "tail", "prompt"})
+# frame_novelty：出现在这么多帧里的词当作全组共用（身份、服装、场景），不参与相邻帧比较。
+NOVELTY_COMMON_SHARE = 0.6
 
 
 @dataclass
@@ -56,6 +60,8 @@ class ValidationContext:
     conflict_rules: list[dict[str, list[str]]] = field(default_factory=lambda: list(DEFAULT_CONFLICTS))
     # 角色 id → 角色节点的词（归一化后），用来发现写错块的角色词。
     character_tags: dict[str, set[str]] = field(default_factory=dict)
+    # 角色 id → 身份词（角色名、发色、瞳色等），用来发现特写里把人删没了的帧。
+    identity_tags: dict[str, set[str]] = field(default_factory=dict)
 
     def member_for(self, frame: ParsedFrame) -> ActionMember | None:
         if self.action_group is None or frame.is_custom:
@@ -404,6 +410,97 @@ def character_tag_keys(characters: dict[str, dict]) -> dict[str, set[str]]:
             keys.update(tag_keys(", ".join(tags)))
         result[cid] = keys
     return result
+
+
+def character_identity_keys(characters: dict[str, dict]) -> dict[str, set[str]]:
+    """角色 id → 身份分区的词（归一化）；角色节点没有这些分区时退回全部非共用分区。"""
+    result: dict[str, set[str]] = {}
+    for cid, summary in characters.items():
+        sections = summary.get("sections") or {}
+        keys: set[str] = set()
+        for section, tags in sections.items():
+            if section in IDENTITY_SECTIONS:
+                keys.update(tag_keys(", ".join(tags)))
+        if not keys:
+            for section, tags in sections.items():
+                if section not in SHARED_CHARACTER_SECTIONS:
+                    keys.update(tag_keys(", ".join(tags)))
+        result[cid] = keys
+    return result
+
+
+def frame_positive_text(frame: ParsedFrame, character: str | None = None) -> str:
+    """本帧全部正向内容（主提示词 + 各角色块）；给了 character 且有该角色块时只取那一块。"""
+    if character:
+        block = frame.block("positive", character)
+        if block is not None:
+            return block.text
+    return "\n".join(block.text for block in prompt_blocks(frame, "positive"))
+
+
+@register
+class IdentityAnchor(_Base):
+    """characters 里列了角色，提示词里却没有这个角色的任何身份词：特写、局部镜头最容易出这种问题，出图会换人。"""
+
+    id = "identity_anchor"
+
+    def validate_frame(self, frame, profile, ctx):
+        issues = []
+        for cid in frame.characters:
+            anchors = ctx.identity_tags.get(cid)
+            if not anchors:
+                continue
+            keys = set(tag_keys(frame_positive_text(frame, cid), profile.separator))
+            if keys & anchors:
+                continue
+            issues.append(self.issue(
+                "warn",
+                f"本帧有 {cid}，但提示词里没有 {cid} 的身份词（角色名、发色、瞳色等），出图容易换人",
+                frame,
+                block=f"positive {cid}" if frame.block("positive", cid) is not None else "positive",
+                fix_hint="特写、局部镜头也至少保留角色名或发色瞳色之一，再加一个当前服装、道具或标志物",
+            ))
+        return issues
+
+
+@register
+class FrameNovelty(_Base):
+    """相邻两帧去掉全组共用的词（身份、服装、场景）后几乎一样：出图只会像换了个 seed。"""
+
+    id = "frame_novelty"
+
+    def validate_contract(self, profile, ctx):
+        frames = ctx.contract.frames
+        if len(frames) < 2:
+            return []
+        identity = set().union(*ctx.identity_tags.values()) if ctx.identity_tags else set()
+        keyed = [set(tag_keys(frame_positive_text(frame), profile.separator)) for frame in frames]
+        counts = Counter(key for keys in keyed for key in keys)
+        common = {key for key, count in counts.items() if len(frames) >= 4 and count >= NOVELTY_COMMON_SHARE * len(frames)}
+        ignored = common | identity
+        distinct = [{key for key in keys if key not in ignored and not COUNT_TAG_RE.match(key)} for keys in keyed]
+        issues = []
+        for index in range(1, len(frames)):
+            before, frame = frames[index - 1], frames[index]
+            if before.size != frame.size or set(before.characters) != set(frame.characters):
+                continue  # 换了画幅或出场人物，本身就是变化
+            if tag_keys(frame_positive_text(before), profile.separator) == tag_keys(frame_positive_text(frame), profile.separator):
+                issues.append(self.issue("warn", f"和上一帧 {before.id} 的提示词完全相同", frame,
+                                         fix_hint="合并成一帧，或改变机位、景别、姿势、表情、互动、服装或道具状态中的至少一项"))
+                continue
+            a, b = distinct[index - 1], distinct[index]
+            diff = a ^ b
+            # 只差一个词才算「几乎一样」；差两三个动作词通常就是真的变化，不报。
+            if len(diff) > 1:
+                continue
+            changes = ", ".join([f"+{key}" for key in sorted(b - a)] + [f"-{key}" for key in sorted(a - b)]) or "无"
+            issues.append(self.issue(
+                "warn",
+                f"和上一帧 {before.id} 的动作、镜头词几乎相同（差别：{changes}），出图会像只换了 seed",
+                frame,
+                fix_hint="合并成一帧，或改变机位、景别、姿势、表情、互动、服装或道具状态中的至少一项；有意保留时在帧备注里说明",
+            ))
+        return issues
 
 
 @register

@@ -1,0 +1,121 @@
+
+从 **[NovelAI Studio](https://studio.mmw.ink/novelai-byok/)** 与 **[NovelAI 官网](https://novelai.net/image)** 的前端实现机制来看，**官方确实已经不再在 `Source` 标签中写入明文的 `Full` 或 `Curated`，而是改用「代际 + 8 位十六进制 Hash」的格式**（例如 `NovelAI Diffusion V5 0ADF9AB7`）。
+
+以下是两者前端脚本的具体处理逻辑与源码分析：
+
+---
+
+### 一、NovelAI 官方导出的 `Source` 格式现状
+
+在 NovelAI 官方导出的 PNG/WebP 图片中，`Source`（或 EXIF 的 `DocumentName`）字段格式演变为：
+```text
+NovelAI Diffusion V5 0ADF9AB7
+```
+- 前半部分标明模型代际：`V5`、`V4.5`、`V4`
+- 后半部分是一个 **8 位的十六进制 Hash**（例如 `0ADF9AB7`），代表该模型特定构建版本的 Checkpoint Build Hash / 模型指纹。
+
+---
+
+### 二、NovelAI Studio (`studio.mmw.ink`) 的处理实现
+
+通过分析 NovelAI Studio 的现网前端脚本 [`static/app.js`](https://studio.mmw.ink/novelai-byok/static/app.js)，它在导入图片时通过 **`parseImageMetadata` -> `normalizeNovelAIMetadata` -> `canonicalMetadataModel`** 来提取和区分模型。
+
+其核心解析函数源码如下：
+
+```javascript
+function canonicalMetadataModel(value) {
+    if (typeof value !== 'string') return '';
+    const text = value.trim();
+
+    // 1. 优先尝试直接匹配模型 ID (如已经是标准 ID)
+    const id = text.match(/nai-diffusion-(?:5-(?:full|curated)|4-5-(?:full|curated)|4-(?:full|curated-preview)|3|furry-3)/i);
+    if (id) return id[0].toLowerCase();
+
+    const normalized = text.toLowerCase().replace(/[_.-]+/g, ' ').replace(/\s+/g, ' ');
+
+    // 2. 正则提取 8 位十六进制 Hash
+    const sourceHash = text.toUpperCase().match(/\b[0-9A-F]{8}\b/)?.[0] || '';
+
+    if (!normalized.includes('diffusion') && !normalized.includes('nai')) return '';
+
+    // 3. 兼容早期带明文 full/curated 的旧图片
+    if (/\bv5\b.*\bfull\b/.test(normalized)) return 'nai-diffusion-5-full';
+    if (/\bv5\b.*\bcurated\b/.test(normalized)) return 'nai-diffusion-5-curated';
+
+    // 4. 【核心】通过 V5 Hash 映射表精准区分 Full 与 Curated
+    if (/\bv5\b/.test(normalized)) {
+        return ['657484A5', '0ADF9AB7'].includes(sourceHash)
+            ? 'nai-diffusion-5-full'     // 命中 0ADF9AB7 或 657484A5 为 Full
+            : 'nai-diffusion-5-curated';  // 其他 V5 Hash 判定为 Curated
+    }
+
+    // 附：V4.5 的 Hash 分支
+    if (/\bv4\s*5\b.*\bfull\b/.test(normalized)) return 'nai-diffusion-4-5-full';
+    if (/\bv4\s*5\b.*\bcurated\b/.test(normalized)) return 'nai-diffusion-4-5-curated';
+    if (/\bv4\s*5\b/.test(normalized)) {
+        return ['4BDE2A90', '1229B44F', 'B9F340FD', 'F3D95188'].includes(sourceHash)
+            ? 'nai-diffusion-4-5-full'
+            : 'nai-diffusion-4-5-curated';
+    }
+
+    // 附：V4 的 Hash 分支
+    if (/\bv4\b.*\bfull\b/.test(normalized)) return 'nai-diffusion-4-full';
+    if (/\bv4\b.*\bcurated\b/.test(normalized)) return 'nai-diffusion-4-curated-preview';
+    if (/\bv4\b/.test(normalized)) {
+        return ['37442FCA', '4F49EC75', 'CA4B7203', '79F47848', 'F6302A9D'].includes(sourceHash)
+            ? 'nai-diffusion-4-full'
+            : 'nai-diffusion-4-curated-preview';
+    }
+
+    if (/furry.*v3|furry.*3/.test(normalized)) return 'nai-diffusion-furry-3';
+    if (/v3|diffusion 3/.test(normalized)) return 'nai-diffusion-3';
+    return '';
+}
+```
+
+#### 工作流总结：
+1. 提取 `Source` 中的 8 位 HEX：`text.toUpperCase().match(/\b[0-9A-F]{8}\b/)?.[0]`。
+2. 判定代际为 `V5`。
+3. 查 Hash 列表：**`0ADF9AB7`** 和 **`657484A5`** 对应 **`nai-diffusion-5-full`**，其余 Hash 对应 **`nai-diffusion-5-curated`**。
+4. 随后在前端自动将下拉菜单选中对应的模型，并同步触发 V5 特有的 UI（如透明背景开关、自由坐标模式等）。
+
+---
+
+### 三、NovelAI 官网 (`novelai.net/image`) 的处理机制
+
+在官网前端代码（及 `novelai.net/inspect` 校验工具）中，采用的是 **Model Registry（模型注册表）** 机制：
+
+1. **模型元数据注册表**：
+   官网在内部状态中定义了每个模型的常量对象，每个模型除了内部 ID（如 `nai-diffusion-5-full`）外，还包含一个已发布构建的 Hash 数组，例如：
+   ```typescript
+   {
+     id: 'nai-diffusion-5-full',
+     generation: 'v5',
+     hashes: ['0ADF9AB7', '657484A5'],
+     ...
+   },
+   {
+     id: 'nai-diffusion-5-curated',
+     generation: 'v5',
+     hashes: ['...'], // curated 的 hash 列表
+     ...
+   }
+   ```
+2. **图片导入时的匹配策略**：
+   - 当用户将图片拖入画布或导入时，先读取 PNG tEXt / EXIF 里的 `Source`。
+   - 提取出字符串末尾的 8 位短哈希，遍历注册表执行 `model.hashes.includes(hash)` 进行精确命中。
+   - 如果遇到全新的小版本更新 Hash（未在注册表中及时收录），则根据前缀的 `V5` 退化匹配该代际的主模型（默认回落到 Full）。
+
+---
+
+### 四、结论与落地建议
+
+| 项目 | 能否区分 V5 Full 与 Curated | 实现机制 |
+| :--- | :--- | :--- |
+| **Auto-NovelAI-Refactor** | ❌ **无法区分** | 根本没有读 `Source`，也没有回填 model，完全保留用户界面当前选中的模型 |
+| **NovelAI Studio** | ✅ **完全支持** | 正则抓取 8 位 Hash，通过 `['657484A5', '0ADF9AB7']` 判定 Full，其余判定 Curated |
+| **NovelAI 官网** | ✅ **完全支持** | 内部 Model Registry 维护官方 Checkpoint Hash 白名单查表匹配 |
+
+如果希望在我们的项目（如 WebUI 或 `ai-image-gateway`）中实现**导入图片自动准确识别并切换 V5 模型**，建议直接采纳 **NovelAI Studio** 的方案：
+- 正则提取 `/\b[0-9A-F]{8}\b/`；
+- 命中 `0ADF9AB7` / `657484A5` 即切换为 `nai-diffusion-5-full`，否则为 `nai-diffusion-5-curated`。
