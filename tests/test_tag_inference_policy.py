@@ -28,18 +28,19 @@ class TagInferencePolicyTest(unittest.TestCase):
 
         bundle = service.compose_resolved_nodes(nodes)
 
-        # 验证 barefoot 后面由全局 tag_inference 规则插入了 bare_legs
+        # 验证 barefoot 后面由全局 tag_inference 规则插入了 {{{bare_legs}}}
         self.assertIn("barefoot", bundle.prompt.positive)
-        self.assertIn("bare_legs", bundle.prompt.positive)
+        self.assertIn("{{{bare_legs}}}", bundle.prompt.positive)
 
         # 验证位置在 barefoot 之后
         tokens = bundle.prompt.positive.split(", ")
         bf_idx = tokens.index("barefoot")
-        bl_idx = tokens.index("bare_legs")
+        bl_idx = tokens.index("{{{bare_legs}}}")
         self.assertEqual(bl_idx, bf_idx + 1)
 
     def test_existing_bare_legs_not_duplicated(self):
         service = GenerationService()
+        # 1. 已有无权重 bare_legs 时，不重复追加 {{{bare_legs}}}
         bundle = service.compose_full_prompt(
             "1girl, barefoot, bare_legs, smile",
             prompt_policy={
@@ -49,7 +50,21 @@ class TagInferencePolicyTest(unittest.TestCase):
             },
         )
         tokens = bundle.prompt.positive.split(", ")
-        self.assertEqual(tokens.count("bare_legs"), 1)
+        self.assertIn("bare_legs", tokens)
+        self.assertNotIn("{{{bare_legs}}}", tokens)
+
+        # 2. 已有带权重 {bare_legs} 时，同样不重复追加
+        bundle2 = service.compose_full_prompt(
+            "1girl, barefoot, {bare_legs}, smile",
+            prompt_policy={
+                "enabled": True,
+                "profile": "balanced",
+                "apply_to": {"full_prompt": True},
+            },
+        )
+        tokens2 = bundle2.prompt.positive.split(", ")
+        self.assertIn("{bare_legs}", tokens2)
+        self.assertNotIn("{{{bare_legs}}}", tokens2)
 
 
 if __name__ == "__main__":
