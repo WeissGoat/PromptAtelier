@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from tags_machine_core.web.errors import ApiError
 from tags_machine_core.web.services.generate_batch import GENERATE_BATCH_JOB
+from tags_machine_core.web.services.history_index import NodeFilterSpec
 from tags_machine_core.web.services.output_history import OutputHistory
 from tags_machine_core.web.services.result_index import ResultIndex
 
@@ -67,6 +69,69 @@ def list_history_images(run_id: str, request: Request, offset: int = 0, limit: i
         return _history(request).run_images(run_id, offset=max(0, offset), limit=max(1, min(limit, 1000)))
     except FileNotFoundError as exc:
         raise ApiError(code="history_run_not_found", message=f"History run not found: {run_id}", status_code=404) from exc
+
+
+def _parse_node_filters(nodes: str | None) -> list[NodeFilterSpec]:
+    if not nodes or not nodes.strip():
+        return []
+    try:
+        parsed = json.loads(nodes)
+    except ValueError as exc:
+        raise ApiError(code="invalid_node_filters", message="nodes parameter must be valid JSON array", status_code=400) from exc
+    if not isinstance(parsed, list):
+        raise ApiError(code="invalid_node_filters", message="nodes parameter must be a JSON array", status_code=400)
+    filters: list[NodeFilterSpec] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip()
+        name = str(item.get("name") or "").strip()
+        ref = str(item.get("ref") or "").strip()
+        if not name and not ref:
+            continue
+        filters.append(NodeFilterSpec(role=role, name=name, ref=ref))
+    return filters
+
+
+@router.get("/history/search")
+def search_history_images(
+    request: Request,
+    nodes: str | None = None,
+    q: str = "",
+    backend: str = "",
+    kind: str = "",
+    run_id: str = "",
+    offset: int = 0,
+    limit: int = 200,
+    refresh: bool = False,
+) -> dict:
+    node_filters = _parse_node_filters(nodes)
+    return _history(request).search_images(
+        node_filters=node_filters,
+        q=q,
+        backend=backend,
+        kind=kind,
+        run_id=run_id,
+        offset=max(0, offset),
+        limit=max(1, min(limit, 1000)),
+        refresh=refresh,
+    )
+
+
+@router.get("/history/nodes")
+def list_history_nodes(
+    request: Request,
+    role: str = "",
+    q: str = "",
+    limit: int = 100,
+    refresh: bool = False,
+) -> dict:
+    return _history(request).list_indexed_nodes(
+        role=role,
+        q=q,
+        limit=max(1, min(limit, 500)),
+        refresh=refresh,
+    )
 
 
 @router.get("/results/thumb")

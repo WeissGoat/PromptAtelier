@@ -316,7 +316,7 @@ export type HistoryImageInfo = {
   seed: number | string | null;
   width: number | null;
   height: number | null;
-  nodes: Array<{ role: string; name: string }>;
+  nodes: Array<{ role: string; name: string; ref?: string }>;
   timing: ImageTiming | null;
 };
 
@@ -327,6 +327,45 @@ export type HistoryImage = {
   created_at: number;
   size_bytes: number;
   info: HistoryImageInfo;
+  run_id?: string;
+  run_name?: string;
+  run_kind?: HistoryRunKind;
+};
+
+export type HistoryIndexingStatus = {
+  running: boolean;
+  indexed: number;
+  total: number;
+};
+
+export type HistoryNodeFilter = {
+  role: string;
+  name: string;
+  ref?: string | null;
+};
+
+export type HistorySearchResponse = {
+  schema: "tags-machine-core.web.history-search/v1";
+  total: number;
+  offset: number;
+  limit: number;
+  indexing: HistoryIndexingStatus;
+  backends: string[];
+  matched_runs: Array<{ id: string; match_count: number }>;
+  images: HistoryImage[];
+};
+
+export type HistoryIndexedNode = {
+  role: string;
+  name: string;
+  ref: string | null;
+  count: number;
+};
+
+export type HistoryNodesResponse = {
+  schema: "tags-machine-core.web.history-nodes/v1";
+  indexing: HistoryIndexingStatus;
+  nodes: HistoryIndexedNode[];
 };
 
 export type HistoryRunImagesResponse = {

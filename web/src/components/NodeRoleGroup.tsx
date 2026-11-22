@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 
 import type { NodeReadResponse } from "../api/types";
+import type { OpenHistoryForNode } from "../history/historyFilter";
 import { nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { GroupRole } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
@@ -15,7 +16,15 @@ function isDirty(slot: NodeVariantSlot): boolean {
   return status === "modified" || status === "temporary";
 }
 
-export function NodeRoleGroup({ role, onEditSlot }: { role: GroupRole; onEditSlot?: (slotId: string, response?: NodeReadResponse) => void }) {
+export function NodeRoleGroup({
+  role,
+  onEditSlot,
+  onOpenHistory,
+}: {
+  role: GroupRole;
+  onEditSlot?: (slotId: string, response?: NodeReadResponse) => void;
+  onOpenHistory?: OpenHistoryForNode;
+}) {
   const workspace = useCustomWorkspace();
   const group = workspace.state.groups[role];
   const label = labels[role];
@@ -30,6 +39,7 @@ export function NodeRoleGroup({ role, onEditSlot }: { role: GroupRole; onEditSlo
         onCreateRandom={() => workspace.createRandom(slot.slotId)}
         onEdit={(response) => onEditSlot ? onEditSlot(slot.slotId, response) : workspace.openEditor(slot.slotId, response)}
         onEditRandom={() => workspace.openRandomEditor(slot.slotId)}
+        onOpenHistory={onOpenHistory}
         onRemove={slot.mode === "compare" ? () => {
           if (isDirty(slot) && !window.confirm("删除后将丢失当前 Compare 临时修改，是否继续？")) return;
           workspace.removeCompare(slot.slotId);

@@ -105,4 +105,82 @@ describe("HistoryPage", () => {
     expect(groupTitle("group_003_seed_42")).toBe("Group 3 · Seed 42");
     expect(groupTitle("misc")).toBe("misc");
   });
+
+  it("filters across runs by nodes via the picker and external jump request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/history/runs")) return response({ runs });
+      if (url.includes("/history/images")) {
+        return response({
+          run_id: runs[0].id,
+          path: "F:/o",
+          total: 1,
+          offset: 0,
+          limit: 300,
+          images: [image("F:/o/group_001_seed_1/a.png", "group_001_seed_1", "standing", 1)],
+        });
+      }
+      if (url.includes("/history/nodes")) {
+        return response({
+          schema: "tags-machine-core.web.history-nodes/v1",
+          indexing: { running: false, indexed: 3, total: 3 },
+          nodes: [
+            { role: "character", name: "homura", ref: "F:/design/角色/homura", count: 2 },
+            { role: "artist", name: "p4", ref: "artists/p4", count: 2 },
+          ],
+        });
+      }
+      if (url.includes("/history/search")) {
+        const parsed = new URL(url, "http://localhost");
+        const runId = parsed.searchParams.get("run_id") ?? "";
+        const imgs = runId === runs[1].id
+          ? [{ ...image("F:/outputs/x.png", "", "lying", 3), run_id: runs[1].id, run_name: runs[1].name, run_kind: "loose" }]
+          : [
+            { ...image("F:/o/group_001_seed_1/a.png", "group_001_seed_1", "standing", 1), run_id: runs[0].id, run_name: runs[0].name, run_kind: "sequential" },
+            { ...image("F:/outputs/x.png", "", "lying", 3), run_id: runs[1].id, run_name: runs[1].name, run_kind: "loose" },
+          ];
+        return response({
+          schema: "tags-machine-core.web.history-search/v1",
+          total: imgs.length,
+          offset: 0,
+          limit: 200,
+          indexing: { running: false, indexed: 3, total: 3 },
+          backends: ["comfyui"],
+          matched_runs: [
+            { id: runs[0].id, match_count: 1 },
+            { id: runs[1].id, match_count: 1 },
+          ],
+          images: imgs,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <HistoryPage
+        externalFilterRequest={{
+          nodes: [{ role: "character", name: "homura", ref: "F:/design/角色/homura" }],
+          seq: 1,
+        }}
+      />,
+    );
+
+    expect(await screen.findByText("跨批次节点筛选结果")).toBeTruthy();
+    expect(await screen.findByText("全部匹配结果")).toBeTruthy();
+    expect(screen.getByLabelText("移除节点筛选 homura")).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "standing · homura" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "lying · homura" })).toBeTruthy();
+
+    // 打开节点筛选器追加一个画风节点
+    fireEvent.click(screen.getByRole("button", { name: /按节点筛选/ }));
+    const artistOpt = await screen.findByRole("button", { name: /p4/ });
+    fireEvent.click(artistOpt);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/history/search") && String(input).includes("p4"))).toBe(true);
+    });
+
+    // 清空节点筛选后回到普通批次浏览
+    fireEvent.click(screen.getByRole("button", { name: "清空节点筛选" }));
+    expect(await screen.findByRole("heading", { name: runs[0].job!.label! })).toBeTruthy();
+  });
 });

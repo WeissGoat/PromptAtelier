@@ -1,8 +1,9 @@
-import { ChevronDown, FilePlus2, Layers, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronDown, FilePlus2, History, Layers, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeReadResponse, NodeSummary } from "../api/types";
+import type { OpenHistoryForNode } from "../history/historyFilter";
 import { nodeSlotStatus } from "../nodes/temporaryNodes";
 import type { NodeDocument } from "../nodes/types";
 import type { NodeVariantSlot } from "../workspace/types";
@@ -22,6 +23,7 @@ type NodeSlotProps = {
   onClear: () => void;
   onEdit: (response?: NodeReadResponse) => void;
   onEditRandom?: () => void;
+  onOpenHistory?: OpenHistoryForNode;
   onRemove?: () => void;
   onSelectClothing?: (ref: string | null, node?: NodeDocument | null) => void;
   onAddClothingCompare?: () => void;
@@ -66,6 +68,11 @@ function shortPath(ref: string): string {
   return parts.slice(-2).join(" / ");
 }
 
+function refBaseName(ref: string): string {
+  const parts = ref.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? ref;
+}
+
 export function NodeSlot({
   label,
   slot,
@@ -77,6 +84,7 @@ export function NodeSlot({
   onClear,
   onEdit,
   onEditRandom,
+  onOpenHistory,
   onRemove,
   onSelectClothing,
   onAddClothingCompare,
@@ -227,7 +235,7 @@ export function NodeSlot({
                 {membersOpen ? "收起成员" : "展开成员"}
                 {memberCount ? <span className="chip accent">{memberCount} 个改过</span> : null}
               </button>
-              {membersOpen ? <GroupMembers slot={slot} variant="list" /> : null}
+              {membersOpen ? <GroupMembers onOpenHistory={onOpenHistory} slot={slot} variant="list" /> : null}
             </>
           ) : null}
         </div>
@@ -248,6 +256,21 @@ export function NodeSlot({
                 <span className="slot-node-name">{displayName(slot)}</span>
                 <span className="slot-node-path" title={slot.sourceRef}>{shortPath(slot.sourceRef)}</span>
               </div>
+              {onOpenHistory ? (
+                <button
+                  aria-label={`查看${label}节点出图历史`}
+                  className="slot-node-history-btn btn-sm btn-ghost"
+                  onClick={() => onOpenHistory({
+                    role: slot.role,
+                    name: slot.sourceNode?.name || slot.draftNode?.name || slot.draftNode?.id || refBaseName(slot.sourceRef!),
+                    ref: slot.sourceRef,
+                  })}
+                  title="跳转到出图历史并筛选此节点"
+                  type="button"
+                >
+                  <History size={13} /> 历史
+                </button>
+              ) : null}
             </div>
           ) : slot.draftNode ? (
             <div className="slot-node-card temporary">
@@ -286,6 +309,7 @@ export function NodeSlot({
                   onCreateRandom={onCreateRandomClothing ? () => onCreateRandomClothing(clothingSlot.slotId) : undefined}
                   onEdit={(response) => onEditClothing?.(clothingSlot.slotId, response)}
                   onEditRandom={onEditRandomClothing ? () => onEditRandomClothing(clothingSlot.slotId) : undefined}
+                  onOpenHistory={onOpenHistory}
                   onRemove={
                     clothingSlot.mode === "compare" && onRemoveClothingCompare
                       ? () => onRemoveClothingCompare(clothingSlot.slotId)
@@ -308,7 +332,24 @@ export function NodeSlot({
             <div className="clothing-overlay-head">
               <span>服装覆盖 <small>不选就用角色自带服装</small></span>
               {slot.clothingRef ? (
-                <button className="btn-sm btn-ghost" onClick={() => onSelectClothing?.(null, null)} title="清除服装覆盖" type="button">清除</button>
+                <div className="button-row">
+                  {onOpenHistory ? (
+                    <button
+                      aria-label="查看服装节点出图历史"
+                      className="btn-sm btn-ghost"
+                      onClick={() => onOpenHistory({
+                        role: "clothing",
+                        name: slot.clothingNode?.name || refBaseName(slot.clothingRef!),
+                        ref: slot.clothingRef,
+                      })}
+                      title="跳转到出图历史并筛选此服装节点"
+                      type="button"
+                    >
+                      <History size={13} /> 历史
+                    </button>
+                  ) : null}
+                  <button className="btn-sm btn-ghost" onClick={() => onSelectClothing?.(null, null)} title="清除服装覆盖" type="button">清除</button>
+                </div>
               ) : null}
             </div>
             <NodePicker

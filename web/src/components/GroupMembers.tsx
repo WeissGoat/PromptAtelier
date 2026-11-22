@@ -1,8 +1,9 @@
-import { CheckSquare, EyeOff, Pencil, Play, RefreshCw, Search, Square, Undo2 } from "lucide-react";
+import { CheckSquare, EyeOff, History, Pencil, Play, RefreshCw, Search, Square, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodePoolCandidate, NodeReadResponse } from "../api/types";
+import type { OpenHistoryForNode } from "../history/historyFilter";
 import { listAllPoolNodes } from "../randomNodes/api";
 import { withoutSelection } from "../randomNodes/resolve";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
@@ -34,7 +35,15 @@ export function memberEdited(slot: NodeVariantSlot, ref: string): boolean {
  * 节点组成员：整组展开成一个个节点，可以勾选只在部分成员里随机/按序，也可以逐个编辑。
  * 没有勾选记录（spec.selection 为空）表示整组参与；勾选记录为空数组表示一个都没选。
  */
-export function GroupMembers({ slot, variant = "list" }: { slot: NodeVariantSlot; variant?: "list" | "grid" }) {
+export function GroupMembers({
+  slot,
+  variant = "list",
+  onOpenHistory,
+}: {
+  slot: NodeVariantSlot;
+  variant?: "list" | "grid";
+  onOpenHistory?: OpenHistoryForNode;
+}) {
   const workspace = useCustomWorkspace();
   const spec = slot.randomSpec;
   const browseSpec = useMemo(() => (spec ? withoutSelection(spec) : null), [spec]);
@@ -244,6 +253,17 @@ export function GroupMembers({ slot, variant = "list" }: { slot: NodeVariantSlot
               <div className="group-member-actions">
                 {sequential && checked && !isNext && order !== undefined ? (
                   <button aria-label={`从 ${member.name} 开始`} className="icon-button btn-ghost" onClick={() => workspace.setPoolCursor(slot.slotId, order)} title="从这里开始按顺序跑" type="button"><Play size={13} /></button>
+                ) : null}
+                {onOpenHistory ? (
+                  <button
+                    aria-label={`查看成员 ${member.name} 出图历史`}
+                    className="icon-button btn-ghost"
+                    onClick={() => onOpenHistory({ role: slot.role, name: member.name, ref: member.ref })}
+                    title="跳转到出图历史并筛选此节点"
+                    type="button"
+                  >
+                    <History size={13} />
+                  </button>
                 ) : null}
                 <button aria-label={`编辑成员 ${member.name}`} className="icon-button btn-ghost" disabled={opening === member.ref} onClick={() => void editMember(member)} title="编辑这个成员" type="button"><Pencil size={13} /></button>
                 {canExclude ? (

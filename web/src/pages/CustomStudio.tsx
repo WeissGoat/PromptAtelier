@@ -7,6 +7,7 @@ import { NodeRoleGroup } from "../components/NodeRoleGroup";
 import { NodeWorkspaceEditor } from "../components/NodeWorkspaceEditor";
 import { PromptBehaviorGroupPanel } from "../components/PromptBehaviorGroupPanel";
 import { RenderParamsPanel } from "../components/RenderParamsPanel";
+import type { OpenHistoryForNode } from "../history/historyFilter";
 import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import type { OpenImageNodeInCustom } from "../workspace/useOpenImageNodeInCustom";
@@ -38,7 +39,13 @@ function RecipeSection({ title, hint, defaultOpen = true, children }: { title: s
   );
 }
 
-export function CustomStudio({ onOpenNode }: { onOpenNode?: OpenImageNodeInCustom }) {
+export function CustomStudio({
+  onOpenNode,
+  onOpenHistory,
+}: {
+  onOpenNode?: OpenImageNodeInCustom;
+  onOpenHistory?: OpenHistoryForNode;
+}) {
   const workspace = useCustomWorkspace();
   const params = workspace.state.params;
   const groups = workspace.state.groups;
@@ -74,9 +81,9 @@ export function CustomStudio({ onOpenNode }: { onOpenNode?: OpenImageNodeInCusto
           </button>
         </div>
         {workspace.storageWarning ? <div className="inline-warning">{workspace.storageWarning}</div> : null}
-        <NodeRoleGroup onEditSlot={workspace.openEditor} role="artist" />
-        <NodeRoleGroup onEditSlot={workspace.openEditor} role="character" />
-        <NodeRoleGroup onEditSlot={workspace.openEditor} role="action" />
+        <NodeRoleGroup onEditSlot={workspace.openEditor} onOpenHistory={onOpenHistory} role="artist" />
+        <NodeRoleGroup onEditSlot={workspace.openEditor} onOpenHistory={onOpenHistory} role="character" />
+        <NodeRoleGroup onEditSlot={workspace.openEditor} onOpenHistory={onOpenHistory} role="action" />
 
         <RecipeSection hint="尺寸 · 轮数 · 种子" title="出图参数">
           <label className="field compact">
@@ -109,7 +116,7 @@ export function CustomStudio({ onOpenNode }: { onOpenNode?: OpenImageNodeInCusto
           <PromptBehaviorGroupPanel characterSections={characterSections} comfyuiArtists={mayUseComfyUI} />
         </RecipeSection>
       </section>
-      <NodeWorkspaceEditor />
+      <NodeWorkspaceEditor onOpenHistory={onOpenHistory} />
       <CustomGeneratePanel onOpenNode={onOpenNode} />
     </main>
   );

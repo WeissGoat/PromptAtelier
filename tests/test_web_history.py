@@ -15,15 +15,22 @@ from tags_machine_core.web.services.output_history import OutputHistory
 from tags_machine_core.web.services.result_index import ResultIndex
 
 
-def write_png(path: Path, *, seed: int, timing: dict | None = None) -> None:
+def write_png(
+    path: Path,
+    *,
+    seed: int,
+    timing: dict | None = None,
+    backend: str = "comfyui",
+    nodes: list[dict] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     info = PngInfo()
     info.add_text("tags_machine_core", json.dumps({
-        "backend": "comfyui",
-        "nodes": [{"role": "action", "id": "F:\\design\\动作\\standing"}],
+        "backend": backend,
+        "nodes": nodes if nodes is not None else [{"role": "action", "id": "F:\\design\\动作\\standing"}],
         "render": {"seed": seed, "width": 64, "height": 96},
         "timing": timing,
-    }))
+    }, ensure_ascii=False))
     Image.new("RGB", (64, 96), "white").save(path, pnginfo=info)
 
 
@@ -138,3 +145,143 @@ class HistoryHttpTest(TestCase):
         os.utime(image, None)
         self.assertEqual(client.get("/api/results/thumb", params={"path": str(image), "size": 160}).status_code, 200)
         self.assertEqual(client.get("/api/results/thumb", params={"path": str(Path(self._tmp.name) / "nope.png")}).status_code, 404)
+
+    def test_history_search_and_nodes_filter_across_runs(self):
+        run_a = self.root / "compares" / "compare_20261001000000_aaaa"
+        run_b = self.root / "compares" / "random_20261002000000_bbbb"
+        write_png(
+            run_a / "group_001_seed_1" / "a1.png",
+            seed=1,
+            backend="comfyui",
+            nodes=[
+                {"role": "artist", "id": "p4", "ref": "artists/p4"},
+                {"role": "character", "id": "homura", "ref": "F:\\design\\角色\\homura"},
+                {"role": "action", "id": "standing", "ref": "F:\\design\\动作\\standing"},
+            ],
+        )
+        time.sleep(0.02)
+        write_png(
+            run_a / "group_002_seed_2" / "a2.png",
+            seed=2,
+            backend="novelai",
+            nodes=[
+                {"role": "artist", "id": "p4", "ref": "artists/p4"},
+                {"role": "character", "id": "madoka", "ref": "F:\\design\\角色\\madoka"},
+                {"role": "action", "id": "sitting", "ref": "F:\\design\\动作\\sitting"},
+            ],
+        )
+        time.sleep(0.02)
+        # 旧图没有 ref，仅靠 id 也能按 name 回退命中。
+        write_png(
+            run_b / "group_001_seed_3" / "b1.png",
+            seed=3,
+            backend="novelai",
+            nodes=[
+                {"role": "artist", "id": "p5"},
+                {"role": "character", "id": "F:\\design\\角色\\homura"},
+            ],
+        )
+
+        db_path = Path(self._tmp.name) / "history_index.sqlite3"
+        app = create_app(result_index=ResultIndex(roots=[self.root]))
+        app.state.output_history = OutputHistory(self.root, index_path=db_path)
+        client = TestClient(app)
+
+        try:
+            # 1) 列出索引到的节点
+            chars = client.get("/api/history/nodes", params={"role": "character"}).json()
+            self.assertFalse(chars["indexing"]["running"])
+            by_name = {item["name"]: item["count"] for item in chars["nodes"]}
+            self.assertEqual(by_name["homura"], 2)
+            self.assertEqual(by_name["madoka"], 1)
+
+            # 2) 按单节点（含 ref）跨批次筛选，应同时命中 run_a 的带 ref 图和 run_b 的旧图
+            res = client.get(
+                "/api/history/search",
+                params={"nodes": json.dumps([{"role": "character", "name": "homura", "ref": "F:/design/角色/homura"}])},
+            ).json()
+            self.assertEqual(res["total"], 2)
+            self.assertEqual([img["filename"] for img in res["images"]], ["b1.png", "a1.png"])
+            self.assertEqual(
+                {item["id"]: item["match_count"] for item in res["matched_runs"]},
+                {
+                    "compares/compare_20261001000000_aaaa": 1,
+                    "compares/random_20261002000000_bbbb": 1,
+                },
+            )
+            self.assertEqual(res["backends"], ["comfyui", "novelai"])
+
+            # 3) 多节点 AND 筛选（character=homura + artist=p4）
+            combo = client.get(
+                "/api/history/search",
+                params={
+                    "nodes": json.dumps([
+                        {"role": "character", "name": "homura", "ref": "F:/design/角色/homura"},
+                        {"role": "artist", "name": "p4", "ref": "artists/p4"},
+                    ]),
+                },
+            ).json()
+            self.assertEqual(combo["total"], 1)
+            self.assertEqual(combo["images"][0]["filename"], "a1.png")
+
+            # 4) 限定 run_id 时，matched_runs 仍保留全部命中批次供侧边栏切换
+            narrowed = client.get(
+                "/api/history/search",
+                params={
+                    "nodes": json.dumps([{"role": "character", "name": "homura"}]),
+                    "run_id": "compares/compare_20261001000000_aaaa",
+                },
+            ).json()
+            self.assertEqual(narrowed["total"], 1)
+            self.assertEqual(narrowed["images"][0]["filename"], "a1.png")
+            self.assertEqual(len(narrowed["matched_runs"]), 2)
+
+            # 5) 无效 nodes 参数返回 400
+            self.assertEqual(client.get("/api/history/search", params={"nodes": "not-json"}).status_code, 400)
+        finally:
+            app.state.output_history.close()
+
+    def test_history_search_handles_utf8_text_chunk_and_short_ref_mismatch(self):
+        """回归测试：真图用 ensure_ascii=False 写 UTF-8 tEXt（含中文目录如 画风），且有的图存短 ref。"""
+        run_a = self.root / "compares" / "primary_20261003000000_cccc"
+        write_png(
+            run_a / "u1.png",
+            seed=10,
+            backend="novelai",
+            nodes=[{
+                "role": "artist",
+                "id": "22e5cc071e_ixyv5",
+                "ref": "F:\\my_project\\design\\画风\\22e5cc071e_ixyv5",
+            }],
+        )
+        write_png(
+            run_a / "u2.png",
+            seed=11,
+            backend="novelai",
+            nodes=[{
+                "role": "artist",
+                "id": "22e5cc071e_ixyv5",
+                "ref": "22e5cc071e_ixyv5",
+            }],
+        )
+        app = create_app(result_index=ResultIndex(roots=[self.root]))
+        app.state.output_history = OutputHistory(self.root)
+        client = TestClient(app)
+        try:
+            res = client.get(
+                "/api/history/search",
+                params={
+                    "nodes": json.dumps([{
+                        "role": "artist",
+                        "name": "22e5cc071e_ixyv5",
+                        "ref": "F:\\my_project\\design\\画风\\22e5cc071e_ixyv5",
+                    }]),
+                },
+            ).json()
+            self.assertEqual(res["total"], 2)
+            self.assertEqual(
+                {img["info"]["nodes"][0]["ref"] for img in res["images"]},
+                {"F:\\my_project\\design\\画风\\22e5cc071e_ixyv5", "22e5cc071e_ixyv5"},
+            )
+        finally:
+            app.state.output_history.close()

@@ -280,9 +280,24 @@
 
 .slot-node-meta {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.slot-node-history-btn {
+  flex: none;
+  gap: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.node-editor-title-actions {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 4px;
 }
 
 .slot-node-name {

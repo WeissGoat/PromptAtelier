@@ -116,7 +116,11 @@ def create_app(
             roots.append(config.legacy.tags_machine_root)
     roots.extend(config.web.history_roots)
     app.state.result_index = result_index or ResultIndex(roots=roots, thumb_dir=web_data_dir / "thumbs")
-    app.state.output_history = OutputHistory(config.runtime.output_dir, extra_roots=config.web.history_roots)
+    app.state.output_history = OutputHistory(
+        config.runtime.output_dir,
+        extra_roots=config.web.history_roots,
+        index_path=web_data_dir / "history_index.sqlite3",
+    )
     app.state.comfyui_targets = ComfyUITargetService(config.comfyui)
     app.state.novelai_tokens = novelai_token_store or NovelAITokenStore(
         web_data_dir / "novelai_tokens.json",
@@ -125,6 +129,8 @@ def create_app(
     # 上次关掉时还没登录完的账号，服务启动后继续在后台登录。放在启动钩子里：
     # 测试直接 TestClient(app) 不触发启动钩子，不会拿真实账号去登录。
     app.router.on_startup.append(app.state.novelai_tokens.kick_login_queue)
+    # 启动后在后台自动预热出图历史 SQLite 节点索引，进入出图历史页时直接秒开。
+    app.router.on_startup.append(app.state.output_history.start_background_warmup)
     policy_provider = build_prompt_policy_provider(
         config,
         config_path=resolved_config_path,

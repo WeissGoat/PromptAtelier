@@ -133,6 +133,17 @@ describe("NodeSlot", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除Character Compare节点" }));
     expect(onRemove).toHaveBeenCalled();
   });
+
+  it("opens history filtered by the selected node when clicking the history button", () => {
+    const onOpenHistory = vi.fn();
+    render(<NodeSlot {...renderSlotProps(baseSlot)} onOpenHistory={onOpenHistory} />);
+    fireEvent.click(screen.getByRole("button", { name: "查看Character节点出图历史" }));
+    expect(onOpenHistory).toHaveBeenCalledWith({
+      role: "character",
+      name: "source-file",
+      ref: "F:/nodes/source",
+    });
+  });
 });
 
 function renderSlotProps(slot: NodeVariantSlot) {

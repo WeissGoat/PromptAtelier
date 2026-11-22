@@ -1,8 +1,9 @@
-import { Braces, ChevronRight, FileCode2, FileJson2, MousePointerClick, RotateCcw, Save, X } from "lucide-react";
+import { Braces, ChevronRight, FileCode2, FileJson2, History, MousePointerClick, RotateCcw, Save, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { apiPost, apiPut, errorMessage } from "../api/client";
 import type { NodeReadResponse, NodeSavePreviewResponse } from "../api/types";
+import type { OpenHistoryForNode } from "../history/historyFilter";
 import type { NodeDocument } from "../nodes/types";
 import { useCustomWorkspace } from "../workspace/CustomWorkspaceProvider";
 import type { EditorTab } from "../workspace/types";
@@ -69,7 +70,7 @@ function IdleEditor() {
   );
 }
 
-export function NodeWorkspaceEditor() {
+export function NodeWorkspaceEditor({ onOpenHistory }: { onOpenHistory?: OpenHistoryForNode }) {
   const workspace = useCustomWorkspace();
   const editor = workspace.state.editor;
   const slot = editor.slotId ? workspace.findSlot(editor.slotId) : null;
@@ -224,7 +225,24 @@ export function NodeWorkspaceEditor() {
             {isMember ? <span className="chip violet">节点组成员</span> : null}
           </div>
         </div>
-        <button aria-label="关闭节点编辑器" className="icon-button btn-ghost" onClick={requestClose} title="关闭" type="button"><X size={17} /></button>
+        <div className="node-editor-title-actions">
+          {onOpenHistory && target.sourceRef ? (
+            <button
+              aria-label="查看当前编辑节点的出图历史"
+              className="btn-sm btn-ghost"
+              onClick={() => onOpenHistory({
+                role: target.role,
+                name: target.sourceNode?.name || draft.name || draft.id,
+                ref: target.sourceRef,
+              })}
+              title="跳转到出图历史并筛选此节点"
+              type="button"
+            >
+              <History size={14} /> 出图历史
+            </button>
+          ) : null}
+          <button aria-label="关闭节点编辑器" className="icon-button btn-ghost" onClick={requestClose} title="关闭" type="button"><X size={17} /></button>
+        </div>
       </div>
       <div className="editor-tabs" role="tablist">
         <button aria-selected={editor.tab === "form"} className={editor.tab === "form" ? "active" : ""} onClick={() => setTab("form")} role="tab" type="button"><Braces size={15} /> Form</button>
