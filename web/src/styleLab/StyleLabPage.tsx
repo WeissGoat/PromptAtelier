@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, errorMessage } from "../api/client";
 import type {
   Analysis,
+  CustomGroups,
   ImageRecord,
   LLMStatus,
   Recipe,
@@ -22,6 +23,8 @@ import {
   deleteWorkspace,
   createRecipe,
   getAnalysis,
+  getCustomGroups,
+  saveCustomGroups,
   getLLMStatus,
   getWorkspace,
   listRecipes,
@@ -37,6 +40,9 @@ import {
 } from "./api";
 import { CommonalityPanel } from "./CommonalityPanel";
 import { GroupPanel, groupImageIds, groupOfImage, monthBuckets, postBuckets, type GroupMode } from "./GroupPanel";
+import { CustomGroupsDialog } from "./CustomGroupsDialog";
+import { TestPlansDialog } from "./TestPlansDialog";
+import { cleanRepresentatives, customImageIds, EMPTY_CUSTOM_GROUPS, newCustomGroup, UNGROUPED } from "./customGroups";
 import { emptyFilters, filterImages, FilterPanel, ImageGrid, type ImageFilters } from "./ImageBrowser";
 import { ImageInspector } from "./ImageInspector";
 import { ImageViewerProvider } from "./ImageViewer";
@@ -119,11 +125,14 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
   const [regenDuplicate, setRegenDuplicate] = useState<DuplicateRequest | null>(null);
   const [analyzing, setAnalyzing] = useState<{ jobId: string; done: number; total: number } | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [customGroups, setCustomGroups] = useState<CustomGroups>(EMPTY_CUSTOM_GROUPS);
+  const [managingGroups, setManagingGroups] = useState(false);
+  const [testSelection, setTestSelection] = useState<string[] | null>(null);
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [comparingRecipes, setComparingRecipes] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [renameRequest, setRenameRequest] = useState(0);
-  const [groupMode, setGroupMode] = useState<GroupMode>(() => load<GroupMode>(STORAGE.groupMode, "style"));
+  const [groupMode, setGroupMode] = useState<GroupMode>(() => load<GroupMode>(STORAGE.groupMode, "custom"));
   const [openRecipes, setOpenRecipes] = useState<Record<string, string | null>>(() => load(STORAGE.recipe, {}));
   const [creatingRecipe, setCreatingRecipe] = useState(false);
   // 刚从图片生成、还没保存的配方：改了才保存，没动过就不留下。
@@ -137,8 +146,9 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
   const posts = useMemo(() => postBuckets(images), [images]);
   const months = useMemo(() => monthBuckets(images), [images]);
   const groupIds = useMemo(
-    () => groupImageIds(analysis, selectedGroup, groupMode === "post" ? posts : groupMode === "month" ? months : []),
-    [analysis, selectedGroup, groupMode, posts, months],
+    () => groupMode === "custom" && selectedGroup ? new Set(customImageIds(customGroups, selectedGroup))
+      : groupImageIds(analysis, selectedGroup, groupMode === "post" ? posts : groupMode === "month" ? months : []),
+    [analysis, selectedGroup, groupMode, posts, months, customGroups],
   );
   const filtered = useMemo(
     () => filterImages(groupIds ? images.filter((image) => groupIds.has(image.id)) : images, filters),
@@ -212,6 +222,34 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
     }
   }, [workspace]);
 
+  const refreshCustomGroups = useCallback(async () => {
+    if (!workspace) return;
+    try { setCustomGroups(await getCustomGroups(workspace.id)); }
+    catch (exc) { setError(errorMessage(exc)); }
+  }, [workspace]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCustomGroups(EMPTY_CUSTOM_GROUPS); setManagingGroups(false); setTestSelection(null);
+    if (workspace) void getCustomGroups(workspace.id).then((value) => { if (!cancelled) setCustomGroups(value); }).catch((exc) => { if (!cancelled) setError(errorMessage(exc)); });
+    return () => { cancelled = true; };
+  }, [workspace]);
+
+  const copyAutoGroup = async () => {
+    if (!workspace || !selectedGroup) return;
+    const ids = groupImageIds(analysis, selectedGroup);
+    if (!ids) return;
+    const parent = analysis?.groups.find((group) => group.id === selectedGroup || group.children.some((child) => child.id === selectedGroup));
+    const group = newCustomGroup(parent?.name ?? "自定义画风");
+    group.origin_auto_group_id = selectedGroup;
+    group.reason = "从自动分组复制成员，待检查画风依据";
+    try {
+      const next = await saveCustomGroups(workspace.id, cleanRepresentatives({ ...customGroups, groups: [...customGroups.groups, group],
+        membership: { ...customGroups.membership, ...Object.fromEntries([...ids].map((id) => [id, group.id])) } }));
+      setCustomGroups(next); setGroupMode("custom"); save(STORAGE.groupMode, "custom"); setSelectedGroup(group.id);
+    } catch (exc) { setError(errorMessage(exc)); }
+  };
+
   useEffect(() => {
     setAnalysis(null);
     setRecipes([]);
@@ -238,7 +276,9 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
     setRegenError(null);
     try {
       const { recipe } = await createRecipe(workspace.id, selectedImage.id, {
-        groupId: groupOfImage(analysis, selectedImage.id),
+        groupId: groupMode === "custom" ? null : groupOfImage(analysis, selectedImage.id),
+        sourceGroup: groupMode === "custom" && customGroups.membership[selectedImage.id]
+          ? { kind: "custom", id: customGroups.membership[selectedImage.id] } : null,
         draft: true,
       });
       openRecipe(null);
@@ -544,12 +584,19 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
         </div>
       ) : null}
       {notice ? <div className="sl-banner">{notice}</div> : null}
+      {workspace ? <div className="sl-workflow-toolbar">
+        <span>第一步：分析分组、建立配方 → 第二步：选定后测试</span>
+        <button onClick={() => setManagingGroups(true)} type="button">管理分组</button>
+        <button onClick={() => { void refreshCustomGroups(); void refreshRecipes(); void refreshAnalysis(); }} type="button">刷新分组与配方</button>
+        <button onClick={() => setTestSelection([])} type="button">选择配方测试</button>
+      </div> : null}
 
       {workspace && openRecipeId ? (
         <RecipeWorkspace
           analysisReady={Boolean(analysis && analysis.classified > 0)}
           categories={analysis?.categories ?? {}}
           groups={analysis?.groups ?? []}
+          customGroups={customGroups}
           images={images}
           onBack={() => openRecipe(null)}
           onCreated={(recipe) => {
@@ -585,6 +632,11 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
                 analyzing={analyzing && analyzing.total ? analyzing : null}
                 llmAvailable={Boolean(llm?.available)}
                 mode={groupMode}
+                customGroups={customGroups}
+                workspaceId={workspace.id}
+                onManageGroups={() => setManagingGroups(true)}
+                onCopyAutoGroup={() => void copyAutoGroup()}
+                onTestGroup={setTestSelection}
                 monthBuckets={months}
                 onChangeMode={(mode) => {
                   setGroupMode(mode);
@@ -663,6 +715,13 @@ export function StyleLabPage({ onOpenCustom }: StyleLabPageProps = {}) {
           workspaceId={workspace.id}
         />
       ) : null}
+      {workspace && managingGroups ? <CustomGroupsDialog
+        document={customGroups} images={images} initialGroup={selectedGroup === UNGROUPED ? null : selectedGroup}
+        onClose={() => setManagingGroups(false)} onSaved={(doc) => { setCustomGroups(doc); void refreshRecipes(); }} workspaceId={workspace.id}
+      /> : null}
+      {workspace && testSelection !== null ? <TestPlansDialog
+        initialIds={testSelection} onClose={() => setTestSelection(null)} recipes={recipes} workspaceId={workspace.id}
+      /> : null}
       {dragging ? (
         <div className="sl-drop-overlay">
           {workspace?.kind === "files" ? (

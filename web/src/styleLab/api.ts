@@ -368,6 +368,8 @@ export type Recipe = {
   updated_at: number;
   source_image_id: string | null;
   group_id: string | null;
+  source_group?: GroupRef | null;
+  preparation?: PreparationState | null;
   stage: "split" | "edit";
   locked: boolean;
   prefix: RecipeToken[];
@@ -388,7 +390,8 @@ export type Recipe = {
 export type RecipeSummary = Pick<
   Recipe,
   "id" | "name" | "version" | "stage" | "locked" | "source_image_id" | "group_id" | "updated_at"
->;
+> & { source_group?: GroupRef | null; preparation?: PreparationState | null;
+  test_summary?: { plan_id: string; status: string; roles: Record<string, string[]> } | null };
 
 export type RecipePreview = {
   prompt: string;
@@ -425,12 +428,13 @@ export function listRecipes(workspaceId: string): Promise<{ recipes: RecipeSumma
 export function createRecipe(
   workspaceId: string,
   imageId: string,
-  options: { name?: string; groupId?: string | null; draft?: boolean } = {},
+  options: { name?: string; groupId?: string | null; sourceGroup?: GroupRef | null; draft?: boolean } = {},
 ): Promise<{ recipe: Recipe }> {
   return apiPost(`${ws(workspaceId)}/recipes`, {
     image_id: imageId,
     name: options.name,
     group_id: options.groupId,
+    source_group: options.sourceGroup,
     draft: options.draft,
   });
 }
@@ -698,4 +702,86 @@ export function startProbe(workspaceId: string, recipeId: string, settings: Prob
 
 export function getRecipeVersion(workspaceId: string, recipeId: string, version: number): Promise<{ recipe: Recipe }> {
   return apiGet(`${recipeUrl(workspaceId, recipeId)}/versions/${version}`);
+}
+
+// Persistent custom grouping and explicit two-phase workflow.
+export type GroupRef = { kind: "custom" | "auto"; id: string };
+export type PreparationState = {
+  status: "needs_review" | "ready" | "stale" | "source_missing";
+  reason?: string;
+  analysis_id?: string;
+};
+export type CustomGroup = {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  kind: "style" | "review" | "archive";
+  notes: string;
+  reason: string;
+  evidence_strength: "strong" | "limited" | "review";
+  evidence_image_ids: string[];
+  representative_image_id: string | null;
+  origin_auto_group_id: string | null;
+  order: number;
+  locked: boolean;
+  updated_by: "user" | "agent";
+  image_ids: string[];
+  image_count: number;
+  post_count: number;
+  post_share: number;
+  usable_count: number;
+  date_from: string | null;
+  date_to: string | null;
+  missing_image_ids: string[];
+};
+export type CustomGroups = {
+  revision: number;
+  groups: CustomGroup[];
+  membership: Record<string, string>;
+  locked_image_ids: string[];
+  ungrouped_image_ids: string[];
+};
+export function getCustomGroups(workspaceId: string): Promise<CustomGroups> {
+  return apiGet(`${ws(workspaceId)}/custom-groups`);
+}
+export function saveCustomGroups(workspaceId: string, groups: CustomGroups): Promise<CustomGroups> {
+  return apiPut(`${ws(workspaceId)}/custom-groups`, { ...groups, actor: "user" });
+}
+export type TestPlanItem = {
+  id: string;
+  recipe_id: string;
+  label: string;
+  kind: "regenerate" | "recipe";
+  status: string;
+  reused?: boolean;
+  error?: string;
+  run_id?: string;
+  blocks_following?: boolean;
+  preview: { prompt: string; negative_prompt: string; seed: number; size: { width: number; height: number }; model: string };
+  results?: RunItem[];
+};
+export type TestPlan = {
+  id: string;
+  status: string;
+  created_at: number;
+  job_id: string | null;
+  recipe_ids: string[];
+  recipes: Record<string, { name: string; hash: string }>;
+  shelf: MaterialShelf;
+  items: TestPlanItem[];
+  missing_variants: string[];
+  estimated_count: number;
+  reuse_count: number;
+};
+export function createTestPlan(workspaceId: string, recipeIds: string[], includeMaterials: boolean): Promise<TestPlan> {
+  return apiPost(`${ws(workspaceId)}/test-plans`, { recipe_ids: recipeIds, include_materials: includeMaterials });
+}
+export function getTestPlan(workspaceId: string, id: string): Promise<TestPlan> {
+  return apiGet(`${ws(workspaceId)}/test-plans/${encodeURIComponent(id)}`);
+}
+export function listTestPlans(workspaceId: string): Promise<{ plans: TestPlan[] }> {
+  return apiGet(`${ws(workspaceId)}/test-plans`);
+}
+export function startTestPlan(workspaceId: string, id: string): Promise<TestPlan> {
+  return apiPost(`${ws(workspaceId)}/test-plans/${encodeURIComponent(id)}/start`, {});
 }

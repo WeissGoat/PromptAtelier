@@ -2,8 +2,10 @@ import { ArrowLeft, FlaskConical, GitCompareArrows, Play, Save, Trash2 } from "l
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../api/client";
+import { customAsStyleGroup } from "./customGroups";
 import type {
   ArtistExport,
+  CustomGroups,
   AnyRun,
   ArtistTestRun,
   ImageRecord,
@@ -93,6 +95,7 @@ type RecipeWorkspaceProps = {
   recipes: RecipeSummary[];
   images: ImageRecord[];
   groups: StyleGroup[];
+  customGroups?: CustomGroups;
   categories: Record<string, TagCategory>;
   analysisReady: boolean;
   translateOn: boolean;
@@ -112,6 +115,7 @@ export function RecipeWorkspace({
   recipes,
   images,
   groups,
+  customGroups,
   categories,
   analysisReady,
   translateOn,
@@ -176,21 +180,26 @@ export function RecipeWorkspace({
 
   const source = useMemo(() => images.find((image) => image.id === draft?.source_image_id) ?? null, [images, draft?.source_image_id]);
   const group = useMemo(() => {
+    if (draft?.source_group?.kind === "custom") {
+      const found = customGroups?.groups.find((item) => item.id === draft.source_group?.id);
+      return found && customGroups ? customAsStyleGroup(found, customGroups) : null;
+    }
+    const groupId = draft?.source_group?.id ?? draft?.group_id;
     for (const item of groups) {
-      if (draft?.group_id && (item.id === draft.group_id || item.children.some((child) => child.id === draft.group_id))) return item;
+      if (groupId && (item.id === groupId || item.children.some((child) => child.id === groupId))) return item;
     }
     return groups.find((item) => source && item.image_ids.includes(source.id)) ?? null;
-  }, [groups, draft?.group_id, source]);
+  }, [groups, customGroups, draft?.source_group, draft?.group_id, source]);
   // 配方可能挂在某个变体（子分组）上：回归对照只从这个变体里挑图。
   const groupImageIds = useMemo(() => {
-    if (!group) return null;
-    const child = group.children.find((item) => item.id === draft?.group_id);
+    if (!group) return draft?.source_group?.kind === "custom" ? [] : null;
+    const child = group.children.find((item) => item.id === (draft?.source_group?.id ?? draft?.group_id));
     return (child ?? group).image_ids;
   }, [group, draft?.group_id]);
   const frequency = useMemo(() => {
-    const ids = new Set(group?.image_ids ?? images.map((image) => image.id));
+    const ids = new Set(group?.image_ids ?? (draft?.source_group?.kind === "custom" ? [] : images.map((image) => image.id)));
     return postFrequency(images.filter((image) => ids.has(image.id)));
-  }, [group, images]);
+  }, [group, images, draft?.source_group?.kind]);
 
   // 划分时的热力图看整个工作区（不只是所属分组）。
   const heat = useMemo(

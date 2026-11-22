@@ -1,5 +1,30 @@
 # Style Lab 规格 v1
 
+## 自定义分组与两阶段流程（2026-11-15）
+
+工作区新增持久保存的自定义分组，与自动画风、投稿、月份视图并存，散图也可使用。
+数据放在各工作区 `data_dir/custom_groups.json`，带 revision 的乐观并发检查；组 id 稳定，
+支持家族/子组两级、成员调整、分析依据、代表图、证据引用及人工锁定。重扫不清空归属，新增图进入未分组。
+
+Agent 的 `$style-lab` 默认只做准备：建工作区、分析、自定义分组、完整划分与保存配方。
+用户指定现有组或配方后才进入测试，包括原参重生。配方新增 `source_group:{kind,id}` 明确归属，
+保留旧 `group_id` 的自动组兼容；`preparation` 记录 ready/needs_review/stale/source_missing，测试覆盖独立展示。
+
+新增接口（相对于 `/api/style-lab/workspaces/{id}`）：
+
+- `GET/PUT /custom-groups`：读取/保存完整组文档，Agent 写入带 `actor:agent` 保护人工锁定。
+- `GET /analysis-context?offset=0&limit=20`：投稿级分析上下文分页。
+- `POST /preparations`、`GET /preparations/{id}`：按稳定任务 id 应用/恢复组与配方，不提交出图。
+- `POST/GET /test-plans`、`GET /test-plans/{id}`：建立预览/读取测试快照及历史，不提交出图。
+- `POST /test-plans/{id}/start`：显式开始，按源图原参、配方原图、素材变体串行执行。
+
+测试快照保留完整内容、素材架及 exclusions、源图指纹和最终请求；不改写保存配方。
+同源原参去重，有效同参结果复用；配方主体即便未增加画风版本，变化也会使未开始计划失效。
+素材变体未准备时显示 awaiting_content，交给 Agent 或编辑器准备后另建计划；Web 不会自动启动外部 Agent。
+
+详细交互与验收见 [自定义分组与两阶段设计](superpowers/specs/2026-11-15-style-lab-custom-groups-design.md)，
+请求示例见项目 skill 的 `references/workflow-api.md`。
+
 Style Lab 是 PromptAtelier 里的画风复刻工作台，用来替代 `artist-style-reproduction` skill 里由 agent 手工完成的流程：
 
 ```text

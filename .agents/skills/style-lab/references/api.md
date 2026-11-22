@@ -1,5 +1,7 @@
 # Style Lab API
 
+两阶段流程首先读 [workflow-api.md](workflow-api.md)。下列单图接口仅在用户明确选定测试范围之后使用；准备阶段不能调用 regenerate/generate。配方变体用 test-plans 快照，无需临时覆盖保存配方。
+
 路径相对于 `/api/style-lab`；`w/i/r/u` 是工作区、图片、配方、run 的真实 id。用 `client.py api` 和 UTF-8 JSON 文件，避免 PowerShell 多层引号。
 
 ## 创建与读取

@@ -149,7 +149,7 @@ def pick_regression_images(
     images: list[ImageRecord], candidate_ids: list[str] | None, *, first_id: str | None, limit: int = DEFAULT_REGRESSION_COUNT
 ) -> list[ImageRecord]:
     """默认挑法：同组里每个投稿一张能复现的原图，配方原图排第一，其余按投稿日期从新到旧。"""
-    allowed = set(candidate_ids) if candidate_ids else None
+    allowed = set(candidate_ids) if candidate_ids is not None else None
     usable = [
         image
         for image in images

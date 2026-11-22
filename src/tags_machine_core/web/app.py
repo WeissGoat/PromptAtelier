@@ -36,6 +36,7 @@ from .routes import (
     novelai,
     results,
     style_lab,
+    style_lab_workflow,
 )
 from .services.comfyui_targets import ComfyUITargetService
 from .services.generate_batch import GENERATE_BATCH_JOB, recover_interrupted_batch
@@ -180,6 +181,7 @@ def create_app(
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
     app.include_router(novelai.router, prefix="/api", tags=["novelai"])
     app.include_router(style_lab.router, prefix="/api", tags=["style-lab"])
+    app.include_router(style_lab_workflow.router, prefix="/api", tags=["style-lab"])
 
     resolved_static_dir = _resolve_static_dir(static_dir)
     if resolved_static_dir is not None:

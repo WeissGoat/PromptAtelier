@@ -58,6 +58,7 @@ class LibraryEntry:
     copies: list[str] = field(default_factory=list)
     facets: dict[str, list[str]] = field(default_factory=dict)
     search_text: str = ""
+    updated_at_ns: int = 0
 
     def as_dict(self, *, has_preview: bool) -> dict[str, Any]:
         return {
@@ -66,6 +67,7 @@ class LibraryEntry:
             "ref": str(self.path),
             "relative": self.relative,
             "has_preview": has_preview,
+            "updated_at": round(self.updated_at_ns / 1_000_000_000, 3) if self.updated_at_ns else None,
             "copies": len(self.copies),
             "copy_paths": self.copies[:8],
             "facets": self.facets,
@@ -107,14 +109,17 @@ class LibraryIndex:
         offset: int = 0,
         limit: int = 30,
         refresh: bool = False,
+        sort: str = "default",
     ) -> dict[str, Any]:
         entries = self.entries(role, refresh=refresh)
         needles = [part for part in query.lower().split() if part]
         chosen = {key: set(values) for key, values in (facets or {}).items() if values}
         texted = [entry for entry in entries if all(needle in entry.search_text for needle in needles)]
         matched = [entry for entry in texted if _facets_match(entry, chosen)]
+        if sort == "updated":
+            matched.sort(key=lambda entry: (-entry.updated_at_ns, entry.relative))
         if needles:
-            # 名字里就能找到的排前面，只在路径里命中的放后面。
+            # 名字里就能找到的排前面，只在路径里命中的放后面；Python sort 稳定，保留更新时间排序。
             matched.sort(key=lambda entry: 0 if all(needle in entry.name.lower() for needle in needles) else 1)
         page = matched[offset : offset + limit]
         options: dict[str, list[dict[str, Any]]] = {}
@@ -162,6 +167,10 @@ class LibraryIndex:
             members = sorted(groups[fingerprint], key=lambda item: (is_copy_name(item[0].name), len(item[1]), item[1]))
             path, relative, info = members[0]
             names = {display_name(member[0].name) for member in members}
+            updated_at_ns = max(
+                (mtime for _, _, member_info in members for _, mtime, _ in member_info.signature),
+                default=0,
+            )
             entries.append(
                 LibraryEntry(
                     role=role,
@@ -171,6 +180,7 @@ class LibraryIndex:
                     copies=[member[1] for member in members[1:]],
                     facets=info.facets,
                     search_text=" ".join([*names, *(member[1] for member in members)]).lower(),
+                    updated_at_ns=updated_at_ns,
                 )
             )
         if changed:

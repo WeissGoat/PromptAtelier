@@ -19,6 +19,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from .metadata import ImageRecord, read_source_parameters
+from .custom_groups import GroupRef
 from .tokens import Token, TokenList, serialize, tokenize
 
 
@@ -107,6 +108,8 @@ class Recipe(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     source_image_id: str | None = None
     group_id: str | None = None
+    source_group: GroupRef | None = None
+    preparation: dict[str, Any] | None = None
     stage: Literal["split", "edit"] = "split"
     locked: bool = False
     prefix: list[RecipeToken] = Field(default_factory=list)

@@ -17,7 +17,6 @@ from tags_machine_core.style_lab.recipe import block_from_text, tokens_from_text
 from tags_machine_core.web import create_app
 from tests.test_style_lab import write_nai_png
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / ".agents/skills/style-lab/scripts/client.py"
 spec = importlib.util.spec_from_file_location("style_lab_skill_client", SCRIPT)
 skill = importlib.util.module_from_spec(spec)
@@ -74,10 +73,12 @@ def test_materials_resolve_current_selection_and_exact_exclusions():
     client = skill.Client("http://localhost:12345")
     card = {"role": "character", "ref": "角色/a & b", "name": "角色", "excluded": ["hat"]}
     shelf = {"materials": [card], "facets": {}}
-    client.request = Mock(side_effect=[
-        shelf,
-        {"sections": [{"name": "appearance", "tags": ["black hair", "hat", "black hair"]}]},
-    ])
+    client.request = Mock(
+        side_effect=[
+            shelf,
+            {"sections": [{"name": "appearance", "tags": ["black hair", "hat", "black hair"]}]},
+        ]
+    )
     result = client.materials()
     assert result["shelf"] == shelf
     assert result["materials"][0]["tags"] == ["black hair"]
@@ -100,38 +101,72 @@ def test_cli_reads_bom_json_and_saves_full_response(tmp_path, monkeypatch, capsy
     fake.session.__exit__ = Mock()
     fake.request.return_value = {"workspace": {"id": "w", "name": "参考图组"}}
     monkeypatch.setattr(skill, "Client", lambda server: fake)
-    assert skill.main([
-        "api", "POST", "/workspaces", "--body-file", str(body_file), "--output", str(output)
-    ]) == 0
+    assert (
+        skill.main(
+            ["api", "POST", "/workspaces", "--body-file", str(body_file), "--output", str(output)]
+        )
+        == 0
+    )
     fake.request.assert_called_once_with("POST", "/workspaces", body={"name": "参考图组"})
     assert json.loads(output.read_text(encoding="utf-8")) == fake.request.return_value
     assert json.loads(capsys.readouterr().out)["output"] == str(output.resolve())
+
+
+def test_prepare_command_only_submits_preparation(tmp_path, monkeypatch):
+    body_file = tmp_path / "prepare.json"
+    body_file.write_text('{"id":"prep_one","recipes":[]}', encoding="utf-8")
+    fake = Mock()
+    fake.session.__enter__ = Mock()
+    fake.session.__exit__ = Mock(return_value=False)
+    fake.request.return_value = {"id": "prep_one", "status": "succeeded"}
+    monkeypatch.setattr(skill, "Client", lambda server: fake)
+    assert skill.main(["prepare", "workspace", "--body-file", str(body_file)]) == 0
+    fake.request.assert_called_once_with(
+        "POST", "/workspaces/workspace/preparations", body={"id": "prep_one", "recipes": []}
+    )
+    body_file.write_text('{"recipes":[]}', encoding="utf-8")
+    fake.request.reset_mock()
+    assert skill.main(["prepare", "workspace", "--body-file", str(body_file)]) == 1
+    fake.request.assert_not_called()
 
 
 def test_full_workflow_keeps_source_seed_generation_size_and_restores_baseline(tmp_path):
     design = tmp_path / "design"
     design.mkdir()
     config = tmp_path / "config.yaml"
-    config.write_text(json.dumps({
-        "legacy": {"tags_machine_root": str(tmp_path), "design_root": str(design)},
-        "runtime": {"output_dir": str(tmp_path / "outputs"), "cache_dir": str(tmp_path / "cache")},
-    }), encoding="utf-8")
+    config.write_text(
+        json.dumps(
+            {
+                "legacy": {"tags_machine_root": str(tmp_path), "design_root": str(design)},
+                "runtime": {
+                    "output_dir": str(tmp_path / "outputs"),
+                    "cache_dir": str(tmp_path / "cache"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     captured = []
 
     def executor(request, options):
         captured.append(request.model_dump(mode="json"))
         output = Path(options["output_dir"]) / f"gen_{len(captured)}.png"
         write_nai_png(output, size=(request.size.width, request.size.height), **request.params)
-        return GenerationResult(backend="novelai", images=[GeneratedImage(path=output, filename=output.name)])
+        return GenerationResult(
+            backend="novelai", images=[GeneratedImage(path=output, filename=output.name)]
+        )
 
     app = create_app(
         config_path=config, generation_executor=executor, style_lab_dir=tmp_path / "stylelab"
     )
-    source = write_nai_png(tmp_path / "corpus/origin/source.png", size=(128, 192), width=64, height=96)
+    source = write_nai_png(
+        tmp_path / "corpus/origin/source.png", size=(128, 192), width=64, height=96
+    )
     original_bytes = source.read_bytes()
     client = skill.Client("http://testserver")
     client.session.close()
     with TestClient(app) as session:
+
         class SessionAdapter:
             def request(self, method, url, *, timeout, **kwargs):
                 # TestClient returns httpx responses; the helper uses requests.
@@ -157,12 +192,14 @@ def test_full_workflow_keeps_source_seed_generation_size_and_restores_baseline(t
         recipe_path = base + f"/recipes/{recipe['id']}"
 
         def save(value):
-            return client.request("PUT", recipe_path, body={
-                "recipe": value, "base_version": value["version"]
-            })["recipe"]
+            return client.request(
+                "PUT", recipe_path, body={"recipe": value, "base_version": value["version"]}
+            )["recipe"]
 
         baseline = save(recipe)
-        preview = client.request("POST", base + "/recipes/preview", body={"recipe": baseline})["preview"]
+        preview = client.request("POST", base + "/recipes/preview", body={"recipe": baseline})[
+            "preview"
+        ]
         assert preview["char_captions"] == ["girl, silver hair"]
         settings = {"count": 1, "seed_mode": "source", "size_mode": "source", "overrides": {}}
 
@@ -181,7 +218,9 @@ def test_full_workflow_keeps_source_seed_generation_size_and_restores_baseline(t
 
         variant = copy.deepcopy(baseline)
         variant["name"] += " · 测试角色和动作"
-        variant["subject"] = [t.model_dump() for t in block_from_text("1girl, solo, standing", "manual")]
+        variant["subject"] = [
+            t.model_dump() for t in block_from_text("1girl, solo, standing", "manual")
+        ]
         variant["character"]["captions"][0]["tokens"] = [
             t.model_dump() for t in block_from_text("girl, black hair", "character:test")
         ]

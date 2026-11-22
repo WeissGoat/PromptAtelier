@@ -17,6 +17,10 @@ from tags_machine_core.llm.google_translate import google_translate_tags
 from tags_machine_core.style_lab import RegenSettings, StyleLabService, WorkspaceInfo, WorkspaceStore
 from tags_machine_core.style_lab.artist_test import ArtistTestSettings
 from tags_machine_core.style_lab.probe import ProbeSettings
+from tags_machine_core.style_lab.custom_groups import GroupRef
+from tags_machine_core.style_lab.preparation import PreparationService
+from tags_machine_core.style_lab.test_plans import TestPlanService
+from tags_machine_core.style_lab.custom_groups import digest
 from tags_machine_core.style_lab.export import ExportConflictError, ExportError, ExportRequest
 from tags_machine_core.style_lab.library import LibraryIndex, parse_facet_params
 from tags_machine_core.style_lab.recipe import Recipe, RecipeConflictError
@@ -369,6 +373,8 @@ def _recipe_summary(recipe: Recipe) -> dict[str, Any]:
         "locked": recipe.locked,
         "source_image_id": recipe.source_image_id,
         "group_id": recipe.group_id,
+        "source_group": recipe.source_group.model_dump() if recipe.source_group else None,
+        "preparation": recipe.preparation,
         "updated_at": recipe.updated_at,
     }
 
@@ -390,7 +396,35 @@ def _parse_recipe(data: Any) -> Recipe:
 @router.get("/workspaces/{workspace_id}/recipes")
 def list_recipes(workspace_id: str, request: Request) -> dict[str, Any]:
     info = _workspace(request, workspace_id)
-    return {"recipes": [_recipe_summary(recipe) for recipe in _service(request).recipes(info).list()]}
+    service = _service(request)
+    preparation = PreparationService(service, info)
+    plans = TestPlanService(service, info).list()
+    summaries = []
+    for recipe in service.recipes(info).list():
+        state = preparation.status(recipe)
+        plan = next((value for value in plans if recipe.id in value["recipe_ids"] and value["status"] not in {"draft", "awaiting_content"}), None)
+        test_summary = None
+        if plan:
+            current = state["status"] == "ready" and plan["recipes"][recipe.id]["hash"] == digest(recipe.model_dump(mode="json", by_alias=True))
+            related = {item["id"]: item for item in plan["items"] if item["recipe_id"] == recipe.id}
+            by_id = {item["id"]: item for item in plan["items"]}
+            for item in list(related.values()):
+                dependency = item.get("dependency")
+                while dependency and dependency not in related:
+                    related[dependency] = by_id[dependency]
+                    dependency = by_id[dependency].get("dependency")
+            statuses = {item["status"] for item in related.values()}
+            status = plan["status"]
+            if statuses == {"succeeded"} and not any(item.get("blocks_following") for item in related.values()):
+                status = "succeeded"
+            elif status not in {"queued", "running"}:
+                status = "partial" if "succeeded" in statuses else "failed"
+            roles = {}
+            for item in related.values():
+                roles.setdefault(item.get("role", item["kind"]), []).append(item["status"])
+            test_summary = {"plan_id": plan["id"], "status": status if current else "stale", "roles": roles}
+        summaries.append({**_recipe_summary(recipe), "preparation": state, "test_summary": test_summary})
+    return {"recipes": summaries}
 
 
 @router.post("/workspaces/{workspace_id}/recipes")
@@ -401,9 +435,13 @@ def create_recipe(workspace_id: str, data: dict[str, Any], request: Request) -> 
         now = time.time()
         draft = _parse_recipe(data["recipe"]).model_copy(update={"version": 1, "created_at": now, "updated_at": now})
         try:
+            if draft.source_group or draft.preparation:
+                PreparationService(_service(request), info).validate_recipe(draft)
             created = _service(request).recipes(info).create(draft)
         except RecipeConflictError as exc:
             raise ApiError(code="recipe_conflict", message=str(exc), status_code=409) from exc
+        except ValueError as exc:
+            raise ApiError(code="invalid_recipe", message=str(exc), status_code=400) from exc
         return {"recipe": created.model_dump(mode="json", by_alias=True)}
     try:
         recipe = _service(request).create_recipe(
@@ -411,6 +449,7 @@ def create_recipe(workspace_id: str, data: dict[str, Any], request: Request) -> 
             str(data.get("image_id") or ""),
             name=str(data.get("name") or "").strip() or None,
             group_id=str(data.get("group_id") or "").strip() or None,
+            source_group=GroupRef.model_validate(data["source_group"]) if data.get("source_group") else None,
             draft=bool(data.get("draft")),
         )
     except KeyError as exc:
@@ -449,7 +488,8 @@ def save_recipe(workspace_id: str, recipe_id: str, data: dict[str, Any], request
     if recipe.id != recipe_id:
         raise ApiError(code="invalid_recipe", message="Recipe id does not match the URL", status_code=400)
     try:
-        saved = _service(request).recipes(info).save(recipe, base_version=int(data.get("base_version") or 0))
+        with _store(request).lock:
+            saved = _service(request).recipes(info).save(recipe, base_version=int(data.get("base_version") or 0))
     except RecipeConflictError as exc:
         raise ApiError(code="recipe_conflict", message=str(exc), status_code=409) from exc
     return {"recipe": saved.model_dump(mode="json", by_alias=True)}

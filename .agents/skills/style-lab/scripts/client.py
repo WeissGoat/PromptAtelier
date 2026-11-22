@@ -13,7 +13,6 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import requests
 
-
 ACTIVE = {"queued", "running", "cancelling"}
 
 
@@ -29,7 +28,12 @@ def server_url(explicit: str | None) -> str:
     url = url.rstrip("/")
     base = url if url.endswith("/api/style-lab") else url.removesuffix("/api") + "/api/style-lab"
     parsed = urlsplit(base)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+    ):
         raise ValueError("--server must be an HTTP(S) backend URL without query or fragment")
     return base
 
@@ -50,8 +54,12 @@ class Client:
     def request(self, method: str, path: str, *, body: Any = None, timeout: float = 30) -> dict:
         parsed = urlsplit(path)
         if (
-            not path.startswith("/") or path.startswith("//") or parsed.scheme
-            or parsed.netloc or parsed.fragment or ".." in parsed.path.split("/")
+            not path.startswith("/")
+            or path.startswith("//")
+            or parsed.scheme
+            or parsed.netloc
+            or parsed.fragment
+            or ".." in parsed.path.split("/")
         ):
             raise ValueError("Use a path relative to /api/style-lab, for example /workspaces")
         try:
@@ -70,16 +78,17 @@ class Client:
         if not response.ok:
             raise ApiError(response.status_code, payload)
         if not isinstance(payload, dict):
-            raise ValueError("Expected a JSON object from Style Lab")
+            raise TypeError("Expected a JSON object from Style Lab")
         return payload
 
-    def wait(self, workspace: str, run_id: str, timeout: float = 45) -> dict:
+    def wait(self, workspace: str, run_id: str, timeout: float = 45, *, plan: bool = False) -> dict:
         deadline = time.monotonic() + timeout
-        path = f"/workspaces/{quote(workspace, safe='')}/runs/{quote(run_id, safe='')}"
+        collection = "test-plans" if plan else "runs"
+        path = f"/workspaces/{quote(workspace, safe='')}/{collection}/{quote(run_id, safe='')}"
         while True:
             remaining = deadline - time.monotonic()
             result = self.request("GET", path, timeout=max(0.01, min(30, remaining)))
-            if result["run"]["status"] not in ACTIVE:
+            if (result if plan else result["run"])["status"] not in ACTIVE:
                 return result
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -95,10 +104,14 @@ class Client:
             query = urlencode({"ref": material["ref"], "role": material["role"]})
             node = self.request("GET", f"/library/node?{query}")
             excluded = set(material.get("excluded", []))
-            tags = list(dict.fromkeys(
-                tag for section in node.get("sections", []) for tag in section["tags"]
-                if tag not in excluded
-            ))
+            tags = list(
+                dict.fromkeys(
+                    tag
+                    for section in node.get("sections", [])
+                    for tag in section["tags"]
+                    if tag not in excluded
+                )
+            )
             resolved.append({**material, "sections": node.get("sections", []), "tags": tags})
         return {"shelf": shelf, "materials": resolved}
 
@@ -122,9 +135,27 @@ def main(argv: list[str] | None = None) -> int:
     wait.add_argument("workspace")
     wait.add_argument("run_id")
     wait.add_argument("--timeout", type=bounded_timeout, default=45)
+    prepare = commands.add_parser(
+        "prepare", help="Save groups/recipes only; never generates images"
+    )
+    prepare.add_argument("workspace")
+    prepare.add_argument(
+        "--body-file", type=Path, required=True, help="Preparation JSON with a stable id"
+    )
+    start = commands.add_parser("start-plan", help="Explicitly start an existing test plan")
+    start.add_argument("workspace")
+    start.add_argument("plan_id")
+    wait_plan = commands.add_parser(
+        "wait-plan", help="Wait for an existing test plan without resubmitting"
+    )
+    wait_plan.add_argument("workspace")
+    wait_plan.add_argument("plan_id")
+    wait_plan.add_argument("--timeout", type=bounded_timeout, default=45)
     commands.add_parser("materials", help="Read selected shelf materials with exclusions applied")
     for command in commands.choices.values():
-        command.add_argument("--output", type=Path, help="Save the full JSON response to a UTF-8 file")
+        command.add_argument(
+            "--output", type=Path, help="Save the full JSON response to a UTF-8 file"
+        )
     args = parser.parse_args(argv)
     try:
         client = Client(args.server)
@@ -136,6 +167,23 @@ def main(argv: list[str] | None = None) -> int:
                 result = client.request(args.method, args.path, body=body)
             elif args.command == "wait":
                 result = client.wait(args.workspace, args.run_id, args.timeout)
+            elif args.command == "wait-plan":
+                result = client.wait(args.workspace, args.plan_id, args.timeout, plan=True)
+            elif args.command == "prepare":
+                body = json.loads(args.body_file.read_text(encoding="utf-8-sig"))
+                if not isinstance(body, dict) or not body.get("id"):
+                    raise ValueError(
+                        "Preparation requires a stable id to safely resume the same request"
+                    )
+                result = client.request(
+                    "POST", f"/workspaces/{quote(args.workspace, safe='')}/preparations", body=body
+                )
+            elif args.command == "start-plan":
+                result = client.request(
+                    "POST",
+                    f"/workspaces/{quote(args.workspace, safe='')}/test-plans/{quote(args.plan_id, safe='')}/start",
+                    body={},
+                )
             else:
                 result = client.materials()
         encoded = json.dumps(result, ensure_ascii=False, indent=2)
@@ -146,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(encoded)
         return 0
-    except (ValueError, OSError, KeyError) as exc:
+    except (TypeError, ValueError, OSError, KeyError) as exc:
         error = {"error": str(exc)}
         if isinstance(exc, ApiError):
             error = {"http_status": exc.status, "response": exc.payload}
