@@ -10,6 +10,8 @@ export type NodeSummary = {
   backends?: string[];
   /** 节点目录里有可用的预览图（规则见后端 node_previews）。 */
   has_preview?: boolean;
+  /** 节点文件最后修改时间（Unix 秒）。 */
+  updated_at?: number | null;
 };
 
 export type ComfyUITargetState = "online" | "offline" | "running" | "stopped" | "unknown";

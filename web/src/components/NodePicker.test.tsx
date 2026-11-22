@@ -49,6 +49,7 @@ async function runSearchDebounce() {
 
 describe("NodePicker", () => {
   beforeEach(() => {
+    localStorage.clear();
     intersectionCallback = undefined;
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
   });
@@ -176,5 +177,70 @@ describe("NodePicker", () => {
     });
     expect(screen.queryByRole("option", { name: "old-result" })).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("pins previously selected nodes first, deduplicates them from server results, and filters them by query", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("q=foot")) {
+        return response([
+          { role: "action", name: "foot-newest", ref: "F:/path/foot-newest" },
+          { role: "action", name: "foot-picked", ref: "F:/path/foot-picked" },
+        ]);
+      }
+      return response([
+        { role: "action", name: "newest", ref: "F:/path/newest" },
+        { role: "action", name: "foot-picked", ref: "F:/path/foot-picked" },
+        { role: "action", name: "older", ref: "F:/path/older" },
+      ]);
+    });
+
+    renderPicker();
+    const input = screen.getByRole("combobox", { name: "Action" });
+    fireEvent.focus(input);
+    await runSearchDebounce();
+
+    // Select an older node to record it in history.
+    fireEvent.mouseDown(screen.getByRole("option", { name: "foot-picked" }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    // Reopen: previously selected node should be pinned at the top and not duplicated.
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "" } });
+    await runSearchDebounce();
+    expect(screen.getAllByRole("option").map((el) => el.getAttribute("aria-label"))).toEqual([
+      "foot-picked",
+      "newest",
+      "older",
+    ]);
+
+    // Typing a query filters both history and server results while keeping matching history first.
+    fireEvent.change(input, { target: { value: "foot" } });
+    await runSearchDebounce();
+    expect(screen.getAllByRole("option").map((el) => el.getAttribute("aria-label"))).toEqual([
+      "foot-picked",
+      "foot-newest",
+    ]);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("keeps dedupe=true on subsequent paginated requests", async () => {
+    vi.useFakeTimers();
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({ role: "action", name: `node-${index}`, ref: `F:/path/${index}` }));
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response(firstPage, { hasMore: true }))
+      .mockResolvedValueOnce(response([{ role: "action", name: "node-20", ref: "F:/path/20" }], { offset: 20 }));
+    renderPicker();
+    fireEvent.focus(screen.getByRole("combobox", { name: "Action" }));
+    await runSearchDebounce();
+
+    await act(async () => {
+      intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(String(fetchMock.mock.calls[1][0])).toContain("dedupe=true");
   });
 });

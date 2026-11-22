@@ -1,20 +1,24 @@
 ---
 name: compose-contract-author
 description: >-
-  为 PromptAtelier 的「Agent 拼接契约」写每一帧的完整提示词：读契约请求和素材（角色、st_/stn_ 动作组、服装、背景），
-  按定制要求逐帧拼接，写回契约 Markdown 文件，自检；可按用户指定画风测试或在讨论需求时出例图。
-  在收到「Agent 拼接契约」要求 prompt、填写 动作改2/contracts/*.md、或讨论契约并需要试图时使用。
+  用于 PromptAtelier 的 Agent 拼接契约。主 Agent 与用户确认方案后写计划和逐帧提示词，或修改已有契约并安排复核。受派的提示词复核子 Agent 审查词块和前后帧风险。支持按用户指定画风测试或出讨论例图。
 ---
 
 # 写 Agent 拼接契约
 
-设计见 `docs/agent_compose_contract_spec_v1.md`。分工：**提示词全部由你拼接**；来源标记、diff、校验、出图都由 Web 和脚本完成，你不用写结构化标注。
+## 选择任务
+
+- **新写契约**。主 Agent 完整阅读[共享编写规范](../../../src/tags_machine_core/compose_contracts/writing_guide.md)，用 `contract show` 读要求，用 `contract context --summary` 看全组，再按 `--members` 分段取素材。与用户确认方案后，交付计划区和逐帧提示词。有状态变化规划时，用下方派单模板安排整组复核。
+- **修改已有提示词**。主 Agent 从当前版本、改动要求和相关帧开始，沿用已确认的方案。按[提示词修订与重出流程](../../../src/tags_machine_core/compose_contracts/writing_guide.md#提示词修订与重出流程)安排审词、修补和最终版复核。重出后由图片复核子 Agent 看图，主 Agent 根据文字报告修正仍有问题的帧，再交审词，进入下一轮。
+- **受派复核提示词**。直接执行[提示词复核派单模板](../../../src/tags_machine_core/compose_contracts/writing_guide.md#提示词复核派单模板)，只读审查指定版本和帧范围。返回词块依据、前后帧风险和覆盖范围，由主 Agent 裁决。
+
+写或改正式提示词时，先按名称查找 V4.5 的 `nai45-prompt` 或 V5 / V5 Curated 的 `nai5-prompting`，读完入口及其要求的资料再写。查找顺序和契约适配见[写提示词前必读的 Skill](../../../src/tags_machine_core/compose_contracts/writing_guide.md#写提示词前必读的-skill)。出图后看实际图片用 `compose-contract-review`。
 
 ## 命令（在 PromptAtelier 仓库根目录执行）
 
 | 命令 | 作用 |
 |---|---|
-| `uv run tm-core contract show <id> [--summary] [--frames f01-f30] [--config <应用配置>]` | 请求部分（节点、定制要求、选项）、目标格式摘要、已写的帧。`--summary` 每帧只给标题、来源、角色、token 数；`--frames` 只看一段 |
+| `uv run tm-core contract show <id> [--summary] [--frames f01-f30] [--config <应用配置>]` | 请求部分（节点、定制要求、选项）、计划区（preamble）、目标格式摘要、已写的帧。`--summary` 每帧只给标题、来源、角色、token 数；`--frames` 只看一段 |
 | `uv run tm-core contract context <id> [--summary] [--members 1-20] [--member N]` | 素材：角色各分区的词、动作组每个成员的正向/负面词、分类（phase/cast/pose…）、`character_scope`、`clothing_state`、服装、背景。**先 `--summary` 看全组结构，再 `--members` 分段取提示词**；整组一次取出可能有几十 KB，会被截断 |
 | `uv run tm-core contract check <id>` | 解析 + 校验，输出 issues（JSON）；有 error 时退出码 1 |
 | `uv run tm-core contract prompt <id> --kind tools` | 重新输出要求 prompt |
@@ -38,27 +42,7 @@ description: >-
 - 先 `contract generate <id> --artist <ref> --frames f01,f05 --dry-run` 看最终提示词、模型、尺寸、token；实际提交去掉 `--dry-run`，可加 `--wait`。异步提交返回任务 id，后续用 `contract job <任务id> --wait`。超限先精简，用户接受截断时才加 `--allow-over-limit`。
 - 支持 `--size contract|random|portrait|landscape|square|custom`、`--width / --height`、`--nt`、`--seed`、`--negative`、`--character-prompts auto|off`、`--add-male-caption`、`--comfyui-target`。
 - 默认跨契约复用相同有效参数的成功图片；随机 seed／随机尺寸也复用第一次结果。需要新的候选时用 `--force`；提示词、画风参数等变了自动重出。失败、图片丢失不会复用。
-- 打开返回的图片，或 `contract review <id> --sheets` 看联系表，结合实际图片反馈；给用户展示例图时附图片路径。复核流程见 `compose-contract-review`。
-
-## 流程
-
-1. `contract show` 读请求：哪些角色（c1、c2…）、哪个动作组、定制要求、`keep_order` / `allow_new_frames` / `max_new_frames`、目标格式。
-2. `contract context --summary` 看全组结构，再 `--members` 分段读素材。动作组按成员顺序给出；`ref` 就是帧的 `source` 要写的值。
-3. **定制要求为空**：一个成员一帧，顺序与动作组一致，逐帧把角色拼进去。
-   **定制要求里有叙事或状态变化**：先规划（下一节），再写帧。
-4. 在 front matter 之后逐帧书写（下面的格式）。
-5. `contract check` 修到没有 error。warn 逐条看：`identity_anchor`、`frame_novelty` 基本都要改；确认是有意为之的在帧备注里说明。
-6. 把 front matter 的 `status: pending` 改为 `status: done`；可以填 `title`（简短中文标题）和 `author`。不要改 front matter 的其他字段。
-
-## 先规划（定制要求里有叙事或状态变化时）
-
-动作组通常只是一堆动作片段，不是现成的分镜。先把它当素材池：
-
-1. 从定制要求里提取：全局硬要求；叙事起点、终点和必须出现的转折；需要保持或按阶段变化的状态；明确不要的表现。
-2. 把状态拆成独立维度：时间与场景、角色身份与外观锚点、服装阶段、姿势与空间位置、表情与情绪阶段、道具与身体痕迹（口塞、绳索、武器、体液等）、出场人物与关系、镜头 / POV。
-3. 先定镜头计划再写帧：按叙事阶段给成员分组（`--summary` 里的 phase / pose / cast），合并重复或功能相同的成员；
-   `keep_order: false` 时按叙事重排，`true` 时保持原顺序；状态变化没有自然承载帧时加过渡帧（`source: custom`，受 `max_new_frames` 限制）。
-4. 计划可以写在第一帧之前的说明文字里（不是帧，不会提交生图）。有意合并或舍弃的成员，`coverage` 会给 warn，在相关帧备注里说明即可。
+- 主 Agent 将返回的图片路径交给图片复核子 Agent，按需用 `contract review <id> --sheets` 准备联系表。由子 Agent 看例图，主 Agent 依据审片报告向用户反馈并附图片路径。复核流程见 `compose-contract-review`。
 
 ## 帧格式
 
@@ -120,24 +104,6 @@ girl, kaname_madoka, pink_hair, twintails, pink_eyes, sitting on lap, open mouth
 - 动作素材里的行内写法 `::character A: … ::` / `::character B: … ::`：把 A、B 里的词挪进对应的 cN 块，主提示词里删掉这一段，**不要两种写法混用**（混用时行内块会原样提交，`contract check` 报 error）。默认 A→c1、B→c2；定制要求说明了谁做什么时按要求对应。块里原来的角色名、发色等换成该角色自己的身份词。
 - 只出现一个角色的帧（单人特写等）可以只写 ```` ```positive ````。
 - 出图时：NovelAI V4+ 画风把 cN 块作为角色提示词提交；V3 画风、ComfyUI 画风或关掉 Character Prompts 时，cN 块并进主提示词。
-
-## 原则
-
-- 先理解定制要求，区分全局改动（背景、服装、语气）和逐帧改动。
-- 服装、发型、配饰结合动作的 `clothing_state`（裸露状态）、`character_scope`（镜头范围）、构图和要求取舍。
-- **身份锚点**：帧里出现的角色，至少保留角色名或发色瞳色之一；特写、局部镜头也一样，再加一个当前服装、道具或标志物。删光身份词出图会换人（`identity_anchor` 会报）。
-- **构图的身份词**：背影、背面特写、头部出画的帧不要写 `purple_eyes`、`empty eyes` 这类必须露脸才能体现的词，否则模型会把头转回来；用发色、发饰、服装、道具做锚点。
-- **来源冲突**：动作素材里的状态词（`standing` / `lying`、`clothed` / `nude`、`gagged`、`bound` 等）只在和本帧状态一致时保留；定制要求和状态推进优先于素材原词。
-- 动作的核心（姿势、构图、表情、互动）优先保留；与要求冲突的环境词（如 `white background`、`simple background`）、混进动作里的角色/画风词去掉。
-- 尽量沿用素材里的原词写法：Web 按字面匹配给每个词标来源，改了写法会显示成「改写」或「新增」。需要强调时改权重。
-- 多角色：按上面「多角色」一节分块写；人物怎么对应以定制要求为准。
-- **连续性是一条状态链**：时间与场景、服装阶段、姿势与位置、道具与身体痕迹、出场人物与关系、镜头 / POV 都要前后衔接。
-  进入新状态后不要无故回退（衣服不会自己穿回去，绑住的手不会自己松开）；状态变化要在画面里看得出原因。
-- **相邻帧至少改变一项**：机位、景别、姿势、表情、互动、服装状态、道具状态。只换 seed 的重复帧合并或删掉（`frame_novelty` 会报）。
-- 写完后按帧顺序复查一遍：服装、姿势与位置、道具、人数与关系、POV 与镜头方向有没有跳变或回退。
-- 权重写法按目标格式（`contract show` 的 format 段）：NovelAI 用 `{tag}` / `[tag]` / `1.2::tag::`，SDXL 用 `(tag:1.2)`。
-- 不要写：画师名（`artist:xxx`）、质量前缀（`masterpiece`、`best quality` 等，由画风叠加）、生图参数。
-- 不要修改素材库里的源节点，不要修改 front matter 的请求部分。
 
 ## 校验器（contract check）
 

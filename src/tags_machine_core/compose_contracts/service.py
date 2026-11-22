@@ -398,6 +398,7 @@ class ContractService:
             "id": contract_id,
             "path": detail["file"]["path"],
             "request": detail["request"],
+            "preamble": detail["preamble"],
             "format": detail["profile"],
             "frame_count": len(detail["frames"]),
             "frames": items,
@@ -431,6 +432,7 @@ class ContractService:
             "id": contract_id,
             "target_format": detail["request"]["target_format"],
             "requirements": detail["request"]["requirements"],
+            "preamble": detail["preamble"],
             "options": detail["request"]["options"],
             "characters": sources["characters"],
             "action_group": group,
@@ -464,10 +466,13 @@ class ContractService:
     def import_frames(self, contract_id: str, raw: str, *, expected_hash: str | None = None) -> dict[str, Any]:
         file = self.store.read(contract_id)
         body, extra = extract_import_frames(raw)
-        parse_contract(f"---\nid: probe\n---\n\n{body}\n")
+        incoming = parse_contract(f"---\nid: probe\n---\n\n{body}\n")
+        contract = parse_contract(file.text)
+        # 旧式仅帧导入更新帧正文，保留已有计划；携带计划时一并替换。
+        if not incoming.preamble and contract.preamble:
+            body = f"{contract.preamble}\n\n{body}"
         text = replace_body(file.text, body)
         fields: dict[str, str] = {"status": "done"}
-        contract = parse_contract(file.text)
         for key in ("title", "author"):
             if extra.get(key) and not getattr(contract.request, key):
                 fields[key] = extra[key]

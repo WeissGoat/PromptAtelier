@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -74,37 +75,44 @@ class NodeWorkspace:
         *,
         offset: int = 0,
         limit: int = 20,
+        sort: str = "updated",
     ) -> tuple[list[dict[str, Any]], bool]:
         roots = role_roots(self.design_root, role)
-        result: list[dict[str, Any]] = []
-        needle = (query or "").strip().lower()
+        needles = [part for part in (query or "").strip().lower().split() if part]
         offset = max(0, offset)
         limit = max(1, min(limit, 500))
-        matched = 0
+        candidates: list[tuple[Path, str, int]] = []
         for root in roots:
             if not root.exists():
                 continue
-            for item in self._iter_node_dirs(root):
+            for item, updated_at_ns in self._iter_node_dirs_with_mtime(root):
                 relative = item.relative_to(root).as_posix()
                 searchable = f"{item.name} {relative}".lower()
-                if needle and needle not in searchable:
+                if needles and not all(part in searchable for part in needles):
                     continue
-                if matched < offset:
-                    matched += 1
-                    continue
-                if len(result) >= limit:
-                    return result, True
-                entry = {
-                    "role": role,
-                    "name": item.name,
-                    "ref": str(item),
-                    "relative": relative,
-                    "has_preview": self.previews.preview_for(item) is not None,
-                }
-                if role == "artist":
-                    entry["backends"] = self._artist_backends(item)
-                result.append(entry)
-        return result, False
+                candidates.append((item, relative, updated_at_ns))
+        if sort == "updated":
+            candidates.sort(key=lambda entry: (-entry[2], entry[1]))
+        if needles:
+            candidates.sort(
+                key=lambda entry: 0 if all(part in entry[0].name.lower() for part in needles) else 1
+            )
+        page = candidates[offset : offset + limit]
+        has_more = offset + limit < len(candidates)
+        result: list[dict[str, Any]] = []
+        for item, relative, updated_at_ns in page:
+            entry: dict[str, Any] = {
+                "role": role,
+                "name": item.name,
+                "ref": str(item),
+                "relative": relative,
+                "has_preview": self.previews.preview_for(item) is not None,
+                "updated_at": round(updated_at_ns / 1_000_000_000, 3) if updated_at_ns else None,
+            }
+            if role == "artist":
+                entry["backends"] = self._artist_backends(item)
+            result.append(entry)
+        return result, has_more
 
     def read_artist_node(self, ref: str | Path) -> NodeDocument:
         """生图用的 artist 读取：有 node.yaml/meta.yaml 的结构化节点（含 ComfyUI 画风）优先，
@@ -341,21 +349,44 @@ class NodeWorkspace:
         return any((path / name).exists() for name in ("meta.yaml", "node.yaml", "tags.txt"))
 
     def _iter_node_dirs(self, root: Path):
+        for path, _ in self._iter_node_dirs_with_mtime(root):
+            yield path
+
+    def _iter_node_dirs_with_mtime(self, root: Path):
         stack = [root]
         while stack:
             current = stack.pop()
-            if current != root and self._has_node_file(current):
-                yield current
-                continue
             try:
-                children = sorted(
-                    [item for item in current.iterdir() if item.is_dir()],
-                    key=lambda path: path.name,
-                    reverse=True,
-                )
+                with os.scandir(current) as iterator:
+                    items = list(iterator)
             except OSError:
                 continue
-            stack.extend(children)
+            has_node = False
+            max_mtime_ns = 0
+            subdirs: list[Path] = []
+            for entry in items:
+                try:
+                    if entry.is_dir():
+                        subdirs.append(Path(entry.path))
+                        continue
+                    name = entry.name
+                    if name in ("meta.yaml", "node.yaml", "tags.txt"):
+                        has_node = True
+                        max_mtime_ns = max(max_mtime_ns, entry.stat().st_mtime_ns)
+                    elif Path(name).suffix.lower() in SOURCE_FILE_SUFFIXES:
+                        max_mtime_ns = max(max_mtime_ns, entry.stat().st_mtime_ns)
+                except OSError:
+                    continue
+            if current != root and has_node:
+                if max_mtime_ns == 0:
+                    try:
+                        max_mtime_ns = current.stat().st_mtime_ns
+                    except OSError:
+                        max_mtime_ns = 0
+                yield current, max_mtime_ns
+                continue
+            subdirs.sort(key=lambda path: path.name, reverse=True)
+            stack.extend(subdirs)
 
     def _raw_file(self, path: Path) -> dict[str, str] | None:
         for name in ("meta.yaml", "node.yaml", "tags.txt"):

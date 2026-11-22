@@ -155,14 +155,13 @@ class ContractToolingTest(unittest.TestCase):
         self.assertIn("+blush", novelty["f02"])
         self.assertIn("完全相同", novelty["f04"])
 
-    def test_prompt_adds_planning_only_with_requirements(self):
-        with_requirements = self.service.prompt(self._create()["id"], "tools")["text"]
-        self.assertIn("## 先规划", with_requirements)
-        self.assertIn("keep_order: false", with_requirements)
-        self.assertIn("--members", with_requirements)
-        plain = self.service.prompt(self._create(requirements="")["id"], "tools")["text"]
-        self.assertNotIn("## 先规划", plain)
-        self.assertIn("身份锚点", plain)
+    def test_prompts_keep_request_options_with_or_without_requirements(self):
+        for requirements in ("保持戒备", ""):
+            detail = self._create(requirements=requirements)
+            for kind in ("tools", "standalone"):
+                prompt = self.service.prompt(detail["id"], kind)["text"]
+                self.assertIn("保持动作组顺序 否", prompt)
+                self.assertIn(requirements or "无（按动作组原样逐帧拼接角色）", prompt)
 
     # ---- 出图结果与复核 ----
 

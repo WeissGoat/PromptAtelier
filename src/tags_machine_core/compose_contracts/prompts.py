@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .profiles import FormatProfile
@@ -26,41 +27,15 @@ size: portrait                     # 可选：portrait / landscape / square
 
 代码块之外的文字都算本帧备注。"""
 
-PRINCIPLES = """\
-- 先理解定制要求，区分全局改动（背景、服装、语气）和逐帧改动。
-- 每帧自己拼出完整提示词：服装、发型、配饰结合动作的裸露状态（clothing_state）、镜头范围（character_scope）、构图和要求取舍。
-- 身份锚点：帧里出现的角色，至少保留角色名或发色瞳色之一；特写、局部镜头也一样，再加一个当前服装、道具或标志物。删光身份词出图会换人。
-- 动作的核心（姿势、构图、表情、互动）优先保留；与要求冲突的环境词、混入的角色/画风词去掉。
-- 来源冲突：动作素材里的状态词（站 / 躺、穿着 / 裸露、有没有口塞绳索等）只在和本帧状态一致时保留；定制要求和状态推进优先于素材原词。
-- 尽量沿用素材里的原词写法（Web 按字面匹配标记来源）；需要调整时可以改权重或替换。
-- 多角色：选了多个角色时，按下面「多角色」一节用分角色代码块写；人物怎么对应以定制要求为准。
-- 连续性是一条状态链，不只是服装和场景：时间与场景、服装阶段、姿势与位置、道具与身体痕迹、出场人物与关系、镜头 / POV 都要前后衔接。
-  进入新状态后不要无故回退（衣服不会自己穿回去，绑住的手不会自己松开）；状态变化要在画面里看得出原因，没有承载帧时加过渡帧。
-- 相邻帧至少改变一项：机位、景别、姿势、表情、互动、服装状态、道具状态。只换 seed 的重复帧合并或删掉；有意保留时在帧备注里写明。
-- 新增帧写 source: custom，参考过的动作写进 inspired_by。
-- 写完后按帧顺序复查一遍：服装、姿势与位置、道具、人数与关系、POV 与镜头方向有没有跳变或回退。
-- 不要写：画师名、质量前缀（masterpiece 等）、生图参数；不要改素材库的源节点；不要改 front matter 的请求部分。"""
+
+def writing_guide() -> str:
+    """与 compose-contract-author Skill 共用一份编写与复核规范。"""
+    return Path(__file__).with_name("writing_guide.md").read_text(encoding="utf-8").strip()
 
 
-PLANNING_GUIDE = """\
-定制要求里有叙事或状态变化时，先把动作组当作素材池，而不是现成的分镜：
-
-1. 从定制要求里提取：全局硬要求；叙事起点、终点和必须出现的转折；需要保持或按阶段变化的状态；明确不要的表现。
-2. 把状态拆成独立维度：时间与场景、角色身份与外观锚点、服装阶段、姿势与空间位置、表情与情绪阶段、道具与身体痕迹、出场人物与关系、镜头 / POV。
-3. 先定镜头计划再写帧：按叙事阶段给成员分组（`contract context --summary` 能看到每个成员的 phase / pose / cast 分类），
-   合并重复或功能相同的成员，{order}；状态变化没有自然承载帧时新增过渡帧（受 max_new_frames 限制）。
-4. 计划可以写在 front matter 之后、第一帧之前的说明文字里（不是帧，不会提交生图）。
-   有意合并或舍弃的成员，contract check 的 coverage 会给 warn，在相关帧的备注里说明即可。"""
-
-
-def planning_guide(detail: dict[str, Any]) -> list[str]:
-    """定制要求不为空时给出「先规划」一节；没有要求时就是按动作组逐帧拼角色，不需要。"""
-    request = detail.get("request") or {}
-    if not (request.get("requirements") or "").strip():
-        return []
-    keep = (request.get("options") or {}).get("keep_order", True)
-    order = "保持动作组原顺序（keep_order: true）" if keep else "按叙事需要调整顺序（keep_order: false）"
-    return ["## 先规划", PLANNING_GUIDE.format(order=order), ""]
+def existing_plan(detail: dict[str, Any]) -> list[str]:
+    preamble = str(detail.get("preamble") or "").strip()
+    return ["## 已有计划区（修改时一并参考）", preamble, ""] if preamble else []
 
 
 MULTI_CHARACTER_GUIDE = """\
@@ -170,7 +145,7 @@ def render_tools_prompt(
     contract_id = request["id"]
     return "\n".join(
         [
-            "请为下面这份「Agent 拼接契约」写出每一帧的完整提示词。",
+            "你是这份「Agent 拼接契约」的主 Agent：先读要求和素材，与用户讨论方案，经用户确认后再写正式计划与每帧完整提示词；会话中已有明确确认的方案直接沿用。",
             "",
             f"契约文件：{contract_path}",
             f"契约 id：{contract_id}",
@@ -183,24 +158,23 @@ def render_tools_prompt(
             f"1. 先读 Skill：{skill_path}",
             f"2. `{cli} contract show {contract_id}{config_arg}` 看请求和已写的帧；`{cli} contract context {contract_id} --summary{config_arg}` 先看全组结构（每个成员的分类），"
             f"再用 `--members 1-20` 分段取提示词（输出很长，不要一次取全部）。已写的帧多时 `contract show --summary` / `--frames f01-f30` 分段看。",
-            f"3. 需要新增帧时，用 `{cli} kb search` / `{cli} kb show` 找参考动作（用法见 Skill）。",
-            "4. 直接编辑契约文件：在 front matter 之后按帧书写（格式见下）。提示词全部由你拼接。",
-            f"5. `{cli} contract check {contract_id}{config_arg}` 没有 error 后，把 front matter 里的 `status: pending` 改成 `status: done`；可以顺便填 `title`（简短中文标题）和 `author`。"
+            f"3. 先提出创作方案，与用户讨论并等待确认。需要新增帧时，用 `{cli} kb search` / `{cli} kb show` 找参考动作（用法见 Skill）。",
+            "4. 确认后落实计划区；写提示词前，按下方规范读完目标格式对应的已有提示词 Skill 及其要求的参考资料，再按帧书写。提示词全部由你拼接。",
+            f"5. `{cli} contract check {contract_id}{config_arg}` 修到没有 error；有状态变化规划时，填写下方「提示词复核派单模板」，交子 Agent 逐帧核实最终提示词、纵向回看整组。主 Agent 退回空泛赞美的报告补查，逐项裁决后再将 `status: pending` 改为 `status: done`。可填 `title` 和 `author`。"
             " warn 里的 identity_anchor（帧里没有角色身份词）和 frame_novelty（和上一帧几乎相同）要逐条处理。",
             "6. 需要测试契约或沟通需求时，先询问用户指定画风（用户已指定则沿用），不要自行挑选。",
             f"   用 `{cli} contract artists --query <搜索词>` 查画风 ref；选少量代表帧先 `{cli} contract generate {contract_id} --artist <用户指定的ref> --frames f01 --dry-run`，",
-            f"   再去掉 --dry-run，按需加 --wait 提交；异步任务用 `{cli} contract job <任务id> --wait` 查结果与图片路径。无需 status: done，讨论中的草稿也能出示例。",
+            f"   正式改词后，通常按下方修订流程先复核当前版本，再去掉 --dry-run 按授权提交。异步任务用 `{cli} contract job <任务id> --wait` 查结果；讨论例图可用草稿。",
             "   生图命令连接正在运行的 PromptAtelier 后台（默认 runtime/dev_web.json，也可 --server 或 PROMPTATELIER_URL），使用该后台的配置和契约目录。默认复用相同参数；要新候选时加 --force。",
-            f"7. 出图后复核用 `{cli} contract review {contract_id} --sheets{config_arg}`（见 compose-contract-review Skill），打开图片或联系表后再给用户结论。",
+            f"7. 出图后用 `{cli} contract review {contract_id} --sheets{config_arg}` 准备材料，填写「图片复核派单模板」，把本轮联系表和原图交给图片复核子 Agent。主 Agent 默认只读报告。有待修问题就据证据改词，重新审词、修补、复核最终版，按授权重出后再交图片复核子 Agent 查验。",
             "",
-            *planning_guide(detail),
+            *existing_plan(detail),
+            writing_guide(),
+            "",
             "## 帧格式",
             FRAME_FORMAT_GUIDE,
             "",
             *multi_character_guide(detail, profile),
-            "## 原则",
-            PRINCIPLES,
-            "",
             "## 目标格式要点",
             _format_notes(profile, request["target_format"]),
             "",
@@ -212,15 +186,14 @@ def render_standalone_prompt(detail: dict[str, Any], profile: FormatProfile | No
     request = detail["request"]
     sources = detail["sources"]
     parts = [
-        "请根据下面的素材和要求，为一组连续的画面写出每一帧的完整图像提示词（danbooru tag 风格）。",
-        "只输出帧内容（Markdown，从第一帧的 `## f01` 开始），不要输出其他说明。",
+        "你是这份「Agent 拼接契约」的主 Agent。先根据下面的素材和要求提出创作方案，与用户讨论并等待确认，再为连续画面写正式计划与每帧完整图像提示词（danbooru tag 风格）。会话中已有明确确认的方案直接沿用。",
+        "方案确认并完成写作后，交付计划区和全部帧组成的契约正文，将它单独放在一个 Markdown 代码块中；导入时只复制该块内容。复核报告与主 Agent 裁决另行交付，不拼进契约正文。",
         "",
         "## 请求",
         *_request_lines(detail),
         "",
         "## 素材",
     ]
-    planning = planning_guide(detail)
     for key, character in (sources.get("characters") or {}).items():
         parts.append(f"### 角色 {key}：{character.get('name') or character.get('ref')}")
         for section, tags in (character.get("sections") or {}).items():
@@ -262,11 +235,10 @@ def render_standalone_prompt(detail: dict[str, Any], profile: FormatProfile | No
             "",
             "source 写上面动作组成员的 ref；新增帧写 source: custom（这种情况下没有工具检索参考动作，inspired_by 可省略）。",
             "",
-            *planning,
-            *multi_character_guide(detail, profile),
-            "## 原则",
-            PRINCIPLES,
+            *existing_plan(detail),
+            writing_guide(),
             "",
+            *multi_character_guide(detail, profile),
             "## 目标格式要点",
             _format_notes(profile, request["target_format"]),
             "",

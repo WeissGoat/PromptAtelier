@@ -443,6 +443,12 @@ export function AgentStudio() {
               </div>
             ) : null}
             {detail.request.requirements ? <blockquote className="ct-requirements">{detail.request.requirements}</blockquote> : null}
+            {detail.preamble ? (
+              <details className="ct-plan">
+                <summary>计划区</summary>
+                <pre className="ct-raw">{detail.preamble}</pre>
+              </details>
+            ) : null}
             {contractIssues.length ? (
               <ul className="ct-issues">
                 {contractIssues.map((issue, index) => (
@@ -580,7 +586,7 @@ export function AgentStudio() {
               <h2>导入帧内容</h2>
               <button aria-label="关闭" className="icon-button" onClick={() => setImportOpen(false)} type="button"><X size={16} /></button>
             </header>
-            <p className="muted">粘贴外部 agent 输出的帧内容（从「## f01 …」开始；包在 ```markdown 里也可以）。会替换契约正文、写回文件并校验，status 改为 done。</p>
+            <p className="muted">粘贴外部 agent 输出的契约正文（计划区 + 帧，也兼容仅帧内容；包在 Markdown 代码块里也可以）。携带计划时一并替换，仅帧内容会保留已有计划。复核报告和裁决请单独保存，不要粘贴在正文中。导入会校验并标记 done，不代表已完成子 Agent 复核。</p>
             <textarea className="ct-modal-text" onChange={(event) => setImportText(event.target.value)} placeholder="## f01 标题&#10;source: …" value={importText} />
             <div className="ct-row">
               <button className="primary" disabled={!importText.trim() || !detail} onClick={() => void submitImport()} type="button">导入并校验</button>

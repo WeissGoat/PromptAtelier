@@ -65,6 +65,31 @@ def read_image_evidence(image_path: str | Path) -> ActionEvidence:
 
     action = clean_text(info.get("action"))
     topic = clean_text(info.get("topic"))
+    ref: str | None = None
+    source_detail = "PNG/JPEG/WebP metadata"
+
+    render_request_raw = info.get("render request") or info.get("render_request")
+    if render_request_raw:
+        try:
+            parsed_rr = (
+                json.loads(render_request_raw)
+                if isinstance(render_request_raw, str)
+                else render_request_raw
+            )
+        except json.JSONDecodeError:
+            parsed_rr = {}
+        if isinstance(parsed_rr, dict):
+            meta = parsed_rr.get("meta") if isinstance(parsed_rr.get("meta"), dict) else {}
+            node_refs = meta.get("node_refs") if isinstance(meta.get("node_refs"), list) else []
+            for item in node_refs:
+                if isinstance(item, dict) and item.get("role") == "action":
+                    action = action or clean_text(item.get("id"))
+                    ref = ref or clean_text(item.get("ref"))
+                    if not topic and ref:
+                        topic = _topic_from_ref(ref)
+                    source_detail = "render_request.meta.node_refs"
+                    break
+
     comment = clean_text(info.get("comment"))
     if comment:
         try:
@@ -80,7 +105,8 @@ def read_image_evidence(image_path: str | Path) -> ActionEvidence:
         source_kind="legacy_image",
         action=action,
         topic=topic,
-        source_detail="PNG/JPEG/WebP metadata",
+        ref=ref or None,
+        source_detail=source_detail,
     )
 
 

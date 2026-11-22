@@ -351,3 +351,35 @@ class WebNodesTest(TestCase):
 
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json()["error"]["code"], "invalid_node")
+
+    def test_nodes_http_sorts_by_updated_time_descending_by_default(self):
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design = root / "design"
+            older = design / "角色" / "alpha"
+            newer = design / "角色" / "zeta"
+            middle = design / "角色" / "middle"
+            _write_meta(older, kind="character", node_id="alpha", prompt="alpha_tag")
+            _write_meta(middle, kind="character", node_id="middle", prompt="middle_tag")
+            _write_meta(newer, kind="character", node_id="zeta", prompt="zeta_tag")
+            os.utime(older / "meta.yaml", (1_700_000_100, 1_700_000_100))
+            os.utime(middle / "meta.yaml", (1_700_000_200, 1_700_000_200))
+            os.utime(newer / "meta.yaml", (1_700_000_300, 1_700_000_300))
+
+            client = TestClient(
+                create_app(
+                    node_workspace=NodeWorkspace(design_root=design),
+                    style_lab_dir=root / "stylelab",
+                )
+            )
+
+            raw = client.get("/api/nodes", params={"role": "character"})
+            deduped = client.get("/api/nodes", params={"role": "character", "dedupe": "true"})
+
+            self.assertEqual(raw.status_code, 200)
+            self.assertEqual([item["name"] for item in raw.json()["nodes"]], ["zeta", "middle", "alpha"])
+            self.assertEqual(deduped.status_code, 200)
+            self.assertEqual([item["name"] for item in deduped.json()["nodes"]], ["zeta", "middle", "alpha"])

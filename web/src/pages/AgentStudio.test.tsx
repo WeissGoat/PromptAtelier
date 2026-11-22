@@ -74,6 +74,18 @@ describe("AgentStudio history request reuse", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows the full plan separately from the original requirements", async () => {
+    const detail = contract();
+    detail.preamble = "### 阶段安排\n1. 保持戒备\n2. 逐渐放松\n\n### 状态变化规划\n背景按镜头裁剪。";
+    vi.mocked(contractsApi.get).mockResolvedValue(detail);
+    render(<AgentStudio />);
+    await screen.findByText("历史 a", { selector: "strong" });
+    selectHistory("a");
+    const summary = await screen.findByText("计划区", { selector: "summary" });
+    expect(summary.closest("details")?.querySelector("pre")?.textContent).toBe(detail.preamble);
+    expect(screen.getByText("要求 a", { selector: "blockquote" })).toBeTruthy();
+  });
+
   it("fills the full request, restores it on reselect, and creates with the edited request", async () => {
     const original = contract();
     vi.spyOn(contractsApi, "create").mockResolvedValue({ ...original, id: "new" });

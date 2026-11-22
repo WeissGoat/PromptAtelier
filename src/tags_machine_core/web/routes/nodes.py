@@ -32,6 +32,7 @@ def list_nodes(
     offset: int = 0,
     limit: int = 20,
     dedupe: bool = False,
+    sort: str = "updated",
 ) -> dict:
     offset = max(0, offset)
     limit = max(1, min(limit, 500))
@@ -41,6 +42,7 @@ def list_nodes(
             q or "",
             offset=offset,
             limit=limit,
+            sort=sort,
         )
         nodes = result["nodes"]
         has_more = result["has_more"]
@@ -50,6 +52,7 @@ def list_nodes(
             query=q,
             offset=offset,
             limit=limit,
+            sort=sort,
         )
     return {
         "schema": "tags-machine-core.web.node-list/v1",
