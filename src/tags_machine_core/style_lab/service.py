@@ -27,6 +27,7 @@ from .artist_test import (
     subject_norms,
 )
 from .classify import classify_tags
+from .custom_groups import CustomGroupStore, GroupRef, member_ids
 from .compare import compare_with_source, image_similarity
 from .export import ArtistExporter, ExportError, ExportLog, ExportRequest, suggest_author
 from .grouping import build_groups, workspace_tags
@@ -117,6 +118,7 @@ class StyleLabService:
         *,
         name: str | None = None,
         group_id: str | None = None,
+        source_group: GroupRef | None = None,
         draft: bool = False,
     ) -> Recipe:
         """从图片新建配方。draft=True 只生成不保存（version 0），等用户改了再由前端创建。"""
@@ -124,6 +126,12 @@ class StyleLabService:
         if not record.has_metadata:
             raise ValueError(f"Image has no NovelAI metadata: {record.rel_path}")
         recipe = recipe_from_image(record, name=name, group_id=group_id)
+        if source_group:
+            if source_group.kind == "custom":
+                doc = CustomGroupStore(self.store, info).load()
+                if image_id not in member_ids(doc, source_group.id):
+                    raise ValueError("源图不属于指定的自定义组")
+            recipe.source_group = source_group
         if draft:
             return recipe.model_copy(update={"version": 0})
         return self.recipes(info).create(recipe)
@@ -288,7 +296,7 @@ class StyleLabService:
         seeds: list[int] = []
         if settings.kind == "regression":
             images = self.store.load_index(info).images
-            candidate_ids = settings.image_ids or self._group_image_ids(recipe, images)
+            candidate_ids = settings.image_ids or self._group_image_ids(recipe, images, info)
             picked = pick_regression_images(
                 images,
                 candidate_ids,
@@ -358,12 +366,17 @@ class StyleLabService:
         client = self.llm_client if self.llm_client and self.llm_client.available else None
         return classify_tags(client, tags, fetch=False)
 
-    def _group_image_ids(self, recipe: Recipe, images: list[ImageRecord]) -> list[str] | None:
-        if not recipe.group_id:
+    def _group_image_ids(self, recipe: Recipe, images: list[ImageRecord], info: WorkspaceInfo | None = None) -> list[str] | None:
+        if recipe.source_group and recipe.source_group.kind == "custom":
+            if info is None:
+                return []
+            return member_ids(CustomGroupStore(self.store, info).load(), recipe.source_group.id)
+        group_id = recipe.source_group.id if recipe.source_group else recipe.group_id
+        if not group_id:
             return None
         for group in build_groups(images, self._cached_categories(images)):
             for candidate in (group, *group.get("children", [])):
-                if candidate["id"] == recipe.group_id:
+                if candidate["id"] == group_id:
                     return list(candidate["image_ids"])
         return None
 

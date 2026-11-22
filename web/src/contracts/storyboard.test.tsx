@@ -106,7 +106,7 @@ describe("ContractStoryboard", () => {
   it("opens the viewer over the filtered images of the frame", () => {
     const props = renderBoard({ filters: { ...DEFAULT_BOARD_FILTERS, artist: "A" } });
     fireEvent.click(screen.getByRole("button", { name: "查看 f01 A seed 14" }));
-    const [openedFrame, opened, index] = props.onOpenImage.mock.calls[0];
+    const [openedFrame, opened, index] = vi.mocked(props.onOpenImage).mock.calls[0];
     expect(openedFrame.id).toBe("f01");
     expect(opened.map((item: ContractResultImage) => item.path)).toEqual(["a1.png", "a0.png", "a2.png"]);
     expect(index).toBe(2);

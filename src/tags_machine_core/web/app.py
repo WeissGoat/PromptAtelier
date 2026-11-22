@@ -17,6 +17,7 @@ from tags_machine_core.execution import execute_render_request
 from tags_machine_core.llm import LLMClient
 from tags_machine_core.services import GenerationJsonApi
 from tags_machine_core.services.generation_service import GenerationService
+from tags_machine_core.services.generation_reuse import GenerationReuse
 from tags_machine_core.services.json_api import GenerationExecutor
 from tags_machine_core.style_lab import StyleLabService, WorkspaceStore
 
@@ -35,6 +36,7 @@ from .routes import (
     novelai,
     results,
     style_lab,
+    style_lab_workflow,
 )
 from .services.comfyui_targets import ComfyUITargetService
 from .services.generate_batch import GENERATE_BATCH_JOB, recover_interrupted_batch
@@ -88,6 +90,7 @@ def create_app(
         recover=recover_interrupted_batch,
     )
     app.state.config = config
+    app.state.generation_reuse = GenerationReuse(config.runtime.output_dir)
     app.state.config_path = resolved_config_path
     app.state.node_workspace = node_workspace or NodeWorkspace(design_root=config.legacy.design_root)
     app.state.node_pool_service = NodePoolService(
@@ -178,6 +181,7 @@ def create_app(
     app.include_router(comfyui.router, prefix="/api", tags=["comfyui"])
     app.include_router(novelai.router, prefix="/api", tags=["novelai"])
     app.include_router(style_lab.router, prefix="/api", tags=["style-lab"])
+    app.include_router(style_lab_workflow.router, prefix="/api", tags=["style-lab"])
 
     resolved_static_dir = _resolve_static_dir(static_dir)
     if resolved_static_dir is not None:

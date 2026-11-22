@@ -1,0 +1,4 @@
+interface:
+  display_name: "Style Lab 画风复刻"
+  short_description: "先整理图库、分析自定义分组并建配方，再按用户指定的组或配方测试出图"
+  default_prompt: "使用 $style-lab 将我指定的图片或文件夹整理为工作区、自定义分组和完整配方，第一步不出图，等我指定哪些组或配方后再测试。"

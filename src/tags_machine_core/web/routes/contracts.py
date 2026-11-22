@@ -9,15 +9,75 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
 from tags_machine_core.compose_contracts import ContractConflictError, ContractService
+from tags_machine_core.compose_contracts.generation import (
+    ContractGenerationOptions,
+    build_generation_batch,
+)
 from tags_machine_core.compose_contracts.parser import ContractParseError
+from tags_machine_core.prompt_tokens import render_request_token_usage
 from tags_machine_core.web.errors import ApiError
-
+from tags_machine_core.web.services.generate_batch import (
+    GENERATE_BATCH_JOB,
+    run_generate_batch,
+    validate_generate_batch,
+)
+from tags_machine_core.web.services.output_paths import resolve_batch_output_dirs
 
 router = APIRouter()
 
 
 def _service(request: Request) -> ContractService:
     return request.app.state.contract_service
+
+
+@router.post("/contracts/{contract_id}/generate")
+def generate_contract(contract_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    """Agent 的出图入口；dry_run 只预检，实际执行沿用 Web 的持久后台任务。"""
+
+    def prepare():
+        artist_ref = str(payload.get("artist") or "").strip()
+        if not artist_ref:
+            raise ValueError("请先询问用户指定画风，然后传入 artist；不会自动选择画风")
+        settings = ContractGenerationOptions.model_validate(payload).model_dump()
+        artist = request.app.state.node_workspace.read_artist_node(artist_ref)
+        detail = _service(request).detail(contract_id)
+        raw = build_generation_batch(detail, artist, settings)
+        batch = resolve_batch_output_dirs(
+            request.app.state.config.runtime.output_dir, validate_generate_batch(raw),
+        )
+        previews = []
+        for item in batch["items"]:
+            plan = request.app.state.generation_api.resolve_compose_render_plan(item["compose_request"])
+            if plan.get("status") != "ready" or not plan.get("render_request"):
+                raise ValueError("契约帧尚未完成提示词拼接")
+            usage = render_request_token_usage(plan["render_request"])
+            previews.append({
+                "frame_id": item["display"]["labels"]["frame"],
+                "token_usage": usage,
+                "render_request": plan["render_request"],
+            })
+        over = [p["frame_id"] for p in previews if (p["token_usage"] or {}).get("over")]
+        if over and not settings["dry_run"] and not settings["allow_over_limit"]:
+            raise ValueError("最终提示词超限：" + ", ".join(over) + "；请精简或显式传 allow_over_limit")
+        return batch, previews, settings
+
+    batch, previews, settings = _call(prepare)
+    if settings["dry_run"]:
+        return {
+            "dry_run": True,
+            "total": len(batch["items"]),
+            "output_dir": batch["output_dir"],
+            "frames": previews,
+            "skip_duplicates": settings["skip_duplicates"],
+        }
+
+    def worker(ctx):
+        return run_generate_batch(
+            request.app.state.generation_api, batch, ctx,
+            reuse=request.app.state.generation_reuse,
+        )
+
+    return request.app.state.job_manager.submit(GENERATE_BATCH_JOB, worker, request=batch).to_dict()
 
 
 def _call(operation):

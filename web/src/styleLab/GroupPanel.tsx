@@ -1,16 +1,18 @@
 import { FlaskConical, GitCompareArrows, LoaderCircle } from "lucide-react";
 
-import type { Analysis, ImageRecord, RecipeSummary } from "./api";
+import { sourceImageUrl, type Analysis, type CustomGroups, type ImageRecord, type RecipeSummary } from "./api";
+import { EMPTY_CUSTOM_GROUPS, preparationLabels, recipesInGroup, UNGROUPED } from "./customGroups";
 import { modelLabel, vibeLabel } from "./format";
 
 /** 分组方式：画风（自动分析出的画风家族），或者按投稿、按月份（作者投稿文件夹才有）。 */
-export type GroupMode = "style" | "post" | "month";
+export type GroupMode = "custom" | "style" | "post" | "month";
 
 /** 按投稿或月份分出的一组图；id 带上方式前缀（post: / month:），和画风分组的 id 区分开。 */
 export type ImageBucket = { id: string; name: string; sub: string; imageIds: string[]; posts: number };
 
 const GROUP_MODES: Array<[GroupMode, string]> = [
-  ["style", "画风"],
+  ["custom", "自定义"],
+  ["style", "自动画风"],
   ["post", "投稿"],
   ["month", "月份"],
 ];
@@ -30,6 +32,11 @@ type GroupPanelProps = {
   onOpenRecipe: (id: string) => void;
   /** 打开配方对比（两个以上配方时显示）。 */
   onCompareRecipes?: () => void;
+  customGroups?: CustomGroups;
+  onManageGroups?: () => void;
+  onCopyAutoGroup?: () => void;
+  onTestGroup?: (recipeIds: string[]) => void;
+  workspaceId?: string;
 };
 
 function vibeText(vibe: string): string {
@@ -57,11 +64,19 @@ export function GroupPanel({
   onSelectGroup,
   onOpenRecipe,
   onCompareRecipes,
+  customGroups = EMPTY_CUSTOM_GROUPS,
+  onManageGroups,
+  onCopyAutoGroup,
+  onTestGroup,
+  workspaceId,
 }: GroupPanelProps) {
   const groups = analysis?.groups ?? [];
   const hasPosts = postBuckets.length > 0;
-  const shown: GroupMode = hasPosts ? mode : "style";
+  const shown: GroupMode = !hasPosts && (mode === "post" || mode === "month") ? "style" : mode;
   const buckets = shown === "post" ? postBuckets : monthBuckets;
+  const selectedCustom = customGroups.groups.find((group) => group.id === selectedGroup);
+  const visibleRecipes = shown === "custom" && selectedGroup
+    ? recipesInGroup(recipes, customGroups, selectedGroup) : recipes;
   return (
     <section className="sl-groups">
       <div className="sl-groups-head">
@@ -76,9 +91,9 @@ export function GroupPanel({
           </span>
         ) : null}
       </div>
-      {hasPosts ? (
+      {(
         <div className="sl-segmented small sl-group-modes" role="radiogroup" aria-label="分组方式">
-          {GROUP_MODES.map(([key, label]) => (
+          {GROUP_MODES.filter(([key]) => hasPosts || key === "custom" || key === "style").map(([key, label]) => (
             <button
               aria-checked={shown === key}
               className={shown === key ? "on" : ""}
@@ -91,12 +106,32 @@ export function GroupPanel({
             </button>
           ))}
         </div>
-      ) : null}
+      )}
       {shown === "style" && !llmAvailable ? <p className="sl-hint">没有配置 LLM，只能按规则识别画师（artist: 前缀）。</p> : null}
       <button className={`sl-group-row ${selectedGroup === null ? "on" : ""}`} onClick={() => onSelectGroup(null)} type="button">
         <span>全部图片</span>
       </button>
-      {shown !== "style" ? (
+      {shown === "custom" ? <>
+        <button className="sl-link-btn" onClick={onManageGroups} type="button">管理自定义分组</button>
+        {!customGroups.groups.length ? <p className="sl-hint">尚未建立自定义分组。可手动建立，或让 Agent 分析并建立配方；准备阶段不会出图。</p> : null}
+        {customGroups.groups.filter((group) => !group.parent_id).flatMap((parent) => [parent,
+          ...customGroups.groups.filter((group) => group.parent_id === parent.id)]).map((group) => <button
+          className={`sl-group-row ${group.parent_id ? "child" : "main"} ${selectedGroup === group.id ? "on" : ""}`}
+          key={group.id} onClick={() => onSelectGroup(group.id)} title={group.reason} type="button">
+          <span>{group.name}{group.locked ? " 🔒" : ""}</span><span className="sl-count">{group.post_count} 投稿 / {group.image_count} 图</span>
+        </button>)}
+        <button className={`sl-group-row ${selectedGroup === UNGROUPED ? "on" : ""}`} onClick={() => onSelectGroup(UNGROUPED)} type="button">未分组 <span className="sl-count">{customGroups.ungrouped_image_ids.length}</span></button>
+        {selectedCustom ? <div className="sl-custom-detail">
+          <p>{selectedCustom.updated_by === "agent" ? "Agent 分析" : "人工整理"} · 证据{({ strong: "充分", limited: "有限", review: "待判断" } as const)[selectedCustom.evidence_strength]} · {selectedCustom.evidence_image_ids.length} 张证据图</p>
+          {workspaceId && selectedCustom.representative_image_id ? <img alt="代表图" src={sourceImageUrl(workspaceId, selectedCustom.representative_image_id, 160)} style={{ maxWidth: "100%", maxHeight: 130 }} /> : null}
+          <p>{selectedCustom.post_count} 投稿 · {(selectedCustom.post_share * 100).toFixed(1)}% · {selectedCustom.usable_count} 张可用源图</p>
+          <p>{dateRange(selectedCustom.date_from, selectedCustom.date_to)}</p>
+          {selectedCustom.reason ? <p>{selectedCustom.reason}</p> : null}
+          {selectedCustom.notes ? <p>{selectedCustom.notes}</p> : null}
+          <button disabled={!visibleRecipes.length} onClick={() => onTestGroup?.(visibleRecipes.map((recipe) => recipe.id))} type="button">测试此组配方</button>
+        </div> : null}
+      </> : null}
+      {shown === "post" || shown === "month" ? (
         <div className="sl-bucket-list">
           {buckets.map((bucket) => (
             <button
@@ -150,10 +185,11 @@ export function GroupPanel({
           ) : null}
         </div>
       ))}
+      {shown === "style" && selectedGroup && onCopyAutoGroup ? <button onClick={onCopyAutoGroup} type="button">将此自动组复制为自定义组</button> : null}
 
       <div className="sl-groups-head">
         <h3>配方</h3>
-        <span className="sl-muted">{recipes.length}</span>
+        <span className="sl-muted">{visibleRecipes.length}</span>
         {onCompareRecipes && recipes.length > 1 ? (
           <button className="sl-link-btn" onClick={onCompareRecipes} title="两个配方逐区对比 tag 和参数" type="button">
             <GitCompareArrows size={13} aria-hidden="true" />
@@ -161,12 +197,15 @@ export function GroupPanel({
           </button>
         ) : null}
       </div>
-      {recipes.length === 0 ? <p className="sl-hint">选一张图，在右侧点“从这张图新建配方”。</p> : null}
-      {recipes.map((recipe) => (
+      {visibleRecipes.length === 0 ? <p className="sl-hint">选一张图，在右侧点“从这张图新建配方”。</p> : null}
+      {visibleRecipes.map((recipe) => (
         <button className="sl-recipe-link" key={recipe.id} onClick={() => onOpenRecipe(recipe.id)} type="button">
           <FlaskConical size={13} aria-hidden="true" />
           <span>{recipe.name}</span>
-          <span className="sl-count">{recipe.stage === "split" ? "待划分" : `v${recipe.version}`}</span>
+          <span className="sl-count" title={recipe.preparation?.reason}>{recipe.test_summary?.status === "succeeded" ? "已测试" : recipe.test_summary?.status === "running" || recipe.test_summary?.status === "queued" ? "测试中"
+            : recipe.test_summary?.status === "partial" || recipe.test_summary?.status === "failed" ? "测试需检查"
+            : recipe.test_summary?.status === "stale" ? "配方已改，需重测"
+            : recipe.preparation ? preparationLabels[recipe.preparation.status] : recipe.stage === "split" ? "待划分" : `v${recipe.version}`}</span>
         </button>
       ))}
     </section>

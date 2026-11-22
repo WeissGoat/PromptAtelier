@@ -263,3 +263,38 @@ def test_resolver_prefers_absolute_path_when_ref_only_record_matches(tmp_path: P
     assert resources == [with_absolute_path]
     assert resources[0].path == action.resolve()
     assert resources[0].exists is True
+
+
+def test_resolver_reads_from_parameter_details_image_when_json_missing(tmp_path: Path):
+    from PIL import Image
+    from PIL.PngImagePlugin import PngInfo
+
+    action = tmp_path / "action"
+    action.mkdir()
+    task = tmp_path / "task"
+    task.mkdir()
+    (task / "image_01.png").write_bytes(b"dummy")
+
+    param_image = task / "zz_123_parameter_details.png"
+    info = PngInfo()
+    info.add_itxt(
+        "Render Request",
+        json.dumps(
+            {
+                "meta": {
+                    "node_refs": [
+                        {"role": "action", "id": "action_from_png", "ref": str(action), "index": 0}
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ),
+    )
+    Image.new("RGB", (4, 4)).save(param_image, pnginfo=info)
+
+    contexts = TaskArchiveResolver().resolve([task])
+
+    assert len(contexts.tasks) == 1
+    assert contexts.tasks[0].task_dir == task.resolve()
+    assert contexts.existing_paths("action") == [action.resolve()]
+    assert contexts.tasks[0].resources_for("action")[0].id == "action_from_png"

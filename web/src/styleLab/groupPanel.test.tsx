@@ -99,9 +99,11 @@ describe("post and month groups", () => {
     rerender(<GroupPanel {...props} mode="post" />);
     expect(screen.getByRole("button", { name: /プール/ })).toBeTruthy();
 
-    // 不是投稿文件夹时没有切换，只有画风分组。
+    // 散图也始终支持自定义分组和自动画风；隐藏投稿与月份。
     rerender(<GroupPanel {...props} mode="post" postBuckets={[]} monthBuckets={[]} />);
-    expect(screen.queryByRole("radiogroup", { name: "分组方式" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "自定义" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "自动画风" })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "月份" })).toBeNull();
     expect(screen.queryByRole("button", { name: /プール/ })).toBeNull();
   });
 });

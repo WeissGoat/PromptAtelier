@@ -11,7 +11,7 @@ import {
   DEFAULT_GENERATE_SETTINGS,
   type GenerateSettings,
 } from "../contracts/ContractGeneratePanel";
-import { ContractRequestPanel, EMPTY_DRAFT, type ContractDraft } from "../contracts/ContractRequestPanel";
+import { ContractRequestPanel, draftFromContract, EMPTY_DRAFT, type ContractDraft } from "../contracts/ContractRequestPanel";
 import { ContractStoryboard, DEFAULT_BOARD_FILTERS, type BoardFilters } from "../contracts/ContractStoryboard";
 import { FrameCard, type FrameView } from "../contracts/FrameCard";
 import { readSelectedFrames, readStored, STORAGE_KEYS, writeSelectedFrames, writeStored } from "../contracts/persist";
@@ -50,6 +50,7 @@ export function AgentStudio() {
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
   const [draft, setDraft] = useState<ContractDraft>(() => readStored(STORAGE_KEYS.draft, EMPTY_DRAFT));
   const [activeId, setActiveId] = useState<string | null>(readActive);
+  const [requestSourceId, setRequestSourceId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
   const [results, setResults] = useState<ContractResults | null>(null);
   const [error, setError] = useState("");
@@ -80,6 +81,8 @@ export function AgentStudio() {
   const restoredRef = useRef<string | null>(null);
   const detailRef = useRef<ContractDetail | null>(null);
   detailRef.current = detail;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   const rememberStatuses = useCallback((items: ContractSummary[]) => {
     items.forEach((item) => statusRef.current.set(item.id, item.status));
@@ -95,20 +98,24 @@ export function AgentStudio() {
   const loadDetail = useCallback(async (id: string) => {
     try {
       const data = await contractsApi.get(id);
+      if (activeIdRef.current !== id) return null;
       setDetail(data);
       setFileChanged(false);
       setError("");
       return data;
     } catch (err) {
+      if (activeIdRef.current !== id) return null;
       setError(errorMessage(err));
       setDetail(null);
+      setRequestSourceId((current) => current === id ? null : current);
       return null;
     }
   }, []);
 
   const loadResults = useCallback(async (id: string) => {
     try {
-      setResults(await contractsApi.results(id));
+      const data = await contractsApi.results(id);
+      if (activeIdRef.current === id) setResults(data);
     } catch {
       // 结果读取失败不影响查看契约。
     }
@@ -139,6 +146,17 @@ export function AgentStudio() {
       setDetail(null);
     }
   }, [activeId, loadDetail, loadResults]);
+
+  useEffect(() => {
+    if (!requestSourceId || detail?.id !== requestSourceId) return;
+    setRequestSourceId(null);
+    if (!detail.parse_error) setDraft(draftFromContract(detail));
+  }, [detail, requestSourceId]);
+
+  function openContract(id: string) {
+    setRequestSourceId(id);
+    setActiveId(id);
+  }
 
   useEffect(() => writeStored(STORAGE_KEYS.draft, draft), [draft]);
   useEffect(() => writeStored(STORAGE_KEYS.settings, settings), [settings]);
@@ -335,7 +353,7 @@ export function AgentStudio() {
         onChange={setDraft}
         onCreate={() => void createContract()}
         onImportNew={() => setImportOpen(true)}
-        onOpen={setActiveId}
+        onOpen={openContract}
         onRefresh={(pull) => void refreshList(pull)}
       />
 
@@ -343,7 +361,7 @@ export function AgentStudio() {
         {finished ? (
           <div className="ct-banner ct-banner-ok">
             Agent 已完成：{finished.title || finished.id}
-            <button className="btn-sm" onClick={() => { setActiveId(finished.id); setFinished(null); }} type="button">打开</button>
+            <button className="btn-sm" onClick={() => { openContract(finished.id); setFinished(null); }} type="button">打开</button>
             <button aria-label="关闭提示" className="icon-button btn-ghost btn-sm" onClick={() => setFinished(null)} type="button"><X size={13} /></button>
           </div>
         ) : null}
@@ -425,6 +443,12 @@ export function AgentStudio() {
               </div>
             ) : null}
             {detail.request.requirements ? <blockquote className="ct-requirements">{detail.request.requirements}</blockquote> : null}
+            {detail.preamble ? (
+              <details className="ct-plan">
+                <summary>计划区</summary>
+                <pre className="ct-raw">{detail.preamble}</pre>
+              </details>
+            ) : null}
             {contractIssues.length ? (
               <ul className="ct-issues">
                 {contractIssues.map((issue, index) => (
@@ -562,7 +586,7 @@ export function AgentStudio() {
               <h2>导入帧内容</h2>
               <button aria-label="关闭" className="icon-button" onClick={() => setImportOpen(false)} type="button"><X size={16} /></button>
             </header>
-            <p className="muted">粘贴外部 agent 输出的帧内容（从「## f01 …」开始；包在 ```markdown 里也可以）。会替换契约正文、写回文件并校验，status 改为 done。</p>
+            <p className="muted">粘贴外部 agent 输出的契约正文（计划区 + 帧，也兼容仅帧内容；包在 Markdown 代码块里也可以）。携带计划时一并替换，仅帧内容会保留已有计划。复核报告和裁决请单独保存，不要粘贴在正文中。导入会校验并标记 done，不代表已完成子 Agent 复核。</p>
             <textarea className="ct-modal-text" onChange={(event) => setImportText(event.target.value)} placeholder="## f01 标题&#10;source: …" value={importText} />
             <div className="ct-row">
               <button className="primary" disabled={!importText.trim() || !detail} onClick={() => void submitImport()} type="button">导入并校验</button>

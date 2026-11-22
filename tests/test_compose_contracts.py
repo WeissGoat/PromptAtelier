@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from tags_machine_core.cli import main
 from tags_machine_core.compose_contracts import ContractConflictError, ContractService, parse_contract
 from tags_machine_core.compose_contracts.parser import (
+    ContractParseError,
     extract_import_frames,
     replace_frame_prompts,
     set_front_matter_fields,
@@ -174,8 +175,18 @@ class ContractParserTest(unittest.TestCase):
     def test_extract_import_frames_handles_wrappers(self):
         raw = "```markdown\n---\ntitle: 夜晚\n---\n说明\n## f01 a\nsource: x\n\n```positive\n1girl\n```\n```"
         body, extra = extract_import_frames(raw)
-        self.assertTrue(body.startswith("## f01 a"))
+        self.assertTrue(body.startswith("说明\n## f01 a"))
         self.assertEqual(extra, {"title": "夜晚"})
+
+    def test_import_preserves_plan_and_ignores_quoted_or_fenced_headers(self):
+        plan = "### 用户自定义要求\n> ## 用户标题\n> 保持戒备\n\n### 阶段安排\n1. 进入\n2. 交谈\n\n```text\n## fake 示例\n```"
+        body, _ = extract_import_frames("````markdown\n" + plan + "\n\n## f01 进入\nsource: #1\n```positive\n1girl\n```\n````")
+        parsed = parse_contract("---\nid: example\n---\n" + body)
+        self.assertEqual(parsed.preamble, plan)
+        self.assertEqual([frame.id for frame in parsed.frames], ["f01"])
+        self.assertEqual(parsed.frames[0].positive, "1girl")
+        with self.assertRaises(ContractParseError):
+            extract_import_frames("### 计划\n```text\n## fake 示例\n```")
 
 
 class TokenizeTest(unittest.TestCase):
@@ -343,6 +354,37 @@ inspired_by: new/missing
         self.assertEqual(saved["frames"][0]["prompts"]["positive"], "1girl, solo")
         with self.assertRaises(ContractConflictError):
             self.service.save_frame(detail["id"], "f01", {"positive": "x"}, expected_hash=detail["file"]["hash"])
+
+    def test_plan_survives_partial_reads_edits_import_and_clone(self):
+        detail = self._create()
+        cid = detail["id"]
+        plan = "### 用户自定义要求\n> 夜晚教室\n> 第二行\n\n### 阶段安排\n1. 进入\n2. 交谈\n\n### 状态变化规划\n表情由戒备逐渐放松。"
+        frames = "\n\n".join(
+            f"## f{i:02} 帧{i}\nsource: #1\ncharacters: c1\n\n```positive\nchar_a, 1girl, standing\n```"
+            for i in range(1, 101)
+        )
+        detail = self.service.import_frames(cid, plan + "\n\n" + frames)
+        hashes = [frame["prompt_hash"] for frame in detail["frames"]]
+        self.assertEqual(len(hashes), 100)
+        self.assertEqual(detail["preamble"], plan)
+        for summary in (True, False):
+            part = self.service.show(cid, summary=summary, frames="f11-f20")
+            self.assertEqual(part["preamble"], plan)
+            self.assertEqual(len(part["frames"]), 10)
+        self.assertEqual(self.service.context(cid, members="1", summary=True)["preamble"], plan)
+        for kind in ("tools", "standalone"):
+            self.assertIn(plan, self.service.prompt(cid, kind)["text"])
+        saved = self.service.save_frame(cid, "f01", {"positive": "char_a, 1girl, sitting"}, expected_hash=detail["file"]["hash"])
+        self.assertEqual(saved["preamble"], plan)
+        self.assertNotEqual(saved["frames"][0]["prompt_hash"], hashes[0])
+        legacy = self.service.import_frames(cid, frames)
+        self.assertEqual(legacy["preamble"], plan)
+        self.assertEqual([frame["prompt_hash"] for frame in legacy["frames"]], hashes)
+        new_plan = plan.replace("戒备逐渐放松", "保持戒备")
+        updated = self.service.import_frames(cid, new_plan + "\n\n" + frames)
+        self.assertEqual(updated["preamble"], new_plan)
+        self.assertEqual([frame["prompt_hash"] for frame in updated["frames"]], hashes)
+        self.assertEqual(self.service.clone(cid, with_frames=True)["preamble"], new_plan)
 
     def test_stale_sources_are_reported(self):
         detail = self._create()

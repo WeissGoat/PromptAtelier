@@ -307,7 +307,7 @@ def _yaml_scalar(value: Any) -> str:
 
 
 def extract_import_frames(raw: str) -> tuple[str, dict[str, str]]:
-    """从外部 agent 的输出里取出帧正文，以及可能附带的 title / author。
+    """从外部 agent 的输出里取出计划区和帧正文，以及可能附带的 title / author。
 
     兼容：整段包在 ```markdown 代码块里；带一份 front matter；帧前有说明文字。
     """
@@ -327,7 +327,7 @@ def extract_import_frames(raw: str) -> tuple[str, dict[str, str]]:
                 extra[key] = value.strip()
         text = "\n".join(lines[body_start:]).strip()
     lines = text.splitlines()
-    first = next((i for i, line in enumerate(lines) if FRAME_HEADER_RE.match(line)), None)
-    if first is None:
+    frames, _, _ = _parse_frames(lines, 0)
+    if not frames:
         raise ContractParseError("没有找到帧：每帧需要以「## f01 标题」这样的二级标题开头")
-    return "\n".join(lines[first:]).strip(), extra
+    return text, extra

@@ -26,6 +26,7 @@ export type GenerateSettings = {
   comfyuiTarget?: string;
   characterPrompts: "auto" | "off";
   addMaleCaption: boolean;
+  skipDuplicates: boolean;
 };
 
 export const DEFAULT_GENERATE_SETTINGS: GenerateSettings = {
@@ -38,6 +39,7 @@ export const DEFAULT_GENERATE_SETTINGS: GenerateSettings = {
   negative: "",
   characterPrompts: "auto",
   addMaleCaption: false,
+  skipDuplicates: true,
 };
 
 const ORIENTATION_LABELS: Record<SizeOrientation, string> = { portrait: "竖", landscape: "横", square: "方" };
@@ -150,6 +152,7 @@ export function buildFrameRequest(
     compose_request: request,
     generate: {
       output_dir: `${outputDir}/${frame.id}`,
+      skip_duplicates: settings.skipDuplicates,
       ...(info.backend === "comfyui" && settings.comfyuiTarget ? { comfyui_target: settings.comfyuiTarget } : {}),
     },
   };
@@ -277,7 +280,7 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
         output_dir: outputDir,
         items,
       });
-      onSubmitted(`已提交 ${frames.length} 帧，到「出图任务」或帧下方查看结果`);
+      onSubmitted(`已提交 ${frames.length} 帧${settings.skipDuplicates ? "，相同参数自动复用已有图片" : ""}，到「出图任务」或帧下方查看结果`);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -349,6 +352,11 @@ export function ContractGeneratePanel({ detail, selected, settings, onChange, on
       {info?.backend === "comfyui" ? <ComfyTargetPanel onChange={(value) => update({ comfyuiTarget: value })} value={settings.comfyuiTarget} /> : null}
       <fieldset className="ct-fieldset">
         <legend>提示词行为</legend>
+        <label className="ct-check">
+          <input checked={settings.skipDuplicates} onChange={(event) => update({ skipDuplicates: event.target.checked })} type="checkbox" />
+          跳过相同参数（跨契约复用已有图片）
+        </label>
+        <small className="muted">随机 seed／随机尺寸也复用第一次的结果；想抽新图时取消勾选。</small>
         <label className="ct-check">
           <input
             checked={settings.characterPrompts === "auto"}

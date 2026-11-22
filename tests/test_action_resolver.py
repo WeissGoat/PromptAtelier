@@ -124,3 +124,69 @@ def test_relative_new_ref_is_returned_directly(tmp_path: Path) -> None:
 
     assert results[0].status == "resolved_new"
     assert results[0].absolute_path == source.resolve()
+
+
+def test_task_dir_with_parameter_details_image_maps_to_new_source(tmp_path: Path) -> None:
+    design, source, category = _write_design(tmp_path)
+    task = tmp_path / "task_dir_only_png"
+    task.mkdir()
+    (task / "0001_generated.png").write_bytes(b"dummy")
+
+    param_details = task / "zz_12345_parameter_details.png"
+    info = PngInfo()
+    info.add_itxt(
+        "Render Request",
+        json.dumps(
+            {
+                "meta": {
+                    "node_refs": [
+                        {
+                            "role": "action",
+                            "id": "04_post_动作A",
+                            "ref": str(category),
+                            "index": 0,
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ),
+    )
+    Image.new("RGB", (4, 4)).save(param_details, pnginfo=info)
+
+    results = resolve_generated_actions([task], design_root=design)
+
+    assert len(results) == 1
+    assert results[0].status == "resolved_new"
+    assert results[0].absolute_path == source.resolve()
+
+
+def test_standalone_image_with_render_request_maps_to_new_source(tmp_path: Path) -> None:
+    design, source, category = _write_design(tmp_path)
+    image_path = tmp_path / "standalone_with_rr.png"
+    info = PngInfo()
+    info.add_itxt(
+        "Render Request",
+        json.dumps(
+            {
+                "meta": {
+                    "node_refs": [
+                        {
+                            "role": "action",
+                            "id": "04_post_动作A",
+                            "ref": str(category),
+                            "index": 0,
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ),
+    )
+    Image.new("RGB", (4, 4)).save(image_path, pnginfo=info)
+
+    results = resolve_generated_actions([image_path], design_root=design)
+
+    assert len(results) == 1
+    assert results[0].status == "resolved_new"
+    assert results[0].absolute_path == source.resolve()

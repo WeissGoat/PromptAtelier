@@ -82,3 +82,16 @@ class LibraryIndexTest(TestCase):
             parse_facet_params(["cast:Solo", "pose:lying", "bogus:x", "pose:"]),
             {"cast": ["solo"], "pose": ["lying"]},
         )
+
+    def test_sort_updated_orders_newest_first(self):
+        import os
+
+        a = write_node(self.root / "a", node_id="a", tags="x")
+        b = write_node(self.root / "b", node_id="b", tags="y")
+        c = write_node(self.root / "c", node_id="c", tags="z")
+        for node_dir, ts in ((a, 1_700_000_100), (b, 1_700_000_300), (c, 1_700_000_200)):
+            os.utime(node_dir / "meta.yaml", (ts, ts))
+            os.utime(node_dir / "tags.txt", (ts, ts))
+
+        result = self.index().search("character", "", sort="updated")
+        self.assertEqual([node["name"] for node in result["nodes"]], ["b", "c", "a"])

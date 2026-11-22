@@ -1,8 +1,14 @@
 import { X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { apiGet, errorMessage } from "../api/client";
 import type { NodeListResponse, NodeSummary } from "../api/types";
+import {
+  filterNodePickerHistory,
+  loadNodePickerHistory,
+  mergeHistoryAndResults,
+  recordNodePickerSelection,
+} from "../nodes/pickerHistory";
 import type { NodeRole } from "../nodes/types";
 import { NodePreviewImage } from "./NodePreviewImage";
 
@@ -28,6 +34,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
   const requestId = useRef(0);
   const activeQueryRef = useRef("");
   const [nodes, setNodes] = useState<NodeSummary[]>([]);
+  const [historyNodes, setHistoryNodes] = useState<NodeSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -41,6 +48,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
 
   useEffect(() => {
     if (!open) return;
+    setHistoryNodes(loadNodePickerHistory(role));
     const query = text === value ? "" : text.trim();
     requestId.current += 1;
     activeQueryRef.current = query;
@@ -82,7 +90,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
     setLoadMoreError("");
   }
 
-  function searchParams(query: string, offset: number) {
+  const searchParams = useCallback((query: string, offset: number) => {
     const search = new URLSearchParams({
       role,
       limit: String(PAGE_SIZE),
@@ -91,7 +99,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
     if (query) search.set("q", query);
     if (DEDUPE_ROLES.has(role)) search.set("dedupe", "true");
     return search;
-  }
+  }, [role]);
 
   async function loadFirstPage(query: string) {
     const currentRequest = ++requestId.current;
@@ -123,13 +131,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
     setLoadingMore(true);
     setLoadMoreError("");
     try {
-      const search = new URLSearchParams({
-        role,
-        limit: String(PAGE_SIZE),
-        offset: String(offset),
-      });
-      if (query) search.set("q", query);
-      const result = await apiGet<NodeListResponse>(`/nodes?${search.toString()}`);
+      const result = await apiGet<NodeListResponse>(`/nodes?${searchParams(query, offset).toString()}`);
       if (currentRequest !== requestId.current) return;
       setNodes((current) => {
         const knownRefs = new Set(current.map((node) => node.ref));
@@ -143,7 +145,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
     } finally {
       if (currentRequest === requestId.current) setLoadingMore(false);
     }
-  }, [hasMore, loadMoreError, loading, loadingMore, nextOffset, open, role]);
+  }, [hasMore, loadMoreError, loading, loadingMore, nextOffset, open, searchParams]);
 
   useEffect(() => {
     const root = resultsRef.current;
@@ -161,6 +163,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
 
   function selectNode(node: NodeSummary) {
     requestId.current += 1;
+    setHistoryNodes(recordNodePickerSelection(role, node));
     setText(node.name);
     setOpen(false);
     setLoading(false);
@@ -169,6 +172,20 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
     setLoadMoreError("");
     onSelect(node);
   }
+
+  const currentQuery = text === value ? "" : text.trim();
+  const matchingHistory = useMemo(
+    () => filterNodePickerHistory(historyNodes, currentQuery),
+    [historyNodes, currentQuery],
+  );
+  const recentRefs = useMemo(
+    () => new Set(matchingHistory.map((node) => node.ref)),
+    [matchingHistory],
+  );
+  const displayNodes = useMemo(
+    () => mergeHistoryAndResults(matchingHistory, nodes),
+    [matchingHistory, nodes],
+  );
 
   return (
     <div className="field node-picker" ref={rootRef}>
@@ -208,8 +225,8 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
         <div aria-label={`${label}节点搜索结果`} className="node-picker-results" id={resultsId} ref={resultsRef} role="listbox">
           {loading ? <div className="node-picker-message">正在搜索...</div> : null}
           {!loading && error ? <div className="node-picker-message field-error">{error}</div> : null}
-          {!loading && !error && nodes.length === 0 ? <div className="node-picker-message">没有匹配节点</div> : null}
-          {!loading && !error ? nodes.map((node) => (
+          {!loading && !error && displayNodes.length === 0 ? <div className="node-picker-message">没有匹配节点</div> : null}
+          {!loading && !error ? displayNodes.map((node) => (
             <button
               aria-label={node.name}
               key={node.ref}
@@ -222,6 +239,7 @@ export function NodePicker({ label, role, value, displayValue, placeholder, onSe
             >
               <NodePreviewImage className="node-picker-thumb" hasPreview={node.has_preview ?? false} name={node.name} nodeRef={node.ref} size={160} zoomable={false} />
               <span className="node-picker-name">{node.name}</span>
+              {recentRefs.has(node.ref) ? <small className="node-badge node-badge-recent">最近</small> : null}
               {node.backends?.includes("comfyui") ? <small className="node-badge">ComfyUI</small> : null}
             </button>
           )) : null}

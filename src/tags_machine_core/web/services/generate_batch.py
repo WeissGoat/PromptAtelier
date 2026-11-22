@@ -8,13 +8,12 @@ from typing import Any
 
 from tags_machine_core.web.services.job_manager import JobContext, JobRecord
 
-
 GENERATE_BATCH_JOB = "generate-batch"
 GENERATE_BATCH_SCHEMA = "tags-machine-core.web.generate-batch/v1"
 MAX_BATCH_ITEMS = 2000
 # 原样带回给前端展示的项目字段（标签、分组、seed 等），后端不解释。
 _ITEM_DISPLAY_KEYS = ("label", "group", "seed", "labels")
-_GENERATE_OPTION_KEYS = ("output_dir", "comfyui_target", "random_selections")
+_GENERATE_OPTION_KEYS = ("output_dir", "comfyui_target", "random_selections", "skip_duplicates")
 
 Emit = Callable[[str, dict[str, Any]], None]
 
@@ -65,6 +64,8 @@ def validate_generate_batch(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"items[{index}].generate must be an object")
         if generate.get("random_selections") is not None:
             _check_random_selections(generate["random_selections"])
+        if "skip_duplicates" in generate and not isinstance(generate["skip_duplicates"], bool):
+            raise ValueError(f"items[{index}].generate.skip_duplicates must be a boolean")
         checked.append(
             {
                 "compose_request": item["compose_request"],
@@ -116,6 +117,7 @@ def run_generate_batch(
     batch: dict[str, Any],
     ctx: JobContext,
     previous: dict[str, Any] | None = None,
+    reuse: Any = None,
 ) -> dict[str, Any]:
     """逐项出图。previous 是同一任务上次的结果：已成功的项原样保留，其余的重跑。"""
     done = {
@@ -154,8 +156,15 @@ def run_generate_batch(
             if plan.get("status") != "ready" or not plan.get("render_request"):
                 raise ValueError("该组合需要外部 Agent 先完成提示词拼接。")
             prepared = attach_random_selections({"render_request": plan["render_request"], **entry["generate"]})
-            result = run_generate(api, prepared, emit)
-            item.update(status="succeeded", images=result.get("images") or [], error=None)
+            trace = (entry["compose_request"].get("compose") or {}).get("contract")
+            skip = entry["generate"].get("skip_duplicates", bool(trace))
+            def generate(prepared=prepared, emit=emit):
+                return run_generate(api, prepared, emit)
+
+            result = reuse.run(api, entry["compose_request"], prepared, generate, force=not skip) if reuse and (trace or skip) else generate()
+            item.update(status="succeeded", images=result.get("images") or [], error=None, cache_hit=bool(result.get("cache_hit")))
+            if item["cache_hit"]:
+                emit("generation_reused", {"image_count": len(item["images"])})
         except Exception as exc:  # noqa: BLE001  单项失败记在该项上，继续下一项
             item.update(status="failed", error=str(exc) or type(exc).__name__)
         item["finished_at"] = time.time()

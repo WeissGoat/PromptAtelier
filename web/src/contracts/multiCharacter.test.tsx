@@ -90,6 +90,12 @@ const detail = { id: "demo", request: { title: "" }, sources } as unknown as Con
 const settings: GenerateSettings = { ...DEFAULT_GENERATE_SETTINGS, artist: { ref: "artist/a", name: "a" } as never, negative: "lowres" };
 
 describe("multi-character blocks", () => {
+  it("reuses identical results by default and allows requesting new candidates", () => {
+    const info = { backend: "novelai" as const, presets: {} };
+    expect(buildFrameRequest(detail, frame, settings, info, "out").generate.skip_duplicates).toBe(true);
+    expect(buildFrameRequest(detail, frame, { ...settings, skipDuplicates: false }, info, "out").generate.skip_duplicates).toBe(false);
+  });
+
   it("orders blocks main → c1 → c2, positive before negative", () => {
     expect(orderBlockKeys(Object.keys(prompts), ["c1", "c2"])).toEqual([
       "positive",

@@ -17,6 +17,57 @@ class TaskArchiveReadError(TaskArchiveError):
     """任务归档存在但无法按 UTF-8 JSON 对象读取。"""
 
 
+PARAMETER_DETAILS_PATTERNS = (
+    "zz_*parameter_details*.png",
+    "*parameter_details*.png",
+)
+
+
+def find_parameter_details_image(directory: Path) -> Path | None:
+    if not directory.is_dir():
+        return None
+    for pattern in PARAMETER_DETAILS_PATTERNS:
+        matches = sorted(directory.glob(pattern), key=lambda p: p.name.casefold())
+        for match in matches:
+            if _is_parameter_details_archive(match):
+                return match
+    return None
+
+
+def _is_parameter_details_archive(path: Path) -> bool:
+    data = _read_image_archive_data(path)
+    return bool(data.get("render_request") or data.get("prompt_bundle"))
+
+
+def _read_image_archive_data(path: Path) -> dict[str, Any]:
+    from PIL import Image
+
+    data: dict[str, Any] = {}
+    try:
+        with Image.open(path) as img:
+            info = {str(k).casefold(): v for k, v in img.info.items()}
+    except Exception:
+        return data
+
+    for key, target_field in (
+        ("render request", "render_request"),
+        ("render_request", "render_request"),
+        ("generation result", "generation_result"),
+        ("generation_result", "generation_result"),
+        ("prompt bundle", "prompt_bundle"),
+        ("prompt_bundle", "prompt_bundle"),
+    ):
+        raw = info.get(key)
+        if raw and target_field not in data:
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, dict):
+                    data[target_field] = parsed
+            except Exception:
+                pass
+    return data
+
+
 class TaskArchiveResolver:
     archive_names = (
         "render_request.json",
@@ -49,6 +100,20 @@ class TaskArchiveResolver:
         loaded = {name: _read_json(path) for name, path in archive_files.items()}
         render_request = loaded.get("render_request.json")
         prompt_bundle = loaded.get("prompt_bundle.json")
+        generation_result = loaded.get("generation_result.json")
+
+        param_image = find_parameter_details_image(task_dir)
+        if param_image is not None:
+            archive_files[param_image.name] = param_image
+            if render_request is None or generation_result is None or prompt_bundle is None:
+                img_data = _read_image_archive_data(param_image)
+                if render_request is None:
+                    render_request = img_data.get("render_request")
+                if generation_result is None:
+                    generation_result = img_data.get("generation_result")
+                if prompt_bundle is None:
+                    prompt_bundle = img_data.get("prompt_bundle")
+
         resources = _merge_resources(
             _resources_from_render_request(render_request or {}),
             _resources_from_prompt_bundle(prompt_bundle or {}),
@@ -60,12 +125,14 @@ class TaskArchiveResolver:
             resources=resources,
             render_request=render_request,
             prompt_bundle=prompt_bundle,
-            generation_result=loaded.get("generation_result.json"),
+            generation_result=generation_result,
         )
 
     def find_task_dir(self, input_path: str | Path) -> Path:
         selected = Path(input_path).resolve(strict=True)
         start = selected if selected.is_dir() else selected.parent
+        if find_parameter_details_image(start) is not None:
+            return start
         for candidate in (start, *start.parents):
             if any((candidate / name).is_file() for name in self.archive_names):
                 return candidate

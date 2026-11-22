@@ -93,7 +93,7 @@ function ItemTiles({ job, item, caption, thumbSize, imageIndexes, onOpen }: Tile
               <button
                 aria-label={`打开 ${name} 大图`}
                 className="task-tile-image"
-                onClick={() => onOpen(imageIndexes.get(image.path) ?? 0)}
+                onClick={() => onOpen(imageIndexes.get(`${item.index}:${index}`) ?? 0)}
                 type="button"
               >
                 <img alt={name} decoding="async" loading="lazy" src={thumbUrl(image.path, thumbSize)} />
@@ -101,6 +101,7 @@ function ItemTiles({ job, item, caption, thumbSize, imageIndexes, onOpen }: Tile
               <figcaption title={item.label ?? caption}>
                 <span className="task-tile-label">{name}</span>
                 <span className="task-tile-meta">
+                  {item.cache_hit ? <span>复用</span> : null}
                   {seed ? <span>Seed {seed}</span> : null}
                   {timing ? <span>{timing}</span> : null}
                 </span>
@@ -169,7 +170,7 @@ function TaskCard({ job, open, tileSize, onToggle, onCancel, onResume, onOpenIma
       badge: item.group !== undefined ? `Group ${item.group}` : undefined,
     };
   }), [images, varying]);
-  const imageIndexes = useMemo(() => new Map(images.map(({ image }, index) => [image.path, index])), [images]);
+  const imageIndexes = useMemo(() => new Map(images.map(({ item, index: imageIndex }, index) => [`${item.index}:${imageIndex}`, index])), [images]);
   const done = (counts?.succeeded ?? 0) + (counts?.failed ?? 0) + (counts?.cancelled ?? 0);
   const percent = total ? Math.round((done / total) * 100) : 0;
   const leftover = unfinishedCount(job);
@@ -258,6 +259,7 @@ function TaskCard({ job, open, tileSize, onToggle, onCancel, onResume, onOpenIma
           <div className="task-progress-bar"><span style={{ width: `${percent}%` }} /></div>
           <small>
             成功 {counts.succeeded} / {total}
+            {items.some((item) => item.cache_hit) ? ` · 复用 ${items.filter((item) => item.cache_hit).length} 项` : ""}
             {counts.failed ? ` · 失败 ${counts.failed}` : ""}
             {counts.cancelled ? ` · 跳过 ${counts.cancelled}` : ""}
             {running ? ` · 正在跑第 ${running.index + 1} 项` : ""}

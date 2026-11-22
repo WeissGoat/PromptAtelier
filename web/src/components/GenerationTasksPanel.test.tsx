@@ -122,4 +122,22 @@ describe("GenerationTasksPanel", () => {
     expect(localStorage.getItem("promptatelier.task-tile-size/v1")).toBe("l");
     expect(screen.getByRole("button", { name: "大" }).getAttribute("aria-pressed")).toBe("true");
   });
+
+  it("opens the correct frame when multiple items reuse the same image", async () => {
+    const job = interruptedJob("succeeded");
+    const shared = { path: "outputs/a.png", meta: {} };
+    job.result.items = [
+      { index: 0, label: "frame-one", seed: 5, status: "succeeded", images: [shared], error: null },
+      { index: 1, label: "frame-two", seed: 5, status: "succeeded", images: [shared], error: null, cache_hit: true },
+    ] as typeof job.result.items;
+    job.result.counts = { queued: 0, running: 0, succeeded: 2, failed: 0, cancelled: 0 };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({ jobs: [job] }));
+    const onOpenImage = vi.fn();
+    render(<GenerationTasksPanel onOpenImage={onOpenImage} />);
+    expect(await screen.findByText("成功 2 / 2 · 复用 1 项")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "打开 frame-one 大图" }));
+    expect(onOpenImage.mock.calls[0][0].index).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "打开 frame-two 大图" }));
+    expect(onOpenImage.mock.calls[1][0].index).toBe(1);
+  });
 });

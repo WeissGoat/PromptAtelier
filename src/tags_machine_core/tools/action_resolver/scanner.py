@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import Iterable
 
+from tags_machine_core.tools.task_tools.resolver import find_parameter_details_image
+
 from .models import ScanIssue, ScannedSource, ScanResult
 
 
@@ -91,7 +93,7 @@ class GeneratedActionInputScanner:
         try:
             for root, directories, files in os.walk(path):
                 current = Path(root)
-                if any(name in files for name in ARCHIVE_NAMES):
+                if is_task_dir(current):
                     _record_unique(task_dirs, current, kind="task", discovery=discovery)
                     directories[:] = []
                     continue
@@ -104,13 +106,17 @@ class GeneratedActionInputScanner:
 
 
 def is_task_dir(path: Path) -> bool:
-    return any((path / name).is_file() for name in ARCHIVE_NAMES)
+    if any((path / name).is_file() for name in ARCHIVE_NAMES):
+        return True
+    return find_parameter_details_image(path) is not None
 
 
 def find_task_dir(path: Path) -> Path | None:
     start = path if path.is_dir() else path.parent
+    if find_parameter_details_image(start) is not None:
+        return start
     for candidate in (start, *start.parents):
-        if is_task_dir(candidate):
+        if any((candidate / name).is_file() for name in ARCHIVE_NAMES):
             return candidate
     return None
 
