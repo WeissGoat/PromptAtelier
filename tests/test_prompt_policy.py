@@ -386,7 +386,7 @@ class PromptPolicyPipelineTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(result["prompt"]["positive"], "1girl, bare_feet")
+        self.assertEqual(result["prompt"]["positive"], "1girl, bare_feet, {{{bare_legs}}}")
         self.assertEqual(result["meta"]["extra"]["policy"]["target"], "full_prompt")
 
     def test_json_api_agent_ignores_prompt_policy_by_default(self):
@@ -451,7 +451,7 @@ class PromptPolicyPipelineTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(result["prompt"]["positive"], "1girl, bare_feet")
+        self.assertEqual(result["prompt"]["positive"], "1girl, bare_feet, {{{bare_legs}}}")
         self.assertTrue(result["meta"]["extra"]["policy"]["template"].endswith("balanced"))
 
     def test_cli_policy_args_build_enabled_config(self):

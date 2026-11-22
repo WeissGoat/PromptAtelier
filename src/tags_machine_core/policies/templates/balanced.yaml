@@ -23,7 +23,7 @@ rules:
             - bare_foot
             - barefeet
           add:
-            - bare_legs
+            - "{{{bare_legs}}}"
           position: after_trigger
   tag_conflict:
     enabled: true

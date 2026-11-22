@@ -48,9 +48,18 @@ class TagInferenceSpec(BaseModel):
 
         result: list[str] = []
         for item in values:
-            key = canonicalize_tag(str(item))
-            if key and key not in result:
-                result.append(key)
+            raw_str = str(item or "").strip()
+            if not raw_str:
+                continue
+            if info.field_name == "add":
+                token = parse_prompt_token(raw_str)
+                canonical_item = f"{token.weight_prefix}{token.canonical}{token.weight_suffix}"
+                if canonical_item and canonical_item not in result:
+                    result.append(canonical_item)
+            else:
+                key = canonicalize_tag(raw_str)
+                if key and key not in result:
+                    result.append(key)
         if info.field_name in {"when_any", "add"} and not result:
             raise ValueError(f"tag_inference {info.field_name} must not be empty")
         return result
@@ -93,7 +102,10 @@ class TagInferenceRule:
             )
             return
 
-        additions = [tag for tag in spec.add if tag not in active]
+        additions = [
+            tag for tag in spec.add
+            if parse_prompt_token(tag).canonical not in active
+        ]
         if not additions:
             context.add_trace(
                 rule=f"{self.id}@{self.version}",
