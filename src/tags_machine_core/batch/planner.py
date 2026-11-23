@@ -700,6 +700,8 @@ class BatchPlanner:
         *,
         run_dir: Path,
     ) -> ActionGroupRecord:
+        if spec.run.preserve_group_record:
+            return ActionGroupStateStore.for_run_dir(run_dir).load().planning_baseline()
         if spec.run.fresh:
             return ActionGroupRecord()
         if spec.expand.action_group_record:

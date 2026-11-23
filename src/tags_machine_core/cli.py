@@ -954,6 +954,10 @@ def cmd_api_inspect_batch(args) -> int:
 def cmd_plan_batch(args) -> int:
     spec_path = Path(args.batch_spec)
     spec = load_batch_spec(spec_path)
+    if getattr(args, "preserve_group_record", False):
+        spec = spec.model_copy(
+            update={"run": spec.run.model_copy(update={"preserve_group_record": True})}
+        )
     run_dir = _batch_run_dir(
         spec,
         output_root=args.output_root,
@@ -1001,6 +1005,7 @@ def cmd_run_batch(args) -> int:
         resume=args.resume,
         stop_on_error=args.stop_on_error,
         fresh=args.fresh,
+        preserve_group_record=getattr(args, "preserve_group_record", None),
         execution_mode="mock" if args.mock_client else None,
     )
     run_dir = _batch_run_dir(
@@ -1015,7 +1020,11 @@ def cmd_run_batch(args) -> int:
         run_dir=run_dir,
         override=args.output_dir,
     ).resolve()
-    _prepare_fresh_batch_run_dir(run_dir, fresh=spec.run.fresh)
+    _prepare_fresh_batch_run_dir(
+        run_dir,
+        fresh=spec.run.fresh,
+        preserve_group_record=spec.run.preserve_group_record,
+    )
     planner = _build_batch_planner(
         spec,
         spec_path=spec_path,
@@ -1128,6 +1137,7 @@ def _batch_spec_with_cli_overrides(
     resume: bool | None,
     stop_on_error: bool | None,
     fresh: bool | None = None,
+    preserve_group_record: bool | None = None,
     execution_mode: str | None = None,
 ):
     run_config = spec.run
@@ -1137,6 +1147,8 @@ def _batch_spec_with_cli_overrides(
         run_config = run_config.model_copy(update={"stop_on_error": stop_on_error})
     if fresh is not None:
         run_config = run_config.model_copy(update={"fresh": fresh})
+    if preserve_group_record is not None:
+        run_config = run_config.model_copy(update={"preserve_group_record": preserve_group_record})
     if execution_mode is not None:
         run_config = run_config.model_copy(update={"execution_mode": execution_mode})
     return spec.model_copy(update={"run": run_config})
@@ -1334,10 +1346,23 @@ def _batch_run_dir(spec, *, output_root: str | None, work_root: str | None = Non
     return _batch_work_dir(spec, output_root=output_root, work_root=work_root, spec_path=spec_path)
 
 
-def _prepare_fresh_batch_run_dir(run_dir: str | Path, *, fresh: bool) -> None:
+def _prepare_fresh_batch_run_dir(
+    run_dir: str | Path,
+    *,
+    fresh: bool,
+    preserve_group_record: bool = False,
+) -> None:
     path = Path(run_dir)
     if fresh and path.exists():
-        shutil.rmtree(path)
+        if preserve_group_record:
+            state_file = path / "state" / "action_groups.json"
+            saved_state = state_file.read_bytes() if state_file.exists() else None
+            shutil.rmtree(path)
+            if saved_state:
+                state_file.parent.mkdir(parents=True, exist_ok=True)
+                state_file.write_bytes(saved_state)
+        else:
+            shutil.rmtree(path)
 
 
 def _batch_output_dir(
@@ -2062,6 +2087,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan_batch.add_argument("--output-root")
     plan_batch.add_argument("--work-root")
     plan_batch.add_argument("--output-dir")
+    plan_batch.add_argument(
+        "--preserve-group-record",
+        action="store_true",
+        help="Preserve action group state (action_groups.json) when planning",
+    )
     plan_batch.set_defaults(func=cmd_plan_batch)
 
     run_batch = subparsers.add_parser(
@@ -2091,6 +2121,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--fresh",
         action="store_true",
         help="Start from scratch and clear the existing batch run directory before planning/running",
+    )
+    run_batch.add_argument(
+        "--preserve-group-record",
+        action="store_true",
+        help="Preserve action group state (action_groups.json) across fresh batch runs",
     )
     run_batch.add_argument(
         "--mock-client",
