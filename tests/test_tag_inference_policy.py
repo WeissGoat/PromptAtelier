@@ -66,6 +66,36 @@ class TagInferencePolicyTest(unittest.TestCase):
         self.assertIn("{bare_legs}", tokens2)
         self.assertNotIn("{{{bare_legs}}}", tokens2)
 
+    def test_pussy_infers_uncensored_globally(self):
+        service = GenerationService()
+        bundle = service.compose_full_prompt(
+            "1girl, pussy, smile",
+            prompt_policy={
+                "enabled": True,
+                "profile": "balanced",
+                "apply_to": {"full_prompt": True},
+            },
+        )
+        tokens = bundle.prompt.positive.split(", ")
+        self.assertIn("pussy", tokens)
+        self.assertIn("uncensored", tokens)
+        pussy_idx = tokens.index("pussy")
+        uncensored_idx = tokens.index("uncensored")
+        self.assertEqual(uncensored_idx, pussy_idx + 1)
+
+    def test_existing_uncensored_not_duplicated(self):
+        service = GenerationService()
+        bundle = service.compose_full_prompt(
+            "1girl, uncensored, pussy, smile",
+            prompt_policy={
+                "enabled": True,
+                "profile": "balanced",
+                "apply_to": {"full_prompt": True},
+            },
+        )
+        tokens = bundle.prompt.positive.split(", ")
+        self.assertEqual(tokens.count("uncensored"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

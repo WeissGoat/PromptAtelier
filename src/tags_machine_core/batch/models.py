@@ -57,6 +57,7 @@ class RunConfig(BaseModel):
     max_images: int | None = None
     execute_requires_agent: bool = False
     fresh: bool = False
+    preserve_group_record: bool = False
     output_mode: Literal["global", "task_dir"] = "task_dir"
     retry: RetryConfig = Field(default_factory=RetryConfig)
 

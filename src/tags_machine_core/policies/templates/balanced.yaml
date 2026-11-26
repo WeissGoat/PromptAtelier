@@ -25,6 +25,12 @@ rules:
           add:
             - "{{{bare_legs}}}"
           position: after_trigger
+        - id: pussy_to_uncensored
+          when_any:
+            - pussy
+          add:
+            - uncensored
+          position: after_trigger
   tag_conflict:
     enabled: true
   character_count:
