@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from tags_machine_core.config import AppConfig
+from tags_machine_core.error_classification import (
+    fatal_generation_error_reason,
+    is_fatal_generation_error,
+    transport_retries_exhausted,
+)
 from tags_machine_core.logging_config import emit_console_record, get_logger
 
 from .archive import BatchArchive
@@ -82,7 +87,7 @@ class BatchRunner:
         configure_runtime = getattr(self.executor, "configure_runtime", None)
         if callable(configure_runtime):
             configure_runtime(config, policy_relative_to=policy_relative_to)
-        effective_config = _config_with_timeout(config, run_config.retry.timeout_seconds)
+        effective_config = _config_for_runner(config, run_config)
 
         root = Path(run_dir)
         if run_config.fresh and root.exists():
@@ -110,6 +115,8 @@ class BatchRunner:
         image_budget = run_config.max_images
         selected = tasks[:limit] if limit is not None else tasks
         total_selected = len(selected)
+        consecutive_failures = 0
+        stopped_reason: str | None = None
         for position, planned_task in enumerate(selected, start=1):
             if image_budget is not None and image_budget <= 0:
                 break
@@ -162,16 +169,52 @@ class BatchRunner:
                 + (f" error={result['error']}" if result.get("error") else ""),
                 level=progress_level,
             )
-            if result["status"] == "succeeded" and image_budget is not None:
-                image_budget -= max(1, len(result.get("image_paths") or []))
-            if result["status"] == "failed" and run_config.stop_on_error:
-                logger.warning(
-                    "batch stopped on failed task task_id=%s source=%s",
-                    result["task_id"],
-                    _source_log(run_task),
-                )
-                _emit_progress(f"[batch] stopped_on_error task_id={result['task_id']}", level="warning")
-                break
+            if result["status"] == "succeeded":
+                consecutive_failures = 0
+                if image_budget is not None:
+                    image_budget -= max(1, len(result.get("image_paths") or []))
+            if result["status"] == "failed":
+                consecutive_failures += 1
+                if run_config.stop_on_error:
+                    logger.warning(
+                        "batch stopped on failed task task_id=%s source=%s",
+                        result["task_id"],
+                        _source_log(run_task),
+                    )
+                    _emit_progress(f"[batch] stopped_on_error task_id={result['task_id']}", level="warning")
+                    stopped_reason = "stop_on_error"
+                    break
+                if run_config.stop_on_fatal_error:
+                    fatal_reason = fatal_generation_error_reason(result.get("error"))
+                    if fatal_reason:
+                        logger.error(
+                            "batch circuit breaker tripped on fatal error task_id=%s reason=%s source=%s",
+                            result["task_id"],
+                            fatal_reason,
+                            _source_log(run_task),
+                        )
+                        _emit_progress(
+                            f"[batch] circuit_breaker fatal_error task_id={result['task_id']} reason={fatal_reason}",
+                            level="error",
+                        )
+                        stopped_reason = f"fatal_error: {fatal_reason}"
+                        break
+                if (
+                    run_config.max_consecutive_failures is not None
+                    and consecutive_failures >= run_config.max_consecutive_failures
+                ):
+                    logger.error(
+                        "batch circuit breaker tripped on consecutive failures count=%s task_id=%s source=%s",
+                        consecutive_failures,
+                        result["task_id"],
+                        _source_log(run_task),
+                    )
+                    _emit_progress(
+                        f"[batch] circuit_breaker max_consecutive_failures={consecutive_failures} task_id={result['task_id']}",
+                        level="error",
+                    )
+                    stopped_reason = f"max_consecutive_failures ({consecutive_failures})"
+                    break
 
         action_group_summary = action_group_tracker.reconcile(selected, entries)
         _log_action_group_summary(entries)
@@ -187,7 +230,10 @@ class BatchRunner:
         )
         logger.info("batch report written run_dir=%s counts=%s", root, report["counts"])
         _emit_progress(f"[batch] completed run_dir={root} counts={report['counts']}")
-        return {"run_dir": str(root), "counts": report["counts"], "entries": entries}
+        payload: dict[str, Any] = {"run_dir": str(root), "counts": report["counts"], "entries": entries}
+        if stopped_reason is not None:
+            payload["stopped_reason"] = stopped_reason
+        return payload
 
     def _execute_with_retry(
         self,
@@ -467,6 +513,10 @@ def _resume_task_snapshot(task: BatchTask) -> BatchTask:
 
 
 def _retryable(exc: Exception, retry_on: list[str]) -> bool:
+    if is_fatal_generation_error(exc):
+        return False
+    if transport_retries_exhausted(exc):
+        return False
     text = f"{type(exc).__name__}: {exc}".lower()
     return any(str(item).lower() in text for item in retry_on)
 
@@ -475,6 +525,17 @@ def _retry_delay(values: list[float], attempt: int) -> float:
     if not values:
         return 0
     return values[min(attempt - 1, len(values) - 1)]
+
+
+def _config_for_runner(config: AppConfig, run_config: RunConfig) -> AppConfig:
+    effective = _config_with_timeout(config, run_config.retry.timeout_seconds)
+    # BatchRunner 自己负责任务级重试时，关闭 NovelAI 传输层重复重试，避免 3×3 乘法轰炸。
+    if run_config.retry.max_attempts > 1 and effective.novelai.retry > 1:
+        effective = effective.model_copy(
+            deep=True,
+            update={"novelai": effective.novelai.model_copy(update={"retry": 1})},
+        )
+    return effective
 
 
 def _config_with_timeout(config: AppConfig, timeout_seconds: float | None) -> AppConfig:

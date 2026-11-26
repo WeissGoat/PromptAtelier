@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from tags_machine_core.error_classification import fatal_generation_error_reason
 from tags_machine_core.logging_config import get_logger
 
 from tags_machine_core.llm import translate_tags
@@ -589,6 +590,7 @@ class StyleLabService:
             item["status"] = "running"
             self.store.save_run(info, run)
             ctx.emit("item_started", {"index": item["index"], "seed": item["seed"]})
+            fatal_reason: str | None = None
             try:
                 with self._generate_lock:
                     result = self.generation_api.generate(
@@ -618,14 +620,24 @@ class StyleLabService:
                         item["baseline_compare"] = image_similarity(Path(baseline["image_path"]), image_path)
                     except Exception as exc:  # noqa: BLE001 - 比不了不影响出图结果
                         item["baseline_compare"] = {"similarity": None, "dhash_distance": None, "error": str(exc)}
-            except Exception as exc:  # 单张失败不影响后面的张数
+            except Exception as exc:  # 单张失败不影响后面的张数；致命错误熔断
                 logger.warning("Style Lab regenerate item failed: %s", exc)
                 item["status"] = "failed"
                 item["error"] = friendly_error(str(exc))
                 item["error_detail"] = str(exc)
+                fatal_reason = fatal_generation_error_reason(exc)
             self.store.save_run(info, run)
             ctx.set_result(copy.deepcopy(run))
             ctx.emit("item_finished", {"index": item["index"], "status": item["status"]})
+            if fatal_reason:
+                logger.warning("Style Lab aborted on fatal error: %s", fatal_reason)
+                for rest in run["items"]:
+                    if rest.get("status") == "queued":
+                        rest["status"] = "cancelled"
+                self.store.save_run(info, run)
+                ctx.set_result(copy.deepcopy(run))
+                ctx.emit("run_aborted", {"index": item["index"], "reason": fatal_reason})
+                break
         statuses = {item["status"] for item in run["items"]}
         if statuses == {"succeeded"}:
             run["status"] = "succeeded"

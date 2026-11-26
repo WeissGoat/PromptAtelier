@@ -567,6 +567,23 @@ class StyleLabServiceTest(TestCase):
         self.assertEqual(reconciled["status"], "interrupted")
         self.assertEqual(reconciled["items"][0]["status"], "interrupted")
 
+    def test_fatal_402_aborts_remaining_style_lab_items(self):
+        class FatalApi(_FakeGenerationApi):
+            def generate(self, data):
+                self.requests.append(data["render_request"])
+                raise RuntimeError("[novelai] HTTP 402: Anlas insufficient")
+
+        jobs = _InlineJobManager()
+        api = FatalApi()
+        service = StyleLabService(store=self.store, job_manager=jobs, generation_api=api)
+        service.start_regenerate(self.info, self.image_id, RegenSettings(count=3))
+        ctx = _FakeContext()
+        result = jobs.pending(ctx)
+
+        self.assertEqual(len(api.requests), 1)
+        self.assertEqual([item["status"] for item in result["items"]], ["failed", "cancelled", "cancelled"])
+        self.assertIn("run_aborted", ctx.events)
+
 
 class ClassifyAndGroupingTest(TestCase):
     def setUp(self):

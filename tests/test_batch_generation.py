@@ -2358,6 +2358,116 @@ class ActionGroupRoundSelectionTests(unittest.TestCase):
             self.assertEqual(resumed.groups["g1"].completed_count, 1)
 
 
+class BatchCircuitBreakerTests(unittest.TestCase):
+    def _tasks(self, root: Path, count: int) -> list[BatchTask]:
+        return [
+            BatchTask(
+                id=f"cb_task_{index}",
+                index=index,
+                composer="full",
+                prompt="akemi_homura",
+                render=RenderOptions(artist="20260412"),
+                output={
+                    "task_dir": str(root / "run" / "tasks" / f"cb_task_{index}"),
+                    "output_dir": str(root / "run" / "outputs" / f"cb_task_{index}"),
+                },
+            )
+            for index in range(count)
+        ]
+
+    def test_fatal_402_stops_batch_even_when_stop_on_error_is_false(self):
+        class FatalExecutor:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, task, *, config, output_dir=None):
+                self.calls += 1
+                raise RuntimeError("[novelai] HTTP 402: Anlas insufficient")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = FatalExecutor()
+            result = BatchRunner(executor=executor).run_tasks(
+                run_dir=root / "run",
+                tasks=self._tasks(root, 4),
+                config=_config(root),
+                run_config=RunConfig(stop_on_error=False),
+            )
+
+            self.assertEqual(executor.calls, 1)
+            self.assertEqual(result["counts"], {"failed": 1})
+            self.assertIn("fatal_error", result["stopped_reason"])
+            self.assertIn("402", result["stopped_reason"])
+
+    def test_consecutive_failures_trip_circuit_breaker_and_success_resets_counter(self):
+        class ScriptedExecutor:
+            def __init__(self, outcomes: list[str]):
+                self.outcomes = outcomes
+                self.calls = 0
+
+            def execute(self, task, *, config, output_dir=None):
+                outcome = self.outcomes[self.calls]
+                self.calls += 1
+                if outcome == "ok":
+                    return SuccessfulExecutor().execute(task, config=config, output_dir=output_dir)
+                return BatchExecutionResult(status="failed", error="transient error")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 2 次失败 -> 1 次成功清零 -> 3 次连续失败触发熔断（第 7 个不再执行）
+            executor = ScriptedExecutor(["fail", "fail", "ok", "fail", "fail", "fail", "ok"])
+            result = BatchRunner(executor=executor).run_tasks(
+                run_dir=root / "run",
+                tasks=self._tasks(root, 7),
+                config=_config(root),
+                run_config=RunConfig(
+                    stop_on_error=False,
+                    max_consecutive_failures=3,
+                    retry=RetryConfig(max_attempts=1),
+                ),
+            )
+
+            self.assertEqual(executor.calls, 6)
+            self.assertEqual(result["counts"], {"failed": 5, "succeeded": 1})
+            self.assertEqual(result["stopped_reason"], "max_consecutive_failures (3)")
+
+    def test_runner_prevents_double_retry_multiplication(self):
+        class InspectingExecutor:
+            def __init__(self):
+                self.calls = 0
+                self.novelai_retries: list[int] = []
+
+            def execute(self, task, *, config, output_dir=None):
+                self.calls += 1
+                self.novelai_retries.append(config.novelai.retry)
+                raise RuntimeError(
+                    "[novelai] Rate limited; retry_records=["
+                    "RetryRecord(attempt=1, status_code=429, error='Rate limited', retryable=True, sleep_seconds=8.0), "
+                    "RetryRecord(attempt=2, status_code=429, error='Rate limited', retryable=False, sleep_seconds=None)]"
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _config(root)
+            config = config.model_copy(
+                update={"novelai": config.novelai.model_copy(update={"retry": 3})}
+            )
+            executor = InspectingExecutor()
+            result = BatchRunner(executor=executor).run_tasks(
+                run_dir=root / "run",
+                tasks=self._tasks(root, 1),
+                config=config,
+                run_config=RunConfig(
+                    retry=RetryConfig(max_attempts=3, retry_on=["429"], backoff_seconds=[0])
+                ),
+            )
+
+            self.assertEqual(executor.novelai_retries, [1])
+            self.assertEqual(executor.calls, 1)
+            self.assertEqual(result["counts"], {"failed": 1})
+            self.assertFalse(result["entries"][0]["retry_records"][0]["retryable"])
+
+
 def _config(root: Path) -> AppConfig:
     legacy = root / "legacy"
     design = legacy / "design"

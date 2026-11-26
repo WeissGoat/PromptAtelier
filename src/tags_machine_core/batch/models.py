@@ -53,6 +53,8 @@ class RetryConfig(BaseModel):
 class RunConfig(BaseModel):
     resume: bool = True
     stop_on_error: bool = False
+    stop_on_fatal_error: bool = True
+    max_consecutive_failures: int | None = 5
     execution_mode: ExecutionMode = "real"
     max_images: int | None = None
     execute_requires_agent: bool = False
@@ -60,6 +62,13 @@ class RunConfig(BaseModel):
     preserve_group_record: bool = False
     output_mode: Literal["global", "task_dir"] = "task_dir"
     retry: RetryConfig = Field(default_factory=RetryConfig)
+
+    @field_validator("max_consecutive_failures")
+    @classmethod
+    def _max_consecutive_failures_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("max_consecutive_failures must be >= 1")
+        return value
 
 
 class ArchiveConfig(BaseModel):

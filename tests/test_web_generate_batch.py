@@ -135,6 +135,54 @@ class GenerateBatchTest(TestCase):
             with self.assertRaisesRegex(ValueError, message):
                 validate_generate_batch(payload)
 
+    def test_fatal_402_on_first_item_aborts_rest_and_marks_job_failed(self):
+        class FatalApi(FakeApi):
+            def generate(self, request):
+                self.generated.append(request)
+                raise RuntimeError("[novelai] HTTP 402: Payment Required")
+
+        api = FatalApi()
+        record = _run(JobManager(), api, {"items": [_item(1), _item(2), _item(3)]})
+
+        self.assertEqual(record.status, "failed")
+        self.assertIn("402", record.error)
+        self.assertEqual(len(api.generated), 1)
+        self.assertEqual([item["status"] for item in record.result["items"]], ["failed", "cancelled", "cancelled"])
+        self.assertIn("402", record.result["aborted_reason"])
+
+    def test_fatal_402_after_success_preserves_succeeded_and_cancels_rest(self):
+        class PartialFatalApi(FakeApi):
+            def generate(self, request):
+                seed = request["render_request"]["seed"]
+                if seed == 2:
+                    raise RuntimeError("[novelai] HTTP 402: Payment Required")
+                return super().generate(request)
+
+        api = PartialFatalApi()
+        record = _run(JobManager(), api, {"items": [_item(1), _item(2), _item(3)]})
+
+        self.assertEqual(record.status, "succeeded")
+        self.assertEqual([item["status"] for item in record.result["items"]], ["succeeded", "failed", "cancelled"])
+        self.assertEqual([item["render_request"]["seed"] for item in api.generated], [1])
+        self.assertIn("402", record.result["aborted_reason"])
+
+    def test_five_consecutive_non_fatal_failures_trip_circuit_breaker(self):
+        class AlwaysFailApi(FakeApi):
+            def generate(self, request):
+                self.generated.append(request)
+                raise RuntimeError("transient 502 error")
+
+        api = AlwaysFailApi()
+        record = _run(JobManager(), api, {"items": [_item(i) for i in range(1, 7)]})
+
+        self.assertEqual(record.status, "failed")
+        self.assertEqual(len(api.generated), 5)
+        self.assertEqual(
+            [item["status"] for item in record.result["items"]],
+            ["failed", "failed", "failed", "failed", "failed", "cancelled"],
+        )
+        self.assertIn("连续 5 项失败", record.result["aborted_reason"])
+
 
 class GenerateBatchHttpTest(TestCase):
     def test_submit_and_list_background_runs(self):

@@ -1,6 +1,8 @@
 import json
 import struct
 import tempfile
+import threading
+import time
 import unittest
 import zlib
 from pathlib import Path
@@ -16,11 +18,13 @@ from tags_machine_core.composers import ScriptComposer
 from tags_machine_core.config import AppConfig
 from tags_machine_core.contracts import GeneratedImage, RenderRequest
 from tags_machine_core.execution import (
+    _generate_novelai_images,
     collect_png_info,
     execute_comfyui_generation,
     execute_novelai_generation,
     execute_render_request,
     execute_sd_generation,
+    reset_novelai_throttle_state,
     save_generated_images,
     split_novelai_samples,
 )
@@ -766,6 +770,164 @@ gen_json, {"model":"nai-diffusion-4-5-full","reference_image_multiple":["vibe-a"
             self.assertEqual(result.images[0].path.parent, output_dir)
             self.assertEqual(result.images[0].path.read_bytes(), b"png-bytes")
             self.assertIn("Not a PNG file", result.png_info["images"][0]["error"])
+
+
+class NovelAIThrottleTest(unittest.TestCase):
+    def setUp(self):
+        reset_novelai_throttle_state()
+
+    def tearDown(self):
+        reset_novelai_throttle_state()
+
+    def test_failed_first_request_still_enforces_cooldown_on_next_request(self):
+        request = RenderRequest(backend="novelai", prompt="1girl")
+        client = SimpleNamespace(
+            generate_images=unittest.mock.MagicMock(
+                side_effect=[
+                    RuntimeError("[novelai] HTTP 402: Payment Required"),
+                    [SimpleNamespace(filename="out.png", content=b"png")],
+                ]
+            )
+        )
+        clock = [100.0]
+        sleeps: list[float] = []
+
+        def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        with (
+            patch("tags_machine_core.execution.time.monotonic", side_effect=lambda: clock[0]),
+            patch("tags_machine_core.execution.time.sleep", side_effect=fake_sleep),
+            patch("tags_machine_core.execution.random.uniform", return_value=2.0),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 402"):
+                _generate_novelai_images(client, request, request_interval=0.0)
+            _generate_novelai_images(client, request, request_interval=0.0)
+
+        self.assertEqual(sleeps, [6.0])
+
+    def test_failed_request_after_success_updates_completion_timestamp(self):
+        request = RenderRequest(backend="novelai", prompt="1girl")
+        client = SimpleNamespace(
+            generate_images=unittest.mock.MagicMock(
+                side_effect=[
+                    [SimpleNamespace(filename="1.png", content=b"png")],
+                    RuntimeError("[novelai] HTTP 402: Payment Required"),
+                    [SimpleNamespace(filename="3.png", content=b"png")],
+                ]
+            )
+        )
+        clock = [100.0]
+        sleeps: list[float] = []
+
+        def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        with (
+            patch("tags_machine_core.execution.time.monotonic", side_effect=lambda: clock[0]),
+            patch("tags_machine_core.execution.time.sleep", side_effect=fake_sleep),
+            patch("tags_machine_core.execution.random.uniform", return_value=1.5),
+        ):
+            _generate_novelai_images(client, request, request_interval=0.0)
+            clock[0] += 10.0
+            with self.assertRaisesRegex(RuntimeError, "HTTP 402"):
+                _generate_novelai_images(client, request, request_interval=0.0)
+            _generate_novelai_images(client, request, request_interval=0.0)
+
+        self.assertEqual(sleeps, [5.5])
+
+    def test_rate_limit_429_enforces_escalating_cooldown_and_resets_on_success(self):
+        request = RenderRequest(backend="novelai", prompt="1girl")
+
+        class FakeRateLimitError(RuntimeError):
+            def __init__(self, msg: str, retry_after: float | None = None):
+                super().__init__(msg)
+                self.status_code = 429
+                self.retry_after = retry_after
+
+        client = SimpleNamespace(
+            generate_images=unittest.mock.MagicMock(
+                side_effect=[
+                    FakeRateLimitError("Rate limited"),
+                    FakeRateLimitError("Rate limited", retry_after=50.0),
+                    [SimpleNamespace(filename="ok.png", content=b"png")],
+                    [SimpleNamespace(filename="ok2.png", content=b"png")],
+                ]
+            )
+        )
+        clock = [100.0]
+        sleeps: list[float] = []
+
+        def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        with (
+            patch("tags_machine_core.execution.time.monotonic", side_effect=lambda: clock[0]),
+            patch("tags_machine_core.execution.time.sleep", side_effect=fake_sleep),
+            patch("tags_machine_core.execution.random.uniform", return_value=2.0),
+        ):
+            with self.assertRaises(FakeRateLimitError):
+                _generate_novelai_images(client, request, request_interval=0.0)
+            with self.assertRaises(FakeRateLimitError):
+                _generate_novelai_images(client, request, request_interval=0.0)
+            _generate_novelai_images(client, request, request_interval=0.0)
+            _generate_novelai_images(client, request, request_interval=0.0)
+
+        # 第 1 次 429 后冷却 20+2=22s；第 2 次 429 尊重 retry_after=50 + 2 = 52s；
+        # 第 3 次成功后重置 429 计数，第 4 次恢复常规 4+2=6s。
+        self.assertEqual(sleeps, [22.0, 52.0, 6.0])
+
+    def test_concurrent_threads_are_serialized_with_cooldown(self):
+        request = RenderRequest(backend="novelai", prompt="1girl")
+        real_sleep = time.sleep
+        clock = [100.0]
+        clock_guard = threading.Lock()
+        sleeps: list[float] = []
+        in_flight = 0
+        max_in_flight = 0
+        entered = threading.Event()
+
+        def fake_generate(_req):
+            nonlocal in_flight, max_in_flight
+            with clock_guard:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            entered.set()
+            real_sleep(0.03)
+            with clock_guard:
+                in_flight -= 1
+                clock[0] += 0.5
+            return [SimpleNamespace(filename="ok.png", content=b"png")]
+
+        def fake_monotonic() -> float:
+            with clock_guard:
+                return clock[0]
+
+        def fake_sleep(seconds: float) -> None:
+            with clock_guard:
+                sleeps.append(seconds)
+                clock[0] += seconds
+
+        client = SimpleNamespace(generate_images=fake_generate)
+
+        with (
+            patch("tags_machine_core.execution.time.monotonic", side_effect=fake_monotonic),
+            patch("tags_machine_core.execution.time.sleep", side_effect=fake_sleep),
+            patch("tags_machine_core.execution.random.uniform", return_value=1.5),
+        ):
+            t1 = threading.Thread(target=_generate_novelai_images, args=(client, request), kwargs={"request_interval": 0.0})
+            t2 = threading.Thread(target=_generate_novelai_images, args=(client, request), kwargs={"request_interval": 0.0})
+            t1.start()
+            entered.wait(timeout=2)
+            t2.start()
+            t1.join(timeout=5)
+            t2.join(timeout=5)
+
+        self.assertEqual(max_in_flight, 1)
+        self.assertEqual(sleeps, [5.5])
 
 
 if __name__ == "__main__":

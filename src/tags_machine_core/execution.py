@@ -4,7 +4,9 @@ import io
 import json
 import os
 from pathlib import Path
+import random
 import struct
+import threading
 import time
 from typing import Any
 from uuid import uuid4
@@ -26,6 +28,10 @@ from tags_machine_core.clients import (
 )
 from tags_machine_core.config import AppConfig, ResolvedComfyUITarget
 from tags_machine_core.contracts import GeneratedImage, GenerationResult, RenderRequest
+from tags_machine_core.error_classification import (
+    extract_retry_after_seconds,
+    is_rate_limit_error,
+)
 from tags_machine_core.logging_config import get_logger
 from tags_machine_core.renderers.comfyui_workflow import normalize_binding_paths
 from tags_machine_core.verification import read_image_parameters
@@ -34,7 +40,6 @@ from tags_machine_core.verification import read_image_parameters
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CORE_PNG_INFO_KEY = "tags_machine_core"
 logger = get_logger(__name__)
-_last_novelai_request_at = 0.0
 
 
 def save_generated_images(
@@ -607,7 +612,23 @@ def _mock_png_bytes(request: RenderRequest) -> bytes:
     return buffer.getvalue()
 
 
+NOVELAI_MIN_REQUEST_INTERVAL = 4.0
+NOVELAI_JITTER_RANGE = (1.0, 3.5)
+NOVELAI_429_COOLDOWN_STEPS = (20.0, 40.0, 60.0)
+NOVELAI_429_COOLDOWN_MAX = 120.0
+_novelai_request_lock = threading.Lock()
 _last_novelai_request_completed_at = 0.0
+_novelai_cooldown_until = 0.0
+_consecutive_novelai_429 = 0
+
+
+def reset_novelai_throttle_state() -> None:
+    """重置进程内 NovelAI 节流状态（主要用于单元测试隔离）。"""
+    global _last_novelai_request_completed_at, _novelai_cooldown_until, _consecutive_novelai_429
+    with _novelai_request_lock:
+        _last_novelai_request_completed_at = 0.0
+        _novelai_cooldown_until = 0.0
+        _consecutive_novelai_429 = 0
 
 
 def _generate_novelai_images(
@@ -617,13 +638,40 @@ def _generate_novelai_images(
     request_interval: float,
 ):
     """返回图片和耗时；耗时从发出请求算起，严格在单张完成后执行人类反应级别的安全防风控冷却。"""
-    global _last_novelai_request_completed_at
-    _wait_for_novelai_request_slot(request_interval)
-    started_at = time.monotonic()
-    images = client.generate_images(request)
-    # 记录该次请求真正完成（包含网络传输下载）的时间戳
-    _last_novelai_request_completed_at = time.monotonic()
-    return images, {"elapsed_seconds": _seconds_since(started_at)}
+    global _last_novelai_request_completed_at, _novelai_cooldown_until, _consecutive_novelai_429
+    with _novelai_request_lock:
+        _wait_for_novelai_request_slot(request_interval)
+        started_at = time.monotonic()
+        raised_exc: Exception | None = None
+        try:
+            images = client.generate_images(request)
+        except Exception as exc:
+            raised_exc = exc
+            raise
+        finally:
+            # 无论成功还是报错，都必须记录请求结束时间，避免异常分支跳过冷却造成 0 秒连击。
+            completed_at = time.monotonic()
+            _last_novelai_request_completed_at = completed_at
+            if raised_exc is None:
+                _consecutive_novelai_429 = 0
+                _novelai_cooldown_until = 0.0
+            elif is_rate_limit_error(raised_exc):
+                _consecutive_novelai_429 += 1
+                base_penalty = NOVELAI_429_COOLDOWN_STEPS[
+                    min(_consecutive_novelai_429 - 1, len(NOVELAI_429_COOLDOWN_STEPS) - 1)
+                ]
+                hint = extract_retry_after_seconds(raised_exc)
+                penalty = min(
+                    NOVELAI_429_COOLDOWN_MAX,
+                    max(base_penalty, hint or 0.0) + random.uniform(*NOVELAI_JITTER_RANGE),
+                )
+                _novelai_cooldown_until = max(_novelai_cooldown_until, completed_at + penalty)
+                logger.warning(
+                    "NovelAI 429 cooldown applied consecutive=%s penalty=%.2fs",
+                    _consecutive_novelai_429,
+                    penalty,
+                )
+        return images, {"elapsed_seconds": _seconds_since(started_at)}
 
 
 def _seconds_since(started_at: float) -> float:
@@ -661,21 +709,23 @@ def _comfyui_timing(started_at: float, generated: ComfyUIGenerationResult) -> di
 
 def _wait_for_novelai_request_slot(request_interval: float) -> None:
     """严格基于【上一张图完成返回的时间戳】进行冷却限速，绝不因网络耗时吞噬间隔导致毫秒级连击！"""
-    global _last_novelai_request_completed_at
-    if _last_novelai_request_completed_at <= 0.0:
+    ready_at = 0.0
+    if _last_novelai_request_completed_at > 0.0:
+        # 基础冷却至少 4.0 秒，外加 1.0~3.5 秒随机人类反应抖动，彻底粉碎 0 秒机器连击特征
+        base_interval = max(NOVELAI_MIN_REQUEST_INTERVAL, float(request_interval or 0.0))
+        jitter = random.uniform(*NOVELAI_JITTER_RANGE)
+        ready_at = _last_novelai_request_completed_at + base_interval + jitter
+
+    ready_at = max(ready_at, _novelai_cooldown_until)
+    if ready_at <= 0.0:
         return
 
-    # 基础冷却至少 4.0 秒，外加 1.0~3.0 秒随机人类反应抖动，彻底粉碎 0 秒机器连击特征
-    base_interval = max(4.0, float(request_interval or 0.0))
-    import random
-    jitter = random.uniform(1.0, 3.5)
-    target_wait = base_interval + jitter
-
-    now = time.monotonic()
-    elapsed_since_last_done = now - _last_novelai_request_completed_at
-    remaining_wait = target_wait - elapsed_since_last_done
+    remaining_wait = ready_at - time.monotonic()
     if remaining_wait > 0:
-        logger.info("NovelAI safe throttle: cooling down for %.2fs after previous generation completed...", remaining_wait)
+        logger.info(
+            "NovelAI safe throttle: cooling down for %.2fs after previous generation completed...",
+            remaining_wait,
+        )
         time.sleep(remaining_wait)
 
 
