@@ -1,4 +1,0 @@
-interface:
-  display_name: "Artist Style Reproduction"
-  short_description: "Analyze artist corpora and reproduce NovelAI style presets."
-  default_prompt: "Use $artist-style-reproduction to analyze this artist folder, group style versions, and reproduce the selected style with run_action."
